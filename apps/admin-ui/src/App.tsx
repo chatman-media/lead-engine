@@ -30,6 +30,7 @@ import { SaasOnboarding } from "./pages/SaasOnboarding.tsx";
 import { SaasOutreach } from "./pages/SaasOutreach.tsx";
 import { SaasPartners } from "./pages/SaasPartners.tsx";
 import SaasProfile from "./pages/SaasProfile.tsx";
+import { SaasProviderOrders } from "./pages/SaasProviderOrders.tsx";
 import { SaasProviders } from "./pages/SaasProviders.tsx";
 import { SaasQuality } from "./pages/SaasQuality.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
@@ -184,6 +185,7 @@ export function App() {
                 <Route path="/leads/:id" element={<SaasLeadDetail />} />
                 <Route path="/conversations" element={<SaasConversations />} />
                 <Route path="/conversations/:id" element={<SaasConversations />} />
+                <Route path="/orders" element={<SaasProviderOrders />} />
                 <Route path="/exchange" element={<SaasExchange />} />
                 <Route path="/profile" element={<SaasProfile />} />
                 <Route path="/notifications" element={<SaasNotifications />} />

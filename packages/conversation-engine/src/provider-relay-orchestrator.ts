@@ -14,12 +14,14 @@ import {
 } from "@chatman-media/storage";
 import { and, eq, inArray } from "drizzle-orm";
 import {
+	canTransitionServiceOrder,
 	type OrderEventRow,
 	OutboundQueueRepo,
 	type OutboundQueueRow,
 	ProviderRelayRepo,
 	type ProviderRequestRow,
 	type ServiceOrderRow,
+	type ServiceOrderStatus,
 	canTransitionProviderRequest,
 } from "./dal/index.ts";
 import type { RepoCtx } from "./dal/types.ts";
@@ -67,6 +69,8 @@ export interface ProviderRelayStartInput {
 	providerRequestIdempotencyKey?: string | null;
 	outboundIdempotencyKey?: string | null;
 	messageText?: string | null;
+	whatsAppTemplateName?: string | null;
+	whatsAppTemplateLanguageCode?: string | null;
 	metadata?: Record<string, unknown>;
 }
 
@@ -84,6 +88,43 @@ export type ProviderRelayStartResult =
 			ok: false;
 			reason: ProviderRelayStartFailureReason;
 			order: ServiceOrderRow;
+			routingReason?: ProviderRoutingFailureReason;
+			providerId?: number;
+	  };
+
+export interface ProviderRelaySendProviderRequestInput {
+	orderId: number;
+	nowEpoch: number;
+	serviceArea?: string | null;
+	summary?: string | null;
+	providerIdOverride?: number | null;
+	preferredChannelKinds?: ChannelKind[];
+	providerRequestIdempotencyKey?: string | null;
+	outboundIdempotencyKey?: string | null;
+	messageText?: string | null;
+	whatsAppTemplateName?: string | null;
+	whatsAppTemplateLanguageCode?: string | null;
+	metadata?: Record<string, unknown>;
+}
+
+export type ProviderRelaySendProviderRequestResult =
+	| {
+			ok: true;
+			order: ServiceOrderRow;
+			providerRequest: ProviderRequestRow;
+			outbound: OutboundQueueRow;
+			envelope: OutboundEnvelope;
+			candidate: ProviderRouteCandidate;
+			identity: ProviderChannelIdentity;
+	  }
+	| {
+			ok: false;
+			reason:
+				| ProviderRelayStartFailureReason
+				| "order_not_found"
+				| "order_not_sendable";
+			order?: ServiceOrderRow;
+			currentStatus?: ServiceOrderStatus;
 			routingReason?: ProviderRoutingFailureReason;
 			providerId?: number;
 	  };
@@ -120,6 +161,81 @@ export class ProviderRelayOrchestrator {
 			nowEpoch: input.nowEpoch,
 		});
 
+		return this.enqueueProviderRequestForOrder({
+			order,
+			requestType: input.requestType,
+			serviceArea: input.serviceArea,
+			summary: input.summary,
+			providerIdOverride: input.providerIdOverride,
+			preferredChannelKinds: input.preferredChannelKinds,
+			providerRequestIdempotencyKey: input.providerRequestIdempotencyKey,
+			outboundIdempotencyKey: input.outboundIdempotencyKey,
+			messageText: input.messageText,
+			whatsAppTemplateName: input.whatsAppTemplateName,
+			whatsAppTemplateLanguageCode: input.whatsAppTemplateLanguageCode,
+			metadata: input.metadata,
+			nowEpoch: input.nowEpoch,
+		});
+	}
+
+	async sendProviderRequestForOrder(
+		input: ProviderRelaySendProviderRequestInput,
+	): Promise<ProviderRelaySendProviderRequestResult> {
+		const order = await this.relay.orderById(input.orderId);
+		if (!order) return { ok: false, reason: "order_not_found" };
+		if (!canTransitionServiceOrder(order.status, "awaiting_provider")) {
+			return {
+				ok: false,
+				reason: "order_not_sendable",
+				order,
+				currentStatus: order.status,
+			};
+		}
+
+		return this.enqueueProviderRequestForOrder({
+			order,
+			requestType: order.requestType,
+			serviceArea:
+				input.serviceArea !== undefined
+					? input.serviceArea
+					: readString(order.metadataJson, [
+							"serviceArea",
+							"service_area",
+							"area",
+							"location",
+						]),
+			summary: input.summary !== undefined ? input.summary : order.summary,
+			providerIdOverride:
+				input.providerIdOverride !== undefined
+					? input.providerIdOverride
+					: order.assignedProviderId,
+			preferredChannelKinds: input.preferredChannelKinds,
+			providerRequestIdempotencyKey: input.providerRequestIdempotencyKey,
+			outboundIdempotencyKey: input.outboundIdempotencyKey,
+			messageText: input.messageText,
+			whatsAppTemplateName: input.whatsAppTemplateName,
+			whatsAppTemplateLanguageCode: input.whatsAppTemplateLanguageCode,
+			metadata: input.metadata,
+			nowEpoch: input.nowEpoch,
+		});
+	}
+
+	private async enqueueProviderRequestForOrder(input: {
+		order: ServiceOrderRow;
+		requestType: string;
+		nowEpoch: number;
+		serviceArea?: string | null;
+		summary?: string | null;
+		providerIdOverride?: number | null;
+		preferredChannelKinds?: ChannelKind[];
+		providerRequestIdempotencyKey?: string | null;
+		outboundIdempotencyKey?: string | null;
+		messageText?: string | null;
+		whatsAppTemplateName?: string | null;
+		whatsAppTemplateLanguageCode?: string | null;
+		metadata?: Record<string, unknown>;
+	}): Promise<ProviderRelayStartResult> {
+		const { order } = input;
 		const route = await this.router.selectProvider({
 			serviceType: input.requestType,
 			serviceArea: input.serviceArea,
@@ -219,6 +335,7 @@ export class ProviderRelayOrchestrator {
 				input.providerRequestIdempotencyKey ??
 				`provider-request:${order.id}:${route.candidate.providerId}`,
 			metadata: {
+				...(input.metadata ?? {}),
 				providerServiceId: route.candidate.providerServiceId,
 				override: route.override,
 			},
@@ -565,4 +682,20 @@ function defaultProviderRequestTemplateComponents(input: {
 			],
 		},
 	];
+}
+
+function readString(json: string, keys: string[]): string | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(json || "{}");
+	} catch {
+		return null;
+	}
+	if (!parsed || typeof parsed !== "object") return null;
+	const record = parsed as Record<string, unknown>;
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string" && value.trim()) return value.trim();
+	}
+	return null;
 }
