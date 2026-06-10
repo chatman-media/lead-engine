@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.27.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.26.0...@chatman-media/storage-v1.27.0) (2026-06-10)
+
+
+### Features
+
+* **whatsapp:** enforce template outbound policy ([#463](https://github.com/chatman-media/lead-engine/issues/463)) ([9110933](https://github.com/chatman-media/lead-engine/commit/91109335196fda7a2c1e120350e13bb6321472fe))
+
 # [@chatman-media/storage-v1.26.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.25.0...@chatman-media/storage-v1.26.0) (2026-06-10)
 
 
