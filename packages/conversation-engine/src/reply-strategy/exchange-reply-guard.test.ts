@@ -29,6 +29,47 @@ describe("guardExchangeReply", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("does not treat crypto network in a tool-backed quote as payment requisites", () => {
+    const r = guardExchangeReply({
+      text: "Курс: 31.5. За 500 USDT (TRC20) получите 15750 THB.",
+      telemetry: {
+        toolCalls: [
+          {
+            name: "compute_exchange_quote",
+            args: { asset: "USDT", amount: 500, network: "TRC20" },
+            result: { rate: 31.5, amountToThb: 15750, network: "TRC20" },
+            cycle: 0,
+          },
+        ],
+      },
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("does not treat THB amount plus payout options as a payout code", () => {
+    const r = guardExchangeReply({
+      text: "Курс: 31.5. За 500 USDT получите 15750 THB. Можно выбрать офис, банкомат или курьера.",
+      telemetry: {
+        toolCalls: [
+          {
+            name: "compute_exchange_quote",
+            args: { asset: "USDT", amount: 500 },
+            result: { rate: 31.5, amountToThb: 15750 },
+            cycle: 0,
+          },
+        ],
+      },
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("does not treat a single source amount in KYC wording as a quote", () => {
+    const r = guardExchangeReply({
+      text: "Да, видео нужно для проверки документов перед обменом 500 USDT.",
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it("blocks payment requisites without fetch_exchange_requisites", () => {
     const r = guardExchangeReply({
       text: "Оплатите по карте 2200 7000 1234 5678, после оплаты пришлите чек.",

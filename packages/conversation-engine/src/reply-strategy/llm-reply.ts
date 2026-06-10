@@ -121,6 +121,173 @@ function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
   return out;
 }
 
+type ExchangeQuoteArgs = {
+  asset: string;
+  amount: number;
+  network?: string;
+};
+
+type AmountCandidate = {
+  amount: number;
+  start: number;
+  score: number;
+};
+
+type ExchangeForcedReply = {
+  text: string;
+  toolCalls: ToolCallRecord[];
+};
+
+const EXCHANGE_QUOTE_INTENT_RE =
+  /курс|rate|сколько|получ(?:у|ится|ить)|итого|посчитай|рассчитай/i;
+const EXCHANGE_OUTPUT_CURRENCY_RE = /thb|бат|฿/i;
+const EXCHANGE_CONFIRMATION_RE = /точно|верно|правильно/i;
+const EXCHANGE_START_INTENT_RE = /(?:хочу|нужно|надо)?\s*(?:обменять|поменять)|обмен|помен/i;
+const EXCHANGE_KYC_TOPIC_RE = /верификац|kyc|документ|паспорт|видео|кружок/i;
+const EXCHANGE_KYC_MATERIAL_SENT_RE =
+  /(?:отправил|отправила|прислал|прислала|загрузил|загрузила|вот|держи|лови)[^.!\n]{0,80}(?:видео|кружок|документ|паспорт)|(?:видео|кружок|документ|паспорт)[^.!\n]{0,80}(?:отправил|отправила|прислал|прислала|загрузил|загрузила)/i;
+const EXCHANGE_KYC_HANDOFF_TEXT = [
+  "Да. Перед реквизитами нужна верификация клиента.",
+  "Пришлите короткое видео: лицо и документ в кадре. Оператор или внешний сервис проведёт проверку личности.",
+  "После проверки продолжим заявку: способ получения батов, реквизиты и финальное подтверждение.",
+].join("\n");
+
+function assetMentionRe(asset: string): RegExp {
+  switch (asset) {
+    case "USDT":
+      return /\busdt\b|юсдт/i;
+    case "BTC":
+      return /\bbtc\b|битк/i;
+    case "ETH":
+      return /\beth\b|эфир/i;
+    case "RUB":
+      return /\brub\b|руб|₽/i;
+    case "EUR":
+      return /\beur\b|евро/i;
+    case "USD":
+      return /\busd\b|доллар/i;
+    default:
+      return new RegExp(`\\b${asset}\\b`, "i");
+  }
+}
+
+function amountCandidates(text: string, asset: string): AmountCandidate[] {
+  const assetRe = assetMentionRe(asset);
+  const matches = [...text.matchAll(/\d+(?:[ \u00a0]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g)];
+  const candidates: AmountCandidate[] = [];
+  for (const match of matches) {
+    const raw = match[0];
+    const start = match.index ?? 0;
+    const end = start + raw.length;
+    const before = text.slice(Math.max(0, start - 16), start).toLowerCase();
+    if (/trc\s*$|erc\s*$|bep\s*$/i.test(before)) continue;
+    const after = text.slice(end, end + 16).toLowerCase();
+    const n = Number(raw.replace(/[ \u00a0]/g, "").replace(",", "."));
+    if (!Number.isFinite(n) || n <= 0) continue;
+
+    let score = 0;
+    const multiplier = /тыс|к\b|k\b/.test(after) ? 1000 : 1;
+    const window = `${before}${raw}${after}`;
+    if (assetRe.test(window)) score += 5;
+    if (/(?:^|\s)за\s*$/iu.test(before) || /\bза\b/iu.test(before)) score += 2;
+    if (/(?:thb|бат|฿)/iu.test(after) && asset !== "THB") score -= 4;
+    candidates.push({ amount: n * multiplier, start, score });
+  }
+  return candidates;
+}
+
+function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
+  const quoteIntent = EXCHANGE_QUOTE_INTENT_RE.test(text);
+  const confirmationIntent =
+    EXCHANGE_CONFIRMATION_RE.test(text) && EXCHANGE_OUTPUT_CURRENCY_RE.test(text);
+  const strongIntent = quoteIntent || confirmationIntent;
+  if (!strongIntent && !EXCHANGE_START_INTENT_RE.test(text)) return null;
+  if (EXCHANGE_KYC_TOPIC_RE.test(text) && !strongIntent) return null;
+  if (
+    EXCHANGE_KYC_TOPIC_RE.test(text) &&
+    !confirmationIntent &&
+    !EXCHANGE_OUTPUT_CURRENCY_RE.test(text)
+  ) {
+    return null;
+  }
+  const lower = text.toLowerCase();
+  const asset =
+    /\busdt\b|юсдт/.test(lower)
+      ? "USDT"
+      : /\bbtc\b|битк/.test(lower)
+        ? "BTC"
+        : /\beth\b|эфир/.test(lower)
+          ? "ETH"
+          : /\brub\b|руб|₽/.test(lower)
+            ? "RUB"
+            : /\beur\b|евро/.test(lower)
+              ? "EUR"
+              : /\busd\b|доллар/.test(lower)
+                ? "USD"
+                : null;
+  if (!asset) return null;
+
+  const candidates = amountCandidates(text, asset);
+  const best = candidates.sort((a, b) => b.score - a.score || a.start - b.start)[0];
+  if (!best) return null;
+
+  const network =
+    /trc[\s-]?20|tron/i.test(text)
+      ? "TRC20"
+      : /erc[\s-]?20/i.test(text)
+        ? "ERC20"
+        : /bep[\s-]?20|bsc/i.test(text)
+        ? "BEP20"
+        : undefined;
+  return { asset, amount: best.amount, ...(network ? { network } : {}) };
+}
+
+function numberLike(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function forcedExchangeQuoteText(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  const row = result as Record<string, unknown>;
+  if (typeof row.error === "string") return row.error;
+  const asset = typeof row.asset === "string" ? row.asset : null;
+  const rate = numberLike(row.rate);
+  const amountFrom = numberLike(row.amountFrom);
+  const amountToThb = numberLike(row.amountToThb);
+  const network = typeof row.network === "string" && row.network ? row.network : null;
+  if (!asset || rate === null || amountFrom === null || amountToThb === null) return null;
+  const networkLabel = network ? ` (${network})` : "";
+  return [
+    `Курс: ${rate}.`,
+    `За ${amountFrom} ${asset}${networkLabel} получите ${amountToThb} THB.`,
+    "Если подходит, напишите, как хотите получить баты: офис, банкомат, курьер или тайский банк.",
+  ].join("\n");
+}
+
+async function maybeForceExchangeQuoteReply(
+  userMessageText: string,
+  tools: AnyRagTool[],
+): Promise<ExchangeForcedReply | null> {
+  const quoteTool = tools.find((tool) => tool.name === "compute_exchange_quote");
+  if (!quoteTool) return null;
+  const args = parseExchangeQuoteArgs(userMessageText);
+  if (!args) return null;
+  const result = await quoteTool.execute(args);
+  const text = forcedExchangeQuoteText(result);
+  if (!text) return null;
+  return {
+    text,
+    toolCalls: [{ name: quoteTool.name, args, result, cycle: 0 }],
+  };
+}
+
+function maybeForceExchangeKycReply(userMessageText: string): ExchangeForcedReply | null {
+  if (!EXCHANGE_KYC_TOPIC_RE.test(userMessageText)) return null;
+  if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(userMessageText)) return null;
+  return { text: EXCHANGE_KYC_HANDOFF_TEXT, toolCalls: [] };
+}
+
 export class LlmReplyStrategy implements ReplyStrategy {
   constructor(
     private readonly opts: LlmReplyStrategyOpts,
@@ -183,6 +350,10 @@ export class LlmReplyStrategy implements ReplyStrategy {
       : null;
 
     const isExchange = template.slug === "exchange_v1";
+    const forcedExchangeReply = isExchange
+      ? ((await maybeForceExchangeQuoteReply(input.userMessageText, tools)) ??
+        maybeForceExchangeKycReply(input.userMessageText))
+      : null;
     const exchangePolicyState =
       isExchange && this.opts.resolveExchangePolicyState
         ? await Promise.resolve(
@@ -195,7 +366,37 @@ export class LlmReplyStrategy implements ReplyStrategy {
             console.warn("[llm-reply] failed to resolve exchange policy state:", err);
             return null;
           })
-        : null;
+      : null;
+
+    if (forcedExchangeReply) {
+      const guarded = guardExchangePolicy({
+        text: forcedExchangeReply.text,
+        telemetry: buildToolTelemetry(forcedExchangeReply.toolCalls),
+        history,
+        state: exchangePolicyState,
+      });
+      if (this.opts.recordToolCalls && forcedExchangeReply.toolCalls.length > 0) {
+        try {
+          await this.opts.recordToolCalls({
+            tenantId,
+            conversationId: input.conversationId,
+            contactId: input.contactId,
+            userMessageText: input.userMessageText,
+            assistantText: guarded.text,
+            toolCalls: forcedExchangeReply.toolCalls,
+          });
+        } catch (err) {
+          console.warn("[llm-reply] failed to record forced exchange tool call:", err);
+        }
+      }
+      return [
+        {
+          channelId: String(input.channel.channelId),
+          externalUserId: input.inbound.externalUserId,
+          parts: [{ kind: "text", text: guarded.text }],
+        },
+      ];
+    }
 
     const systemPrompt = [
       BASE_SYSTEM_PROMPT,
