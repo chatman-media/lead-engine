@@ -193,7 +193,7 @@ export const kbDocuments = pgTable("kb_documents", {
     )`,
   ),
   check("kb_documents_file_size_check", sql`${t.fileSizeBytes} IS NULL OR ${t.fileSizeBytes} >= 0`),
-  uniqueIndex("uniq_kb_source_hash").on(t.source, t.contentHash),
+  uniqueIndex("uniq_kb_source_hash").on(t.tenantId, t.source, t.contentHash),
   uniqueIndex("uniq_kb_docs_file_storage_key").on(t.fileStorageKey).where(sql`file_storage_key IS NOT NULL`),
   index("idx_kb_docs_topic").on(t.topic).where(sql`topic IS NOT NULL`),
   index("idx_kb_docs_scope").on(t.tenantId, t.scopeType, t.funnelId, t.stageSlug),
