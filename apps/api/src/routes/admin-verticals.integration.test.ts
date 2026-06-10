@@ -9,6 +9,7 @@ import {
   applyAllMigrations,
   createIsolatedDb,
   funnels,
+  kbDocuments,
   schema,
   styles as stylesTable,
   tryConnectToPg,
@@ -19,6 +20,7 @@ import { EXCHANGE_V1 } from "@chatman-media/vertical-exchange";
 // Side-effect: регистрирует REAL_ESTATE_V1 (мульти-стилевой шаблон) —
 // нужен для проверки, что install активирует ровно один стиль.
 import { REAL_ESTATE_STYLES } from "@chatman-media/vertical-real-estate";
+import { NullEmbeddingClient } from "@chatman-media/llm-router";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -48,6 +50,7 @@ let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
 let token = "";
 let tenantId = 0;
+let embedder: NullEmbeddingClient;
 
 beforeAll(
   async () => {
@@ -59,12 +62,13 @@ beforeAll(
     sql = postgres(testUrl, { max: 2, onnotice: () => {} });
     await applyAllMigrations(sql, migrationsDir);
     db = drizzle(sql, { schema });
+    embedder = new NullEmbeddingClient(1536);
 
     app = new Hono();
     // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
     app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
     app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminVerticalsRoutes({ db }));
+    app.route("/", makeAdminVerticalsRoutes({ db, resolveEmbedder: () => embedder }));
 
     const sa = await app.request("/api/auth/signup", {
       method: "POST",
@@ -131,6 +135,35 @@ describe("admin-verticals install → vertical_template_id", () => {
     // resolveTemplate(tenantSlug) в runtime делает KNOWN_TEMPLATES[verticalTemplateId];
     // ключ совпадает с EXCHANGE_V1.slug, значит lookup нашёл бы шаблон.
     expect(funnel.verticalTemplateId).toBe(EXCHANGE_V1.slug);
+  });
+
+  it("install exchange_v1 сидит KB docs со scope воронки и стадии", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/verticals/exchange_v1/install", { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      funnel?: { funnelId: number };
+      kbDocuments?: { ingested?: number };
+    };
+    const expectedDocs = EXCHANGE_V1.kbDocuments?.length ?? 0;
+    expect(body.kbDocuments?.ingested).toBe(expectedDocs);
+
+    const rows = await db
+      .select({
+        title: kbDocuments.title,
+        scopeType: kbDocuments.scopeType,
+        funnelId: kbDocuments.funnelId,
+        stageSlug: kbDocuments.stageSlug,
+      })
+      .from(kbDocuments)
+      .where(eq(kbDocuments.tenantId, tenantId));
+    const seededTitles = new Set(EXCHANGE_V1.kbDocuments?.map((doc) => doc.title) ?? []);
+    const seeded = rows.filter((row) => seededTitles.has(row.title));
+    expect(seeded.length).toBe(expectedDocs);
+    expect(seeded.find((row) => row.scopeType === "funnel")?.funnelId).toBe(body.funnel?.funnelId);
+    const stageDoc = seeded.find((row) => row.scopeType === "stage");
+    expect(stageDoc?.funnelId).toBe(body.funnel?.funnelId);
+    expect(stageDoc?.stageSlug).toBe("quote_calculated");
   });
 
   it("повторная установка (existing funnel) не теряет vertical_template_id", async () => {

@@ -50,4 +50,17 @@ describe("exchange_v1 template", () => {
 			}
 		}
 	});
+
+	it("seed KB docs имеют валидные scope", () => {
+		const t = defaultRegistry.load("exchange_v1");
+		const slugs = new Set(t.funnelStages.map((s) => s.slug));
+		expect(t.kbDocuments?.length).toBeGreaterThan(0);
+		for (const doc of t.kbDocuments ?? []) {
+			expect(doc.title.length).toBeGreaterThan(0);
+			expect(doc.body.length).toBeGreaterThan(0);
+			if (doc.scope?.scopeType === "stage") {
+				expect(slugs.has(doc.scope.stageSlug)).toBe(true);
+			}
+		}
+	});
 });

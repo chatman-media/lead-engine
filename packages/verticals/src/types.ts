@@ -88,10 +88,16 @@ export interface VerticalStyleSeed {
   configJson: string;
 }
 
+export type VerticalKbDocScope =
+  | { scopeType: "global" }
+  | { scopeType: "funnel" }
+  | { scopeType: "stage"; stageSlug: string };
+
 export interface VerticalKbDocSeed {
   title: string;
   body: string;
   topic?: string;
+  scope?: VerticalKbDocScope;
 }
 
 export interface VerticalTemplate<TCtx = unknown> {

@@ -526,6 +526,72 @@ describe("GET /api/admin/leads/:id/kb-guidance", () => {
     ).toBe(true);
   });
 
+  it("falls back to scoped text search when embedder is unavailable", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Text Guidance Contact" })
+      .returning({ id: contacts.id });
+    const [lead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contact!.id,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    await db.insert(stageFields).values({
+      tenantId: tenantA,
+      stageId: stageIdA,
+      slug: "text_guidance_budget",
+      displayName: "Client budget",
+      fieldType: "number",
+      required: true,
+      hint: "Amount the client is ready to exchange",
+      aiExtractable: true,
+      position: 21,
+      createdAt: now,
+    });
+
+    await ingestText(
+      {
+        title: "Text-only intake rules",
+        body: "Обязательные правила Intake intake_pending: уточнить Client budget, сумму, валюту и сеть. Нельзя обещать курс без расчёта.",
+      },
+      {
+        kb: new DrizzleKbStore({ db: db as never, tenantId: tenantA }),
+        embedder,
+        topic: "process",
+        scope: { scopeType: "stage", funnelId: funnelIdA, stageSlug: "intake_pending" },
+        source: `test:lead-guidance:text-fallback:${lead!.id}`,
+      },
+    );
+
+    const noEmbedApp = new Hono();
+    noEmbedApp.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    noEmbedApp.route("/", makeAdminLeadsRoutes({ db }));
+
+    const res = await noEmbedApp.request(`/api/admin/leads/${lead!.id}/kb-guidance`, {
+      headers: { Authorization: `Bearer ${tokenA}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kbAvailable: boolean;
+      warning: string | null;
+      hits: Array<{ title: string; scopeType: string; stageSlug: string | null }>;
+    };
+    expect(body.kbAvailable).toBe(true);
+    expect(body.warning).toContain("текстовый поиск");
+    expect(body.hits.some((hit) => hit.title === "Text-only intake rules")).toBe(true);
+    expect(
+      body.hits.every((hit) => hit.scopeType === "stage" && hit.stageSlug === "intake_pending"),
+    ).toBe(true);
+  });
+
   it("cross-tenant: tenant B cannot access tenant A guidance → 404", async () => {
     if (!sql) return;
     const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}/kb-guidance`);
