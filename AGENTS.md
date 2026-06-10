@@ -255,13 +255,13 @@ audit_log           — tenantId, adminId, action, resourceType, resourceId, dif
 message_templates   — tenantId, name, body
 referral_codes      — tenantId, code, usageCount
 exchange_rates      — tenantId, asset, network, baseRate, marginPct, feeFixedThb (обменник)
-exchange_rate_tiers — tenantId, targetThb, displayRate, marketRate (approved объёмные ступени)
+exchange_rate_tiers — tenantId, asset/quoteAsset/network, rangeBasis (target_thb/source_amount), minAmount/maxAmount, marketRate, displayRate, deviationPct, isActive, approvedByAdminId (approved объёмные ступени)
 exchange_orders     — tenantId, leadId, status, amounts, payment rails
 service_catalog_items — tenantId, slug, routeType (manual/funnel/partner_service/webhook), target refs
 partners            — tenantId, provider/partner contact data, defaultCommissionPct, settlementCurrency
 partner_services    — tenantId, partnerId, name, category, funnel/stage refs, commissionPct
 partner_deals       — tenantId, partnerId, serviceId, leadId, status, gross/commission, handoff mode
-partner_settlements — tenantId, partnerId, period, totals, status
+partner_settlements — tenantId, partnerId, periodStart/periodEnd, totalGross/totalCommission, currency, status (draft/issued/paid/cancelled); создана в 0041, app-кодом пока не используется
 ```
 
 **`stage_definitions.kind` enum:** only `'intake' | 'active' | 'terminal_won' | 'terminal_lost'` — CHECK constraint will reject anything else.

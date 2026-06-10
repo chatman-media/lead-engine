@@ -182,6 +182,7 @@ UI and install verticals/providers from the cabinet.
 | `apps/worker` | Outbound queue dispatcher, channel reload polling, cron jobs |
 | `apps/admin-ui` | React 19 + Vite cabinet: onboarding, channels, settings, catalog, leads, conversations, quality lab |
 | `apps/landing` | Public demo/marketing site |
+| `apps/widget` | Embeddable web chat widget for customer sites: vanilla TS, builds to a single IIFE `/widget.js` |
 | `apps/vertical-*` | Vertical template packages loaded through `packages/verticals` |
 | `packages/storage` | Drizzle schema, migrations, RLS helpers |
 | `packages/channel-*` | Channel adapters behind `ChannelAdapter` |
