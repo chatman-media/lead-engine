@@ -1,3 +1,11 @@
+# [@chatman-media/storage-v1.25.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.24.0...@chatman-media/storage-v1.25.0) (2026-06-10)
+
+
+### Features
+
+* **conversation-engine:** add reactive operator bot previews ([#444](https://github.com/chatman-media/lead-engine/issues/444)) ([ced6e4d](https://github.com/chatman-media/lead-engine/commit/ced6e4ddd63bb6c607bee2627a1b290d605b78a8))
+* **quality:** link tool proposals to artifacts ([#445](https://github.com/chatman-media/lead-engine/issues/445)) ([bf7e8c6](https://github.com/chatman-media/lead-engine/commit/bf7e8c6d89f9331e41206349c6f7b6a6439fc131))
+
 # [@chatman-media/storage-v1.24.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.23.0...@chatman-media/storage-v1.24.0) (2026-06-09)
 
 
