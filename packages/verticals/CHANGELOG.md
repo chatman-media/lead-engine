@@ -1,3 +1,10 @@
+# [@chatman-media/verticals-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.2.0...@chatman-media/verticals-v1.3.0) (2026-06-10)
+
+
+### Features
+
+* **kb:** add scoped guidance fallback seeds ([#458](https://github.com/chatman-media/lead-engine/issues/458)) ([6699167](https://github.com/chatman-media/lead-engine/commit/66991671fff975377cc4b659eeec2c39fffd29f7))
+
 # [@chatman-media/verticals-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.1.0...@chatman-media/verticals-v1.2.0) (2026-06-05)
 
 
