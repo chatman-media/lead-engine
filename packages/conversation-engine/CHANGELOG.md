@@ -1,3 +1,16 @@
+# [@chatman-media/conversation-engine-v3.0.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v2.1.0...@chatman-media/conversation-engine-v3.0.0) (2026-06-10)
+
+
+* feat(kb)!: прунинг LLM-шагов answerWithRag по результатам замера ([#515](https://github.com/chatman-media/lead-engine/issues/515)) ([#523](https://github.com/chatman-media/lead-engine/issues/523)) ([e5e75f3](https://github.com/chatman-media/lead-engine/commit/e5e75f3f07be06bad982a3290e5664d61ae14a8e))
+
+
+### BREAKING CHANGES
+
+* дефолт rewriteQueryBeforeRetrieval в RagReplyStrategy
+сменился с true на false; для прежнего поведения передайте флаг явно.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+
 # [@chatman-media/conversation-engine-v2.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v2.0.0...@chatman-media/conversation-engine-v2.1.0) (2026-06-10)
 
 
