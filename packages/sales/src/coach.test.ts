@@ -7,6 +7,7 @@ import {
 } from "./coach.ts";
 import type { ISelfPlayMatchesRepo } from "./store.ts";
 import { STYLES } from "./styles/index.ts";
+import { StyleSchema } from "./types.ts";
 
 const baseStyle = STYLES[0]; // marina-prime
 if (!baseStyle) throw new Error("missing base style fixture");
@@ -106,6 +107,32 @@ describe("applyEditsToStyle", () => {
     });
     expect(out.stages.close?.guidance).toBe("дожимай мягко");
   });
+  it("stage_guidance: отсутствующая стадия создаётся с минимальным конфигом", () => {
+    const minimal = StyleSchema.parse({
+      slug: "min-style",
+      displayName: "Min",
+      persona: { name: "Аня", role: "human", company: "Acme" },
+      voice: { tone: "тёплый", language: "ru" },
+      framework: "SPIN",
+      stages: { qualify: { goal: "понять запрос" } },
+      guardrails: {},
+      model: {},
+    });
+    const out = applyEditsToStyle(minimal, {
+      stage_guidance: { objection: "снимай возражения мягко" },
+    });
+    expect(out.stages.objection).toEqual({
+      goal: "objection",
+      guidance: "снимай возражения мягко",
+      groundingRequired: false,
+    });
+    // существующая стадия обновляется, а не пересоздаётся
+    const out2 = applyEditsToStyle(minimal, {
+      stage_guidance: { qualify: "уточняй бюджет" },
+    });
+    expect(out2.stages.qualify?.goal).toBe("понять запрос");
+    expect(out2.stages.qualify?.guidance).toBe("уточняй бюджет");
+  });
   it("fewshot_add: валидный добавляется (со стадией), пустой дропается", () => {
     const out = applyEditsToStyle(baseStyle, {
       fewshot_add: [
@@ -166,6 +193,30 @@ describe("proposeStyleEdits", () => {
     expect(prompt).toContain("create_exchange_order");
     expect(prompt).toContain("Label: bad_args");
     expect(prompt).toContain("quote id should be verified");
+  });
+  it("несериализуемые args в tool feedback → '<unserializable>' в промпте", async () => {
+    const calls: ChatMessage[][] = [];
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+    const p = await proposeStyleEdits({
+      style: baseStyle,
+      matchesRepo: fakeMatches([]),
+      chat: chatCapture('{"summary":"ok","edits":{},"rationale":[]}', calls),
+      toolFeedbackSignals: [
+        {
+          toolName: "create_exchange_order",
+          source: "llm_reply",
+          label: "other",
+          error: false,
+          args: circular,
+          result: { ok: true },
+        },
+      ],
+    });
+    expect(p.summary).toBe("ok");
+    const prompt = calls[0]?.map((message) => message.content).join("\n") ?? "";
+    expect(prompt).toContain('"<unserializable>"');
+    expect(prompt).toContain('{"ok":true}');
   });
   it("LLM упал → summary с ошибкой", async () => {
     const p = await proposeStyleEdits({

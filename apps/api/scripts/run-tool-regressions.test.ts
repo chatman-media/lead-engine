@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { runToolCallRegressionCases } from "@chatman-media/kb";
 import {
 	loadRegressionCorpus,
+	main,
 	parseArgs,
+	renderToolRegressionMarkdown,
 	writeReportOutputs,
 } from "./run-tool-regressions.ts";
 
@@ -56,6 +58,65 @@ describe("run-tool-regressions CLI source handling", () => {
 		expect(args.outJsonPath?.endsWith("/artifacts/report.json")).toBe(true);
 		expect(args.outJunitPath?.endsWith("/artifacts/report.xml")).toBe(true);
 		expect(args.outMdPath?.endsWith("/artifacts/report.md")).toBe(true);
+	});
+
+	test("parses space-separated option forms and repeated --tool", () => {
+		const args = parseArgs(
+			[
+				"--api-base",
+				"http://api.test",
+				"--token-env",
+				"MY_TOKEN",
+				"--status",
+				"archived",
+				"--limit",
+				"9",
+				"--tool",
+				"a",
+				"--tool=b",
+				"--tools",
+				"c,d",
+				"--tools=d,e",
+				"--token-env=MY_TOKEN",
+			],
+			{ MY_TOKEN: "tok" },
+		);
+		expect("error" in args).toBe(false);
+		if ("error" in args) return;
+		expect(args.source).toEqual({
+			kind: "api",
+			apiBase: "http://api.test",
+			token: "tok",
+			status: "archived",
+			limit: 9,
+		});
+		expect(args.supportedTools).toEqual(["a", "b", "c", "d", "e"]);
+	});
+
+	test("each option missing its value or invalid → error", () => {
+		const cases: Array<[string[], string]> = [
+			[["--out-json"], "--out-json requires a path"],
+			[["--out-junit"], "--out-junit requires a path"],
+			[["--out-md"], "--out-md requires a path"],
+			[["--file"], "--file requires a path"],
+			[["--api-base"], "--api-base requires a URL"],
+			[["--token"], "--token requires a bearer token"],
+			[["--token-env"], "--token-env requires an environment variable name"],
+			[["--status"], "--status requires active, archived, or all"],
+			[
+				["--status", "weird"],
+				"--status must be active, archived, or all",
+			],
+			[["--limit"], "--limit requires a number"],
+			[["--limit", "abc"], "--limit must be an integer from 1 to 1000"],
+			[["--limit=1001"], "--limit must be an integer from 1 to 1000"],
+			[["--tool"], "--tool requires a name"],
+			[["--tools"], "--tools requires a comma-separated list"],
+			[["--bogus"], "unknown argument: --bogus"],
+		];
+		for (const [argv, error] of cases) {
+			expect(parseArgs(argv, {})).toEqual({ error });
+		}
 	});
 
 	test("rejects ambiguous and invalid API arguments", () => {
@@ -223,6 +284,125 @@ describe("run-tool-regressions CLI source handling", () => {
 		expect(junit).toContain("<failure");
 		expect(md).toContain("| Failed | 1 |");
 		expect(md).toContain("expected.behavior");
+	});
+});
+
+describe("renderToolRegressionMarkdown branches", () => {
+	test("no failures → 'No regression failures.'", () => {
+		const report = runToolCallRegressionCases({
+			raw: jsonl(validRecord({ id: 1 })),
+		});
+		const md = renderToolRegressionMarkdown(report);
+		expect(md).toContain("| Failed | 0 |");
+		expect(md).toContain("No regression failures.");
+	});
+
+	test("more than 20 failures → omission note", () => {
+		const records = Array.from({ length: 21 }, (_, index) =>
+			validRecord({ id: index + 1, expected: {} }),
+		);
+		const report = runToolCallRegressionCases({ raw: jsonl(...records) });
+		expect(report.summary.failed).toBe(21);
+		const md = renderToolRegressionMarkdown(report);
+		expect(md).toContain("### Failures");
+		expect(md).toContain("- 1 more failed cases omitted from summary.");
+	});
+});
+
+describe("main()", () => {
+	async function runMain(argv: string[]): Promise<{
+		logs: string[];
+		errors: string[];
+		exitCode: number | undefined;
+	}> {
+		const logs: string[] = [];
+		const errors: string[] = [];
+		const bunWithArgv = Bun as unknown as { argv: string[] };
+		const originalArgv = bunWithArgv.argv;
+		const originalLog = console.log;
+		const originalError = console.error;
+		const originalExitCode = process.exitCode;
+		bunWithArgv.argv = ["bun", "run-tool-regressions.ts", ...argv];
+		console.log = (...parts: unknown[]) => {
+			logs.push(parts.join(" "));
+		};
+		console.error = (...parts: unknown[]) => {
+			errors.push(parts.join(" "));
+		};
+		process.exitCode = 0;
+		try {
+			await main();
+			const exitCode = process.exitCode;
+			return { logs, errors, exitCode };
+		} finally {
+			console.log = originalLog;
+			console.error = originalError;
+			bunWithArgv.argv = originalArgv;
+			process.exitCode = originalExitCode;
+		}
+	}
+
+	test("invalid argument → help on stdout, error on stderr, exitCode 1", async () => {
+		const { logs, errors, exitCode } = await runMain(["--bogus"]);
+		expect(errors[0]).toBe("unknown argument: --bogus");
+		expect(logs.join("\n")).toContain("Usage:");
+		expect(exitCode).toBe(1);
+	});
+
+	test("--help → usage, exitCode stays 0", async () => {
+		const { logs, exitCode } = await runMain(["--help"]);
+		expect(logs.join("\n")).toContain("Usage:");
+		expect(exitCode).toBe(0);
+	});
+
+	test("file corpus with failures → summary, failure details, exitCode 1, reports written", async () => {
+		const corpusFile = `/tmp/tool-regression-main-${crypto.randomUUID()}.jsonl`;
+		const outputDir = `/tmp/tool-regression-main-out-${crypto.randomUUID()}`;
+		await Bun.write(
+			corpusFile,
+			jsonl(
+				validRecord({ id: 1 }),
+				validRecord({ id: 2, status: "archived" }),
+				validRecord({ id: 3, expected: {} }),
+			),
+		);
+
+		const { logs, errors, exitCode } = await runMain([
+			"--file",
+			corpusFile,
+			"--out-md",
+			`${outputDir}/report.md`,
+		]);
+
+		const stdout = logs.join("\n");
+		expect(stdout).toContain("Tool-call regression cases:");
+		expect(stdout).toContain("total=3");
+		expect(stdout).toContain("failed=1");
+		expect(stdout).toContain("Skipped:");
+		expect(errors.join("\n")).toContain("Failures:");
+		expect(exitCode).toBe(1);
+		const md = await Bun.file(`${outputDir}/report.md`).text();
+		expect(md).toContain("| Failed | 1 |");
+	});
+
+	test("--json with passing corpus → machine-readable report, exitCode 0", async () => {
+		const corpusFile = `/tmp/tool-regression-json-${crypto.randomUUID()}.jsonl`;
+		await Bun.write(corpusFile, jsonl(validRecord({ id: 1 })));
+
+		const { logs, errors, exitCode } = await runMain([
+			"--file",
+			corpusFile,
+			"--json",
+		]);
+
+		expect(errors).toEqual([]);
+		expect(exitCode).toBe(0);
+		const report = JSON.parse(logs.join("\n")) as {
+			summary: { total: number; passed: number };
+		};
+		expect(report.summary).toEqual(
+			expect.objectContaining({ total: 1, passed: 1 }),
+		);
 	});
 });
 
