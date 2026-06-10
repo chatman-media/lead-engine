@@ -1,10 +1,17 @@
-import { type Db, withTenant, type NotificationService } from "@chatman-media/conversation-engine";
+import {
+  type Db,
+  DrizzleKbStore,
+  withTenant,
+  type NotificationService,
+} from "@chatman-media/conversation-engine";
+import type { EmbeddingClient } from "@chatman-media/llm-router";
 import {
   channelIdentities,
   channels,
   contacts,
   conversations,
   exchangeOrders,
+  kbDocuments,
   leadEvents,
   leadFieldValues,
   leadNotes,
@@ -43,8 +50,122 @@ import {
  */
 export interface AdminLeadsRoutesOpts {
   db: Db;
+  resolveEmbedder?: (tenantId: number) => EmbeddingClient;
   notificationService?: NotificationService;
   partnerPing?: { appUrl: string; operatorBotToken: string; callbackSecret: string } | null;
+}
+
+type LeadKbScope = {
+  scopeType: "global" | "funnel" | "stage";
+  funnelId?: number | null;
+  stageSlug?: string | null;
+};
+
+const DEFAULT_LEAD_KB_GUIDANCE_LIMIT = 5;
+const MAX_LEAD_KB_GUIDANCE_LIMIT = 8;
+
+function parseLeadKbGuidanceLimit(value: string | undefined): number {
+  const n = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_LEAD_KB_GUIDANCE_LIMIT;
+  return Math.min(n, MAX_LEAD_KB_GUIDANCE_LIMIT);
+}
+
+function parseFieldValue(valueJson: string | null | undefined): unknown {
+  if (!valueJson) return null;
+  try {
+    return JSON.parse(valueJson);
+  } catch {
+    return valueJson;
+  }
+}
+
+function fieldValueFilled(valueJson: string | null | undefined): boolean {
+  const value = parseFieldValue(valueJson);
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function buildLeadKbGuidanceQuery(input: {
+  stage: {
+    displayName: string;
+    slug: string;
+    stageType: string;
+    phase: string | null;
+    goal: string | null;
+    guidance: string | null;
+  };
+  fields: Array<{ displayName: string; required: boolean; hint: string | null }>;
+  missingRequiredFields: Array<{ displayName: string }>;
+}): string {
+  const required = input.fields
+    .filter((field) => field.required)
+    .map((field) => field.displayName)
+    .join(", ");
+  const hints = input.fields
+    .map((field) => field.hint)
+    .filter((hint): hint is string => Boolean(hint))
+    .join(". ");
+  const missing = input.missingRequiredFields.map((field) => field.displayName).join(", ");
+  return [
+    `Стадия ${input.stage.displayName} (${input.stage.slug})`,
+    `Тип стадии: ${input.stage.stageType}`,
+    input.stage.phase ? `Фаза: ${input.stage.phase}` : "",
+    input.stage.goal ? `Цель: ${input.stage.goal}` : "",
+    input.stage.guidance ? `Инструкция: ${input.stage.guidance}` : "",
+    required ? `Обязательные поля: ${required}` : "",
+    missing ? `Не заполнено: ${missing}` : "",
+    hints,
+    "обязательные правила риски ограничения что проверить next best action",
+  ]
+    .filter((part) => part.trim().length > 0)
+    .join(". ")
+    .slice(0, 2000);
+}
+
+function stageTypeAction(stageType: string): string | null {
+  switch (stageType) {
+    case "payment":
+      return "Проверить proof/поступление оплаты до перевода лида дальше";
+    case "rate_confirmation":
+      return "Зафиксировать курс, сумму и срок действия оффера";
+    case "document_upload":
+    case "document_signature":
+      return "Сверить полноту документов и формат файлов перед следующим шагом";
+    case "awaiting_operator":
+    case "external_approval":
+      return "Передать оператору полный контекст и зафиксировать SLA ответа";
+    default:
+      return null;
+  }
+}
+
+function buildLeadKbNextActions(input: {
+  missingRequiredFields: Array<{ displayName: string }>;
+  stage: { stageType: string; guidance: string | null };
+  hits: Array<{ title: string; scopeType: string }>;
+}): string[] {
+  const actions: string[] = [];
+  if (input.missingRequiredFields.length > 0) {
+    actions.push(
+      `Заполнить обязательные поля: ${input.missingRequiredFields
+        .map((field) => field.displayName)
+        .join(", ")}`,
+    );
+  }
+  const typedAction = stageTypeAction(input.stage.stageType);
+  if (typedAction) actions.push(typedAction);
+  const stageHit = input.hits.find((hit) => hit.scopeType === "stage");
+  const funnelHit = input.hits.find((hit) => hit.scopeType === "funnel");
+  const globalHit = input.hits.find((hit) => hit.scopeType === "global");
+  const bestHit = stageHit ?? funnelHit ?? globalHit;
+  if (bestHit) actions.push(`Сверить правила в БЗ: ${bestHit.title}`);
+  if (input.stage.guidance) actions.push(input.stage.guidance);
+  if (actions.length === 0) {
+    actions.push("Открыть диалог и сверить следующий шаг с правилами базы знаний");
+  }
+  return [...new Set(actions)].slice(0, 5);
 }
 
 export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
@@ -517,6 +638,246 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     });
 
     return c.json({ imported, skipped, errors }, 200);
+  });
+
+  /**
+   * GET /api/admin/leads/:id/kb-guidance
+   * Returns operational KB hints for the current lead stage:
+   * - required field fill state
+   * - scoped KB chunks for stage → funnel → global
+   * - deterministic next actions for the operator
+   */
+  app.get("/api/admin/leads/:id/kb-guidance", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+    const limit = parseLeadKbGuidanceLimit(c.req.query("limit"));
+
+    const context = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({
+          id: leads.id,
+          userId: leads.userId,
+          state: leads.state,
+          stageDefinitionId: leads.stageDefinitionId,
+        })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)))
+        .limit(1);
+      if (!lead) return null;
+
+      const [stageDef] = lead.stageDefinitionId
+        ? await tx
+            .select({
+              id: stageDefinitions.id,
+              funnelId: stageDefinitions.funnelId,
+              slug: stageDefinitions.slug,
+              displayName: stageDefinitions.displayName,
+              stageType: stageDefinitions.stageType,
+              phase: stageDefinitions.phase,
+              goal: stageDefinitions.goal,
+              guidance: stageDefinitions.guidance,
+            })
+            .from(stageDefinitions)
+            .where(and(eq(stageDefinitions.id, lead.stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)))
+            .limit(1)
+        : [null];
+
+      const fields = stageDef
+        ? await tx
+            .select({
+              id: stageFields.id,
+              slug: stageFields.slug,
+              displayName: stageFields.displayName,
+              fieldType: stageFields.fieldType,
+              required: stageFields.required,
+              hint: stageFields.hint,
+              position: stageFields.position,
+            })
+            .from(stageFields)
+            .where(and(eq(stageFields.tenantId, tenantId), eq(stageFields.stageId, stageDef.id)))
+            .orderBy(stageFields.position)
+        : [];
+
+      const values =
+        fields.length > 0
+          ? await tx
+              .select({
+                fieldId: leadFieldValues.fieldId,
+                valueJson: leadFieldValues.valueJson,
+              })
+              .from(leadFieldValues)
+              .where(
+                and(
+                  eq(leadFieldValues.leadId, id),
+                  inArray(
+                    leadFieldValues.fieldId,
+                    fields.map((field) => field.id),
+                  ),
+                ),
+              )
+          : [];
+
+      const [contact] = await tx
+        .select({ id: contacts.id, displayName: contacts.displayName })
+        .from(contacts)
+        .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)))
+        .limit(1);
+
+      return { lead, stageDef, fields, values, contact: contact ?? null };
+    });
+
+    if (!context) return c.json({ error: "lead not found" }, 404);
+
+    const valueByFieldId = new Map(context.values.map((value) => [value.fieldId, value.valueJson]));
+    const requiredFields = context.fields
+      .filter((field) => field.required)
+      .map((field) => ({
+        id: field.id,
+        slug: field.slug,
+        displayName: field.displayName,
+        fieldType: field.fieldType,
+        filled: fieldValueFilled(valueByFieldId.get(field.id) ?? null),
+      }));
+    const missingRequiredFields = requiredFields.filter((field) => !field.filled);
+
+    const stage = context.stageDef;
+    let query = "";
+    let kbAvailable = false;
+    let warning: string | null = null;
+    let hits: Array<{
+      rank: number;
+      chunkId: number;
+      documentId: number;
+      distance: number;
+      text: string;
+      source: string;
+      title: string;
+      topic: string | null;
+      scopeType: "global" | "funnel" | "stage";
+      funnelId: number | null;
+      stageSlug: string | null;
+    }> = [];
+
+    if (stage) {
+      query = buildLeadKbGuidanceQuery({
+        stage,
+        fields: context.fields,
+        missingRequiredFields,
+      });
+
+      if (!opts.resolveEmbedder) {
+        warning = "Поиск по БЗ недоступен: embedder не настроен";
+      } else {
+        try {
+          const embedder = opts.resolveEmbedder(tenantId);
+          const [embedding] = await embedder.embed([query]);
+          if (!embedding) {
+            warning = "Поиск по БЗ недоступен: embedder не вернул вектор";
+          } else {
+            kbAvailable = true;
+            const rawHits = await withTenant(opts.db, tenantId, async (tx) => {
+              const kb = new DrizzleKbStore({ db: tx, tenantId });
+              const scopes: LeadKbScope[] = [
+                { scopeType: "stage", funnelId: stage.funnelId, stageSlug: stage.slug },
+                { scopeType: "funnel", funnelId: stage.funnelId },
+                { scopeType: "global" },
+              ];
+              const collected: Array<{
+                chunk_id: number;
+                document_id: number;
+                distance: number;
+                text: string;
+                source: string;
+                title: string;
+              }> = [];
+              const seen = new Set<number>();
+              for (const scope of scopes) {
+                const scopeHits = await kb.hybridSearch({
+                  embedding,
+                  query,
+                  k: scope.scopeType === "global" ? 2 : limit,
+                  scope,
+                });
+                for (const hit of scopeHits) {
+                  if (seen.has(hit.chunk_id)) continue;
+                  seen.add(hit.chunk_id);
+                  collected.push(hit);
+                  if (collected.length >= limit) return collected;
+                }
+              }
+              return collected;
+            });
+
+            const documentIds = [...new Set(rawHits.map((hit) => hit.document_id))];
+            const documents =
+              documentIds.length > 0
+                ? await withTenant(opts.db, tenantId, (tx) =>
+                    tx
+                      .select({
+                        id: kbDocuments.id,
+                        topic: kbDocuments.topic,
+                        scopeType: kbDocuments.scopeType,
+                        funnelId: kbDocuments.funnelId,
+                        stageSlug: kbDocuments.stageSlug,
+                      })
+                      .from(kbDocuments)
+                      .where(and(eq(kbDocuments.tenantId, tenantId), inArray(kbDocuments.id, documentIds))),
+                  )
+                : [];
+            const docById = new Map(documents.map((doc) => [doc.id, doc]));
+            hits = rawHits.map((hit, index) => {
+              const doc = docById.get(hit.document_id);
+              return {
+                rank: index + 1,
+                chunkId: hit.chunk_id,
+                documentId: hit.document_id,
+                distance: hit.distance,
+                text: hit.text,
+                source: hit.source,
+                title: hit.title,
+                topic: doc?.topic ?? null,
+                scopeType: (doc?.scopeType ?? "global") as "global" | "funnel" | "stage",
+                funnelId: doc?.funnelId ?? null,
+                stageSlug: doc?.stageSlug ?? null,
+              };
+            });
+          }
+        } catch (err) {
+          warning = err instanceof Error ? err.message : String(err);
+        }
+      }
+    }
+
+    return c.json({
+      leadId: context.lead.id,
+      contact: context.contact,
+      stage: stage
+        ? {
+            id: stage.id,
+            funnelId: stage.funnelId,
+            slug: stage.slug,
+            displayName: stage.displayName,
+            stageType: stage.stageType,
+            phase: stage.phase,
+            goal: stage.goal,
+            guidance: stage.guidance,
+          }
+        : null,
+      query,
+      kbAvailable,
+      warning,
+      requiredFields,
+      missingRequiredFields,
+      nextActions: stage
+        ? buildLeadKbNextActions({
+            missingRequiredFields,
+            stage,
+            hits,
+          })
+        : ["Назначить лиду стадию воронки, чтобы получить подсказки из базы знаний"],
+      hits,
+    });
   });
 
   /**

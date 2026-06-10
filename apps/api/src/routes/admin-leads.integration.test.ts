@@ -4,6 +4,9 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
+import { DrizzleKbStore } from "@chatman-media/conversation-engine";
+import { ingestText } from "@chatman-media/kb";
+import { NullEmbeddingClient } from "@chatman-media/llm-router";
 import {
   applyAllMigrations,
   channelIdentities,
@@ -51,6 +54,7 @@ let tokenA = "";
 let tenantA = 0;
 let tokenB = "";
 let tenantB = 0;
+let embedder: NullEmbeddingClient;
 
 let contactIdA = 0;
 let contactIdA2 = 0;
@@ -71,12 +75,13 @@ beforeAll(async () => {
   sql = postgres(testUrl, { max: 2, onnotice: () => {} });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
+  embedder = new NullEmbeddingClient(1536);
 
   app = new Hono();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
   app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-  app.route("/", makeAdminLeadsRoutes({ db }));
+  app.route("/", makeAdminLeadsRoutes({ db, resolveEmbedder: () => embedder }));
 
   // Tenant A
   const sa = await app.request("/api/auth/signup", {
@@ -438,6 +443,92 @@ describe("GET /api/admin/leads/:id", () => {
   it("cross-tenant: tenant B cannot access tenant A's lead → 404", async () => {
     if (!sql) return;
     const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}`);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/admin/leads/:id/kb-guidance", () => {
+  it("without auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request(`/api/admin/leads/${leadIdA}/kb-guidance`);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns required field state and stage-scoped KB hints", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Guidance Contact" })
+      .returning({ id: contacts.id });
+    const [lead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contact!.id,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    const [field] = await db
+      .insert(stageFields)
+      .values({
+        tenantId: tenantA,
+        stageId: stageIdA,
+        slug: "guidance_budget",
+        displayName: "Client budget",
+        fieldType: "number",
+        required: true,
+        hint: "Amount the client is ready to exchange",
+        aiExtractable: true,
+        position: 20,
+        createdAt: now,
+      })
+      .returning({ id: stageFields.id });
+
+    await ingestText(
+      {
+        title: "Intake rules",
+        body: "На стадии intake обязательно уточнить сумму, валюту, сеть и способ выдачи. Нельзя обещать курс без расчёта.",
+      },
+      {
+        kb: new DrizzleKbStore({ db: db as never, tenantId: tenantA }),
+        embedder,
+        topic: "process",
+        scope: { scopeType: "stage", funnelId: funnelIdA, stageSlug: "intake_pending" },
+        source: `test:lead-guidance:${lead!.id}`,
+      },
+    );
+
+    const res = await authReq(tokenA, `/api/admin/leads/${lead!.id}/kb-guidance`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      leadId: number;
+      stage: { slug: string; funnelId: number } | null;
+      kbAvailable: boolean;
+      requiredFields: Array<{ id: number; displayName: string; filled: boolean }>;
+      missingRequiredFields: Array<{ id: number; displayName: string; filled: boolean }>;
+      nextActions: string[];
+      hits: Array<{ title: string; scopeType: string; stageSlug: string | null }>;
+    };
+    expect(body.leadId).toBe(lead!.id);
+    expect(body.stage?.slug).toBe("intake_pending");
+    expect(body.stage?.funnelId).toBe(funnelIdA);
+    expect(body.kbAvailable).toBe(true);
+    expect(body.requiredFields.find((item) => item.id === field!.id)?.filled).toBe(false);
+    expect(body.missingRequiredFields.map((item) => item.displayName)).toContain("Client budget");
+    expect(body.nextActions.some((action) => action.includes("Client budget"))).toBe(true);
+    expect(body.hits.some((hit) => hit.title === "Intake rules")).toBe(true);
+    expect(
+      body.hits.every((hit) => hit.scopeType === "stage" && hit.stageSlug === "intake_pending"),
+    ).toBe(true);
+  });
+
+  it("cross-tenant: tenant B cannot access tenant A guidance → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}/kb-guidance`);
     expect(res.status).toBe(404);
   });
 });
