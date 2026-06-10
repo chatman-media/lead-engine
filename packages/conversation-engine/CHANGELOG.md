@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.28.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.28.0...@chatman-media/conversation-engine-v1.28.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **conversation-engine:** avoid exchange intent redos ([#501](https://github.com/chatman-media/lead-engine/issues/501)) ([51e7444](https://github.com/chatman-media/lead-engine/commit/51e74440128c7eb864cb4426ea9a3fbddad99ce6))
+
 # [@chatman-media/conversation-engine-v1.28.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.27.0...@chatman-media/conversation-engine-v1.28.0) (2026-06-10)
 
 
