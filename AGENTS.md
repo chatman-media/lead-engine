@@ -42,6 +42,23 @@ bun run check         # biome lint + format check
 
 ---
 
+## Environments & deploy
+
+| Среда | URL | Что |
+|---|---|---|
+| Прод | `https://exchanges.agency` | лендинг (`apps/landing/dist` на корне) + API/webhooks (proxy → :3000) |
+| Прод-админка | `https://client.exchanges.agency` | admin-ui SPA на корне поддомена (сборка с `ADMIN_UI_BASE=/`); `/api`,`/ws` проксируются на тот же :3000 — same-host, без CORS. `exchanges.agency/admin` → 301 сюда |
+| Дев | `https://dev.exchanges.agency` | полная копия в `/opt/lead-engine-dev`: порт **3001**, БД `lead_engine_dev`, юниты `lead-engine-dev-api/-worker`; админка здесь осталась на `/admin/` |
+
+**CD:** push в `main` → прод; push в ветку `dev` → дев-инстанс (оба — job'ы в `ci.yml`, SSH → `deploy.sh`). Рабочий цикл: фичи → `dev` → проверка на дев-стенде → PR `dev → main`. Детали и серверная разметка: [docs/operations/CD_SETUP.md](docs/operations/CD_SETUP.md), [docs/operations/SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md).
+
+Гочи:
+- API статику почти не раздаёт (только `/widget.js`) — лендинг/админку отдаёт nginx; proxy всего `/` на API даёт 404 на корне.
+- `ADMIN_UI_BASE=/` задан **только** в прод-`.env` (`/opt/lead-engine/.env`); в дев-`.env` его быть не должно, иначе сломается `/admin/` на дев-домене.
+- Каналы (Telegram-боты и т.п.) на деве — только отдельные: продовый бот, подключённый к деву, перетянет вебхук на себя и прод перестанет получать сообщения.
+
+---
+
 ## Dev login
 
 After `bun db:reset` the DB is empty. **Public signup is closed by default**
