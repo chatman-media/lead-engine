@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -51,6 +51,7 @@ const fixturesPath = resolve(
 );
 const MASTER_KEY =
 	"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const realFetch = globalThis.fetch;
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -466,6 +467,71 @@ function toTools(conversationId: number): ToolMap {
 	) as ToolMap;
 }
 
+function mockTronscanPayment(opts: {
+	txHash: string;
+	toAddress?: string;
+	amount?: number;
+	timestamp?: number;
+}): void {
+	const toAddress = opts.toAddress ?? "TMockExchangeWallet111111111111111111";
+	const amount = opts.amount ?? 100;
+	const timestamp = opts.timestamp ?? Math.floor(Date.now() / 1000) * 1000;
+	globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+		expect(String(input)).toContain(opts.txHash);
+		return new Response(
+			JSON.stringify({
+				confirmed: true,
+				contractRet: "SUCCESS",
+				timestamp,
+				trc20TransferInfo: [
+					{
+						to_address: toAddress,
+						from_address: "TReplaySource",
+						amount_str: String(Math.round(amount * 1_000_000)),
+						decimals: 6,
+						symbol: "USDT",
+					},
+				],
+			}),
+			{ status: 200 },
+		);
+	}) as unknown as typeof fetch;
+}
+
+async function createCryptoOrderForVerification(id: string): Promise<{
+	orderId: number;
+	tools: ToolMap;
+}> {
+	const { conversationId } = await makeConversation(
+		{
+			id,
+			title: `Crypto ${id}`,
+			messages: [],
+			expectedWorkflow: [],
+		},
+		true,
+	);
+	const tools = toTools(conversationId);
+	const created = (await must(
+		tools.create_exchange_order,
+		"create_exchange_order",
+	).execute({
+		asset: "USDT",
+		amount: 100,
+		amountMode: "source_amount",
+		network: "trc20",
+		paymentMethod: "crypto_transfer",
+		paymentRail: "trc20",
+		payoutMethod: "office_cash",
+		payoutLocation: "office",
+	})) as Record<string, unknown>;
+	await must(
+		tools.fetch_exchange_requisites,
+		"fetch_exchange_requisites",
+	).execute({});
+	return { orderId: created.orderId as number, tools };
+}
+
 beforeAll(async () => {
 	if (!ownerUrl) return;
 	const probe = await tryConnectToPg(ownerUrl);
@@ -503,6 +569,10 @@ beforeAll(async () => {
 afterAll(async () => {
 	if (sql) await sql.end({ timeout: 0 }).catch(() => {});
 }, 10_000);
+
+afterEach(() => {
+	globalThis.fetch = realFetch;
+});
 
 describe("Exchange workflow fixtures", () => {
 	it("loads exactly 10 redacted workflow documents", () => {
@@ -672,6 +742,119 @@ describe("Exchange workflow fixtures", () => {
 				expect(order.proofJson).toContain("fiat_receipt");
 		});
 	}
+
+	it("rejects replayed crypto tx hash on a second order", async () => {
+		if (!sql) return;
+		const txHash = "b".repeat(64);
+		mockTronscanPayment({ txHash });
+
+		const first = await createCryptoOrderForVerification("replay-first");
+		const firstProof = (await must(
+			first.tools.verify_exchange_payment,
+			"verify_exchange_payment",
+		).execute({ proof: `https://tronscan.org/#/transaction/${txHash}` })) as Record<
+			string,
+			unknown
+		>;
+		expect(firstProof.ok).toBe(true);
+
+		const second = await createCryptoOrderForVerification("replay-second");
+		const secondProof = (await must(
+			second.tools.verify_exchange_payment,
+			"verify_exchange_payment",
+		).execute({ proof: txHash })) as Record<string, unknown>;
+		expect(secondProof.ok).toBe(false);
+		expect(secondProof.needsOperator).toBe(true);
+		expect(secondProof.duplicateOrderId).toBe(first.orderId);
+
+		const rows = await withTenant(db, tenantId, (tx) =>
+			tx
+				.select({
+					id: exchangeOrders.id,
+					status: exchangeOrders.status,
+					proofJson: exchangeOrders.proofJson,
+				})
+				.from(exchangeOrders)
+				.where(
+					and(
+						eq(exchangeOrders.tenantId, tenantId),
+						eq(exchangeOrders.id, second.orderId),
+					),
+				),
+		);
+		const row = must(rows[0], "second replay order");
+		expect(row.status).toBe("awaiting_payment");
+		expect(row.proofJson).toContain("tx_hash_replay");
+	});
+
+	it("allows only one paid order when two verifies race with the same crypto tx hash", async () => {
+		if (!sql) return;
+		const txHash = "c".repeat(64);
+		mockTronscanPayment({ txHash });
+		const first = await createCryptoOrderForVerification("race-first");
+		const second = await createCryptoOrderForVerification("race-second");
+
+		const results = (await Promise.all([
+			must(first.tools.verify_exchange_payment, "verify_exchange_payment").execute({
+				proof: txHash,
+			}),
+			must(second.tools.verify_exchange_payment, "verify_exchange_payment").execute({
+				proof: txHash,
+			}),
+		])) as [Record<string, unknown>, Record<string, unknown>];
+
+		expect(results.filter((result) => result.ok === true)).toHaveLength(1);
+		expect(results.filter((result) => result.needsOperator === true)).toHaveLength(1);
+
+		const orderRows = await withTenant(db, tenantId, (tx) =>
+			tx
+				.select({
+					id: exchangeOrders.id,
+					status: exchangeOrders.status,
+					proofJson: exchangeOrders.proofJson,
+				})
+				.from(exchangeOrders)
+				.where(eq(exchangeOrders.tenantId, tenantId)),
+		);
+		const raced = orderRows.filter((row) =>
+			[first.orderId, second.orderId].includes(row.id),
+		);
+		expect(raced.filter((row) => row.status === "paid")).toHaveLength(1);
+		expect(raced.filter((row) => row.proofJson?.includes("tx_hash_replay"))).toHaveLength(1);
+	});
+
+	it("keeps old crypto tx hash out of paid status", async () => {
+		if (!sql) return;
+		const txHash = "d".repeat(64);
+		mockTronscanPayment({
+			txHash,
+			timestamp: (Math.floor(Date.now() / 1000) - 25 * 60 * 60) * 1000,
+		});
+		const order = await createCryptoOrderForVerification("old-tx");
+		const proof = (await must(
+			order.tools.verify_exchange_payment,
+			"verify_exchange_payment",
+		).execute({ proof: txHash })) as Record<string, unknown>;
+
+		expect(proof.ok).toBe(false);
+		expect(proof.needsOperator).toBe(true);
+		expect(String(proof.reason)).toContain("старше");
+
+		const rows = await withTenant(db, tenantId, (tx) =>
+			tx
+				.select({ status: exchangeOrders.status, proofJson: exchangeOrders.proofJson })
+				.from(exchangeOrders)
+				.where(
+					and(
+						eq(exchangeOrders.tenantId, tenantId),
+						eq(exchangeOrders.id, order.orderId),
+					),
+				),
+		);
+		const row = must(rows[0], "old tx order");
+		expect(row.status).toBe("awaiting_payment");
+		expect(row.proofJson).toContain('"verifiedOk":false');
+	});
 
 	// A3: бот читает бизнес-настройки (часы/контакт/выдача/KYC/адрес) из секретов.
 	it("get_exchange_business_info returns configured settings (A3)", async () => {

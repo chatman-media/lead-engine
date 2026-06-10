@@ -13,6 +13,7 @@ function mockJson(json: unknown, ok = true) {
 
 const TO = "TXmyAddr";
 const TX = "a".repeat(64);
+const NOW = 1_800_000_000;
 
 describe("extractTxHash", () => {
   it("голый 64-hex хеш", () => {
@@ -31,30 +32,33 @@ describe("verifyTronUsdt", () => {
     mockJson({
       confirmed: true,
       contractRet: "SUCCESS",
+      timestamp: NOW * 1000,
       trc20TransferInfo: [
         { to_address: TO, from_address: "TFrom", amount_str: "100000000", decimals: 6, symbol: "USDT" },
       ],
     });
-    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100 });
+    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100, nowEpoch: NOW });
     expect(r.ok).toBe(true);
     expect(r.amount).toBe(100);
     expect(r.fromAddress).toBe("TFrom");
+    expect(r.confirmedAt).toBe(NOW);
   });
 
   it("сумма меньше ожидаемой (за вычетом допуска) → ok:false", async () => {
     mockJson({
       confirmed: true,
       contractRet: "SUCCESS",
+      timestamp: NOW,
       trc20TransferInfo: [{ to_address: TO, amount_str: "50000000", decimals: 6, symbol: "USDT" }],
     });
-    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100 });
+    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100, nowEpoch: NOW });
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("меньше ожидаемой");
   });
 
   it("нет перевода USDT на наш адрес → ok:false", async () => {
-    mockJson({ confirmed: true, trc20TransferInfo: [{ to_address: "TOther", amount_str: "100000000", symbol: "USDT" }] });
-    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100 });
+    mockJson({ confirmed: true, timestamp: NOW, trc20TransferInfo: [{ to_address: "TOther", amount_str: "100000000", symbol: "USDT" }] });
+    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100, nowEpoch: NOW });
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("нет перевода USDT");
   });
@@ -80,5 +84,34 @@ describe("verifyTronUsdt", () => {
     const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 1 });
     expect(r.ok).toBe(false);
     expect(r.needsOperator).toBe(true);
+  });
+
+  it("старая транзакция → needsOperator", async () => {
+    mockJson({
+      confirmed: true,
+      contractRet: "SUCCESS",
+      timestamp: (NOW - 25 * 60 * 60) * 1000,
+      trc20TransferInfo: [
+        { to_address: TO, from_address: "TFrom", amount_str: "1000000", decimals: 6, symbol: "USDT" },
+      ],
+    });
+    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 1, nowEpoch: NOW });
+    expect(r.ok).toBe(false);
+    expect(r.needsOperator).toBe(true);
+    expect(r.reason).toContain("старше");
+  });
+
+  it("нет времени транзакции → needsOperator", async () => {
+    mockJson({
+      confirmed: true,
+      contractRet: "SUCCESS",
+      trc20TransferInfo: [
+        { to_address: TO, from_address: "TFrom", amount_str: "1000000", decimals: 6, symbol: "USDT" },
+      ],
+    });
+    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 1, nowEpoch: NOW });
+    expect(r.ok).toBe(false);
+    expect(r.needsOperator).toBe(true);
+    expect(r.reason).toContain("время транзакции");
   });
 });
