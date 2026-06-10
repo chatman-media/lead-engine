@@ -37,6 +37,94 @@ type KbUploadScope =
   | { scopeType: "funnel"; funnelId: number }
   | { scopeType: "stage"; funnelId: number; stageSlug: string };
 
+interface KbMaterialDraft {
+  title: string;
+  topic: string;
+  body: string;
+  scope: KbUploadScope;
+  updatedAt: number;
+}
+
+const KB_MATERIAL_DRAFT_PREFIX = "lead-engine:kb-material-draft:v1";
+
+function draftStoragePart(value: string | number | null | undefined): string {
+  return encodeURIComponent(String(value ?? "_"));
+}
+
+function requirementDraftStorageKey(req: Pick<KbRequirement, "funnelId" | "key" | "stageSlug">) {
+  return [
+    KB_MATERIAL_DRAFT_PREFIX,
+    "requirement",
+    draftStoragePart(req.funnelId),
+    draftStoragePart(req.key),
+    draftStoragePart(req.stageSlug),
+  ].join(":");
+}
+
+function isUploadScope(value: unknown): value is KbUploadScope {
+  if (!value || typeof value !== "object") return false;
+  const scope = value as KbUploadScope;
+  if (scope.scopeType === "global") return true;
+  if (scope.scopeType === "funnel") return Number.isFinite(scope.funnelId);
+  return scope.scopeType === "stage" && Number.isFinite(scope.funnelId) && !!scope.stageSlug;
+}
+
+function readKbMaterialDraft(key: string): KbMaterialDraft | null {
+  if (!key || typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<KbMaterialDraft>;
+    if (
+      typeof parsed.title !== "string" ||
+      typeof parsed.topic !== "string" ||
+      typeof parsed.body !== "string" ||
+      typeof parsed.updatedAt !== "number" ||
+      !isUploadScope(parsed.scope)
+    ) {
+      return null;
+    }
+    return {
+      title: parsed.title,
+      topic: parsed.topic,
+      body: parsed.body,
+      scope: parsed.scope,
+      updatedAt: parsed.updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeKbMaterialDraft(key: string, draft: KbMaterialDraft) {
+  if (!key || typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(draft));
+  } catch {
+    // Storage quota or private mode should not block the form.
+  }
+}
+
+function clearKbMaterialDraft(key: string) {
+  if (!key || typeof localStorage === "undefined") return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+function hasDraftContent(title: string, topic: string, body: string): boolean {
+  return !!title.trim() || !!topic.trim() || !!body.trim();
+}
+
+function formatDraftTime(updatedAt: number): string {
+  return new Date(updatedAt).toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /**
  * FAQ-справочник для бота: документы (RAG) и предложенные ботом Q&A.
  * Бот обменки использует это как необязательный справочник для общих вопросов
@@ -84,6 +172,8 @@ export function SaasFaq() {
   const [kbSearchError, setKbSearchError] = useState("");
   const [kbSearching, setKbSearching] = useState(false);
   const [appliedPrefillKey, setAppliedPrefillKey] = useState("");
+  const [activeDraftKey, setActiveDraftKey] = useState("");
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
 
   const queryFunnelId = Number(searchParams.get("funnelId") ?? "");
   const queryRequirementKey = searchParams.get("requirementKey")?.trim() ?? "";
@@ -185,6 +275,8 @@ export function SaasFaq() {
 
   useEffect(() => {
     setPasteScope(null);
+    setActiveDraftKey("");
+    setDraftSavedAt(null);
     setKbSearchScope(null);
     setKbSearchHits(null);
     setKbSearchMode(null);
@@ -210,6 +302,30 @@ export function SaasFaq() {
     fillRequirement(req);
     setAppliedPrefillKey(marker);
   }, [selectedFunnelId, queryRequirementKey, queryStageSlug, requirements, appliedPrefillKey]);
+
+  useEffect(() => {
+    if (!activeDraftKey) return;
+
+    if (!hasDraftContent(pasteTitle, pasteTopic, pasteBody)) {
+      clearKbMaterialDraft(activeDraftKey);
+      setDraftSavedAt(null);
+      return;
+    }
+
+    const draft: KbMaterialDraft = {
+      title: pasteTitle,
+      topic: pasteTopic,
+      body: pasteBody,
+      scope: uploadScope(),
+      updatedAt: Date.now(),
+    };
+    const timer = window.setTimeout(() => {
+      writeKbMaterialDraft(activeDraftKey, draft);
+      setDraftSavedAt(draft.updatedAt);
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [activeDraftKey, pasteTitle, pasteTopic, pasteBody, pasteScope, selectedFunnelId]);
 
   function defaultUploadScope(): KbUploadScope {
     return selectedFunnelId
@@ -279,7 +395,15 @@ export function SaasFaq() {
     return doc.chunksCount > 0 && doc.indexStatus !== "embedded";
   }
 
-  function fillRequirement(req: KbRequirement) {
+  function applyMaterialDraft(draft: KbMaterialDraft) {
+    setPasteTitle(draft.title);
+    setPasteTopic(draft.topic);
+    setPasteBody(draft.body);
+    setPasteScope(draft.scope);
+    setDraftSavedAt(draft.updatedAt);
+  }
+
+  function applyRequirementTemplate(req: KbRequirement) {
     setPasteTitle(req.title);
     setPasteTopic(req.topic);
     setPasteScope(
@@ -296,6 +420,30 @@ export function SaasFaq() {
         "Заполните конкретные правила бизнеса здесь.",
       ].join("\n"),
     );
+    setDraftSavedAt(null);
+  }
+
+  function fillRequirement(req: KbRequirement) {
+    const draftKey = requirementDraftStorageKey(req);
+    setActiveDraftKey(draftKey);
+
+    const draft = readKbMaterialDraft(draftKey);
+    if (draft) {
+      applyMaterialDraft(draft);
+      return;
+    }
+
+    applyRequirementTemplate(req);
+  }
+
+  function clearActiveDraft() {
+    if (activeDraftKey) clearKbMaterialDraft(activeDraftKey);
+    setActiveDraftKey("");
+    setDraftSavedAt(null);
+    setPasteTitle("");
+    setPasteTopic("");
+    setPasteBody("");
+    setPasteScope(null);
   }
 
   async function handlePaste(e: FormEvent) {
@@ -304,6 +452,7 @@ export function SaasFaq() {
     setUploading(true);
     setError("");
     setFileUploadNotice("");
+    const submittedDraftKey = activeDraftKey;
     try {
       await saas.uploadJson({
         title: pasteTitle.trim() || "untitled",
@@ -315,6 +464,9 @@ export function SaasFaq() {
       setPasteBody("");
       setPasteTopic("");
       setPasteScope(null);
+      setActiveDraftKey("");
+      setDraftSavedAt(null);
+      if (submittedDraftKey) clearKbMaterialDraft(submittedDraftKey);
       await Promise.all([refreshDocs(), refreshRequirements()]);
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
@@ -611,9 +763,25 @@ export function SaasFaq() {
               </div>
 
               <form onSubmit={handlePaste} className="space-y-3">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Область:</span>
-                  <Badge variant="secondary">{scopeLabel(uploadScope())}</Badge>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <span>Область:</span>
+                    <Badge variant="secondary">{scopeLabel(uploadScope())}</Badge>
+                  </div>
+                  {activeDraftKey && draftSavedAt && (
+                    <div className="flex items-center gap-2">
+                      <span>Черновик сохранён {formatDraftTime(draftSavedAt)}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={clearActiveDraft}
+                      >
+                        Очистить
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Input
