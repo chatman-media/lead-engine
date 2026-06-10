@@ -1,3 +1,11 @@
+# [@chatman-media/storage-v1.26.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.25.0...@chatman-media/storage-v1.26.0) (2026-06-10)
+
+
+### Features
+
+* **conversation-engine:** resolve conversations by channel ([#456](https://github.com/chatman-media/lead-engine/issues/456)) ([5c060c9](https://github.com/chatman-media/lead-engine/commit/5c060c944f973f019851740ac6c3c152759ed2a0))
+* **quality:** promote tool proposals to regression cases ([#450](https://github.com/chatman-media/lead-engine/issues/450)) ([793e0ca](https://github.com/chatman-media/lead-engine/commit/793e0ca36d50be5a18e48ad9d3aa4d772009bb8f))
+
 # [@chatman-media/storage-v1.25.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.24.0...@chatman-media/storage-v1.25.0) (2026-06-10)
 
 
