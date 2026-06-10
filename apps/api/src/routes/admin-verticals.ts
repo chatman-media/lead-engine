@@ -4,9 +4,9 @@ import {
   type Db,
   withTenant,
 } from "@chatman-media/conversation-engine";
-import { ingestText } from "@chatman-media/kb";
+import { ingestText, type KbScope } from "@chatman-media/kb";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
-import { defaultRegistry } from "@chatman-media/verticals";
+import { defaultRegistry, type VerticalKbDocSeed } from "@chatman-media/verticals";
 import { funnels, styles as stylesTable } from "@chatman-media/storage";
 import { and, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -28,6 +28,16 @@ export interface AdminVerticalsRoutesOpts {
   db: Db;
   /** Embedder для KB ingest (нужен для вертикалей с kbDocuments). */
   resolveEmbedder?: (tenantId: number) => EmbeddingClient;
+}
+
+function resolveVerticalKbDocScope(
+  scope: VerticalKbDocSeed["scope"],
+  funnelId: number | null,
+): KbScope | null {
+  if (!scope || scope.scopeType === "global") return null;
+  if (!funnelId) return null;
+  if (scope.scopeType === "funnel") return { scopeType: "funnel", funnelId };
+  return { scopeType: "stage", funnelId, stageSlug: scope.stageSlug };
 }
 
 export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
@@ -70,6 +80,7 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
     }
 
     const report: Record<string, unknown> = {};
+    let installedFunnelId: number | null = null;
 
     // 1. Funnel seed
     if (tpl.funnelSeedKey) {
@@ -77,6 +88,7 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
       if ("error" in result) {
         return c.json({ error: `funnel seed failed: ${result.error}` }, 500);
       }
+      installedFunnelId = result.funnelId;
       // Привязываем воронку к vertical template, чтобы runtime (index.ts →
       // resolveTemplate) и onboarding-детекция нашли её по
       // funnels.vertical_template_id. seedFunnelByKey переиспользует
@@ -167,6 +179,7 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
         if (embedder) {
           let docsIngested = 0;
           for (const doc of tpl.kbDocuments) {
+            const scope = resolveVerticalKbDocScope(doc.scope, installedFunnelId);
             await withTenant(opts.db, tenantId, async (tx) => {
               const kb = new DrizzleKbStore({ db: tx, tenantId });
               await ingestText(
@@ -175,6 +188,7 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
                   kb,
                   embedder: embedder as unknown as Parameters<typeof ingestText>[1]["embedder"],
                   ...(doc.topic ? { topic: doc.topic } : {}),
+                  ...(scope ? { scope } : {}),
                 },
               );
             });

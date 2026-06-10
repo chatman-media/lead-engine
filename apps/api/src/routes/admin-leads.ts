@@ -61,6 +61,15 @@ type LeadKbScope = {
   stageSlug?: string | null;
 };
 
+type LeadKbRawHit = {
+  chunk_id: number;
+  document_id: number;
+  distance: number;
+  text: string;
+  source: string;
+  title: string;
+};
+
 const DEFAULT_LEAD_KB_GUIDANCE_LIMIT = 5;
 const MAX_LEAD_KB_GUIDANCE_LIMIT = 8;
 
@@ -166,6 +175,42 @@ function buildLeadKbNextActions(input: {
     actions.push("Открыть диалог и сверить следующий шаг с правилами базы знаний");
   }
   return [...new Set(actions)].slice(0, 5);
+}
+
+async function collectScopedLeadKbHits(input: {
+  db: Db;
+  tenantId: number;
+  scopes: LeadKbScope[];
+  query: string;
+  limit: number;
+  embedding?: number[] | null;
+}): Promise<LeadKbRawHit[]> {
+  return withTenant(input.db, input.tenantId, async (tx) => {
+    const kb = new DrizzleKbStore({ db: tx, tenantId: input.tenantId });
+    const collected: LeadKbRawHit[] = [];
+    const seen = new Set<number>();
+
+    for (const scope of input.scopes) {
+      const k = scope.scopeType === "global" ? 2 : input.limit;
+      const scopeHits = input.embedding
+        ? await kb.hybridSearch({
+            embedding: input.embedding,
+            query: input.query,
+            k,
+            scope,
+          })
+        : await kb.textSearch(input.query, k, null, scope);
+
+      for (const hit of scopeHits) {
+        if (seen.has(hit.chunk_id)) continue;
+        seen.add(hit.chunk_id);
+        collected.push(hit);
+        if (collected.length >= input.limit) return collected;
+      }
+    }
+
+    return collected;
+  });
 }
 
 export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
@@ -766,87 +811,88 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         missingRequiredFields,
       });
 
-      if (!opts.resolveEmbedder) {
-        warning = "Поиск по БЗ недоступен: embedder не настроен";
-      } else {
+      const scopes: LeadKbScope[] = [
+        { scopeType: "stage", funnelId: stage.funnelId, stageSlug: stage.slug },
+        { scopeType: "funnel", funnelId: stage.funnelId },
+        { scopeType: "global" },
+      ];
+      let rawHits: LeadKbRawHit[] = [];
+      let vectorWarning: string | null = null;
+
+      if (opts.resolveEmbedder) {
         try {
           const embedder = opts.resolveEmbedder(tenantId);
           const [embedding] = await embedder.embed([query]);
           if (!embedding) {
-            warning = "Поиск по БЗ недоступен: embedder не вернул вектор";
+            vectorWarning = "embedder не вернул вектор";
           } else {
             kbAvailable = true;
-            const rawHits = await withTenant(opts.db, tenantId, async (tx) => {
-              const kb = new DrizzleKbStore({ db: tx, tenantId });
-              const scopes: LeadKbScope[] = [
-                { scopeType: "stage", funnelId: stage.funnelId, stageSlug: stage.slug },
-                { scopeType: "funnel", funnelId: stage.funnelId },
-                { scopeType: "global" },
-              ];
-              const collected: Array<{
-                chunk_id: number;
-                document_id: number;
-                distance: number;
-                text: string;
-                source: string;
-                title: string;
-              }> = [];
-              const seen = new Set<number>();
-              for (const scope of scopes) {
-                const scopeHits = await kb.hybridSearch({
-                  embedding,
-                  query,
-                  k: scope.scopeType === "global" ? 2 : limit,
-                  scope,
-                });
-                for (const hit of scopeHits) {
-                  if (seen.has(hit.chunk_id)) continue;
-                  seen.add(hit.chunk_id);
-                  collected.push(hit);
-                  if (collected.length >= limit) return collected;
-                }
-              }
-              return collected;
-            });
-
-            const documentIds = [...new Set(rawHits.map((hit) => hit.document_id))];
-            const documents =
-              documentIds.length > 0
-                ? await withTenant(opts.db, tenantId, (tx) =>
-                    tx
-                      .select({
-                        id: kbDocuments.id,
-                        topic: kbDocuments.topic,
-                        scopeType: kbDocuments.scopeType,
-                        funnelId: kbDocuments.funnelId,
-                        stageSlug: kbDocuments.stageSlug,
-                      })
-                      .from(kbDocuments)
-                      .where(and(eq(kbDocuments.tenantId, tenantId), inArray(kbDocuments.id, documentIds))),
-                  )
-                : [];
-            const docById = new Map(documents.map((doc) => [doc.id, doc]));
-            hits = rawHits.map((hit, index) => {
-              const doc = docById.get(hit.document_id);
-              return {
-                rank: index + 1,
-                chunkId: hit.chunk_id,
-                documentId: hit.document_id,
-                distance: hit.distance,
-                text: hit.text,
-                source: hit.source,
-                title: hit.title,
-                topic: doc?.topic ?? null,
-                scopeType: (doc?.scopeType ?? "global") as "global" | "funnel" | "stage",
-                funnelId: doc?.funnelId ?? null,
-                stageSlug: doc?.stageSlug ?? null,
-              };
+            rawHits = await collectScopedLeadKbHits({
+              db: opts.db,
+              tenantId,
+              scopes,
+              query,
+              limit,
+              embedding,
             });
           }
         } catch (err) {
-          warning = err instanceof Error ? err.message : String(err);
+          vectorWarning = err instanceof Error ? err.message : String(err);
+        }
+      } else {
+        vectorWarning = "embedder не настроен";
+      }
+
+      if (rawHits.length === 0 && vectorWarning) {
+        try {
+          rawHits = await collectScopedLeadKbHits({
+            db: opts.db,
+            tenantId,
+            scopes,
+            query,
+            limit,
+          });
+          kbAvailable = true;
+          warning = `Векторный поиск недоступен: ${vectorWarning}. Используется текстовый поиск по БЗ.`;
+        } catch (err) {
+          const textWarning = err instanceof Error ? err.message : String(err);
+          warning = `Поиск по БЗ недоступен: ${vectorWarning}; текстовый поиск: ${textWarning}`;
         }
       }
+
+      const documentIds = [...new Set(rawHits.map((hit) => hit.document_id))];
+      const documents =
+        documentIds.length > 0
+          ? await withTenant(opts.db, tenantId, (tx) =>
+              tx
+                .select({
+                  id: kbDocuments.id,
+                  topic: kbDocuments.topic,
+                  scopeType: kbDocuments.scopeType,
+                  funnelId: kbDocuments.funnelId,
+                  stageSlug: kbDocuments.stageSlug,
+                })
+                .from(kbDocuments)
+                .where(and(eq(kbDocuments.tenantId, tenantId), inArray(kbDocuments.id, documentIds))),
+            )
+          : [];
+      const docById = new Map(documents.map((doc) => [doc.id, doc]));
+      hits = rawHits.map((hit, index) => {
+        const doc = docById.get(hit.document_id);
+        return {
+          rank: index + 1,
+          chunkId: hit.chunk_id,
+          documentId: hit.document_id,
+          distance: hit.distance,
+          text: hit.text,
+          source: hit.source,
+          title: hit.title,
+          topic: doc?.topic ?? null,
+          scopeType: (doc?.scopeType ?? "global") as "global" | "funnel" | "stage",
+          funnelId: doc?.funnelId ?? null,
+          stageSlug: doc?.stageSlug ?? null,
+        };
+      });
     }
 
     return c.json({
