@@ -1,3 +1,11 @@
+# [@chatman-media/conversation-engine-v1.27.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.26.0...@chatman-media/conversation-engine-v1.27.0) (2026-06-10)
+
+
+### Features
+
+* **kb:** seed text-only vertical docs ([#462](https://github.com/chatman-media/lead-engine/issues/462)) ([392f591](https://github.com/chatman-media/lead-engine/commit/392f5916baa69b682e979586274d746b138149aa))
+* **whatsapp:** enforce template outbound policy ([#463](https://github.com/chatman-media/lead-engine/issues/463)) ([9110933](https://github.com/chatman-media/lead-engine/commit/91109335196fda7a2c1e120350e13bb6321472fe))
+
 # [@chatman-media/conversation-engine-v1.26.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.25.0...@chatman-media/conversation-engine-v1.26.0) (2026-06-10)
 
 
