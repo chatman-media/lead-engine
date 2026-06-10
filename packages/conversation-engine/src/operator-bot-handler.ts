@@ -547,6 +547,19 @@ export class OperatorBotHandler {
 		}
 
 		const now = this.actions.nowEpoch?.() ?? Math.floor(Date.now() / 1000);
+		const scope = await this.resolveExchangeActionScope({
+			tenantId: settings.tenantId,
+			conversationId: input.conversationId,
+			orderId: input.orderId,
+		});
+		if (scope.kind === "blocked") {
+			await this.client.answerCallbackQuery({
+				callbackQueryId: cq.id,
+				text: scope.toast,
+				showAlert: true,
+			});
+			return;
+		}
 		const resolved = await this.resolveExchangeQuickReply({
 			tenantId: settings.tenantId,
 			conversationId: input.conversationId,
@@ -584,6 +597,46 @@ export class OperatorBotHandler {
 			text: "Preview готов",
 		});
 		await this.sendDraftPreview(chatId, draft, resolved.quickReply.title);
+	}
+
+	private async resolveExchangeActionScope(input: {
+		tenantId: number;
+		conversationId: number;
+		orderId?: number;
+	}): Promise<{ kind: "ready" } | { kind: "blocked"; toast: string }> {
+		if (!this.actions.db) return { kind: "ready" };
+		return withTenant(this.actions.db, input.tenantId, async (tx) => {
+			const [conversation] = await tx
+				.select({ id: conversations.id })
+				.from(conversations)
+				.where(
+					and(
+						eq(conversations.tenantId, input.tenantId),
+						eq(conversations.id, input.conversationId),
+					),
+				)
+				.limit(1);
+			if (!conversation) {
+				return { kind: "blocked", toast: "Диалог не найден" } as const;
+			}
+			if (!input.orderId) return { kind: "ready" } as const;
+
+			const [order] = await tx
+				.select({ id: exchangeOrders.id })
+				.from(exchangeOrders)
+				.where(
+					and(
+						eq(exchangeOrders.tenantId, input.tenantId),
+						eq(exchangeOrders.conversationId, input.conversationId),
+						eq(exchangeOrders.id, input.orderId),
+					),
+				)
+				.limit(1);
+			if (!order) {
+				return { kind: "blocked", toast: "Заявка не найдена" } as const;
+			}
+			return { kind: "ready" } as const;
+		});
 	}
 
 	private async resolveExchangeQuickReply(input: {
