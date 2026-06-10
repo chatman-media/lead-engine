@@ -50,6 +50,7 @@ type KbRequirement = {
 
 type KbDocumentFormat = "text" | "markdown" | "pdf" | "json";
 type KbIndexStatus = "empty" | "text_only" | "partial" | "embedded";
+type KbSearchMode = "hybrid" | "text";
 
 type KbIndexStats = {
   chunksCount: number;
@@ -955,26 +956,28 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
       if (scopeError) return c.json({ error: scopeError }, 400);
     }
 
-    let embedder: EmbeddingClient;
+    let embedding: number[] | null = null;
     try {
-      embedder = opts.resolveEmbedder(tenantId);
+      const embedder = opts.resolveEmbedder(tenantId);
+      const [vector] = await embedder.embed([query]);
+      if (vector) embedding = vector;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return c.json({ error: `embedder not configured: ${msg}` }, 503);
+      console.warn(`[admin-kb] vector search unavailable, falling back to text search: ${msg}`);
     }
 
-    const [embedding] = await embedder.embed([query]);
-    if (!embedding) return c.json({ error: "embedder returned no vector" }, 503);
-
-    const hits = await withTenant(opts.db, tenantId, async (tx) => {
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
       const kb = new DrizzleKbStore({ db: tx, tenantId });
-      const rawHits = await kb.hybridSearch({
-        embedding,
-        query,
-        k: limit,
-        topic,
-        scope,
-      });
+      const mode: KbSearchMode = embedding ? "hybrid" : "text";
+      const rawHits = embedding
+        ? await kb.hybridSearch({
+            embedding,
+            query,
+            k: limit,
+            topic,
+            scope,
+          })
+        : await kb.textSearch(query, limit, topic, scope);
       const documentIds = [...new Set(rawHits.map((hit) => hit.document_id))];
       const docRows =
         documentIds.length > 0
@@ -995,36 +998,40 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
           : [];
       const docsById = new Map(docRows.map((doc) => [doc.id, doc]));
 
-      return rawHits.map((hit, index) => {
-        const doc = docsById.get(hit.document_id);
-        return {
-          rank: index + 1,
-          chunkId: hit.chunk_id,
-          documentId: hit.document_id,
-          distance: hit.distance,
-          text: hit.text,
-          source: hit.source,
-          title: hit.title,
-          topic: doc?.topic ?? null,
-          scopeType: doc?.scopeType ?? "global",
-          funnelId: doc?.funnelId ?? null,
-          stageSlug: doc?.stageSlug ?? null,
-          format: inferKbDocumentFormat({
-            source: doc?.source ?? hit.source,
-            title: doc?.title ?? hit.title,
-            fileName: doc?.fileName ?? null,
-            fileMimeType: doc?.fileMimeType ?? null,
-          }),
-        };
-      });
+      return {
+        mode,
+        items: rawHits.map((hit, index) => {
+          const doc = docsById.get(hit.document_id);
+          return {
+            rank: index + 1,
+            chunkId: hit.chunk_id,
+            documentId: hit.document_id,
+            distance: hit.distance,
+            text: hit.text,
+            source: hit.source,
+            title: hit.title,
+            topic: doc?.topic ?? null,
+            scopeType: doc?.scopeType ?? "global",
+            funnelId: doc?.funnelId ?? null,
+            stageSlug: doc?.stageSlug ?? null,
+            format: inferKbDocumentFormat({
+              source: doc?.source ?? hit.source,
+              title: doc?.title ?? hit.title,
+              fileName: doc?.fileName ?? null,
+              fileMimeType: doc?.fileMimeType ?? null,
+            }),
+          };
+        }),
+      };
     });
 
     return c.json({
       query,
       limit,
       topic,
+      mode: result.mode,
       ...scopeToDbFields(scope),
-      items: hits,
+      items: result.items,
     });
   });
 

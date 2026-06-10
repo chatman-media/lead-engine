@@ -118,6 +118,7 @@ export interface KbSearchResponse {
   query: string;
   limit: number;
   topic: string | null;
+  mode: "hybrid" | "text";
   scopeType: "global" | "funnel" | "stage";
   funnelId: number | null;
   stageSlug: string | null;

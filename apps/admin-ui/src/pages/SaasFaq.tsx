@@ -79,6 +79,7 @@ export function SaasFaq() {
   const [kbSearchQuery, setKbSearchQuery] = useState("");
   const [kbSearchScope, setKbSearchScope] = useState<KbUploadScope | null>(null);
   const [kbSearchHits, setKbSearchHits] = useState<KbSearchHit[] | null>(null);
+  const [kbSearchMode, setKbSearchMode] = useState<"hybrid" | "text" | null>(null);
   const [kbSearchError, setKbSearchError] = useState("");
   const [kbSearching, setKbSearching] = useState(false);
 
@@ -175,6 +176,7 @@ export function SaasFaq() {
     setPasteScope(null);
     setKbSearchScope(null);
     setKbSearchHits(null);
+    setKbSearchMode(null);
     refreshDocs();
     refreshFunnelStages();
     refreshRequirements();
@@ -382,10 +384,12 @@ export function SaasFaq() {
         ...searchScope(),
       });
       setKbSearchHits(res.items);
+      setKbSearchMode(res.mode);
     } catch (err) {
       if (!onAuthError(err)) {
         setKbSearchError(err instanceof Error ? err.message : String(err));
         setKbSearchHits([]);
+        setKbSearchMode(null);
       }
     } finally {
       setKbSearching(false);
@@ -621,6 +625,7 @@ export function SaasFaq() {
                     onChange={(e) => {
                       setKbSearchScope(parseScopeValue(e.target.value));
                       setKbSearchHits(null);
+                      setKbSearchMode(null);
                     }}
                     className="h-10 rounded-md border bg-background px-3 text-sm"
                   >
@@ -650,6 +655,16 @@ export function SaasFaq() {
               {kbSearchError && <p className="text-sm text-destructive">{kbSearchError}</p>}
               {kbSearchHits && (
                 <div className="space-y-3">
+                  {kbSearchMode && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant={kbSearchMode === "hybrid" ? "secondary" : "outline"}>
+                        {kbSearchMode === "hybrid" ? "vector + текст" : "только текст"}
+                      </Badge>
+                      {kbSearchMode === "text" && (
+                        <span>Embeddings недоступны, поиск идёт по текстовым chunks.</span>
+                      )}
+                    </div>
+                  )}
                   {kbSearchHits.length === 0 ? (
                     <p className="rounded-md border bg-muted/20 px-3 py-4 text-sm text-muted-foreground">
                       Ничего не найдено.

@@ -39,6 +39,7 @@ let token = "";
 let tenantId = 0;
 let kbUploadDir = "";
 let previousKbUploadDir: string | undefined;
+let embedderEnabled = true;
 
 beforeAll(
   async () => {
@@ -64,7 +65,10 @@ beforeAll(
       "/",
       makeAdminKbRoutes({
         db,
-        resolveEmbedder: () => embedder,
+        resolveEmbedder: () => {
+          if (!embedderEnabled) throw new Error("embedder disabled for test");
+          return embedder;
+        },
       }),
     );
 
@@ -265,6 +269,51 @@ describe("admin-kb upload/list/delete flow", () => {
       .from(kbChunks)
       .where(and(eq(kbChunks.tenantId, tenantId), eq(kbChunks.documentId, documentId)));
     expect(stats?.embeddedChunksCount).toBe(1);
+  });
+
+  it("search fallback: без embedder ищет по text-only chunks", async () => {
+    if (!sql) return;
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const [doc] = await db
+      .insert(kbDocuments)
+      .values({
+        tenantId,
+        source: `manual:text-search:${suffix}`,
+        title: "Text search fallback seed",
+        contentHash: `text-search-${suffix}`,
+        scopeType: "global",
+      })
+      .returning({ id: kbDocuments.id });
+    const documentId = doc?.id;
+    if (!documentId) throw new Error("expected text search fallback document");
+
+    await db.execute(drizzleSql`
+      INSERT INTO kb_chunks (tenant_id, document_id, chunk_index, text, token_count, embedding)
+      VALUES (${tenantId}, ${documentId}, 0, ${"Банковский перевод доступен после проверки оператора."}, 6, NULL)
+    `);
+
+    embedderEnabled = false;
+    try {
+      const res = await authReq("/api/admin/kb/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: "банковский перевод",
+          scopeType: "global",
+          limit: 5,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        mode: string;
+        items: Array<{ documentId: number; title: string; text: string }>;
+      };
+      expect(body.mode).toBe("text");
+      expect(body.items.some((hit) => hit.documentId === documentId)).toBe(true);
+      expect(body.items.find((hit) => hit.documentId === documentId)?.text).toContain("Банковский перевод");
+    } finally {
+      embedderEnabled = true;
+    }
   });
 
   it("scoped upload/list + requirements coverage", async () => {
@@ -478,6 +527,7 @@ describe("admin-kb upload/list/delete flow", () => {
     });
     expect(funnelSearchRes.status).toBe(200);
     const funnelSearch = (await funnelSearchRes.json()) as {
+      mode: string;
       scopeType: string;
       funnelId: number | null;
       items: Array<{
@@ -490,6 +540,7 @@ describe("admin-kb upload/list/delete flow", () => {
       }>;
     };
     expect(funnelSearch.scopeType).toBe("funnel");
+    expect(funnelSearch.mode).toBe("hybrid");
     expect(funnelSearch.funnelId).toBe(funnelId);
     expect(funnelSearch.items.some((hit) => hit.title === "How to pay scoped")).toBe(true);
     expect(funnelSearch.items.every((hit) => hit.scopeType === "funnel")).toBe(true);
@@ -508,12 +559,14 @@ describe("admin-kb upload/list/delete flow", () => {
     });
     expect(stageSearchRes.status).toBe(200);
     const stageSearch = (await stageSearchRes.json()) as {
+      mode: string;
       scopeType: string;
       funnelId: number | null;
       stageSlug: string | null;
       items: Array<{ title: string; scopeType: string; stageSlug: string | null }>;
     };
     expect(stageSearch.scopeType).toBe("stage");
+    expect(stageSearch.mode).toBe("hybrid");
     expect(stageSearch.funnelId).toBe(funnelId);
     expect(stageSearch.stageSlug).toBe("payment");
     expect(stageSearch.items.some((hit) => hit.title === "Payment stage scoped")).toBe(true);
