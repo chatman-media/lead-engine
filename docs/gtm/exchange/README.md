@@ -9,10 +9,14 @@
 3. [`objections.md`](objections.md) — ответы на ожидаемые вопросы владельца обменника.
 4. [`trial-flow.md`](trial-flow.md) — что происходит после "да" на демо:
    invite, alpha terms, BYOK, 15-минутный чек-лист и dry run.
+5. [`live-demo-runbook.md`](live-demo-runbook.md) — как назначить, провести и
+   зафиксировать два живых демо для закрытия #495.
 
 ## Что держать внутри команды
 
 - [`demo-script.md`](demo-script.md) — сценарий живого показа и rehearsal checklist.
+- [`live-demo-runbook.md`](live-demo-runbook.md) — execution tracker, шаблон
+  outcome-комментария и правила закрытия demo-эпика.
 
 ## Follow-up после демо
 
