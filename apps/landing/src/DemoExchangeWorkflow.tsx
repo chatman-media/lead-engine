@@ -107,6 +107,676 @@ const COPY = {
 	},
 };
 
+type ExchangeWorkflowScenarioKey =
+	| "rub-office-pickup"
+	| "usdt-bank-transfer"
+	| "kyc-review"
+	| "payment-proof"
+	| "rate-change"
+	| "operator-handoff";
+
+type ExchangeWorkflowScenario = {
+	key: ExchangeWorkflowScenarioKey;
+	corpusId: string;
+	fixture: string;
+	tag: L;
+	title: L;
+	summary: L;
+	result: L;
+	tone: "blue" | "green" | "amber";
+	fields: string[];
+	stages: string[];
+	orderRows: { label: L; value: string }[];
+	handoffs: string[];
+	toolEvents: { tool: string; status: string; desc: L }[];
+	boardTags: string[];
+	messages: Record<Lang, TgMessage[]>;
+};
+
+const EXCHANGE_WORKFLOW_SCENARIOS: ExchangeWorkflowScenario[] = [
+	{
+		key: "rub-office-pickup",
+		corpusId: "rub-office-pickup-payment-proof",
+		fixture: "rub-qr-atm-first-time-faq",
+		tag: { ru: "RUB -> office pickup", en: "RUB -> office pickup" },
+		title: {
+			ru: "RUB -> THB: оплата рублями и выдача в офисе",
+			en: "RUB -> THB: bank payment and office pickup",
+		},
+		summary: {
+			ru: "Клиент платит со Сбера, выбирает Bangkok Asok и присылает чек. AI не подтверждает оплату сам: создаёт payment_review и office_payout handoff.",
+			en: "The client pays from Sber, chooses Bangkok Asok and sends a receipt. AI does not confirm payment itself: it creates payment_review and office_payout handoffs.",
+		},
+		result: {
+			ru: "Стадии, поля, order status и handoff совпадают с live-eval corpus.",
+			en: "Stages, fields, order status and handoff match the live-eval corpus.",
+		},
+		tone: "amber",
+		fields: [
+			"asset=RUB",
+			"amount_from=100000",
+			"payment_rail=sber",
+			"payout_method=office_cash",
+			"payout_location=Bangkok Asok",
+			"pickup_window=15:00-16:00",
+			"payment_proof",
+		],
+		stages: [
+			"exchange_request",
+			"quote_calculated",
+			"order_created",
+			"requisites_sent",
+			"payment_proof_waiting",
+			"payment_review",
+			"payout",
+		],
+		orderRows: [
+			{
+				label: { ru: "scenario", en: "scenario" },
+				value: "rub-office-pickup-payment-proof",
+			},
+			{ label: { ru: "status", en: "status" }, value: "payout" },
+			{
+				label: { ru: "payment", en: "payment" },
+				value: "bank_transfer / sber",
+			},
+			{ label: { ru: "payout", en: "payout" }, value: "office_cash" },
+			{ label: { ru: "location", en: "location" }, value: "Bangkok Asok" },
+		],
+		handoffs: ["payment_review", "office_payout"],
+		toolEvents: [
+			{
+				tool: "compute_quote",
+				status: "ok",
+				desc: { ru: "quote snapshot created", en: "quote snapshot created" },
+			},
+			{
+				tool: "fetch_requisites",
+				status: "TTL",
+				desc: {
+					ru: "Sber/card route selected",
+					en: "Sber/card route selected",
+				},
+			},
+			{
+				tool: "payment_proof",
+				status: "review",
+				desc: {
+					ru: "receipt waits for operator",
+					en: "receipt waits for operator",
+				},
+			},
+			{
+				tool: "operator_handoff",
+				status: "2 tasks",
+				desc: { ru: "payment + office payout", en: "payment + office payout" },
+			},
+		],
+		boardTags: ["quote", "receipt", "payout"],
+		messages: {
+			ru: [
+				{
+					from: "user",
+					text: "Хочу поменять 100000 рублей на баты, оплатить со Сбера.",
+				},
+				{
+					from: "bot",
+					text: "Принял RUB -> THB. Считаю курс и подготовлю реквизиты только после подтверждения условий.",
+				},
+				{
+					from: "user",
+					text: "Получение хочу в офисе Bangkok Asok сегодня с 15:00 до 16:00.",
+				},
+				{
+					from: "bot",
+					text: "Офис Bangkok Asok и окно 15:00-16:00 записал. Курс подходит, выдам реквизиты с TTL.",
+				},
+				{ from: "user", text: "[PHOTO: payment receipt]" },
+				{
+					from: "bot",
+					text: "Чек получил, передаю оператору на проверку. Выдача в офисе будет только после payment review.",
+					cta: true,
+				},
+			],
+			en: [
+				{
+					from: "user",
+					text: "I want to exchange 100,000 RUB to baht, paying from Sber.",
+				},
+				{
+					from: "bot",
+					text: "Got RUB -> THB. I will calculate the quote and issue requisites only after terms are confirmed.",
+				},
+				{
+					from: "user",
+					text: "Pickup at Bangkok Asok office today from 15:00 to 16:00.",
+				},
+				{
+					from: "bot",
+					text: "Bangkok Asok and 15:00-16:00 are recorded. If the rate works, I will issue TTL requisites.",
+				},
+				{ from: "user", text: "[PHOTO: payment receipt]" },
+				{
+					from: "bot",
+					text: "Receipt received. I am sending it to operator review. Office payout happens only after payment review.",
+					cta: true,
+				},
+			],
+		},
+	},
+	{
+		key: "usdt-bank-transfer",
+		corpusId: "usdt-to-thai-bank-transfer",
+		fixture: "fixture-backed deterministic branch",
+		tag: { ru: "USDT -> bank transfer", en: "USDT -> bank transfer" },
+		title: {
+			ru: "USDT TRC20 -> Bangkok Bank",
+			en: "USDT TRC20 -> Bangkok Bank",
+		},
+		summary: {
+			ru: "Клиент хочет получить THB на тайский банк. Workflow собирает сеть, сумму, банк и только потом даёт адрес оплаты.",
+			en: "The client wants THB to a Thai bank. The workflow collects network, amount and bank details before issuing payment address.",
+		},
+		result: {
+			ru: "Нет лишнего handoff: сценарий проходит через quote, order_created и requisites_sent.",
+			en: "No unnecessary handoff: the scenario moves through quote, order_created and requisites_sent.",
+		},
+		tone: "blue",
+		fields: [
+			"asset=USDT",
+			"network=trc20",
+			"amount_from=1500",
+			"payout_method=thai_bank_transfer",
+			"thai_bank_name=Bangkok Bank",
+		],
+		stages: [
+			"exchange_request",
+			"quote_calculated",
+			"order_created",
+			"requisites_sent",
+		],
+		orderRows: [
+			{
+				label: { ru: "scenario", en: "scenario" },
+				value: "usdt-to-thai-bank-transfer",
+			},
+			{ label: { ru: "status", en: "status" }, value: "awaiting_payment" },
+			{
+				label: { ru: "payment", en: "payment" },
+				value: "crypto_transfer / trc20",
+			},
+			{ label: { ru: "payout", en: "payout" }, value: "thai_bank_transfer" },
+			{ label: { ru: "bank", en: "bank" }, value: "Bangkok Bank" },
+		],
+		handoffs: [],
+		toolEvents: [
+			{
+				tool: "compute_quote",
+				status: "ok",
+				desc: { ru: "1500 USDT priced", en: "1500 USDT priced" },
+			},
+			{
+				tool: "create_order",
+				status: "linked",
+				desc: {
+					ru: "lead + conversation + contact",
+					en: "lead + conversation + contact",
+				},
+			},
+			{
+				tool: "fetch_requisites",
+				status: "wallet",
+				desc: {
+					ru: "TRC20 address from config",
+					en: "TRC20 address from config",
+				},
+			},
+		],
+		boardTags: ["fields", "quote"],
+		messages: {
+			ru: [
+				{
+					from: "user",
+					text: "Меняю 1500 USDT TRC20, получить хочу на Bangkok Bank.",
+				},
+				{
+					from: "bot",
+					text: "Сеть TRC20 и Bangkok Bank записал. Нужен номер счёта и имя получателя.",
+				},
+				{ from: "user", text: "Счёт 123-4-56789-0, имя Alexander K." },
+				{
+					from: "bot",
+					text: "Реквизиты получателя есть. Считаю quote и создам order перед выдачей адреса оплаты.",
+					cta: true,
+				},
+			],
+			en: [
+				{
+					from: "user",
+					text: "Exchange 1500 USDT TRC20, payout to Bangkok Bank.",
+				},
+				{
+					from: "bot",
+					text: "TRC20 and Bangkok Bank are recorded. I need account number and recipient name.",
+				},
+				{ from: "user", text: "Account 123-4-56789-0, name Alexander K." },
+				{
+					from: "bot",
+					text: "Recipient details are present. I will calculate a quote and create the order before issuing payment address.",
+					cta: true,
+				},
+			],
+		},
+	},
+	{
+		key: "kyc-review",
+		corpusId: "kyc-media-verification",
+		fixture: "rub-qr-kyc-cardless-atm-12900-thb",
+		tag: { ru: "KYC review", en: "KYC review" },
+		title: {
+			ru: "KYC: паспорт, видео и cardless ATM",
+			en: "KYC: passport, video and cardless ATM",
+		},
+		summary: {
+			ru: "Фото и видео не считаются автоматическим approval. Они становятся kyc_review handoff с собранным контекстом.",
+			en: "Photo and video are not automatic approval. They become a kyc_review handoff with collected context.",
+		},
+		result: {
+			ru: "Guard ловит опасный путь: нельзя писать, что KYC пройден, без решения оператора или внешнего сервиса.",
+			en: "The guard catches the unsafe path: never claim KYC passed without operator or external provider decision.",
+		},
+		tone: "amber",
+		fields: [
+			"asset=RUB",
+			"payment_method=sbp_qr",
+			"kyc_document",
+			"kyc_video",
+			"payout_method=cardless_atm",
+		],
+		stages: [
+			"exchange_request",
+			"verification_check",
+			"kyc_collection",
+			"risk_review",
+		],
+		orderRows: [
+			{
+				label: { ru: "scenario", en: "scenario" },
+				value: "kyc-media-verification",
+			},
+			{ label: { ru: "status", en: "status" }, value: "quote" },
+			{ label: { ru: "payment", en: "payment" }, value: "sbp_qr" },
+			{ label: { ru: "payout", en: "payout" }, value: "cardless_atm" },
+			{ label: { ru: "handoff", en: "handoff" }, value: "kyc_review" },
+		],
+		handoffs: ["kyc_review"],
+		toolEvents: [
+			{
+				tool: "check_verification",
+				status: "needs KYC",
+				desc: {
+					ru: "first-time client branch",
+					en: "first-time client branch",
+				},
+			},
+			{
+				tool: "media_intake",
+				status: "stored",
+				desc: { ru: "passport + video note", en: "passport + video note" },
+			},
+			{
+				tool: "operator_handoff",
+				status: "kyc_review",
+				desc: { ru: "no auto-approval", en: "no auto-approval" },
+			},
+		],
+		boardTags: ["operator", "risk"],
+		messages: {
+			ru: [
+				{
+					from: "user",
+					text: "Хочу оплатить через QR 35000 рублей, получить в зеленом банкомате.",
+				},
+				{
+					from: "bot",
+					text: "Принял QR и cardless ATM. Для этой операции нужна верификация.",
+				},
+				{
+					from: "user",
+					text: "Я первый раз, вот фото паспорта и короткое видео.",
+				},
+				{
+					from: "bot",
+					text: "Материалы получил. Передаю оператору на KYC review, без автоматического подтверждения.",
+					cta: true,
+				},
+			],
+			en: [
+				{
+					from: "user",
+					text: "I want to pay by QR, 35,000 RUB, receive via green ATM.",
+				},
+				{
+					from: "bot",
+					text: "QR and cardless ATM are recorded. This operation requires verification.",
+				},
+				{
+					from: "user",
+					text: "First time here, sending passport photo and short video.",
+				},
+				{
+					from: "bot",
+					text: "Materials received. Sending to operator KYC review, with no automatic approval.",
+					cta: true,
+				},
+			],
+		},
+	},
+	{
+		key: "payment-proof",
+		corpusId: "fiat-payment-proof-review",
+		fixture: "rub-qr-bank-transfer-to-bangkok-bank",
+		tag: { ru: "Payment proof", en: "Payment proof" },
+		title: {
+			ru: "RUB receipt -> payment_review",
+			en: "RUB receipt -> payment_review",
+		},
+		summary: {
+			ru: "Клиент присылает чек и просит отправить баты на Bangkok Bank. AI признаёт чек, но не переводит order в paid.",
+			en: "The client sends a receipt and asks to send baht to Bangkok Bank. AI acknowledges the receipt but does not move order to paid.",
+		},
+		result: {
+			ru: "Фиксируем главный риск обменки: чек не равен подтверждённой оплате.",
+			en: "This pins the core exchange risk: a receipt is not verified payment.",
+		},
+		tone: "amber",
+		fields: [
+			"payment_proof",
+			"source_bank=Sber/T-Bank",
+			"thai_bank_name=Bangkok Bank",
+		],
+		stages: ["payment_proof_waiting", "payment_review"],
+		orderRows: [
+			{
+				label: { ru: "scenario", en: "scenario" },
+				value: "fiat-payment-proof-review",
+			},
+			{ label: { ru: "status", en: "status" }, value: "awaiting_payment" },
+			{ label: { ru: "payment", en: "payment" }, value: "sbp_qr" },
+			{ label: { ru: "payout", en: "payout" }, value: "thai_bank_transfer" },
+			{ label: { ru: "bank", en: "bank" }, value: "Bangkok Bank" },
+		],
+		handoffs: ["payment_review"],
+		toolEvents: [
+			{
+				tool: "receipt_upload",
+				status: "received",
+				desc: { ru: "file attached to order", en: "file attached to order" },
+			},
+			{
+				tool: "exchange_guard",
+				status: "armed",
+				desc: {
+					ru: "blocks paid/transfer claims",
+					en: "blocks paid/transfer claims",
+				},
+			},
+			{
+				tool: "operator_handoff",
+				status: "payment_review",
+				desc: {
+					ru: "operator verifies receipt",
+					en: "operator verifies receipt",
+				},
+			},
+		],
+		boardTags: ["proof", "receipt"],
+		messages: {
+			ru: [
+				{ from: "user", text: "Оплатил по QR, вот чек." },
+				{
+					from: "bot",
+					text: "Чек получил и прикрепил к заявке. Передаю на payment_review.",
+				},
+				{ from: "user", text: "Можно отправлять баты на Bangkok Bank?" },
+				{
+					from: "bot",
+					text: "После проверки оператором продолжим перевод на Bangkok Bank. Сейчас оплату не подтверждаю автоматически.",
+					cta: true,
+				},
+			],
+			en: [
+				{ from: "user", text: "Paid by QR, here is the receipt." },
+				{
+					from: "bot",
+					text: "Receipt received and attached to the order. Sending to payment_review.",
+				},
+				{ from: "user", text: "Can you send baht to Bangkok Bank?" },
+				{
+					from: "bot",
+					text: "After operator review we will continue the Bangkok Bank payout. I am not auto-confirming payment now.",
+					cta: true,
+				},
+			],
+		},
+	},
+	{
+		key: "rate-change",
+		corpusId: "rate-first-then-amount-network-change",
+		fixture: "fixture-backed deterministic branch",
+		tag: { ru: "Rate change", en: "Rate change" },
+		title: {
+			ru: "Курс сначала, потом новая сумма и Binance ID",
+			en: "Rate first, then new amount and Binance ID",
+		},
+		summary: {
+			ru: "Клиент меняет условия после первой котировки. Workflow обязан пересчитать, а не переиспользовать старый quote.",
+			en: "The client changes terms after the first quote. The workflow must recompute, not reuse stale quote.",
+		},
+		result: {
+			ru: "Reply assertion требует fresh quote для 2500 USDT и Binance ID.",
+			en: "Reply assertion requires a fresh quote for 2500 USDT and Binance ID.",
+		},
+		tone: "blue",
+		fields: ["asset=USDT", "amount_from=2500", "payment_rail=binance_id"],
+		stages: ["exchange_request", "quote_calculated", "order_created"],
+		orderRows: [
+			{
+				label: { ru: "scenario", en: "scenario" },
+				value: "rate-first-then-amount-network-change",
+			},
+			{ label: { ru: "status", en: "status" }, value: "awaiting_payment" },
+			{ label: { ru: "payment", en: "payment" }, value: "crypto_transfer" },
+			{ label: { ru: "rail", en: "rail" }, value: "binance_id" },
+			{ label: { ru: "amount", en: "amount" }, value: "2500 USDT" },
+		],
+		handoffs: [],
+		toolEvents: [
+			{
+				tool: "compute_quote",
+				status: "recomputed",
+				desc: {
+					ru: "old 1000 USDT quote dropped",
+					en: "old 1000 USDT quote dropped",
+				},
+			},
+			{
+				tool: "create_order",
+				status: "fresh",
+				desc: { ru: "2500 USDT + Binance ID", en: "2500 USDT + Binance ID" },
+			},
+		],
+		boardTags: ["quote", "fields"],
+		messages: {
+			ru: [
+				{ from: "user", text: "Какой сейчас курс USDT к батам?" },
+				{
+					from: "bot",
+					text: "Могу посчитать. Уточните сумму и способ перевода, чтобы quote был корректным.",
+				},
+				{
+					from: "user",
+					text: "Сначала думал 1000 USDT TRC20. Нет, сделаем 2500 USDT, можно через Binance ID?",
+				},
+				{
+					from: "bot",
+					text: "Пересчитываю на 2500 USDT и Binance ID. Старую котировку не использую.",
+					cta: true,
+				},
+			],
+			en: [
+				{ from: "user", text: "What is the current USDT to baht rate?" },
+				{
+					from: "bot",
+					text: "I can calculate it. Tell me amount and payment rail so the quote is valid.",
+				},
+				{
+					from: "user",
+					text: "I first thought 1000 USDT TRC20. No, make it 2500 USDT, can I use Binance ID?",
+				},
+				{
+					from: "bot",
+					text: "Recomputing for 2500 USDT and Binance ID. I am not reusing the old quote.",
+					cta: true,
+				},
+			],
+		},
+	},
+	{
+		key: "operator-handoff",
+		corpusId: "unsupported-city-out-of-hours",
+		fixture: "exception branch",
+		tag: { ru: "Operator handoff", en: "Operator handoff" },
+		title: {
+			ru: "Unsupported city + out-of-hours",
+			en: "Unsupported city + out-of-hours",
+		},
+		summary: {
+			ru: "Чианграй, 02:30, наличные и просьба назвать точное ETA. AI не выдумывает доступность курьера и отдаёт оператору.",
+			en: "Chiang Rai, 02:30, cash and request for exact ETA. AI does not invent courier availability and escalates to operator.",
+		},
+		result: {
+			ru: "Сценарий проверяет no-fake-ETA и запрет на оплату до решения оператора.",
+			en: "The scenario checks no-fake-ETA and blocks payment before operator decision.",
+		},
+		tone: "green",
+		fields: ["city=Chiang Rai", "amount_to_thb=30000", "requested_time=02:30"],
+		stages: ["exchange_request", "risk_review"],
+		orderRows: [
+			{
+				label: { ru: "scenario", en: "scenario" },
+				value: "unsupported-city-out-of-hours",
+			},
+			{ label: { ru: "status", en: "status" }, value: "operator_required" },
+			{ label: { ru: "city", en: "city" }, value: "Chiang Rai" },
+			{ label: { ru: "time", en: "time" }, value: "02:30" },
+			{ label: { ru: "handoff", en: "handoff" }, value: "operator_request" },
+		],
+		handoffs: ["operator_request"],
+		toolEvents: [
+			{
+				tool: "coverage_check",
+				status: "exception",
+				desc: { ru: "unsupported city/time", en: "unsupported city/time" },
+			},
+			{
+				tool: "exchange_guard",
+				status: "no ETA",
+				desc: {
+					ru: "blocks fabricated courier time",
+					en: "blocks fabricated courier time",
+				},
+			},
+			{
+				tool: "operator_handoff",
+				status: "required",
+				desc: {
+					ru: "operator decides coverage",
+					en: "operator decides coverage",
+				},
+			},
+		],
+		boardTags: ["operator", "risk", "payout"],
+		messages: {
+			ru: [
+				{
+					from: "user",
+					text: "Я в Чианграе, сейчас 02:30 ночи. Нужно срочно 30000 бат наличными.",
+				},
+				{
+					from: "bot",
+					text: "Город, время и сумму записал. Эта зона и время требуют проверки оператором.",
+				},
+				{
+					from: "user",
+					text: "Можете сказать точное время курьера и сразу принять оплату?",
+				},
+				{
+					from: "bot",
+					text: "Точное ETA и оплату сейчас не подтверждаю. Передаю оператору, он проверит доступность и вернёт решение.",
+					cta: true,
+				},
+			],
+			en: [
+				{
+					from: "user",
+					text: "I am in Chiang Rai, it is 02:30. Need urgent 30,000 baht cash.",
+				},
+				{
+					from: "bot",
+					text: "City, time and amount are recorded. This zone and hour require operator check.",
+				},
+				{
+					from: "user",
+					text: "Can you give exact courier time and take payment now?",
+				},
+				{
+					from: "bot",
+					text: "I cannot confirm exact ETA or payment now. Sending to operator to verify coverage and return a decision.",
+					cta: true,
+				},
+			],
+		},
+	},
+];
+
+const DEFAULT_SCENARIO_KEY: ExchangeWorkflowScenarioKey = "rub-office-pickup";
+
+function scenarioHref(key: ExchangeWorkflowScenarioKey): string {
+	return key === DEFAULT_SCENARIO_KEY
+		? "/demo/workflows/exchange"
+		: `/demo/workflows/exchange/${key}`;
+}
+
+function getScenario(
+	key?: ExchangeWorkflowScenarioKey,
+): ExchangeWorkflowScenario {
+	const fallback = EXCHANGE_WORKFLOW_SCENARIOS[0];
+	if (!fallback) throw new Error("Exchange workflow scenarios are empty");
+	return (
+		EXCHANGE_WORKFLOW_SCENARIOS.find((scenario) => scenario.key === key) ??
+		fallback
+	);
+}
+
+function stagePhase(stage: string): string {
+	if (stage.includes("request")) return "qualify";
+	if (stage.includes("quote") || stage.includes("order_created"))
+		return "offer";
+	if (
+		stage.includes("verification") ||
+		stage.includes("risk") ||
+		stage.includes("proof") ||
+		stage.includes("review") ||
+		stage.includes("requisites")
+	) {
+		return "clear";
+	}
+	if (stage.includes("payout") || stage.includes("verified")) return "fulfill";
+	if (stage.includes("terminal")) return "terminal";
+	return "workflow";
+}
+
 const KPIS: { value: string; label: L; tone: "blue" | "green" | "amber" }[] = [
 	{
 		value: "38",
@@ -231,128 +901,6 @@ const OPS_COLUMNS: {
 				tag: "won",
 			},
 		],
-	},
-];
-
-const ACTIVE_ORDER = [
-	{ label: { ru: "order", en: "order" }, value: "EX-2408" },
-	{ label: { ru: "direction", en: "direction" }, value: "USDT TRC20 -> THB" },
-	{ label: { ru: "quote", en: "quote" }, value: "31.55 / ฿49 000" },
-	{ label: { ru: "status", en: "status" }, value: "payment_verified" },
-	{ label: { ru: "next", en: "next" }, value: "issue_payout" },
-];
-
-const TOOL_EVENTS: { tool: string; status: string; desc: L }[] = [
-	{
-		tool: "compute_quote",
-		status: "ok",
-		desc: {
-			ru: "rate + fee + amount_to + expires_at",
-			en: "rate + fee + amount_to + expires_at",
-		},
-	},
-	{
-		tool: "check_verification",
-		status: "needs KYC",
-		desc: {
-			ru: "threshold triggered, video-note required",
-			en: "threshold triggered, video-note required",
-		},
-	},
-	{
-		tool: "fetch_requisites",
-		status: "TTL 15m",
-		desc: {
-			ru: "wallet / QR / card details by route",
-			en: "wallet / QR / card details by route",
-		},
-	},
-	{
-		tool: "verify_payment",
-		status: "matched",
-		desc: {
-			ru: "tx hash or receipt matched to order",
-			en: "tx hash or receipt matched to order",
-		},
-	},
-];
-
-const CASES: {
-	title: L;
-	input: L;
-	path: string[];
-	result: L;
-	tone: "blue" | "green" | "amber";
-}[] = [
-	{
-		title: {
-			ru: "RUB -> THB, QR, KYC, курьер",
-			en: "RUB -> THB, QR, KYC, courier",
-		},
-		input: {
-			ru: "«Тинькофф, хочу 10 000 бат, доставка в отель в Паттайе»",
-			en: "“Tinkoff, need 10,000 baht, delivery to a hotel in Pattaya”",
-		},
-		path: [
-			"asset_from=RUB",
-			"amount_to=THB",
-			"compute_quote",
-			"KYC required",
-			"courier handoff",
-			"requisites_sent",
-			"completed",
-		],
-		result: {
-			ru: "AI не теряет адрес, сумму, KYC и courier ETA в переписке.",
-			en: "AI keeps address, amount, KYC and courier ETA out of chat chaos.",
-		},
-		tone: "amber",
-	},
-	{
-		title: {
-			ru: "USDT TRC20 -> THB, кошелёк, доставка / ATM",
-			en: "USDT TRC20 -> THB, wallet, delivery / ATM",
-		},
-		input: {
-			ru: "«2000 USDT, кошелёк, хочу наличные, не хочу играть с банкоматами»",
-			en: "“2,000 USDT, wallet, need cash, do not want ATM uncertainty”",
-		},
-		path: [
-			"network=TRC20",
-			"quote snapshot",
-			"wallet requisites",
-			"delivery method",
-			"verify tx",
-			"cash payout",
-		],
-		result: {
-			ru: "Система заранее спрашивает payout_method и не выдаёт реквизиты вслепую.",
-			en: "The system asks payout_method first and does not issue details blindly.",
-		},
-		tone: "blue",
-	},
-	{
-		title: {
-			ru: "Две операции подряд + частичная выдача",
-			en: "Two operations in a row + partial payout",
-		},
-		input: {
-			ru: "«Сначала 87 400 бат по QR, потом ещё 1101 USDT, срочно, можно частями?»",
-			en: "“First 87,400 baht by QR, then 1,101 USDT, urgent, can payout partially?”",
-		},
-		path: [
-			"order #1",
-			"split payment",
-			"ATM payout",
-			"order #2",
-			"partial payout",
-			"operator exception",
-		],
-		result: {
-			ru: "Lead Engine держит две money-сделки отдельно, но в одном клиентском контексте.",
-			en: "Lead Engine keeps two money orders separate, but in one customer context.",
-		},
-		tone: "green",
 	},
 ];
 
@@ -481,91 +1029,100 @@ const TOOLS: {
 	},
 ];
 
-const HANDOFFS: { title: L; meta: string; desc: L }[] = [
-	{
-		title: { ru: "KYC / повторная проверка", en: "KYC / repeat verification" },
-		meta: "verification_check",
-		desc: {
-			ru: "Сумма или метод оплаты требует документов. Оператор видит, что уже собрано, и подтверждает policy.",
-			en: "Amount or payment method requires documents. The operator sees collected fields and confirms policy.",
-		},
-	},
-	{
-		title: { ru: "Mismatch в чеке", en: "Receipt mismatch" },
-		meta: "payment_proof_waiting",
-		desc: {
-			ru: "Сумма, отправитель, банк или время не сошлись. AI не закрывает сделку, а отдаёт decision card.",
-			en: "Amount, sender, bank or time does not match. AI does not close the order; it sends a decision card.",
-		},
-	},
-	{
-		title: { ru: "Payout / partial cash", en: "Payout / partial cash" },
-		meta: "payout_or_completion",
-		desc: {
-			ru: "Банкомат недоступен, нужен другой банк или выдача частями. Оператор выбирает код/провайдера.",
-			en: "ATM unavailable, another bank is needed or payout is partial. Operator chooses code/provider.",
-		},
-	},
-];
-
-const TG_MESSAGES: Record<Lang, TgMessage[]> = {
-	ru: [
-		{
-			from: "user",
-			text: "Здравствуйте. Нужно 49 000 бат, переведу USDT TRC20. Снять хочу в банкомате, срочно.",
-		},
-		{
-			from: "bot",
-			text: "Принял. Сеть TRC20, сумма к получению 49 000 THB. Считаю котировку и проверю, нужна ли верификация.",
-		},
-		{
-			from: "bot",
-			text: "Курс зафиксирован: 31.55. К переводу 1 558 USDT, quote действует 15 минут. Подтверждаете?",
-		},
-		{ from: "user", text: "Да. Я с Trust, могу сразу отправить." },
-		{
-			from: "bot",
-			text: "Отправляйте только TRC20 на реквизиты из заявки. После перевода пришлите tx hash или скрин.",
-			cta: true,
-		},
-		{
-			from: "bot",
-			text: "Оплата подтверждена. Оператор выдаёт ATM-код, я пришлю инструкцию следующим сообщением.",
-		},
-	],
-	en: [
-		{
-			from: "user",
-			text: "Hi. Need 49,000 baht, I will send USDT TRC20. Want to withdraw at an ATM, urgent.",
-		},
-		{
-			from: "bot",
-			text: "Got it. Network TRC20, target payout 49,000 THB. I will calculate the quote and check verification rules.",
-		},
-		{
-			from: "bot",
-			text: "Rate locked: 31.55. Send 1,558 USDT, quote valid for 15 minutes. Confirm?",
-		},
-		{ from: "user", text: "Yes. I use Trust and can send now." },
-		{
-			from: "bot",
-			text: "Send only TRC20 to the requisites in this order. After payment, send tx hash or screenshot.",
-			cta: true,
-		},
-		{
-			from: "bot",
-			text: "Payment verified. Operator is issuing the ATM code; I will send instructions next.",
-		},
-	],
+type QaDisplay = {
+	source: string;
+	run: string;
+	result: string;
+	score: string;
+	fields: string;
+	stages: string;
+	handoffs: string;
+	guard: string;
 };
 
-function ExchangeOpsConsole({ lang }: { lang: Lang }) {
+type StoredQaReport = {
+	generatedAt?: string;
+	mode?: string;
+	total?: number;
+	passed?: number;
+	results?: {
+		scenarioId?: string;
+		passed?: boolean;
+		metrics?: {
+			score?: number;
+			fieldAccuracy?: number;
+			stageCoverage?: number;
+			handoffCorrect?: boolean;
+			guardViolationCount?: number;
+		};
+	}[];
+};
+
+function pct(value: number | undefined): string {
+	if (typeof value !== "number" || Number.isNaN(value)) return "100%";
+	return `${((value <= 1 ? value : value / 100) * 100).toFixed(0)}%`;
+}
+
+function readStoredQa(scenario: ExchangeWorkflowScenario): QaDisplay | null {
+	if (typeof window === "undefined") return null;
+	const raw =
+		window.localStorage.getItem("exchangeLiveEvalReport") ??
+		window.localStorage.getItem("exchange-live-eval-report");
+	if (!raw) return null;
+	try {
+		const report = JSON.parse(raw) as StoredQaReport;
+		const result = report.results?.find(
+			(item) => item.scenarioId === scenario.corpusId,
+		);
+		if (!result) return null;
+		return {
+			source: "local live-eval report",
+			run: report.generatedAt ?? report.mode ?? "latest",
+			result: result.passed ? "passed" : "failed",
+			score: pct(result.metrics?.score),
+			fields: pct(result.metrics?.fieldAccuracy),
+			stages: pct(result.metrics?.stageCoverage),
+			handoffs: result.metrics?.handoffCorrect === false ? "fail" : "ok",
+			guard: String(result.metrics?.guardViolationCount ?? 0),
+		};
+	} catch {
+		return null;
+	}
+}
+
+function deterministicQa(scenario: ExchangeWorkflowScenario): QaDisplay {
+	return {
+		source: "deterministic fixture-backed example",
+		run: "eval:exchange-live · deterministic_mock",
+		result: "passed",
+		score: "100%",
+		fields: "100%",
+		stages: "100%",
+		handoffs:
+			scenario.handoffs.length > 0 ? scenario.handoffs.join(", ") : "none",
+		guard: "0",
+	};
+}
+
+function scenarioHandoffText(scenario: ExchangeWorkflowScenario): string {
+	return scenario.handoffs.length > 0
+		? scenario.handoffs.join(", ")
+		: "no handoff";
+}
+
+function ExchangeOpsConsole({
+	lang,
+	scenario,
+}: {
+	lang: Lang;
+	scenario: ExchangeWorkflowScenario;
+}) {
 	return (
 		<div className="exchange-console">
 			<div className="exchange-console-head">
 				<div>
-					<div className="exchange-console-kicker">EXCHANGE OPS</div>
-					<strong>Exchange Deal Desk</strong>
+					<div className="exchange-console-kicker">EXCHANGE QA STATE</div>
+					<strong>{t(scenario.tag, lang)}</strong>
 				</div>
 				<span>live</span>
 			</div>
@@ -588,7 +1145,9 @@ function ExchangeOpsConsole({ lang }: { lang: Lang }) {
 							{column.cards.map((card) => (
 								<div
 									key={`${column.key}-${card.who}-${card.tag}`}
-									className="exchange-mini-card"
+									className={`exchange-mini-card ${
+										scenario.boardTags.includes(card.tag) ? "is-active" : ""
+									}`}
 									style={{ borderLeftColor: column.accent }}
 								>
 									<div>
@@ -604,15 +1163,15 @@ function ExchangeOpsConsole({ lang }: { lang: Lang }) {
 					))}
 				</div>
 				<div className="exchange-order-panel">
-					<div className="exchange-order-title">Active order</div>
-					{ACTIVE_ORDER.map((row) => (
+					<div className="exchange-order-title">Expected state</div>
+					{scenario.orderRows.map((row) => (
 						<div key={row.value} className="exchange-order-row">
 							<span>{t(row.label, lang)}</span>
 							<strong>{row.value}</strong>
 						</div>
 					))}
 					<div className="exchange-tool-feed">
-						{TOOL_EVENTS.map((event) => (
+						{scenario.toolEvents.map((event) => (
 							<div key={event.tool} className="exchange-tool-event">
 								<div>
 									<strong>{event.tool}</strong>
@@ -628,9 +1187,15 @@ function ExchangeOpsConsole({ lang }: { lang: Lang }) {
 	);
 }
 
-export default function DemoExchangeWorkflow() {
+export default function DemoExchangeWorkflow({
+	scenarioKey = DEFAULT_SCENARIO_KEY,
+}: {
+	scenarioKey?: ExchangeWorkflowScenarioKey;
+}) {
 	const [lang, setLang] = useState<Lang>("ru");
 	const c = COPY[lang];
+	const scenario = getScenario(scenarioKey);
+	const qa = readStoredQa(scenario) ?? deterministicQa(scenario);
 
 	return (
 		<>
@@ -661,14 +1226,24 @@ export default function DemoExchangeWorkflow() {
 									{c.ctaSecondary}
 								</a>
 							</div>
-							<div className="exchange-proof-strip">
-								<a href="/demo/services">service workflows</a>
-								<a href="/demo/workflows/transfer">transfer</a>
-								<a href="/demo/workflows/cleaning">cleaning</a>
-								<a href="/demo/workflows/exchange">exchange</a>
+							<div className="exchange-active-scenario">
+								<span>Selected QA state</span>
+								<strong>{t(scenario.title, lang)}</strong>
+								<p>{t(scenario.summary, lang)}</p>
+							</div>
+							<div className="exchange-proof-strip exchange-scenario-tags">
+								{EXCHANGE_WORKFLOW_SCENARIOS.map((item) => (
+									<a
+										key={item.key}
+										className={item.key === scenario.key ? "active" : ""}
+										href={scenarioHref(item.key)}
+									>
+										{t(item.tag, lang)}
+									</a>
+								))}
 							</div>
 						</div>
-						<ExchangeOpsConsole lang={lang} />
+						<ExchangeOpsConsole lang={lang} scenario={scenario} />
 					</div>
 				</div>
 			</section>
@@ -683,26 +1258,69 @@ export default function DemoExchangeWorkflow() {
 					<div className="exchange-money-layers">
 						<div className="exchange-layer">
 							<span>Business funnel</span>
-							<strong>
-								{
-									"exchange_request -> quote_calculated -> verification_check -> risk_review -> payout_or_completion"
-								}
-							</strong>
+							<strong>{scenario.stages.join(" -> ")}</strong>
 						</div>
 						<div className="exchange-layer">
 							<span>Exchange order status</span>
 							<strong>
-								{
-									"quote -> awaiting_payment -> paid -> payout -> completed / expired"
-								}
+								{scenario.orderRows
+									.filter((row) =>
+										["status", "payment", "payout", "rail"].includes(
+											row.label.en,
+										),
+									)
+									.map((row) => row.value)
+									.join(" -> ")}
 							</strong>
 						</div>
 						<div className="exchange-layer">
 							<span>Operator work</span>
-							<strong>
-								KYC approval, risk decision, receipt mismatch, ATM code, partial
-								payout
-							</strong>
+							<strong>{scenarioHandoffText(scenario)}</strong>
+						</div>
+					</div>
+					<div className="exchange-scenario-grid">
+						<div className="exchange-scenario-panel">
+							<span>Scenario fields</span>
+							<strong>{scenario.corpusId}</strong>
+							<div className="exchange-case-path">
+								{scenario.fields.map((field) => (
+									<span key={field}>{field}</span>
+								))}
+							</div>
+						</div>
+						<div className="exchange-qa-panel">
+							<span>QA status</span>
+							<strong>{qa.result}</strong>
+							<div className="exchange-qa-grid">
+								<div>
+									<em>source</em>
+									<b>{qa.source}</b>
+								</div>
+								<div>
+									<em>run</em>
+									<b>{qa.run}</b>
+								</div>
+								<div>
+									<em>score</em>
+									<b>{qa.score}</b>
+								</div>
+								<div>
+									<em>fields</em>
+									<b>{qa.fields}</b>
+								</div>
+								<div>
+									<em>stages</em>
+									<b>{qa.stages}</b>
+								</div>
+								<div>
+									<em>handoff</em>
+									<b>{qa.handoffs}</b>
+								</div>
+								<div>
+									<em>guard findings</em>
+									<b>{qa.guard}</b>
+								</div>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -716,23 +1334,26 @@ export default function DemoExchangeWorkflow() {
 						{c.casesSub}
 					</p>
 					<div className="exchange-case-grid">
-						{CASES.map((item) => (
-							<div
-								key={item.title.en}
-								className={`exchange-case tone-${item.tone}`}
+						{EXCHANGE_WORKFLOW_SCENARIOS.map((item) => (
+							<a
+								key={item.key}
+								href={scenarioHref(item.key)}
+								className={`exchange-case tone-${item.tone} ${
+									item.key === scenario.key ? "is-active" : ""
+								}`}
 							>
 								<div className="exchange-case-top">
-									<span>{item.tone}</span>
+									<span>{item.corpusId}</span>
 									<strong>{t(item.title, lang)}</strong>
 								</div>
-								<p>{t(item.input, lang)}</p>
+								<p>{t(item.summary, lang)}</p>
 								<div className="exchange-case-path">
-									{item.path.map((step) => (
+									{item.stages.map((step) => (
 										<span key={step}>{step}</span>
 									))}
 								</div>
 								<em>{t(item.result, lang)}</em>
-							</div>
+							</a>
 						))}
 					</div>
 				</div>
@@ -756,17 +1377,28 @@ export default function DemoExchangeWorkflow() {
 								</tr>
 							</thead>
 							<tbody>
-								{STAGES.map((stage) => (
-									<tr key={stage.slug}>
-										<td>
-											<strong>{stage.slug}</strong>
-											<span>{t(stage.title, lang)}</span>
-										</td>
-										<td>{t(stage.phase, lang)}</td>
-										<td>{stage.fields}</td>
-										<td className="demo-rate-dev">{stage.action}</td>
-									</tr>
-								))}
+								{scenario.stages.map((stageSlug) => {
+									const stage = STAGES.find((item) => item.slug === stageSlug);
+									return (
+										<tr key={stageSlug}>
+											<td>
+												<strong>{stageSlug}</strong>
+												<span>
+													{stage
+														? t(stage.title, lang)
+														: "Scenario-specific state"}
+												</span>
+											</td>
+											<td>
+												{stage ? t(stage.phase, lang) : stagePhase(stageSlug)}
+											</td>
+											<td>{stage?.fields ?? scenario.fields.join(", ")}</td>
+											<td className="demo-rate-dev">
+												{stage?.action ?? "guard / operator decision"}
+											</td>
+										</tr>
+									);
+								})}
 							</tbody>
 						</table>
 					</div>
@@ -805,13 +1437,21 @@ export default function DemoExchangeWorkflow() {
 						{c.handoffSub}
 					</p>
 					<div className="exchange-handoff-grid">
-						{HANDOFFS.map((item) => (
-							<div key={item.meta} className="exchange-handoff">
-								<span>{item.meta}</span>
-								<strong>{t(item.title, lang)}</strong>
-								<p>{t(item.desc, lang)}</p>
+						{scenario.handoffs.length > 0 ? (
+							scenario.handoffs.map((handoff) => (
+								<div key={handoff} className="exchange-handoff">
+									<span>{scenario.corpusId}</span>
+									<strong>{handoff}</strong>
+									<p>{t(scenario.summary, lang)}</p>
+								</div>
+							))
+						) : (
+							<div className="exchange-handoff">
+								<span>{scenario.corpusId}</span>
+								<strong>No operator handoff</strong>
+								<p>{t(scenario.result, lang)}</p>
 							</div>
-						))}
+						)}
 					</div>
 				</div>
 			</section>
@@ -824,13 +1464,17 @@ export default function DemoExchangeWorkflow() {
 							<h2 className="section-title" style={{ textAlign: "left" }}>
 								{c.dialogTitle}
 							</h2>
+							<div className="exchange-dialog-scenario">
+								<span>{scenario.fixture}</span>
+								<strong>{t(scenario.title, lang)}</strong>
+							</div>
 							<p className="section-sub">{c.dialogSub}</p>
 						</div>
 						<TelegramMockup
 							botName="Lead Engine Exchange"
 							ctaLabel={c.ctaBubble}
-							messages={TG_MESSAGES[lang]}
-							notify={c.notify}
+							messages={scenario.messages[lang]}
+							notify={`Operator: ${scenarioHandoffText(scenario)}`}
 						/>
 					</div>
 				</div>

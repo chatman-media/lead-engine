@@ -319,6 +319,30 @@ export default function App() {
       <Route path="/demo/exchange" element={<DemoExchange />} />
       <Route path="/demo/exchange-workflow" element={<DemoExchangeWorkflow />} />
       <Route path="/demo/workflows/exchange" element={<DemoExchangeWorkflow />} />
+      <Route
+        path="/demo/workflows/exchange/rub-office-pickup"
+        element={<DemoExchangeWorkflow scenarioKey="rub-office-pickup" />}
+      />
+      <Route
+        path="/demo/workflows/exchange/usdt-bank-transfer"
+        element={<DemoExchangeWorkflow scenarioKey="usdt-bank-transfer" />}
+      />
+      <Route
+        path="/demo/workflows/exchange/kyc-review"
+        element={<DemoExchangeWorkflow scenarioKey="kyc-review" />}
+      />
+      <Route
+        path="/demo/workflows/exchange/payment-proof"
+        element={<DemoExchangeWorkflow scenarioKey="payment-proof" />}
+      />
+      <Route
+        path="/demo/workflows/exchange/rate-change"
+        element={<DemoExchangeWorkflow scenarioKey="rate-change" />}
+      />
+      <Route
+        path="/demo/workflows/exchange/operator-handoff"
+        element={<DemoExchangeWorkflow scenarioKey="operator-handoff" />}
+      />
       <Route path="/demo/workflows/transfer" element={<DemoServiceWorkflow workflowKey="transfer" />} />
       <Route path="/demo/workflows/cleaning" element={<DemoServiceWorkflow workflowKey="cleaning" />} />
       <Route path="/demo/workflows/massage" element={<DemoServiceWorkflow workflowKey="massage" />} />
