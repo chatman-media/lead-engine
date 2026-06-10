@@ -32,11 +32,13 @@
 
 | Док | О чём |
 |---|---|
-| [strategy/VERTICALS.md](strategy/VERTICALS.md) | 5 реализованных vertical templates + маппинг стадий на фазы + карта ниш (Пхукет/Таиланд) |
-| [strategy/ROADMAP.md](strategy/ROADMAP.md) | Что сделано / в работе / дальше; GTM-треки, метрики, $1M ARR план |
-| [strategy/POSITIONING.md](strategy/POSITIONING.md) | Позиционирование, ICP, ценность, цена, elevator pitch |
+| [strategy/VERTICALS.md](strategy/VERTICALS.md) | 9 реализованных vertical templates + маппинг стадий на фазы + карта ниш (Пхукет/Таиланд) |
+| [strategy/ROADMAP.md](strategy/ROADMAP.md) | Канон позиционирования (универсальная платформа), что в работе / дальше, метрики, $1M ARR план |
+| [strategy/POSITIONING.md](strategy/POSITIONING.md) | Позиционирование (универсал + GTM-wedge'ы), ICP, ценность, цена, elevator pitch |
 | [strategy/GTM_STRATEGY.md](strategy/GTM_STRATEGY.md) | Go-to-market: каналы, партнёры, питч инвесторам |
 | [strategy/COMPETITORS.md](strategy/COMPETITORS.md) | Анализ конкурентов и pricing benchmarks |
+| [strategy/PROVIDER_RELAY_EPIC.md](strategy/PROVIDER_RELAY_EPIC.md) | Эпик: кросс-канальный брокер заказов — клиент в одном канале, провайдер в другом, платформа владеет заказом/оплатой/комиссией |
+| [strategy/REAL_ESTATE_TRAINING_FUNNEL_NOTES.md](strategy/REAL_ESTATE_TRAINING_FUNNEL_NOTES.md) | Конспект RE-тренинга → универсальные правила воронок (stage goal/CTA/SLA) + RE-воронка |
 
 ## 🎯 GTM / Demo
 
@@ -58,6 +60,8 @@
 
 | Док | Статус |
 |---|---|
+| [archive/ROADMAP_HISTORY.md](archive/ROADMAP_HISTORY.md) | PR-летопись сделанного (до июня 2026) + история позиционирования — вынесена из ROADMAP |
+| [archive/CONCIERGE_VERTICAL.md](archive/CONCIERGE_VERTICAL.md) | Дизайн-док концерж-вертикали (фаза 0 эпика #175) — реализовано; канон теперь [CONCIERGE_FUNNEL_CONVERGENCE.md](engineering/CONCIERGE_FUNNEL_CONVERGENCE.md) |
 | [archive/WORKFLOW_ANALYSIS_GAPS.md](archive/WORKFLOW_ANALYSIS_GAPS.md) | Анализ разрывов воронки — закрыт костяком фаз (PR #160) |
 | [archive/bot-package-migration.md](archive/bot-package-migration.md) | Миграция `apps/bot` → пакеты — завершена (`apps/bot` удалён) |
 

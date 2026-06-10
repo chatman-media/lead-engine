@@ -10,8 +10,10 @@
 
 > **TL;DR:** Категория «AI отвечает за тебя в мессенджере» коммодитизируется
 > на глазах. Технология перестаёт быть moat — defensible остаётся
-> **вертикаль + дистрибуция в Telegram-СНГ**, а не «движок». Это подтверждает
-> правильность exchange-пивота (уход в моно-вертикаль).
+> **вертикальная глубина + дистрибуция в Telegram-СНГ**, а не «движок».
+> В продукте это: универсальная платформа (любая вертикаль и набор вертикалей,
+> канон — [`POSITIONING.md`](POSITIONING.md)) + глубокие vertical packs и
+> GTM-wedge'ы (exchange, recruitment) как точки входа.
 
 **Главное событие: Meta Business Agent — глобально и бесплатно (3 июня 2026).**
 Meta встроила AI-агента прямо в WhatsApp Business: отвечает, рекомендует,
@@ -423,8 +425,9 @@ VK уже закрывает локальный moat; Avito / OK остаютс�
 ## 8. Action items (инжиниринг и GTM)
 
 ### GTM (приоритет #1 — до первого клиента)
-1. **Landing page для recruitment ICP** — messaging "Первый AI рекрутер
-   с Persuasion Engine для Telegram". Не generic SaaS page.
+1. **Landing page**: универсальное позиционирование («опиши бизнес — AI
+   соберёт воронку») + вертикальные посадочные для wedge'ей (exchange,
+   recruitment). Не generic SaaS page — у каждого wedge свой messaging.
 2. **BYOK калькулятор vs Intercom Fin** — side-by-side: $0.99/resolution × N
    у Fin против flat $99/мес у нас с BYOK. Конкретные цифры на маркетинг-сайте.
 3. **"Persuasion Engine" как named feature** — выносить в заголовки,

@@ -919,7 +919,7 @@ capture → qualify → offer → [clear] → [fulfill] → won / lost
   валидный костяк для кастомных/AI-воронок.
 - `GET /api/admin/funnel/phase-stats` — число лидов по фазам (vertical-agnostic).
 
-Маппинг стадий на фазы по 5 вертикалям — см. [`VERTICALS.md`](../strategy/VERTICALS.md).
+Маппинг стадий на фазы по всем 9 вертикалям — см. [`VERTICALS.md`](../strategy/VERTICALS.md).
 
 **UI vs backend:** фазы — backend-слой (валидация костяка + cross-vertical аналитика);
 в кабинете оператор видит `displayName`/`kind` стадий, а не фазы. **Одна активная воронка

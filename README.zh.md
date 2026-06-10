@@ -185,7 +185,7 @@ bun run test                               # 对整个 monorepo 执行 bun test
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-15 个包中 950+ 个测试——经真实 webhook 处理的多租户 E2E、RLS 非绕过契约、
+15 个包中 2400+ 个测试——经真实 webhook 处理的多租户 E2E、RLS 非绕过契约、
 RAG 管线（约 180）、SaaS 路由集成，以及兑换工作流 mock。覆盖率：
 `bun test --coverage`。更多见 [docs/engineering/TESTING.md](docs/engineering/TESTING.md)。
 

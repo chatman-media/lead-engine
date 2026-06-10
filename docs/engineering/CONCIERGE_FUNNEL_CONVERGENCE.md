@@ -6,7 +6,7 @@ _Создано: 2026-06-06._
 воронка** (AI-сборка по описанию бизнеса + behavior-слой `goal`/`guidance`, #208 и ранее) и
 **концерж** (мульти-реквест сервис-деск, #207). По отдельности обе зелёные и
 задокументированы — [`AI_FUNNEL_BUILDER.md`](AI_FUNNEL_BUILDER.md) и
-[`../CONCIERGE_VERTICAL.md`](../CONCIERGE_VERTICAL.md). Этот док — про то, **как они
+[`../archive/CONCIERGE_VERTICAL.md`](../archive/CONCIERGE_VERTICAL.md). Этот док — про то, **как они
 срастаются**, где **швы**, и **дорожная карта**, которая сводит концерж в единую модель
 универсальной воронки (принятое решение — «свести в одну модель», а не держать спец-случаем).
 
@@ -24,13 +24,13 @@ _Создано: 2026-06-06._
 `<type>_request/offer/fulfill` → общие `completed`/`cancelled`. Она хранится в тех же
 `funnels → stage_definitions → stage_fields`, размечена фазами и проходит `validateBackbone`
 (каждая ветка фаза-монотонна по `position`) — без правок apply/boot/install (см.
-[`../CONCIERGE_VERTICAL.md`](../CONCIERGE_VERTICAL.md) §3).
+[`../archive/CONCIERGE_VERTICAL.md`](../archive/CONCIERGE_VERTICAL.md) §3).
 
 Ключевое и неочевидное: **сам движок ветвления тоже универсален.** `selectNextStage`
 ([`field-extractor.ts:51`](../../apps/api/src/lib/field-extractor.ts)) и детект multi-request
 ([`field-extractor.ts:102`](../../apps/api/src/lib/field-extractor.ts)) срабатывают для
-**любой** воронки, у которой на intake-стадии есть поле со слагом `request_type`. Линейные 5
-вертикалей не затронуты (нет поля → прежнее `nextStages[0]`). То есть «контакт ↔ N
+**любой** воронки, у которой на intake-стадии есть поле со слагом `request_type`. Линейные
+вертикали не затронуты (нет поля → прежнее `nextStages[0]`). То есть «контакт ↔ N
 параллельных заявок» — это **общая способность платформы**, которой просто никто, кроме
 концержа, не пользуется.
 
@@ -189,7 +189,7 @@ _Создано: 2026-06-06._
 
 - [`AI_FUNNEL_BUILDER.md`](AI_FUNNEL_BUILDER.md) — нарратив билдера и его собственный roadmap
   (behavior-слой, унификация входов). R1/R3/R4 здесь — конкретизация его «Дальше».
-- [`../CONCIERGE_VERTICAL.md`](../CONCIERGE_VERTICAL.md) — дизайн концержа (ветвящаяся воронка,
+- [`../archive/CONCIERGE_VERTICAL.md`](../archive/CONCIERGE_VERTICAL.md) — дизайн концержа (ветвящаяся воронка,
   мульти-лид, резолвинг входящего §5).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md#funnel-phase-backbone-костяк) — костяк фаз.
 
