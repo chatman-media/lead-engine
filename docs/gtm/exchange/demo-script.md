@@ -11,6 +11,8 @@
 - [`one-pager.md`](one-pager.md) — что делает продукт, ROI, цена и безопасность.
 - [`screen-sequence.md`](screen-sequence.md) — порядок экранов для повторного показа.
 - [`objections.md`](objections.md) — ответы на типовые вопросы владельца.
+- [`trial-flow.md`](trial-flow.md) — как выдать alpha-доступ и довести клиента до
+  отвечающего бота в тот же день.
 
 ## Before the call
 
@@ -279,6 +281,10 @@ Closing line:
 > После демо клиент должен запомнить не “бот ответил 24/7”, а “каждый входящий
 > обмен стал заявкой с курсом, статусом, риском, реквизитами и точкой решения
 > оператора”.
+
+Если клиент говорит "да", не оставлять это на follow-up. Сразу открыть
+[`trial-flow.md`](trial-flow.md): invite link, BYOK, bot token, rate-card,
+requisites и dry run до первого ответа бота.
 
 ## Rehearsal checklist
 
