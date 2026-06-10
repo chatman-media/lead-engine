@@ -108,11 +108,27 @@ UI: страница «Инструменты» (`/tools`).
 bun run quality:tool-regressions -- --file tool-call-regression-cases.jsonl
 ```
 
-Runner читает JSONL, валидирует `recordType`, `toolName`, `input.args`,
-`expected.behavior`, reviewer label и shape исходного tool-call result/error.
-На schema/regression failures он печатает line/case/tool/path и возвращает
-non-zero exit code. По умолчанию archived cases не валидируются, а явно
-считаются skipped. Если нужно проверить весь export:
+Runner читает JSONL-файл или сам забирает export из Quality API, валидирует
+`recordType`, `toolName`, `input.args`, `expected.behavior`, reviewer label и
+shape исходного tool-call result/error. На schema/regression failures он
+печатает line/case/tool/path и возвращает non-zero exit code.
+
+Для CI/cron можно не скачивать файл вручную:
+
+```bash
+QUALITY_LAB_TOKEN=<admin-bearer-token> \
+  bun run quality:tool-regressions -- \
+  --api-base https://api.example.com \
+  --status active \
+  --limit 500
+```
+
+`--token <token>` тоже поддерживается, но env-переменная безопаснее для shell
+history. По умолчанию API-mode берёт `status=active&limit=500` с
+`/api/admin/quality/tool-call-regression-cases/export.jsonl`.
+
+Archived cases по умолчанию не валидируются, а явно считаются skipped. Если
+нужно проверить весь local export:
 
 ```bash
 bun run quality:tool-regressions -- \
