@@ -1405,6 +1405,10 @@ export interface QualityToolCallRegressionCaseCreateOptions {
   expectedBehavior?: string | null;
 }
 
+export interface QualityToolCallRegressionCaseStatusOptions {
+  status: QualityToolCallRegressionCaseStatus;
+}
+
 export interface QualityTranscriptTurn {
   role: "candidate" | "salesperson";
   text: string;
@@ -3101,6 +3105,18 @@ export const saas = {
       body: JSON.stringify(opts),
     });
   },
+  setQualityToolCallRegressionCaseStatus(
+    id: number,
+    data: QualityToolCallRegressionCaseStatusOptions,
+  ) {
+    return request<{ ok: boolean; case: QualityToolCallRegressionCase }>(
+      `/api/admin/quality/tool-call-regression-cases/${id}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      },
+    );
+  },
   runQualitySelfPlay(data: QualitySelfPlayRunOptions) {
     return request<{ ok: boolean; match: QualitySelfPlayMatch }>(
       "/api/admin/quality/self-play/matches",
@@ -3256,6 +3272,33 @@ export const saas = {
     const a = document.createElement("a");
     a.href = url;
     a.download = "tool-call-feedback.jsonl";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  async exportQualityToolCallRegressionCasesJsonl(
+    opts: QualityToolCallRegressionCaseListOptions = {},
+  ): Promise<void> {
+    const params = new URLSearchParams();
+    if (opts.status) params.set("status", opts.status);
+    if (opts.limit) params.set("limit", String(opts.limit));
+
+    const token = getToken();
+    const qs = params.toString();
+    const res = await fetch(
+      `${API_BASE}/api/admin/quality/tool-call-regression-cases/export.jsonl${qs ? `?${qs}` : ""}`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+    );
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      throw new ApiError(res.status, (body.error as string | undefined) ?? res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tool-call-regression-cases.jsonl";
     a.click();
     URL.revokeObjectURL(url);
   },

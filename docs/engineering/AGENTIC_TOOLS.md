@@ -74,7 +74,9 @@ Zod-схема конвертится в OpenAI function-формат (`toolToOp
   **Case**, чтобы сохранить пример в `agent_tool_call_regression_cases`.
   Regression case фиксирует исходные args/result, reviewer label, expected
   behavior и context; proposal при этом закрывается как `applied` с
-  `resolution.ref = REG-<id>`.
+  `resolution.ref = REG-<id>`. Cases можно архивировать/восстанавливать и
+  выгружать как `tool-call-regression-cases.jsonl` для offline regression/eval
+  пайплайна.
 - Coach proposals (`POST /api/admin/quality/coach/proposals`) подтягивают
   последние actionable feedback labels по тому же `styleId` и передают их в
   CoachAnalyzer как human-reviewed defects. Coach не меняет tool contracts
