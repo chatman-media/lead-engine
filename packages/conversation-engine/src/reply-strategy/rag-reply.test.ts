@@ -364,6 +364,55 @@ describe("RagReplyStrategy.generate", () => {
     expect(part.text).toBe(EXCHANGE_PAYMENT_FALLBACK);
   });
 
+  it("exchange: payment proof answer attaches payment-review operator handoff", async () => {
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: chatReturning("Чек получили, передаю оператору на проверку."),
+        kb: kbWith([HIT]),
+        exchangePolicyState: {
+          stageSlug: "payment_review",
+          verification: {
+            verified: true,
+            status: "verified",
+            needsVerification: false,
+          },
+          order: {
+            id: 77,
+            status: "awaiting_payment",
+            assetFrom: "RUB",
+            network: "",
+            amountMode: "source_amount",
+            requestedAmount: 100000,
+            amountFrom: 100000,
+            rate: 0.38,
+            amountToThb: 38000,
+            paymentMethod: "bank_transfer",
+            paymentRail: "sber",
+            payoutMethod: "office_cash",
+            payoutLocation: "Bangkok Asok",
+            requisitesIssued: true,
+            paymentProofReceived: true,
+            paymentVerified: false,
+            payoutReady: false,
+            payoutCompleted: false,
+            payoutCodeIssued: false,
+          },
+        },
+      }),
+      { rewriteQueryBeforeRetrieval: false, reflect: false },
+    );
+
+    const r = await s.generate(baseInput());
+
+    expect(r?.[0]?.operatorHandoff).toMatchObject({
+      reason: "payment_review",
+      orderId: 77,
+      stageSlug: "payment_review",
+      pending: "operator_payment_review",
+    });
+  });
+
   it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
     const s = mk(
       ctxWith({

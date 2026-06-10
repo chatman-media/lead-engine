@@ -485,6 +485,7 @@ export function exchangeOrderPolicyStateFromOrder(
 		paymentRail: order.paymentRail,
 		payoutMethod: order.payoutMethod,
 		payoutLocation: order.payoutLocation,
+		payoutDestinationJson: order.payoutDestinationJson,
 		requisitesIssued: hasJsonPayload(order.requisitesJson),
 		paymentProofReceived: hasJsonPayload(order.proofJson),
 		paymentVerified: PAYMENT_VERIFIED_STATUSES.has(order.status),

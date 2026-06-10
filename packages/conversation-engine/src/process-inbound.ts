@@ -211,6 +211,38 @@ function inboundText(inbound: Inbound): { text: string; mediaOnly: boolean } {
   return { text, mediaOnly: hasMedia && text.length === 0 };
 }
 
+function exchangeMediaHandoffData(input: {
+	text: string;
+	currentStage?: string | null;
+	hasVideoNote: boolean;
+}): Record<string, unknown> {
+	const signal = `${input.text}\n${input.currentStage ?? ""}`.toLowerCase();
+	const paymentLike =
+		/(?:чек|оплат|receipt|proof|перевод|плат[её]ж|payment)/iu.test(signal);
+	if (paymentLike && !input.hasVideoNote) {
+		return {
+			reason: "payment_review",
+			title: "Проверить оплату по чеку",
+			action:
+				"Сверить чек/поступление, сумму, банк/rail и отправителя. После проверки подтвердить оплату или отметить проблему.",
+			priority: "high",
+			pending: "operator_payment_review",
+			reviewPath:
+				"operator_bot: payment_confirmed / payment_under_review / payment_problem",
+		};
+	}
+	return {
+		reason: "kyc_review",
+		title: "Проверить KYC клиента",
+		action:
+			"Проверить документ/фото/видео клиента, принять решение: KYC OK, запросить материалы или отклонить.",
+		priority: "high",
+		pending: "operator_kyc_decision",
+		reviewPath:
+			"operator_bot: kyc_approved / kyc_request_materials / kyc_rejected",
+	};
+}
+
 /**
  * Основной pipeline. Channel-agnostic, tenant-scoped. apps/worker дёргает
  * это для каждого Inbound из ChannelAdapter.receive().
@@ -352,6 +384,23 @@ export async function processInbound(
         data: {
           displayName: contact.displayName || "Без имени",
           text: text || "(Медиа)",
+        },
+      });
+    } else if (deps.template?.slug === "exchange_v1" && hasMedia) {
+      await deps.notifications.notify({
+        tenantId: deps.tenant.tenantId,
+        eventType: "operator_handoff_required",
+        conversationId: conversation.id,
+        contactId: contact.id,
+        data: {
+          displayName: contact.displayName || "Без имени",
+          text: text || "(Клиент загрузил документ/медиа)",
+          ...exchangeMediaHandoffData({
+            text,
+            currentStage: conversation.currentStage,
+            hasVideoNote,
+          }),
+          ...operatorMediaNotificationData(inbound),
         },
       });
     } else if (hasVideoNote) {

@@ -18,6 +18,7 @@ import {
   type ExchangePolicyState,
   guardExchangePolicy,
 } from "./exchange-policy-guard.ts";
+import { buildExchangeOperatorHandoff } from "./exchange-operator-handoff.ts";
 
 /**
  * Минимальный LLM-based ReplyStrategy. Шаги на каждый inbound:
@@ -372,9 +373,10 @@ export class LlmReplyStrategy implements ReplyStrategy {
       : null;
 
     if (forcedExchangeReply) {
+      const telemetry = buildToolTelemetry(forcedExchangeReply.toolCalls);
       const guarded = guardExchangePolicy({
         text: forcedExchangeReply.text,
-        telemetry: buildToolTelemetry(forcedExchangeReply.toolCalls),
+        telemetry,
         history,
         state: exchangePolicyState,
       });
@@ -392,11 +394,17 @@ export class LlmReplyStrategy implements ReplyStrategy {
           console.warn("[llm-reply] failed to record forced exchange tool call:", err);
         }
       }
+      const operatorHandoff = buildExchangeOperatorHandoff({
+        text: guarded.text,
+        telemetry,
+        state: exchangePolicyState,
+      });
       return [
         {
           channelId: String(input.channel.channelId),
           externalUserId: input.inbound.externalUserId,
           parts: [{ kind: "text", text: guarded.text }],
+          ...(operatorHandoff ? { operatorHandoff } : {}),
         },
       ];
     }
@@ -461,11 +469,19 @@ export class LlmReplyStrategy implements ReplyStrategy {
         console.warn("[llm-reply] failed to record tool calls:", err);
       }
     }
+    const operatorHandoff = isExchange
+      ? buildExchangeOperatorHandoff({
+          text: guarded.text,
+          telemetry: buildToolTelemetry(toolCalls),
+          state: exchangePolicyState,
+        })
+      : null;
     return [
       {
         channelId: String(input.channel.channelId),
         externalUserId: input.inbound.externalUserId,
         parts: [{ kind: "text", text: guarded.text }],
+        ...(operatorHandoff ? { operatorHandoff } : {}),
       },
     ];
   }
