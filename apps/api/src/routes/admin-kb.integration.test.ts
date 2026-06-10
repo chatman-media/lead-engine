@@ -11,6 +11,7 @@ import {
   applyAllMigrations,
   createIsolatedDb,
   funnels,
+  kbChunks,
   kbDocuments,
   kbSuggestions,
   schema,
@@ -18,7 +19,7 @@ import {
   stageFields,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql as drizzleSql } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import postgres, { type Sql } from "postgres";
@@ -142,6 +143,9 @@ describe("admin-kb upload/list/delete flow", () => {
       documentId: number;
       source: string;
       chunks: number;
+      chunksCount: number;
+      embeddedChunksCount: number;
+      indexStatus: string;
       created: boolean;
       hasStoredFile: boolean;
       fileName: string | null;
@@ -149,6 +153,9 @@ describe("admin-kb upload/list/delete flow", () => {
     expect(body.documentId).toBeGreaterThan(0);
     expect(body.source).toMatch(/^inline:/);
     expect(body.chunks).toBeGreaterThan(0);
+    expect(body.chunksCount).toBe(body.chunks);
+    expect(body.embeddedChunksCount).toBe(body.chunks);
+    expect(body.indexStatus).toBe("embedded");
     expect(body.created).toBe(true);
     expect(body.hasStoredFile).toBe(true);
     expect(body.fileName).toBe("Test doc.txt");
@@ -189,6 +196,75 @@ describe("admin-kb upload/list/delete flow", () => {
     };
     const visa = list.items.find((d) => d.title === "Visa info");
     expect(visa?.topic).toBe("visa");
+  });
+
+  it("list/detail показывают text-only статус, reindex проставляет embeddings", async () => {
+    if (!sql) return;
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const [doc] = await db
+      .insert(kbDocuments)
+      .values({
+        tenantId,
+        source: `manual:text-only:${suffix}`,
+        title: "Text-only KB seed",
+        contentHash: `text-only-${suffix}`,
+        scopeType: "global",
+      })
+      .returning({ id: kbDocuments.id });
+    const documentId = doc?.id;
+    if (!documentId) throw new Error("expected text-only KB document");
+
+    await db.execute(drizzleSql`
+      INSERT INTO kb_chunks (tenant_id, document_id, chunk_index, text, token_count, embedding)
+      VALUES (${tenantId}, ${documentId}, 0, ${"Seed документ без embedding должен доиндексироваться."}, 6, NULL)
+    `);
+
+    const listRes = await authReq("/api/admin/kb/documents?scopeType=global");
+    expect(listRes.status).toBe(200);
+    const list = (await listRes.json()) as {
+      items: Array<{
+        id: number;
+        chunksCount: number;
+        embeddedChunksCount: number;
+        indexStatus: string;
+      }>;
+    };
+    const item = list.items.find((candidate) => candidate.id === documentId);
+    expect(item?.chunksCount).toBe(1);
+    expect(item?.embeddedChunksCount).toBe(0);
+    expect(item?.indexStatus).toBe("text_only");
+
+    const detailRes = await authReq(`/api/admin/kb/documents/${documentId}`);
+    expect(detailRes.status).toBe(200);
+    const detail = (await detailRes.json()) as {
+      item: { chunksCount: number; embeddedChunksCount: number; indexStatus: string };
+    };
+    expect(detail.item.chunksCount).toBe(1);
+    expect(detail.item.embeddedChunksCount).toBe(0);
+    expect(detail.item.indexStatus).toBe("text_only");
+
+    const reindexRes = await authReq(`/api/admin/kb/documents/${documentId}/reindex`, {
+      method: "POST",
+    });
+    expect(reindexRes.status).toBe(200);
+    const reindex = (await reindexRes.json()) as {
+      documentId: number;
+      chunksCount: number;
+      embeddedChunksCount: number;
+      indexStatus: string;
+    };
+    expect(reindex.documentId).toBe(documentId);
+    expect(reindex.chunksCount).toBe(1);
+    expect(reindex.embeddedChunksCount).toBe(1);
+    expect(reindex.indexStatus).toBe("embedded");
+
+    const [stats] = await db
+      .select({
+        embeddedChunksCount: drizzleSql<number>`count(${kbChunks.embedding})::int`,
+      })
+      .from(kbChunks)
+      .where(and(eq(kbChunks.tenantId, tenantId), eq(kbChunks.documentId, documentId)));
+    expect(stats?.embeddedChunksCount).toBe(1);
   });
 
   it("scoped upload/list + requirements coverage", async () => {

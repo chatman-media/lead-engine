@@ -31,7 +31,7 @@ import { canAddKbDocument } from "../lib/quota.ts";
  */
 export interface AdminKbRoutesOpts {
   db: Db;
-  /** Embedder для ingest (vector indexing). Пусто = upload disabled. */
+  /** Embedder для ingest/search/reindex. Может бросить ошибку, если embeddings не настроены. */
   resolveEmbedder: (tenantId: number) => EmbeddingClient;
 }
 
@@ -49,6 +49,12 @@ type KbRequirement = {
 };
 
 type KbDocumentFormat = "text" | "markdown" | "pdf" | "json";
+type KbIndexStatus = "empty" | "text_only" | "partial" | "embedded";
+
+type KbIndexStats = {
+  chunksCount: number;
+  embeddedChunksCount: number;
+};
 
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const DEFAULT_SEARCH_LIMIT = 5;
@@ -175,6 +181,32 @@ function docFileFields(doc: {
     fileSizeBytes: doc.fileSizeBytes,
     fileUploadedAt: doc.fileUploadedAt,
   };
+}
+
+function kbIndexStatus(stats: KbIndexStats): KbIndexStatus {
+  if (stats.chunksCount <= 0) return "empty";
+  if (stats.embeddedChunksCount <= 0) return "text_only";
+  if (stats.embeddedChunksCount < stats.chunksCount) return "partial";
+  return "embedded";
+}
+
+function docIndexFields(stats?: Partial<KbIndexStats> | null) {
+  const normalized = {
+    chunksCount: stats?.chunksCount ?? 0,
+    embeddedChunksCount: stats?.embeddedChunksCount ?? 0,
+  };
+  return {
+    ...normalized,
+    indexStatus: kbIndexStatus(normalized),
+  };
+}
+
+function vectorLiteral(embedding: number[]): string {
+  if (embedding.length === 0) throw new Error("empty embedding vector");
+  if (embedding.some((value) => !Number.isFinite(value))) {
+    throw new Error("embedding contains non-finite value");
+  }
+  return `[${embedding.join(",")}]`;
 }
 
 async function readUploadFile(file: File): Promise<{ body: string; originalFile: StoredKbFile }> {
@@ -496,8 +528,40 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
         })
         .from(kbDocuments)
         .where(eq(kbDocuments.tenantId, tenantId));
+      const statsRows =
+        rows.length > 0
+          ? await tx
+              .select({
+                documentId: kbChunks.documentId,
+                chunksCount: sql<number>`count(*)::int`,
+                embeddedChunksCount: sql<number>`count(${kbChunks.embedding})::int`,
+              })
+              .from(kbChunks)
+              .where(
+                and(
+                  eq(kbChunks.tenantId, tenantId),
+                  inArray(
+                    kbChunks.documentId,
+                    rows.map((row) => row.id),
+                  ),
+                ),
+              )
+              .groupBy(kbChunks.documentId)
+          : [];
+      const statsByDocumentId = new Map(
+        statsRows.map((stats) => [
+          stats.documentId,
+          {
+            chunksCount: stats.chunksCount,
+            embeddedChunksCount: stats.embeddedChunksCount,
+          },
+        ]),
+      );
       return {
-        rows,
+        rows: rows.map((row) => ({
+          ...row,
+          ...docIndexFields(statsByDocumentId.get(row.id)),
+        })),
         storage: {
           storedFiles: storage?.storedFiles ?? 0,
           totalBytes: storage?.totalBytes ?? 0,
@@ -557,11 +621,19 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
         .from(kbChunks)
         .where(and(eq(kbChunks.tenantId, tenantId), eq(kbChunks.documentId, id)))
         .orderBy(asc(kbChunks.chunkIndex));
+      const [stats] = await tx
+        .select({
+          chunksCount: sql<number>`count(*)::int`,
+          embeddedChunksCount: sql<number>`count(${kbChunks.embedding})::int`,
+        })
+        .from(kbChunks)
+        .where(and(eq(kbChunks.tenantId, tenantId), eq(kbChunks.documentId, id)));
 
       return {
         ...doc,
         format: inferKbDocumentFormat(doc),
         ...docFileFields(doc),
+        ...docIndexFields(stats),
         fileStorageKey: undefined,
         text: chunks.map((chunk) => chunk.text).join("\n\n"),
         chunks,
@@ -729,6 +801,10 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
         fileMimeType: fileMeta.fileMimeType,
       }),
       ...docFileFields(fileMeta),
+      ...docIndexFields({
+        chunksCount: chunks.length,
+        embeddedChunksCount: chunks.length,
+      }),
       fileStorageKey: undefined,
       text: chunks.map((chunk) => chunk.text).join("\n\n"),
       chunks: chunks.map((chunk) => ({
@@ -738,6 +814,86 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
       })),
     };
     return c.json({ item });
+  });
+
+  /**
+   * POST /api/admin/kb/documents/:id/reindex
+   * Rebuilds vector embeddings for existing chunks without touching document
+   * metadata, scope or stored original file.
+   */
+  app.post("/api/admin/kb/documents/:id/reindex", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const existing = await withTenant(opts.db, tenantId, async (tx) => {
+      const [doc] = await tx
+        .select({ id: kbDocuments.id })
+        .from(kbDocuments)
+        .where(and(eq(kbDocuments.tenantId, tenantId), eq(kbDocuments.id, id)))
+        .limit(1);
+      if (!doc) return null;
+      const chunks = await tx
+        .select({
+          id: kbChunks.id,
+          chunkIndex: kbChunks.chunkIndex,
+          text: kbChunks.text,
+        })
+        .from(kbChunks)
+        .where(and(eq(kbChunks.tenantId, tenantId), eq(kbChunks.documentId, id)))
+        .orderBy(asc(kbChunks.chunkIndex));
+      return { doc, chunks };
+    });
+    if (!existing) return c.json({ error: "document not found" }, 404);
+    if (existing.chunks.length === 0) {
+      return c.json({
+        ok: true,
+        documentId: id,
+        ...docIndexFields({ chunksCount: 0, embeddedChunksCount: 0 }),
+      });
+    }
+
+    let embedder: EmbeddingClient;
+    try {
+      embedder = opts.resolveEmbedder(tenantId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `embedder not configured: ${msg}` }, 503);
+    }
+
+    const vectors = await embedder.embed(existing.chunks.map((chunk) => chunk.text));
+    if (vectors.length !== existing.chunks.length) {
+      return c.json({ error: "embedder returned unexpected vector count" }, 503);
+    }
+
+    const stats = await withTenant(opts.db, tenantId, async (tx) => {
+      for (const [index, chunk] of existing.chunks.entries()) {
+        const vector = vectors[index];
+        if (!vector) return null;
+        await tx.execute(sql`
+          UPDATE kb_chunks
+          SET embedding = ${vectorLiteral(vector)}::vector
+          WHERE tenant_id = ${tenantId}
+            AND document_id = ${id}
+            AND id = ${chunk.id}
+        `);
+      }
+      const [row] = await tx
+        .select({
+          chunksCount: sql<number>`count(*)::int`,
+          embeddedChunksCount: sql<number>`count(${kbChunks.embedding})::int`,
+        })
+        .from(kbChunks)
+        .where(and(eq(kbChunks.tenantId, tenantId), eq(kbChunks.documentId, id)));
+      return docIndexFields(row);
+    });
+    if (!stats) return c.json({ error: "embedder returned no vector" }, 503);
+
+    return c.json({
+      ok: true,
+      documentId: id,
+      ...stats,
+    });
   });
 
   /**
@@ -1171,6 +1327,10 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
         documentId: result.documentId,
         source: result.source,
         chunks: result.chunks,
+        ...docIndexFields({
+          chunksCount: result.chunks,
+          embeddedChunksCount: result.chunks,
+        }),
         created: result.created,
         ...(storedFile ? docFileFields(storedFile) : {}),
         ...scopeToDbFields(scope),
