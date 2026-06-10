@@ -3,7 +3,10 @@ import { OutboundQueueRepo } from "./dal/outbound.ts";
 import type { Db } from "./dal/types.ts";
 import type { NotificationService } from "./notifications.ts";
 import { emitOperatorHandoffNotifications } from "./operator-handoff.ts";
-import { dispatchOutbound } from "./outbound-dispatch.ts";
+import {
+	dispatchOutbound,
+	withWhatsAppFreeFormWindow,
+} from "./outbound-dispatch.ts";
 import type { ReplyStrategy } from "./process-inbound.ts";
 import type {
 	ChannelContext,
@@ -97,10 +100,14 @@ export async function generateReplyAndEnqueue(
 			tenantId: tenant.tenantId,
 		});
 		for (const env of envelopes as OutboundEnvelope[]) {
+			const outboundEnvelope = withWhatsAppFreeFormWindow(env, {
+				channelKind: channel.kind,
+				nowEpoch: now,
+			});
 			const queued = await dispatchOutbound({
 				channelDbId,
 				conversationId: result.conversationId,
-				envelope: env,
+				envelope: outboundEnvelope,
 				outbound,
 				nowEpoch: now,
 			});
@@ -110,7 +117,7 @@ export async function generateReplyAndEnqueue(
 				tenantId: tenant.tenantId,
 				conversationId: result.conversationId,
 				queueItemId: queued.id,
-				envelope: env,
+				envelope: outboundEnvelope,
 			});
 		}
 	});

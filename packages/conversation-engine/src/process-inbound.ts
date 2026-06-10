@@ -20,7 +20,10 @@ import {
 	emitOperatorHandoffNotifications,
 	operatorMediaNotificationData,
 } from "./operator-handoff.ts";
-import { dispatchOutbound } from "./outbound-dispatch.ts";
+import {
+	dispatchOutbound,
+	withWhatsAppFreeFormWindow,
+} from "./outbound-dispatch.ts";
 import {
 	applyClassifiedStage,
 	type StageClassifier,
@@ -534,10 +537,14 @@ export async function processInbound(
 			}
 
 			for (const env of envelopes) {
+				const outboundEnvelope = withWhatsAppFreeFormWindow(env, {
+					channelKind: deps.channel.kind,
+					nowEpoch: now,
+				});
 				const queued = await dispatchOutbound({
 					channelDbId: deps.channelDbId,
 					conversationId: conversation.id,
-					envelope: env,
+					envelope: outboundEnvelope,
 					outbound: deps.outbound,
 					nowEpoch: now,
 				});
@@ -547,7 +554,7 @@ export async function processInbound(
 					tenantId: deps.tenant.tenantId,
 					conversationId: conversation.id,
 					queueItemId: queued.id,
-					envelope: env,
+					envelope: outboundEnvelope,
 				});
 			}
 			await emitOperatorHandoffNotifications({

@@ -56,6 +56,7 @@ async function createProvider(opts: {
 	contactId: number;
 	serviceType: string;
 	serviceArea?: string | null;
+	optIn?: boolean;
 }): Promise<number> {
 	const [provider] = await db
 		.insert(schema.providerProfiles)
@@ -67,6 +68,16 @@ async function createProvider(opts: {
 			status: "active",
 			serviceArea: opts.serviceArea ?? null,
 			defaultCommissionPct: 15,
+			...(opts.optIn === false
+				? {}
+				: {
+						optInSource: "manual_onboarding",
+						optInAt: now,
+						optInCategoriesJson: JSON.stringify([
+							"provider_outreach",
+							"utility",
+						]),
+					}),
 			createdAt: now,
 			updatedAt: now,
 		})
@@ -196,6 +207,27 @@ describe("ProviderRelayOrchestrator", () => {
 
 		const payload = JSON.parse(result.outbound.payloadJson);
 		expect(payload.parts[0].text).toContain("Massage today around 18:00");
+		expect(payload.channelMeta.whatsapp).toMatchObject({
+			orderId: result.order.id,
+			template: {
+				name: "provider_booking_request_v1",
+				languageCode: "en_US",
+				category: "utility",
+			},
+			providerOptIn: {
+				source: "manual_onboarding",
+				timestamp: now,
+				categories: ["provider_outreach", "utility"],
+			},
+		});
+		expect(payload.channelMeta.whatsapp.template.components[0]).toEqual({
+			type: "body",
+			parameters: [
+				{ type: "text", text: "massage" },
+				{ type: "text", text: "Chaweng" },
+				{ type: "text", text: "Massage today around 18:00" },
+			],
+		});
 
 		const events = await relayRepo().eventsForOrder(result.order.id);
 		expect(new Set(events.map((event) => event.eventType))).toEqual(
@@ -283,6 +315,47 @@ describe("ProviderRelayOrchestrator", () => {
 			ok: false,
 			reason: "provider_channel_missing",
 			providerId: providerWithoutChannelId,
+		});
+		expect(await tableCount("provider_requests")).toBe(beforeRequests);
+		expect(await tableCount("outbound_queue")).toBe(beforeOutbound);
+		const events = await relayRepo().eventsForOrder(result.order.id);
+		expect(events.map((event) => event.eventType)).toEqual([
+			"provider_request_failed",
+		]);
+	});
+
+	it("rejects WhatsApp provider outreach when onboarding opt-in is missing", async () => {
+		if (!enabled) return;
+		const contactId = await createContact("No opt-in provider contact");
+		const providerWithoutOptInId = await createProvider({
+			name: "No Opt-In Spa",
+			contactId,
+			serviceType: "wellness",
+			serviceArea: "Chaweng",
+			optIn: false,
+		});
+		await db.insert(schema.channelIdentities).values({
+			contactId,
+			channelId: whatsappChannelId,
+			externalUserId: "66888888888",
+			createdAt: now,
+		});
+		const beforeRequests = await tableCount("provider_requests");
+		const beforeOutbound = await tableCount("outbound_queue");
+
+		const result = await orchestrator().startProviderOutreach({
+			customerContactId,
+			requestType: "wellness",
+			serviceArea: "Chaweng",
+			providerIdOverride: providerWithoutOptInId,
+			orderIdempotencyKey: "orch-no-opt-in",
+			nowEpoch: now + 45,
+		});
+
+		expect(result).toMatchObject({
+			ok: false,
+			reason: "provider_opt_in_missing",
+			providerId: providerWithoutOptInId,
 		});
 		expect(await tableCount("provider_requests")).toBe(beforeRequests);
 		expect(await tableCount("outbound_queue")).toBe(beforeOutbound);

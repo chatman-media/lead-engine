@@ -8,12 +8,12 @@
  * этому полю: всю канал-специфику должен прятать ChannelAdapter.
  */
 export type ChannelKind =
-  | "telegram_bot"
-  | "telegram_userbot"
-  | "whatsapp"
-  | "facebook"
-  | "vk"
-  | "web";
+	| "telegram_bot"
+	| "telegram_userbot"
+	| "whatsapp"
+	| "facebook"
+	| "vk"
+	| "web";
 
 /**
  * Капабилити канала — что конкретный адаптер реально умеет. WhatsApp, например,
@@ -21,15 +21,15 @@ export type ChannelKind =
  * читает это, чтобы решать, какие части envelope можно отправить.
  */
 export interface ChannelCapabilities {
-  text: boolean;
-  photo: boolean;
-  video: boolean;
-  voice: boolean;
-  document: boolean;
-  edit: boolean;
-  delete: boolean;
-  callbackQuery: boolean;
-  typing: boolean;
+	text: boolean;
+	photo: boolean;
+	video: boolean;
+	voice: boolean;
+	document: boolean;
+	edit: boolean;
+	delete: boolean;
+	callbackQuery: boolean;
+	typing: boolean;
 }
 
 /**
@@ -38,123 +38,177 @@ export interface ChannelCapabilities {
  * externalRef → байты через downloadMedia().
  */
 export interface MediaRef {
-  channelId: string;
-  externalRef: string;
+	channelId: string;
+	externalRef: string;
 }
 
 // ---- Inbound -----------------------------------------------------------
 
 export type InboundPart =
-  | { kind: "text"; text: string }
-  | { kind: "photo"; mediaRef: MediaRef; caption?: string }
-  | { kind: "video"; mediaRef: MediaRef; caption?: string }
-  | { kind: "voice"; mediaRef: MediaRef; durationSec?: number }
-  // Telegram «кружок» (видео-сообщение). Используется для опциональной
-  // видео-верификации личности в обменнике (уходит оператору).
-  | { kind: "video_note"; mediaRef: MediaRef; durationSec?: number }
-  | { kind: "document"; mediaRef: MediaRef; mimeType?: string; fileName?: string }
-  | { kind: "callback_query"; data: string; originalMessageId: string };
+	| { kind: "text"; text: string }
+	| { kind: "photo"; mediaRef: MediaRef; caption?: string }
+	| { kind: "video"; mediaRef: MediaRef; caption?: string }
+	| { kind: "voice"; mediaRef: MediaRef; durationSec?: number }
+	// Telegram «кружок» (видео-сообщение). Используется для опциональной
+	// видео-верификации личности в обменнике (уходит оператору).
+	| { kind: "video_note"; mediaRef: MediaRef; durationSec?: number }
+	| {
+			kind: "document";
+			mediaRef: MediaRef;
+			mimeType?: string;
+			fileName?: string;
+	  }
+	| { kind: "callback_query"; data: string; originalMessageId: string };
 
 /**
  * Входящее событие. Адаптер собирает его из webhook-payload (BotAPI) или
  * MTProto-update (userbot) — наверх отдаётся уже unified-структура.
  */
 export interface Inbound {
-  channelId: string;
-  externalMessageId: string;
-  externalUserId: string;
-  externalUsername?: string;
-  parts: InboundPart[];
-  receivedAt: number;
-  /**
-   * Escape-hatch: канал-специфичный raw payload. Conversation-engine не
-   * должен на это смотреть — нужно только для audit/debug и адаптер-специфичных
-   * расширений (например, MTProto reply-to-resolve).
-   */
-  raw: unknown;
+	channelId: string;
+	externalMessageId: string;
+	externalUserId: string;
+	externalUsername?: string;
+	parts: InboundPart[];
+	receivedAt: number;
+	/**
+	 * Escape-hatch: канал-специфичный raw payload. Conversation-engine не
+	 * должен на это смотреть — нужно только для audit/debug и адаптер-специфичных
+	 * расширений (например, MTProto reply-to-resolve).
+	 */
+	raw: unknown;
 }
 
 // ---- Outbound ----------------------------------------------------------
 
 export interface ReplyMarkup {
-  /** Inline-кнопки: каждая внутренняя строка — это ряд. */
-  inlineButtons?: Array<Array<{ label: string; callbackData: string }>>;
+	/** Inline-кнопки: каждая внутренняя строка — это ряд. */
+	inlineButtons?: Array<Array<{ label: string; callbackData: string }>>;
+}
+
+export type WhatsAppTemplateCategory =
+	| "utility"
+	| "marketing"
+	| "authentication";
+
+export type WhatsAppTemplateParameter = { type: "text"; text: string };
+
+export interface WhatsAppTemplateComponent {
+	type: "header" | "body" | "button";
+	subType?: "quick_reply" | "url";
+	index?: string;
+	parameters: WhatsAppTemplateParameter[];
+}
+
+export interface WhatsAppTemplatePayload {
+	/** Approved WhatsApp template name in Meta Business Manager. */
+	name: string;
+	/** WhatsApp language code, for example "en_US". */
+	languageCode: string;
+	category?: WhatsAppTemplateCategory;
+	components?: WhatsAppTemplateComponent[];
+}
+
+export interface WhatsAppProviderOptInMeta {
+	source: string;
+	timestamp: number;
+	categories: string[];
+}
+
+export interface WhatsAppOutboundMeta {
+	/** Approved template payload for proactive / outside-window sends. */
+	template?: WhatsAppTemplatePayload;
+	/** Epoch second until which free-form messaging is allowed. */
+	freeFormAllowedUntil?: number;
+	/** Provider request linkage so worker/operator tooling can update relay state. */
+	providerRequestId?: number;
+	orderId?: number;
+	providerOptIn?: WhatsAppProviderOptInMeta;
+}
+
+export interface ChannelSpecificOutboundMeta {
+	whatsapp?: WhatsAppOutboundMeta;
 }
 
 export interface OperatorHandoffMeta {
-  reason:
-    | "kyc_review"
-    | "payment_review"
-    | "office_payout"
-    | "payout_review"
-    | "operator_request";
-  title: string;
-  action: string;
-  contractId?: string;
-  orderId?: number;
-  stageSlug?: string;
-  priority?: "normal" | "high";
-  /** Customer input accepted by the bot before escalation, safe for UI/logs. */
-  accepted?: string;
-  /** What is still pending and must not be skipped. */
-  pending?: string;
-  /** Explicit review path so external services are distinguishable from manual review. */
-  reviewPath?:
-    | "manual_operator"
-    | "operator_or_external_kyc"
-    | "operator_or_payment_service"
-    | "operator_or_payout_service";
-  /** Safe operational context: no secrets, requisites, or raw document contents. */
-  context?: string;
-  urgency?: string;
-  amount?: string;
-  rail?: string;
-  network?: string;
+	reason:
+		| "kyc_review"
+		| "payment_review"
+		| "office_payout"
+		| "payout_review"
+		| "operator_request";
+	title: string;
+	action: string;
+	contractId?: string;
+	orderId?: number;
+	stageSlug?: string;
+	priority?: "normal" | "high";
+	/** Customer input accepted by the bot before escalation, safe for UI/logs. */
+	accepted?: string;
+	/** What is still pending and must not be skipped. */
+	pending?: string;
+	/** Explicit review path so external services are distinguishable from manual review. */
+	reviewPath?:
+		| "manual_operator"
+		| "operator_or_external_kyc"
+		| "operator_or_payment_service"
+		| "operator_or_payout_service";
+	/** Safe operational context: no secrets, requisites, or raw document contents. */
+	context?: string;
+	urgency?: string;
+	amount?: string;
+	rail?: string;
+	network?: string;
 }
 
 export type OutboundPart =
-  | { kind: "text"; text: string; parseMode?: "markdown" | "html" }
-  | { kind: "photo"; mediaRef: MediaRef; caption?: string }
-  | { kind: "video"; mediaRef: MediaRef; caption?: string }
-  | { kind: "document"; mediaRef: MediaRef; caption?: string };
+	| { kind: "text"; text: string; parseMode?: "markdown" | "html" }
+	| { kind: "photo"; mediaRef: MediaRef; caption?: string }
+	| { kind: "video"; mediaRef: MediaRef; caption?: string }
+	| { kind: "document"; mediaRef: MediaRef; caption?: string };
 
 /**
  * Запрос на отправку. conversation-engine кладёт это в outbound-очередь,
  * worker дёргает соответствующий ChannelAdapter.send().
  */
 export interface OutboundEnvelope {
-  channelId: string;
-  externalUserId: string;
-  parts: OutboundPart[];
-  /** Internal metadata for admin/operator workflows. Channel adapters ignore it. */
-  operatorHandoff?: OperatorHandoffMeta;
-  replyToExternalMessageId?: string;
-  replyMarkup?: ReplyMarkup;
-  /** Опционально — для дедупликации повторных send-попыток. */
-  idempotencyKey?: string;
+	channelId: string;
+	externalUserId: string;
+	parts: OutboundPart[];
+	/** Internal metadata for admin/operator workflows. Channel adapters ignore it. */
+	operatorHandoff?: OperatorHandoffMeta;
+	/**
+	 * Channel-specific policy/payload metadata. Adapters that do not understand a
+	 * key must ignore it; WhatsApp uses this for template-aware sends.
+	 */
+	channelMeta?: ChannelSpecificOutboundMeta;
+	replyToExternalMessageId?: string;
+	replyMarkup?: ReplyMarkup;
+	/** Опционально — для дедупликации повторных send-попыток. */
+	idempotencyKey?: string;
 }
 
 /** Результат успешной отправки. */
 export interface Sent {
-  channelId: string;
-  externalMessageId: string;
-  sentAt: number;
+	channelId: string;
+	externalMessageId: string;
+	sentAt: number;
 }
 
 // ---- Edit / Delete -----------------------------------------------------
 
 export interface EditOpts {
-  channelId: string;
-  externalUserId: string;
-  externalMessageId: string;
-  /** Новый текст. Замена и фото/видео в этом API не поддерживается — channel-specific. */
-  text: string;
-  parseMode?: "markdown" | "html";
-  replyMarkup?: ReplyMarkup;
+	channelId: string;
+	externalUserId: string;
+	externalMessageId: string;
+	/** Новый текст. Замена и фото/видео в этом API не поддерживается — channel-specific. */
+	text: string;
+	parseMode?: "markdown" | "html";
+	replyMarkup?: ReplyMarkup;
 }
 
 export interface DeleteOpts {
-  channelId: string;
-  externalUserId: string;
-  externalMessageId: string;
+	channelId: string;
+	externalUserId: string;
+	externalMessageId: string;
 }

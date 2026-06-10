@@ -35,6 +35,7 @@ export const PROVIDER_REQUEST_STATUSES = [
 	"declined",
 	"expired",
 	"cancelled",
+	"failed",
 ] as const;
 
 export type ProviderRequestStatus = (typeof PROVIDER_REQUEST_STATUSES)[number];
@@ -89,14 +90,23 @@ const providerRequestTransitions: Record<
 	ProviderRequestStatus,
 	readonly ProviderRequestStatus[]
 > = {
-	draft: ["sent", "cancelled"],
-	sent: ["seen", "quoted", "accepted", "declined", "expired", "cancelled"],
-	seen: ["quoted", "accepted", "declined", "expired", "cancelled"],
-	quoted: ["accepted", "declined", "expired", "cancelled"],
-	accepted: ["cancelled"],
+	draft: ["sent", "cancelled", "failed"],
+	sent: [
+		"seen",
+		"quoted",
+		"accepted",
+		"declined",
+		"expired",
+		"cancelled",
+		"failed",
+	],
+	seen: ["quoted", "accepted", "declined", "expired", "cancelled", "failed"],
+	quoted: ["accepted", "declined", "expired", "cancelled", "failed"],
+	accepted: ["cancelled", "failed"],
 	declined: [],
 	expired: [],
 	cancelled: [],
+	failed: ["cancelled"],
 };
 
 export function canTransitionServiceOrder(
@@ -181,6 +191,7 @@ export interface ProviderRequestRow {
 	respondedAt: number | null;
 	expiredAt: number | null;
 	cancelledAt: number | null;
+	failedAt: number | null;
 	createdAt: number;
 	updatedAt: number;
 }
@@ -223,6 +234,21 @@ export class ProviderRelayRepo {
 			.where(
 				and(
 					eq(providerRequests.id, requestId),
+					eq(providerRequests.tenantId, this.ctx.tenantId),
+				),
+			);
+		return (row as ProviderRequestRow) ?? null;
+	}
+
+	async providerRequestByOutboundQueueId(
+		outboundQueueId: number,
+	): Promise<ProviderRequestRow | null> {
+		const [row] = await this.ctx.db
+			.select()
+			.from(providerRequests)
+			.where(
+				and(
+					eq(providerRequests.outboundQueueId, outboundQueueId),
 					eq(providerRequests.tenantId, this.ctx.tenantId),
 				),
 			);
@@ -479,6 +505,7 @@ export class ProviderRelayRepo {
 				...(nextStatus === "sent" ? { sentAt: nowEpoch } : {}),
 				...(nextStatus === "expired" ? { expiredAt: nowEpoch } : {}),
 				...(nextStatus === "cancelled" ? { cancelledAt: nowEpoch } : {}),
+				...(nextStatus === "failed" ? { failedAt: nowEpoch } : {}),
 			})
 			.where(
 				and(
@@ -491,6 +518,38 @@ export class ProviderRelayRepo {
 			throw new Error("provider_requests.transition: update returned no row");
 		}
 		return row as ProviderRequestRow;
+	}
+
+	async recordProviderRequestSendFailedForOutbound(opts: {
+		outboundQueueId: number;
+		error: string;
+		nowEpoch: number;
+	}): Promise<ProviderRequestRow | null> {
+		const current = await this.providerRequestByOutboundQueueId(
+			opts.outboundQueueId,
+		);
+		if (!current) return null;
+
+		let request = current;
+		if (current.status !== "failed") {
+			request = await this.transitionProviderRequestStatus(
+				current.id,
+				"failed",
+				opts.nowEpoch,
+			);
+		}
+		await this.appendEvent({
+			orderId: current.orderId,
+			providerRequestId: current.id,
+			actorType: "system",
+			eventType: "provider_request_send_failed",
+			data: {
+				error: opts.error,
+				outboundQueueId: opts.outboundQueueId,
+			},
+			nowEpoch: opts.nowEpoch,
+		});
+		return request;
 	}
 
 	async recordProviderQuote(opts: {

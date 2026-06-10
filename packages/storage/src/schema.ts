@@ -2408,6 +2408,9 @@ export const providerProfiles = pgTable(
     serviceArea: text("service_area"),
     defaultCommissionPct: doublePrecision("default_commission_pct").notNull().default(0),
     notes: text("notes"),
+    optInSource: text("opt_in_source"),
+    optInAt: integer("opt_in_at"),
+    optInCategoriesJson: text("opt_in_categories_json").notNull().default("[]"),
     metadataJson: text("metadata_json").notNull().default("{}"),
     createdAt: integer("created_at").notNull().default(epochNow()),
     updatedAt: integer("updated_at").notNull().default(epochNow()),
@@ -2551,13 +2554,14 @@ export const providerRequests = pgTable(
     respondedAt: integer("responded_at"),
     expiredAt: integer("expired_at"),
     cancelledAt: integer("cancelled_at"),
+    failedAt: integer("failed_at"),
     createdAt: integer("created_at").notNull().default(epochNow()),
     updatedAt: integer("updated_at").notNull().default(epochNow()),
   },
   (t) => [
     check(
       "provider_requests_status_check",
-      sql`${t.status} IN ('draft','sent','seen','quoted','accepted','declined','expired','cancelled')`,
+      sql`${t.status} IN ('draft','sent','seen','quoted','accepted','declined','expired','cancelled','failed')`,
     ),
     uniqueIndex("uniq_provider_requests_idem")
       .on(t.idempotencyKey)

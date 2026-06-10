@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
 import type { OutboundQueueRepo } from "./dal/index.ts";
-import { dispatchOutbound } from "./outbound-dispatch.ts";
+import {
+	dispatchOutbound,
+	withWhatsAppFreeFormWindow,
+} from "./outbound-dispatch.ts";
 
 describe("dispatchOutbound", () => {
 	it("делегирует OutboundQueueRepo.enqueue с прокинутыми аргументами", async () => {
@@ -47,6 +50,44 @@ describe("dispatchOutbound", () => {
 			outbound,
 			nowEpoch: 0,
 		});
-		expect(calls[0]!.conversationId).toBeNull();
+		expect(calls[0]?.conversationId).toBeNull();
+	});
+
+	it("adds WhatsApp free-form window for inbound replies", () => {
+		const envelope: OutboundEnvelope = {
+			channelId: "10",
+			externalUserId: "66999999999",
+			parts: [{ kind: "text", text: "reply" }],
+		};
+		const result = withWhatsAppFreeFormWindow(envelope, {
+			channelKind: "whatsapp",
+			nowEpoch: 100,
+		});
+		expect(result.channelMeta?.whatsapp?.freeFormAllowedUntil).toBe(
+			100 + 24 * 60 * 60,
+		);
+		expect(envelope.channelMeta).toBeUndefined();
+	});
+
+	it("does not mutate WhatsApp template envelopes", () => {
+		const envelope: OutboundEnvelope = {
+			channelId: "10",
+			externalUserId: "66999999999",
+			parts: [{ kind: "text", text: "fallback" }],
+			channelMeta: {
+				whatsapp: {
+					template: {
+						name: "provider_booking_request_v1",
+						languageCode: "en_US",
+					},
+				},
+			},
+		};
+		expect(
+			withWhatsAppFreeFormWindow(envelope, {
+				channelKind: "whatsapp",
+				nowEpoch: 100,
+			}),
+		).toBe(envelope);
 	});
 });

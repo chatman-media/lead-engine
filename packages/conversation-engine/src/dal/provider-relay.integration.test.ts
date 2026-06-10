@@ -129,6 +129,7 @@ describe("provider relay lifecycle helpers", () => {
 		expect(canTransitionServiceOrder("intake", "awaiting_provider")).toBe(true);
 		expect(canTransitionServiceOrder("fulfilled", "matching")).toBe(false);
 		expect(canTransitionProviderRequest("sent", "quoted")).toBe(true);
+		expect(canTransitionProviderRequest("sent", "failed")).toBe(true);
 		expect(canTransitionProviderRequest("declined", "sent")).toBe(false);
 	});
 });

@@ -1,6 +1,8 @@
 import type {
 	ChannelKind,
 	OutboundEnvelope,
+	WhatsAppProviderOptInMeta,
+	WhatsAppTemplatePayload,
 } from "@chatman-media/channel-core";
 import {
 	channelIdentities,
@@ -32,16 +34,21 @@ const defaultProviderChannelKinds: ChannelKind[] = [
 	"facebook",
 	"vk",
 ];
+const providerOutreachOptInCategory = "provider_outreach";
+const defaultWhatsAppProviderTemplateName = "provider_booking_request_v1";
+const defaultWhatsAppProviderTemplateLanguage = "en_US";
 
 export type ProviderRelayStartFailureReason =
 	| "routing_failed"
-	| "provider_channel_missing";
+	| "provider_channel_missing"
+	| "provider_opt_in_missing";
 
 export interface ProviderChannelIdentity {
 	channelDbId: number;
 	channelKind: ChannelKind;
 	channelExternalId: string;
 	externalUserId: string;
+	providerOptIn: WhatsAppProviderOptInMeta | null;
 }
 
 export interface ProviderRelayStartInput {
@@ -58,6 +65,8 @@ export interface ProviderRelayStartInput {
 	providerRequestIdempotencyKey?: string | null;
 	outboundIdempotencyKey?: string | null;
 	messageText?: string | null;
+	whatsAppTemplateName?: string | null;
+	whatsAppTemplateLanguageCode?: string | null;
 	metadata?: Record<string, unknown>;
 }
 
@@ -160,25 +169,72 @@ export class ProviderRelayOrchestrator {
 				providerId: route.candidate.providerId,
 			};
 		}
+		if (
+			identity.channelKind === "whatsapp" &&
+			!hasProviderOutreachOptIn(identity.providerOptIn)
+		) {
+			await this.relay.appendEvent({
+				orderId: order.id,
+				actorType: "system",
+				eventType: "provider_request_failed",
+				data: {
+					reason: "provider_opt_in_missing",
+					providerId: route.candidate.providerId,
+					channelId: identity.channelDbId,
+				},
+				nowEpoch: input.nowEpoch,
+			});
+			return {
+				ok: false,
+				reason: "provider_opt_in_missing",
+				order,
+				providerId: route.candidate.providerId,
+			};
+		}
 
 		const outboundKey =
 			input.outboundIdempotencyKey ??
 			`provider-relay:${order.id}:${route.candidate.providerId}:${identity.channelDbId}:initial`;
+		const providerMessage =
+			input.messageText ??
+			this.defaultProviderMessage({
+				requestType: input.requestType,
+				serviceArea: input.serviceArea,
+				summary: input.summary,
+			});
+		const whatsappTemplate =
+			identity.channelKind === "whatsapp"
+				? this.defaultProviderWhatsAppTemplate({
+						requestType: input.requestType,
+						serviceArea: input.serviceArea,
+						summary: input.summary,
+						templateName:
+							input.whatsAppTemplateName ?? defaultWhatsAppProviderTemplateName,
+						languageCode:
+							input.whatsAppTemplateLanguageCode ??
+							defaultWhatsAppProviderTemplateLanguage,
+					})
+				: null;
 		const envelope: OutboundEnvelope = {
 			channelId: String(identity.channelDbId),
 			externalUserId: identity.externalUserId,
 			parts: [
 				{
 					kind: "text",
-					text:
-						input.messageText ??
-						this.defaultProviderMessage({
-							requestType: input.requestType,
-							serviceArea: input.serviceArea,
-							summary: input.summary,
-						}),
+					text: providerMessage,
 				},
 			],
+			...(whatsappTemplate
+				? {
+						channelMeta: {
+							whatsapp: {
+								template: whatsappTemplate,
+								orderId: order.id,
+								providerOptIn: identity.providerOptIn ?? undefined,
+							},
+						},
+					}
+				: {}),
 			idempotencyKey: outboundKey,
 		};
 
@@ -201,6 +257,15 @@ export class ProviderRelayOrchestrator {
 			metadata: {
 				providerServiceId: route.candidate.providerServiceId,
 				override: route.override,
+				...(whatsappTemplate
+					? {
+							whatsappTemplate: {
+								name: whatsappTemplate.name,
+								languageCode: whatsappTemplate.languageCode,
+								category: whatsappTemplate.category,
+							},
+						}
+					: {}),
 			},
 			nowEpoch: input.nowEpoch,
 		});
@@ -236,6 +301,13 @@ export class ProviderRelayOrchestrator {
 		outboundQueueId?: number | null;
 	}): Promise<OrderEventRow> {
 		const request = await this.requireProviderRequest(opts.providerRequestId);
+		if (request.status !== "failed") {
+			await this.relay.transitionProviderRequestStatus(
+				request.id,
+				"failed",
+				opts.nowEpoch,
+			);
+		}
 		return this.relay.appendEvent({
 			orderId: request.orderId,
 			providerRequestId: request.id,
@@ -339,6 +411,9 @@ export class ProviderRelayOrchestrator {
 				channelKind: channels.kind,
 				channelExternalId: channels.externalId,
 				externalUserId: channelIdentities.externalUserId,
+				optInSource: providerProfiles.optInSource,
+				optInAt: providerProfiles.optInAt,
+				optInCategoriesJson: providerProfiles.optInCategoriesJson,
 			})
 			.from(providerProfiles)
 			.innerJoin(
@@ -373,6 +448,35 @@ export class ProviderRelayOrchestrator {
 			channelKind: row.channelKind as ChannelKind,
 			channelExternalId: row.channelExternalId,
 			externalUserId: row.externalUserId,
+			providerOptIn: parseProviderOptIn({
+				source: row.optInSource,
+				timestamp: row.optInAt,
+				categoriesJson: row.optInCategoriesJson,
+			}),
+		};
+	}
+
+	private defaultProviderWhatsAppTemplate(input: {
+		requestType: string;
+		serviceArea?: string | null;
+		summary?: string | null;
+		templateName: string;
+		languageCode: string;
+	}): WhatsAppTemplatePayload {
+		return {
+			name: input.templateName,
+			languageCode: input.languageCode,
+			category: "utility",
+			components: [
+				{
+					type: "body",
+					parameters: [
+						{ type: "text", text: input.requestType },
+						{ type: "text", text: input.serviceArea?.trim() || "any area" },
+						{ type: "text", text: input.summary?.trim() || "No extra notes" },
+					],
+				},
+			],
 		};
 	}
 
@@ -389,4 +493,36 @@ export class ProviderRelayOrchestrator {
 		].filter((line): line is string => Boolean(line));
 		return lines.join("\n");
 	}
+}
+
+function parseProviderOptIn(input: {
+	source: string | null;
+	timestamp: number | null;
+	categoriesJson: string;
+}): WhatsAppProviderOptInMeta | null {
+	if (!input.source || input.timestamp === null) return null;
+	let categories: string[];
+	try {
+		const parsed = JSON.parse(input.categoriesJson);
+		categories = Array.isArray(parsed)
+			? parsed.filter((item): item is string => typeof item === "string")
+			: [];
+	} catch {
+		categories = [];
+	}
+	return {
+		source: input.source,
+		timestamp: input.timestamp,
+		categories,
+	};
+}
+
+function hasProviderOutreachOptIn(
+	optIn: WhatsAppProviderOptInMeta | null,
+): boolean {
+	return (
+		optIn !== null &&
+		optIn.timestamp > 0 &&
+		optIn.categories.includes(providerOutreachOptInCategory)
+	);
 }
