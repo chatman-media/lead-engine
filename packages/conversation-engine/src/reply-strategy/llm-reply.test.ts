@@ -298,6 +298,42 @@ describe("LlmReplyStrategy", () => {
     });
   });
 
+  it("exchange: стартовый интент с длинным пробельным разрывом проверяется линейно", async () => {
+    const userText = `хочу${" ".repeat(25_000)}поменять 500 USDT`;
+    const chat = new CapturingChat("Сейчас уточню у оператора.");
+    const repo = fakeMessagesRepo([row(1, "user", userText)]);
+    const recorded: Array<Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveTools: () => [exchangeQuoteTool()],
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: userText,
+    });
+
+    expect(result).not.toBeNull();
+    const part = result?.[0]?.parts[0];
+    expect(part?.kind).toBe("text");
+    expect(part?.kind === "text" ? part.text : "").toContain(
+      "За 500 USDT (TRC20) получите 15750 THB.",
+    );
+    expect(chat.lastCall).toBeNull();
+    expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({ asset: "USDT", amount: 500 });
+  });
+
   it("exchange: в follow-up выбирает source amount рядом с asset, а не THB total", async () => {
     const chat = new CapturingChat("Сейчас уточню у оператора.");
     const repo = fakeMessagesRepo([
