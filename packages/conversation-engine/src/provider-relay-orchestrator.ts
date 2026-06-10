@@ -212,6 +212,11 @@ export class ProviderRelayOrchestrator {
 	async sendProviderRequestForOrder(
 		input: ProviderRelaySendProviderRequestInput,
 	): Promise<ProviderRelaySendProviderRequestResult> {
+		if (!(await this.flags.isEnabled(PROVIDER_RELAY_FEATURE_KEY))) {
+			this.recordFailureMetric("none", "provider_relay_disabled");
+			return { ok: false, reason: "provider_relay_disabled" };
+		}
+
 		const order = await this.relay.orderById(input.orderId);
 		if (!order) return { ok: false, reason: "order_not_found" };
 		if (!canTransitionServiceOrder(order.status, "awaiting_provider")) {

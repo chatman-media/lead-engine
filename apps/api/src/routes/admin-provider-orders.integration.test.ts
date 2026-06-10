@@ -75,6 +75,13 @@ beforeAll(async () => {
 	token = auth.token;
 	tenantId = auth.tenant.id;
 	now = Math.floor(Date.parse("2026-06-09T04:00:00Z") / 1000);
+	await db.insert(schema.tenantFeatureFlags).values({
+		tenantId,
+		featureKey: "provider_relay",
+		enabled: true,
+		createdAt: now,
+		updatedAt: now,
+	});
 
 	await seedBrokerOrder();
 }, 30_000);
@@ -358,6 +365,41 @@ async function seedBrokerOrder() {
 	retryOrderId = retry.id;
 }
 
+async function createRetryOrder(summary: string): Promise<number> {
+	const [row] = await db
+		.insert(schema.serviceOrders)
+		.values({
+			tenantId,
+			customerContactId,
+			assignedProviderId: providerId,
+			requestType: "massage",
+			status: "provider_declined",
+			summary,
+			metadataJson: JSON.stringify({ serviceArea: "Chaweng" }),
+			createdAt: now,
+			updatedAt: now,
+		})
+		.returning({ id: schema.serviceOrders.id });
+	if (!row) throw new Error("retry order insert failed");
+	return row.id;
+}
+
+async function outboundRowCount(): Promise<number> {
+	return (
+		await db
+			.select({ id: schema.outboundQueue.id })
+			.from(schema.outboundQueue)
+			.where(eq(schema.outboundQueue.tenantId, tenantId))
+	).length;
+}
+
+async function setProviderRelayFlag(enabled: boolean): Promise<void> {
+	await db
+		.update(schema.tenantFeatureFlags)
+		.set({ enabled, updatedAt: now + 100 })
+		.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+}
+
 describe("admin provider orders", () => {
 	it("exposes ops settings and metrics and blocks writes when disabled", async () => {
 		if (!sql) return;
@@ -378,7 +420,7 @@ describe("admin provider orders", () => {
 				stuckOrders: { count: number };
 			};
 		};
-		expect(ops.settings).toMatchObject({ enabled: true, source: "default" });
+		expect(ops.settings).toMatchObject({ enabled: true, source: "flag" });
 		expect(ops.metrics.ordersCreated).toBeGreaterThanOrEqual(4);
 		expect(ops.metrics.providerRequestsSent).toBe(1);
 		expect(ops.metrics.providerResponseRatePct).toBe(100);
@@ -591,5 +633,33 @@ describe("admin provider orders", () => {
 				{ from: "confirmed", to: "fulfilled" },
 			],
 		});
+	});
+
+	it("blocks manual provider request when provider relay rollout flag is disabled", async () => {
+		if (!sql) return;
+		const disabledOrderId = await createRetryOrder("Disabled rollout retry");
+		const outboundBefore = await outboundRowCount();
+
+		await setProviderRelayFlag(false);
+		try {
+			const res = await authReq(
+				`/api/admin/provider-orders/${disabledOrderId}/send-provider-request`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						providerId,
+						messageText: "Should not be enqueued",
+					}),
+				},
+			);
+			expect(res.status).toBe(403);
+			expect(await res.json()).toMatchObject({
+				error: "provider_relay_disabled",
+			});
+			expect(await outboundRowCount()).toBe(outboundBefore);
+		} finally {
+			await setProviderRelayFlag(true);
+		}
 	});
 });
