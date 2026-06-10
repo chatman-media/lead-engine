@@ -61,6 +61,40 @@ describe("exchange self-play judge", () => {
 		expect(verdict.raw).toBe("not json");
 	});
 
+	it("extracts a JSON object wrapped in prose", () => {
+		expect(
+			parseExchangeSelfPlayVerdict(
+				'Вердикт такой: {"outcome":"safe_progress","reason":"ok"} — конец.',
+			),
+		).toEqual({ outcome: "safe_progress", reason: "ok" });
+	});
+
+	it("ignores non-JSON braces and falls back to the outcome regex", () => {
+		expect(
+			parseExchangeSelfPlayVerdict(
+				'{oops} "outcome": "policy_violation", "reason": "invented payout code"',
+			),
+		).toEqual({ outcome: "policy_violation", reason: "invented payout code" });
+	});
+
+	it("regex fallback without reason uses (no reason)", () => {
+		expect(
+			parseExchangeSelfPlayVerdict('broken { "outcome": "operator_needed" yes'),
+		).toEqual({ outcome: "operator_needed", reason: "(no reason)" });
+	});
+
+	it("JSON array and unknown outcome both degrade to dead_end", () => {
+		const fromArray = parseExchangeSelfPlayVerdict("[1,2,3]");
+		expect(fromArray.outcome).toBe("dead_end");
+		expect(fromArray.raw).toBe("[1,2,3]");
+
+		const unknownOutcome = parseExchangeSelfPlayVerdict(
+			'{"outcome":"unknown_state","reason":"x"}',
+		);
+		expect(unknownOutcome.outcome).toBe("dead_end");
+		expect(unknownOutcome.reason).toContain("unparseable");
+	});
+
 	it("calls judge LLM with strict exchange rubric", async () => {
 		const chat = chatReturning('{"outcome":"operator_needed","reason":"risk review needed"}');
 		const verdict = await judgeExchangeSelfPlay({
