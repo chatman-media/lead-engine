@@ -209,6 +209,106 @@ afterAll(async () => {
 }, 10_000);
 
 describe("CustomerOfferFlow", () => {
+	it("runs Telegram customer to WhatsApp provider to Telegram customer e2e with fake adapters", async () => {
+		if (!enabled) return;
+		const [conversation] = await db
+			.insert(schema.conversations)
+			.values({
+				tenantId,
+				userId: customerContactId,
+				source: "bot",
+				channelId: telegramChannelId,
+				mode: "ai",
+				status: "open",
+				lastMessageAt: now + 5,
+				createdAt: now + 5,
+			})
+			.returning({ id: schema.conversations.id });
+		if (!conversation) throw new Error("conversation insert returned no row");
+		await db.insert(schema.messages).values({
+			tenantId,
+			conversationId: conversation.id,
+			role: "user",
+			text: "Need in-room massage in Chaweng today 18:00",
+			createdAt: now + 5,
+		});
+
+		const outboundBefore = await tableCount("outbound_queue");
+		const outreach = await orchestrator().startProviderOutreach({
+			customerContactId,
+			customerConversationId: conversation.id,
+			requestType: "massage",
+			serviceArea: "Chaweng",
+			summary: "Telegram customer asks for in-room massage today 18:00",
+			preferredChannelKinds: ["whatsapp"],
+			orderIdempotencyKey: "e2e-order-telegram-whatsapp",
+			providerRequestIdempotencyKey: "e2e-provider-request-whatsapp",
+			outboundIdempotencyKey: "e2e-provider-outbound-whatsapp",
+			nowEpoch: now + 110,
+		});
+
+		expect(outreach.ok).toBe(true);
+		if (!outreach.ok) throw new Error("expected outreach success");
+		expect(outreach.identity).toMatchObject({
+			channelDbId: whatsappChannelId,
+			channelKind: "whatsapp",
+			externalUserId: providerExternalUserId,
+		});
+		expect(outreach.outbound.channelId).toBe(whatsappChannelId);
+		expect(await tableCount("outbound_queue")).toBe(outboundBefore + 1);
+		const providerPayload = JSON.parse(outreach.outbound.payloadJson);
+		expect(providerPayload.externalUserId).toBe(providerExternalUserId);
+		expect(providerPayload.parts[0].text).toContain("New massage request");
+		expect(providerPayload.parts[0].text).toContain("Area: Chaweng");
+
+		const quote = await responseHandler().handleProviderResponse({
+			inbound: providerInbound(
+				"Available today 18:00, price 1,200 THB",
+				"wa-e2e-quote",
+				now + 120,
+			),
+		});
+		expect(quote.ok).toBe(true);
+		if (!quote.ok) throw new Error("expected provider quote success");
+		expect(quote.order).toMatchObject({
+			id: outreach.order.id,
+			status: "offer_ready",
+			customerConversationId: conversation.id,
+			assignedProviderId: providerId,
+			customerAmount: 1380,
+		});
+
+		const customerOffer = await flow().sendCustomerOffer({
+			orderId: outreach.order.id,
+			customerChannelId: telegramChannelId,
+			nowEpoch: now + 130,
+		});
+		expect(customerOffer.ok).toBe(true);
+		if (!customerOffer.ok) throw new Error("expected customer offer success");
+		expect(customerOffer.identity).toMatchObject({
+			channelDbId: telegramChannelId,
+			channelKind: "telegram_bot",
+			externalUserId: customerExternalUserId,
+		});
+		expect(customerOffer.outbound.channelId).toBe(telegramChannelId);
+		expect(customerOffer.outbound.conversationId).toBe(conversation.id);
+		const customerPayload = JSON.parse(customerOffer.outbound.payloadJson);
+		expect(customerPayload.externalUserId).toBe(customerExternalUserId);
+		expect(customerPayload.parts[0].text).toContain("Провайдер подтвердил");
+		expect(customerPayload.parts[0].text).toContain("Стоимость: 1,380 THB");
+		expect(await tableCount("outbound_queue")).toBe(outboundBefore + 2);
+
+		const events = await relayRepo().eventsForOrder(outreach.order.id);
+		expect(new Set(events.map((event) => event.eventType))).toEqual(
+			new Set([
+				"provider_request_created",
+				"provider_request_sent",
+				"provider_quoted",
+				"customer_offer_sent",
+			]),
+		);
+	});
+
 	it("sends a normalized provider offer to the customer channel idempotently", async () => {
 		if (!enabled) return;
 		const quote = await startQuotedOrder("send", now + 10);

@@ -9,6 +9,7 @@ import {
 	withTenant,
 } from "@chatman-media/conversation-engine";
 import {
+	appSettings,
 	channelIdentities,
 	channels,
 	contacts,
@@ -33,6 +34,7 @@ type ActionBody = {
 	customerChannelId?: unknown;
 	serviceArea?: unknown;
 	reason?: unknown;
+	enabled?: unknown;
 };
 
 type OrderListRow = {
@@ -237,6 +239,40 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 		return c.json({ items: [...byProvider.values()] });
 	});
 
+	app.get("/api/admin/provider-orders/ops", async (c) => {
+		const tenantId = c.var.tenantId;
+		const [settings, metrics] = await Promise.all([
+			loadProviderRelaySettings(opts.db, tenantId),
+			loadProviderRelayMetrics(opts.db, tenantId, epochNow()),
+		]);
+		return c.json({ settings, metrics });
+	});
+
+	app.put("/api/admin/provider-orders/ops/settings", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = c.var.adminId as number | undefined;
+		const body = await readBody(c);
+		if (typeof body.enabled !== "boolean") {
+			return c.json({ error: "enabled boolean required" }, 400);
+		}
+
+		const settings = await setProviderRelayEnabled(
+			opts.db,
+			tenantId,
+			body.enabled,
+			epochNow(),
+		);
+		await recordAudit(opts.db, {
+			tenantId,
+			adminId,
+			action: "provider_relay.settings_update",
+			targetKind: "provider_relay",
+			targetId: String(tenantId),
+			details: settings,
+		});
+		return c.json({ ok: true, settings });
+	});
+
 	app.get("/api/admin/provider-orders/:id", async (c) => {
 		const tenantId = c.var.tenantId;
 		const id = parsePositiveId(c.req.param("id"));
@@ -257,6 +293,8 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 		const body = await readBody(c);
 		const providerId = parsePositiveId(body.providerId);
 		if (!providerId) return c.json({ error: "providerId required" }, 400);
+		const disabled = await rejectIfProviderRelayDisabled(c, opts.db, tenantId);
+		if (disabled) return disabled;
 		const now = epochNow();
 
 		const result = await withTenant(opts.db, tenantId, async (tx) => {
@@ -314,6 +352,8 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 		if (!id) return c.json({ error: "bad id" }, 400);
 		const body = await readBody(c);
 		const providerId = parsePositiveId(body.providerId);
+		const disabled = await rejectIfProviderRelayDisabled(c, opts.db, tenantId);
+		if (disabled) return disabled;
 		const now = epochNow();
 
 		const result = await withTenant(opts.db, tenantId, async (tx) => {
@@ -366,6 +406,8 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 		if (!id) return c.json({ error: "bad id" }, 400);
 		const body = await readBody(c);
 		const providerRequestId = parsePositiveId(body.providerRequestId);
+		const disabled = await rejectIfProviderRelayDisabled(c, opts.db, tenantId);
+		if (disabled) return disabled;
 		const now = epochNow();
 
 		const result = await withTenant(opts.db, tenantId, async (tx) => {
@@ -407,7 +449,11 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 		const id = parsePositiveId(c.req.param("id"));
 		if (!id) return c.json({ error: "bad id" }, 400);
 		const body = await readBody(c);
+		const disabled = await rejectIfProviderRelayDisabled(c, opts.db, tenantId);
+		if (disabled) return disabled;
 		const now = epochNow();
+		const offerTextOverride = cleanString(body.offerText) || null;
+		const paymentInstructions = cleanString(body.paymentInstructions) || null;
 
 		const result = await withTenant(opts.db, tenantId, async (tx) => {
 			const flow = new CustomerOfferFlow({ db: tx, tenantId });
@@ -415,8 +461,8 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 				orderId: id,
 				nowEpoch: now,
 				customerChannelId: parsePositiveId(body.customerChannelId) ?? undefined,
-				offerTextOverride: cleanString(body.offerText) || null,
-				paymentInstructions: cleanString(body.paymentInstructions) || null,
+				offerTextOverride,
+				paymentInstructions,
 				approvedByAdminId: adminId ?? null,
 			});
 		});
@@ -436,8 +482,25 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			details: {
 				providerRequestId: result.providerRequest.id,
 				outboundQueueId: result.outbound.id,
+				customerChannelId: result.identity.channelDbId,
+				manualOverride: Boolean(offerTextOverride),
+				hasPaymentInstructions: Boolean(paymentInstructions),
 			},
 		});
+		if (offerTextOverride) {
+			await recordAudit(opts.db, {
+				tenantId,
+				adminId,
+				action: "provider_order.manual_offer_override",
+				targetKind: "service_order",
+				targetId: String(id),
+				details: {
+					providerRequestId: result.providerRequest.id,
+					outboundQueueId: result.outbound.id,
+					customerChannelId: result.identity.channelDbId,
+				},
+			});
+		}
 		return c.json({
 			ok: true,
 			order: result.order,
@@ -452,6 +515,8 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 		const id = parsePositiveId(c.req.param("id"));
 		if (!id) return c.json({ error: "bad id" }, 400);
 		const body = await readBody(c);
+		const disabled = await rejectIfProviderRelayDisabled(c, opts.db, tenantId);
+		if (disabled) return disabled;
 		const now = epochNow();
 
 		const result = await withTenant(opts.db, tenantId, async (tx) => {
@@ -494,10 +559,13 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 		const adminId = c.var.adminId as number | undefined;
 		const id = parsePositiveId(c.req.param("id"));
 		if (!id) return c.json({ error: "bad id" }, 400);
+		const disabled = await rejectIfProviderRelayDisabled(c, opts.db, tenantId);
+		if (disabled) return disabled;
 		const now = epochNow();
 
 		const result = await withTenant(opts.db, tenantId, async (tx) => {
 			const relay = new ProviderRelayRepo({ db: tx, tenantId });
+			const transitions: Array<{ from: string; to: string }> = [];
 			let order = await relay.orderById(id);
 			if (!order) return { error: "order not found", status: 404 as const };
 			if (order.status === "fulfilled") return { order };
@@ -505,9 +573,11 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 				order.status === "awaiting_customer_payment" &&
 				order.paymentStatus === "paid"
 			) {
+				transitions.push({ from: order.status, to: "paid" });
 				order = await relay.transitionOrderStatus(id, "paid", now);
 			}
 			if (order.status === "paid") {
+				transitions.push({ from: order.status, to: "confirmed" });
 				order = await relay.transitionOrderStatus(id, "confirmed", now);
 			}
 			if (order.status !== "confirmed") {
@@ -516,15 +586,16 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 					status: 409 as const,
 				};
 			}
+			transitions.push({ from: order.status, to: "fulfilled" });
 			const fulfilled = await relay.transitionOrderStatus(id, "fulfilled", now);
 			await relay.appendEvent({
 				orderId: id,
 				actorType: "operator",
 				eventType: "order_fulfilled",
-				data: { adminId: adminId ?? null },
+				data: { adminId: adminId ?? null, transitions },
 				nowEpoch: now,
 			});
-			return { order: fulfilled };
+			return { order: fulfilled, transitions };
 		});
 		if ("error" in result) return c.json({ error: result.error }, result.status);
 		await recordAudit(opts.db, {
@@ -533,12 +604,313 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			action: "provider_order.mark_fulfilled",
 			targetKind: "service_order",
 			targetId: String(id),
-			details: {},
+			details: { transitions: result.transitions ?? [] },
 		});
+		if (result.transitions && result.transitions.length > 0) {
+			await recordAudit(opts.db, {
+				tenantId,
+				adminId,
+				action: "provider_order.payment_transition",
+				targetKind: "service_order",
+				targetId: String(id),
+				details: { transitions: result.transitions },
+			});
+		}
 		return c.json({ ok: true, order: result.order });
 	});
 
 	return app;
+}
+
+type ProviderRelaySettings = {
+	enabled: boolean;
+	source: "default" | "setting";
+	updatedAt: number | null;
+};
+
+type ProviderRelayMetrics = {
+	generatedAt: number;
+	ordersCreated: number;
+	ordersByStatus: Record<string, number>;
+	providerRequestsSent: number;
+	providerRequestsByStatus: Record<string, number>;
+	providerResponseRatePct: number | null;
+	avgTimeToQuoteSec: number | null;
+	paidOrders: number;
+	commissionAmountTotal: number;
+	paidCommissionAmount: number;
+	failuresByChannel: Record<string, number>;
+	failedDispatches: number;
+	stuckOrders: {
+		count: number;
+		items: Array<{
+			id: number;
+			status: string;
+			requestType: string;
+			reason: "order_expired" | "quote_expired";
+			dueAt: number;
+		}>;
+	};
+};
+
+const PROVIDER_RELAY_FLAG_DEFAULT = true;
+
+const activeOrderStatuses = new Set([
+	"intake",
+	"matching",
+	"awaiting_provider",
+	"provider_declined",
+	"offer_ready",
+	"awaiting_customer_payment",
+	"paid",
+	"confirmed",
+]);
+
+const responseProviderRequestStatuses = new Set(["quoted", "accepted", "declined"]);
+
+const openProviderRequestStatuses = new Set(["sent", "seen", "quoted"]);
+
+function providerRelayEnabledKey(tenantId: number): string {
+	return `tenant:${tenantId}:provider_relay_enabled`;
+}
+
+async function loadProviderRelaySettings(
+	db: Db,
+	tenantId: number,
+): Promise<ProviderRelaySettings> {
+	const key = providerRelayEnabledKey(tenantId);
+	const rows = await withTenant(db, tenantId, (tx) =>
+		tx
+			.select({ value: appSettings.value, updatedAt: appSettings.updatedAt })
+			.from(appSettings)
+			.where(and(eq(appSettings.tenantId, tenantId), eq(appSettings.key, key)))
+			.limit(1),
+	);
+	const row = rows[0];
+	if (!row) {
+		return {
+			enabled: PROVIDER_RELAY_FLAG_DEFAULT,
+			source: "default",
+			updatedAt: null,
+		};
+	}
+	return {
+		enabled: row.value !== "false",
+		source: "setting",
+		updatedAt: row.updatedAt,
+	};
+}
+
+async function setProviderRelayEnabled(
+	db: Db,
+	tenantId: number,
+	enabled: boolean,
+	now: number,
+): Promise<ProviderRelaySettings> {
+	const key = providerRelayEnabledKey(tenantId);
+	const value = enabled ? "true" : "false";
+	await withTenant(db, tenantId, (tx) =>
+		tx
+			.insert(appSettings)
+			.values({ tenantId, key, value, updatedAt: now })
+			.onConflictDoUpdate({
+				target: appSettings.key,
+				set: { value, updatedAt: now },
+			}),
+	);
+	return { enabled, source: "setting", updatedAt: now };
+}
+
+async function rejectIfProviderRelayDisabled(
+	c: Context,
+	db: Db,
+	tenantId: number,
+): Promise<Response | null> {
+	const settings = await loadProviderRelaySettings(db, tenantId);
+	if (settings.enabled) return null;
+	return c.json({ error: "provider_relay_disabled", settings }, 403);
+}
+
+async function loadProviderRelayMetrics(
+	db: Db,
+	tenantId: number,
+	now: number,
+): Promise<ProviderRelayMetrics> {
+	return withTenant(db, tenantId, async (tx) => {
+		const orders = await tx
+			.select({
+				id: serviceOrders.id,
+				status: serviceOrders.status,
+				requestType: serviceOrders.requestType,
+				paymentStatus: serviceOrders.paymentStatus,
+				commissionAmount: serviceOrders.commissionAmount,
+				expiresAt: serviceOrders.expiresAt,
+				createdAt: serviceOrders.createdAt,
+			})
+			.from(serviceOrders)
+			.where(eq(serviceOrders.tenantId, tenantId));
+
+		const requests = await tx
+			.select({
+				id: providerRequests.id,
+				orderId: providerRequests.orderId,
+				status: providerRequests.status,
+				channelKind: channels.kind,
+				sentAt: providerRequests.sentAt,
+				respondedAt: providerRequests.respondedAt,
+				quoteExpiresAt: providerRequests.quoteExpiresAt,
+				createdAt: providerRequests.createdAt,
+			})
+			.from(providerRequests)
+			.leftJoin(
+				channels,
+				and(
+					eq(channels.tenantId, tenantId),
+					eq(channels.id, providerRequests.channelId),
+				),
+			)
+			.where(eq(providerRequests.tenantId, tenantId));
+
+		const failureEvents = await tx
+			.select({
+				providerRequestId: orderEvents.providerRequestId,
+				dataJson: orderEvents.dataJson,
+			})
+			.from(orderEvents)
+			.where(
+				and(
+					eq(orderEvents.tenantId, tenantId),
+					eq(orderEvents.eventType, "provider_request_send_failed"),
+				),
+			);
+
+		const ordersByStatus: Record<string, number> = {};
+		let paidOrders = 0;
+		let commissionAmountTotal = 0;
+		let paidCommissionAmount = 0;
+		for (const order of orders) {
+			increment(ordersByStatus, order.status);
+			if (order.paymentStatus === "paid") paidOrders += 1;
+			commissionAmountTotal += order.commissionAmount ?? 0;
+			if (order.paymentStatus === "paid") {
+				paidCommissionAmount += order.commissionAmount ?? 0;
+			}
+		}
+
+		const providerRequestsByStatus: Record<string, number> = {};
+		const sentRequests = [];
+		const respondedRequests = [];
+		const quoteLatencies: number[] = [];
+		const requestsById = new Map<number, (typeof requests)[number]>();
+		const requestsByOrder = new Map<number, Array<(typeof requests)[number]>>();
+		for (const request of requests) {
+			increment(providerRequestsByStatus, request.status);
+			requestsById.set(request.id, request);
+			const list = requestsByOrder.get(request.orderId) ?? [];
+			list.push(request);
+			requestsByOrder.set(request.orderId, list);
+			if (request.sentAt !== null || request.status !== "draft") {
+				sentRequests.push(request);
+			}
+			if (
+				request.respondedAt !== null ||
+				responseProviderRequestStatuses.has(request.status)
+			) {
+				respondedRequests.push(request);
+			}
+			if (
+				request.sentAt !== null &&
+				request.respondedAt !== null &&
+				(request.status === "quoted" || request.status === "accepted")
+			) {
+				quoteLatencies.push(Math.max(0, request.respondedAt - request.sentAt));
+			}
+		}
+
+		const failuresByChannel: Record<string, number> = {};
+		const failureEventRequestIds = new Set<number>();
+		for (const event of failureEvents) {
+			if (event.providerRequestId) {
+				failureEventRequestIds.add(event.providerRequestId);
+			}
+			const request = event.providerRequestId
+				? requestsById.get(event.providerRequestId)
+				: null;
+			const eventData = parseJsonObject(event.dataJson);
+			const channelKind =
+				request?.channelKind ??
+				(typeof eventData.channelKind === "string"
+					? eventData.channelKind
+					: "unknown");
+			increment(failuresByChannel, channelKind);
+		}
+		for (const request of requests) {
+			if (request.status !== "failed" || failureEventRequestIds.has(request.id)) {
+				continue;
+			}
+			increment(failuresByChannel, request.channelKind ?? "unknown");
+		}
+
+		const stuckItems: ProviderRelayMetrics["stuckOrders"]["items"] = [];
+		for (const order of orders) {
+			if (!activeOrderStatuses.has(order.status)) continue;
+			if (order.expiresAt !== null && order.expiresAt < now) {
+				stuckItems.push({
+					id: order.id,
+					status: order.status,
+					requestType: order.requestType,
+					reason: "order_expired",
+					dueAt: order.expiresAt,
+				});
+				continue;
+			}
+			const expiredQuote = (requestsByOrder.get(order.id) ?? []).find(
+				(request) =>
+					openProviderRequestStatuses.has(request.status) &&
+					request.quoteExpiresAt !== null &&
+					request.quoteExpiresAt < now,
+			);
+			if (expiredQuote) {
+				stuckItems.push({
+					id: order.id,
+					status: order.status,
+					requestType: order.requestType,
+					reason: "quote_expired",
+					dueAt: expiredQuote.quoteExpiresAt ?? now,
+				});
+			}
+		}
+
+		return {
+			generatedAt: now,
+			ordersCreated: orders.length,
+			ordersByStatus,
+			providerRequestsSent: sentRequests.length,
+			providerRequestsByStatus,
+			providerResponseRatePct:
+				sentRequests.length > 0
+					? roundOneDecimal((respondedRequests.length / sentRequests.length) * 100)
+					: null,
+			avgTimeToQuoteSec:
+				quoteLatencies.length > 0
+					? Math.round(
+							quoteLatencies.reduce((sum, seconds) => sum + seconds, 0) /
+								quoteLatencies.length,
+						)
+					: null,
+			paidOrders,
+			commissionAmountTotal: roundMoney(commissionAmountTotal),
+			paidCommissionAmount: roundMoney(paidCommissionAmount),
+			failuresByChannel,
+			failedDispatches: failureEvents.length,
+			stuckOrders: {
+				count: stuckItems.length,
+				items: stuckItems
+					.sort((a, b) => a.dueAt - b.dueAt || a.id - b.id)
+					.slice(0, 20),
+			},
+		};
+	});
 }
 
 async function latestProviderRequests(
@@ -959,6 +1331,18 @@ function cleanString(value: unknown): string {
 function clampInt(value: number, min: number, max: number): number {
 	if (!Number.isFinite(value)) return min;
 	return Math.min(Math.max(Math.trunc(value), min), max);
+}
+
+function increment(map: Record<string, number>, key: string): void {
+	map[key] = (map[key] ?? 0) + 1;
+}
+
+function roundMoney(value: number): number {
+	return Math.round(value * 100) / 100;
+}
+
+function roundOneDecimal(value: number): number {
+	return Math.round(value * 10) / 10;
 }
 
 function epochNow(): number {

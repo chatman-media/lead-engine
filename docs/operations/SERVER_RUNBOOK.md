@@ -248,3 +248,89 @@ curl -fsS "$PLATFORM_PUBLIC_URL/api/admin/funnel" \
 - сохранённые реквизиты доступны через exchange tools.
 
 Если `workflowStage` не виден, проверить, что UI был пересобран и задеплоен.
+
+## 8. Provider relay: rollout и инциденты
+
+Provider relay управляет заказами, где клиент пишет в один канал, оператор
+матчит провайдера, а провайдер получает запрос в своём канале. На alpha это
+включается tenant-by-tenant через feature flag.
+
+Проверить флаг и операционные метрики:
+
+```bash
+TOKEN="<admin-jwt>"
+
+curl -fsS "$PLATFORM_PUBLIC_URL/api/admin/provider-orders/ops" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+В ответе смотреть:
+
+- `settings.enabled` — можно ли выполнять operator actions;
+- `metrics.ordersCreated` — созданные service orders;
+- `metrics.providerResponseRatePct` и `metrics.avgTimeToQuoteSec` — отвечает ли
+  провайдерский слой;
+- `metrics.paidOrders`, `metrics.commissionAmountTotal`,
+  `metrics.paidCommissionAmount` — деньги и комиссия;
+- `metrics.failuresByChannel` — ошибки доставки по каналам;
+- `metrics.stuckOrders.items` — зависшие заказы с `reason` и `dueAt`.
+
+Временно выключить relay для tenant:
+
+```bash
+curl -fsS -X PUT "$PLATFORM_PUBLIC_URL/api/admin/provider-orders/ops/settings" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":false}'
+```
+
+Вернуть обратно:
+
+```bash
+curl -fsS -X PUT "$PLATFORM_PUBLIC_URL/api/admin/provider-orders/ops/settings" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true}'
+```
+
+### Зависшие заказы
+
+1. Вызвать `/api/admin/provider-orders/ops` и взять
+   `metrics.stuckOrders.items`.
+2. Открыть деталь заказа:
+
+```bash
+curl -fsS "$PLATFORM_PUBLIC_URL/api/admin/provider-orders/<order-id>" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+3. Если `reason=quote_expired`, проверить последний `providerRequests[].status`,
+   `quoteExpiresAt`, `outboundStatus`, `outboundLastError`.
+4. Если провайдер не ответил, отправить новый запрос через UI или API
+   `POST /api/admin/provider-orders/<order-id>/send-provider-request`.
+5. Если клиент отменил или заказ протух, закрыть через
+   `POST /api/admin/provider-orders/<order-id>/cancel`.
+6. Проверить `events[]`: должны быть видны `provider_request_sent`,
+   `provider_quoted`, `customer_offer_sent`, `order_cancelled` или
+   `order_fulfilled`.
+
+### WhatsApp send failures
+
+Если `metrics.failuresByChannel.whatsapp > 0`:
+
+1. Открыть проблемный order detail и найти `providerRequests[]` с
+   `outboundStatus=failed` или событие `provider_request_send_failed`.
+2. Проверить `outboundLastError`: чаще всего это невалидный provider opt-in,
+   template outside 24h window, неверный phone number id или истёкший token.
+3. Проверить channel в админке: WhatsApp channel должен быть `active`, а secret
+   должен расшифровываться тем же `PLATFORM_MASTER_KEY`.
+4. Перезапустить worker только после исправления channel/secret:
+
+```bash
+sudo systemctl restart lead-engine-worker
+sudo journalctl -u lead-engine-worker -n 200 --no-pager
+```
+
+5. Повторить `send-provider-request` для affected order. Если ошибка
+   повторяется, выключить relay feature flag для tenant и вести заказы вручную
+   до исправления канала.
