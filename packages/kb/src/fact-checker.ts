@@ -1,4 +1,8 @@
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import {
+  FACT_CHECKER_SYSTEM_PROMPT_NO_VACANCIES,
+  FACT_CHECKER_SYSTEM_PROMPT_WITH_VACANCIES,
+} from "./prompts/fact-checker.ts";
 import { stripCodeFences, stripThinkBlocks } from "./sanitize.ts";
 
 /**
@@ -45,48 +49,6 @@ export interface FactCheckResult {
   reason?: string;
 }
 
-// ── System prompts ──────────────────────────────────────────────────────────
-
-const SYSTEM_PROMPT_NO_VACANCIES = `Ты проверяешь ответ бота на галлюцинации.
-Тебе дают: ВОПРОС кандидата, КОНТЕКСТ (выдержки из базы знаний), ОТВЕТ бота.
-
-Задача: проверить, что КАЖДЫЙ конкретный факт из ОТВЕТА встречается в КОНТЕКСТЕ.
-
-Правила:
-- Общие фразы ("хорошие условия", "напишу подробности"), приветствия, эмоции — НЕ требуют проверки
-- Конкретные числа, страны, города, валюты, сроки, % — ДОЛЖНЫ быть в контексте
-- "уточню у руководства" / "уточним на созвоне" — ОК, не требует проверки
-- Личные факты бота (имя, возраст, город, статус) — НЕ требуют проверки в контексте
-
-Верни СТРОГО JSON одной строкой, без markdown, без \`\`\`:
-{"grounded": true, "vacancyOk": true} — если все факты подтверждены или ответ общий
-{"grounded": false, "vacancyOk": true, "reason": "<какой факт не из контекста>"} — если есть выдуманное
-
-Только JSON, ничего больше.`;
-
-const SYSTEM_PROMPT_WITH_VACANCIES = `Ты проверяешь ответ бота на два типа ошибок.
-Тебе дают: ВОПРОС кандидата, KB-КОНТЕКСТ (выдержки из базы знаний), АКТУАЛЬНЫЕ ВАКАНСИИ (официальный список из БД), ОТВЕТ бота.
-
-ВАЖНО: АКТУАЛЬНЫЕ ВАКАНСИИ имеют приоритет над KB-КОНТЕКСТОМ.
-Если KB-чанк содержит устаревшую зарплату/условие, а в АКТУАЛЬНЫХ ВАКАНСИЯХ другое — правы ВАКАНСИИ.
-
-Проверка 1 — KB grounding:
-- Все конкретные факты в ОТВЕТЕ (числа, страны, города, валюты, сроки, %) должны быть в KB-КОНТЕКСТЕ или в АКТУАЛЬНЫХ ВАКАНСИЯХ.
-- Общие фразы, приветствия, "уточним на созвоне", личные факты бота — НЕ проверяются.
-
-Проверка 2 — Vacancy accuracy (только если ОТВЕТ содержит конкретные данные о вакансиях):
-- Суммы заработка, города трудоустройства, условия жилья/перелёта, тип заведения —
-  должны совпадать с АКТУАЛЬНЫМИ ВАКАНСИЯМИ.
-- Общие фразы ("легальный контракт", "поддержка агентства") — НЕ проверяются.
-
-Верни СТРОГО JSON одной строкой, без markdown, без \`\`\`:
-{"grounded": true, "vacancyOk": true} — всё ок
-{"grounded": false, "vacancyOk": true, "reason": "..."} — выдуманный факт (не из KB и не из вакансий)
-{"grounded": true, "vacancyOk": false, "reason": "..."} — данные вакансии не совпадают с официальным списком
-{"grounded": false, "vacancyOk": false, "reason": "..."} — оба нарушения
-
-Только JSON, ничего больше.`;
-
 // ── Main function ───────────────────────────────────────────────────────────
 
 /** Reply when the checker itself cannot run (LLM error / network).
@@ -114,7 +76,9 @@ export async function checkFacts(input: FactCheckInput): Promise<FactCheckResult
   // rules are the last line of defense on truly empty turns).
   if (!hasContext && !hasVacancies) return OK;
 
-  const systemPrompt = hasVacancies ? SYSTEM_PROMPT_WITH_VACANCIES : SYSTEM_PROMPT_NO_VACANCIES;
+  const systemPrompt = hasVacancies
+    ? FACT_CHECKER_SYSTEM_PROMPT_WITH_VACANCIES
+    : FACT_CHECKER_SYSTEM_PROMPT_NO_VACANCIES;
 
   let userPrompt: string;
   if (hasVacancies) {

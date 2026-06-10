@@ -1,23 +1,6 @@
-import type { ComposeOptions, FunnelStage, Hook, Style } from "./styles.ts";
+import { PROMPT_FRAMEWORK_BLURB, PROMPT_HOOK_LABELS } from "./prompts/prompt.ts";
+import type { ComposeOptions, FunnelStage, Style } from "./styles.ts";
 import { renderSummaryBlock, renderUserFactsBlock } from "./system-prompt.ts";
-
-const HOOK_LABELS: Record<Hook["kind"], string> = {
-  social_proof: "СОЦ. ДОКАЗАТЕЛЬСТВО",
-  scarcity: "ДЕФИЦИТ",
-  authority: "АВТОРИТЕТ",
-  liking: "СИМПАТИЯ",
-  reciprocity: "ВЗАИМНОСТЬ",
-  commitment: "ОБЯЗАТЕЛЬСТВО",
-};
-
-const FRAMEWORK_BLURB: Record<Style["framework"], string> = {
-  AIDA: "Двигай разговор по AIDA: Attention → Interest → Desire → Action.",
-  PAS: "Используй PAS: Problem → Agitate → Solve. Кратко, без воды.",
-  SPIN: "Веди по SPIN: Situation → Problem → Implication → Need-payoff.",
-  NEPQ: "NEPQ: задавай нейро-эмоциональные вопросы. Пусть prospect сам убедит себя.",
-  straight_line:
-    "Belfort Straight Line: веди prospect к 10/10 уверенности по продукту, продавцу и компании. Тон уверенный и заразительный.",
-};
 
 function kbGroundingReminder(personaRole: Style["persona"]["role"]): string {
   const base = "Никогда не выдумывай цифры, суммы, сроки, условия. Если фактов нет в KB CONTEXT — ";
@@ -91,11 +74,11 @@ export function composeSystemPrompt(
     `ТОН: ${voice.tone}. Язык: ${langName}.` +
     (voice.forbid.length ? ` ЗАПРЕЩЕНО: ${voice.forbid.join("; ")}.` : "");
 
-  const frameworkBlock = `ФРЕЙМВОРК: ${FRAMEWORK_BLURB[style.framework]}`;
+  const frameworkBlock = `ФРЕЙМВОРК: ${PROMPT_FRAMEWORK_BLURB[style.framework]}`;
 
   const hooksBlock = hooks.length
     ? `ХУКИ (применяй когда уместно — не все сразу):\n` +
-      hooks.map((h) => `- ${HOOK_LABELS[h.kind]}: ${h.text}`).join("\n")
+      hooks.map((h) => `- ${PROMPT_HOOK_LABELS[h.kind]}: ${h.text}`).join("\n")
     : "";
 
   // Director hooks: tenant-specific scripted persuasion techniques. Always

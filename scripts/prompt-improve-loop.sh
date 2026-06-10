@@ -19,7 +19,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 ITERATIONS="${ITERATIONS:-5}"
-TARGET="${TARGET:-системные промпты (module-level *_PROMPT / systemPrompt константы) в packages/kb/src и packages/sales/src}"
+TARGET="${TARGET:-промпты в prompts/-слое: packages/kb/src/prompts, packages/sales/src/prompts, packages/conversation-engine/src/prompts, apps/api/src/prompts}"
 LOG_FILE="${LOG_FILE:-docs/engineering/prompt-loop-log.md}"
 GATE_EXTRA_CMD="${GATE_EXTRA_CMD:-}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"

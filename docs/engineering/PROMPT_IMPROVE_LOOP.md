@@ -29,7 +29,7 @@ git checkout -b quality/prompt-loop
 ITERATIONS=5 ./scripts/prompt-improve-loop.sh
 
 # сузить зону поиска
-TARGET="reflect/fact-check промпты в packages/kb/src" ./scripts/prompt-improve-loop.sh
+TARGET="reflect/fact-check промпты в packages/kb/src/prompts" ./scripts/prompt-improve-loop.sh
 
 # добавить живой бенчмарк в гейт (нужны LLM-ключи)
 GATE_EXTRA_CMD="bun run quality:tool-regressions --file corpus.jsonl" \
@@ -68,8 +68,8 @@ GATE_EXTRA_CMD="bun run quality:tool-regressions --file corpus.jsonl" \
 ## Связанные задачи
 
 - [#516](https://github.com/chatman-media/lead-engine/issues/516) —
-  централизация промптов в `prompts/`-слой: сузит зону правок цикла до
-  чистых данных и сделает его ещё безопаснее.
+  централизация промптов в `prompts/`-слой (сделано): дефолтный `TARGET`
+  цикла указывает на эти каталоги — правки идут по чистым данным.
 - [#515](https://github.com/chatman-media/lead-engine/issues/515) —
   eval-driven прунинг опциональных LLM-шагов `answerWithRag` тем же
   методом «гипотеза → замер → принять/откатить».

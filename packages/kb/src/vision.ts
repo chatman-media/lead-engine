@@ -1,4 +1,5 @@
 import type { FetchLike } from "@chatman-media/llm-router";
+import { VISION_PASSPORT_PROMPT, VISION_SYSTEM_PROMPT } from "./prompts/vision.ts";
 
 /** AI provider for the vision model — both expose an OpenAI-compatible API. */
 export type VisionProvider = "openrouter" | "openai";
@@ -20,18 +21,6 @@ export type VisionProvider = "openrouter" | "openai";
 
 export const PHOTO_CLASSES = ["passport", "full_body", "portrait", "other"] as const;
 export type PhotoClass = (typeof PHOTO_CLASSES)[number];
-
-const SYSTEM_PROMPT = `Ты классифицируешь фотографию из переписки рекрутингового агентства.
-
-Отнеси изображение РОВНО к одной из категорий и верни ТОЛЬКО одно слово:
-
-- passport — фотография или скан страницы паспорта/загранпаспорта (видны поля документа, фото-страница, машиночитаемая зона).
-- full_body — человек снят в полный рост (видно всю фигуру от головы до ног или почти всю).
-- portrait — обычное фото человека: лицо, по пояс, селфи, не в полный рост.
-- other — всё остальное (пейзаж, предмет, скриншот, документ, который не паспорт, и т.п.).
-
-Ответь СТРОГО одним словом из списка: passport, full_body, portrait, other.
-Без знаков препинания, без пояснений.`;
 
 export interface ClassifyPhotoOptions {
   /** Raw image bytes (as downloaded from Telegram). */
@@ -92,7 +81,7 @@ export async function classifyPhoto(opts: ClassifyPhotoOptions): Promise<PhotoCl
     // `reasoning` is OpenRouter-specific — OpenAI rejects unknown params.
     ...(provider === "openrouter" ? { reasoning: { enabled: false } } : {}),
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: VISION_SYSTEM_PROMPT },
       {
         role: "user",
         content: [
@@ -147,25 +136,6 @@ export interface PassportIdentity {
   /** Expiration date, formatted dd.mm.yyyy to match the intake field. */
   passport_expiry?: string;
 }
-
-const PASSPORT_PROMPT = `Ты извлекаешь данные из фотографии загранпаспорта.
-
-На изображении — страница с данными заграничного паспорта. Внизу страницы
-есть машиночитаемая зона (MRZ) — две строки из букв, цифр и символов «<».
-
-Извлеки и верни СТРОГО JSON-объект с полями (все опциональные):
-- family_name: фамилия ЛАТИНИЦЕЙ, как напечатано в паспорте / в MRZ
-- given_name: имя ЛАТИНИЦЕЙ, как напечатано в паспорте / в MRZ
-- passport_number: номер паспорта
-- passport_expiry: дата окончания срока действия в формате дд.мм.гггг
-
-Приоритет источника — MRZ (две нижние строки). Если MRZ нечитаема —
-бери печатные латинские поля. Не транслитерируй и не угадывай сам:
-бери ровно то, что видно.
-
-ВЕРНИ ТОЛЬКО JSON, без markdown, без \`\`\`, без пояснений.
-Если поле не читается — НЕ включай его в JSON. Если не видно ничего —
-верни {}.`;
 
 /**
  * Strips markdown / think-tags and parses the model's passport JSON.
@@ -222,7 +192,7 @@ export async function extractPassportIdentity(
     reasoning: { enabled: false },
     max_tokens: 512,
     messages: [
-      { role: "system", content: PASSPORT_PROMPT },
+      { role: "system", content: VISION_PASSPORT_PROMPT },
       {
         role: "user",
         content: [

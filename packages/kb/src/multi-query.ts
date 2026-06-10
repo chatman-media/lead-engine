@@ -14,6 +14,7 @@
  */
 
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import { MULTI_QUERY_SYSTEM_PROMPT } from "./prompts/multi-query.ts";
 import { stripThinkBlocks } from "./sanitize.ts";
 
 export interface ExpandQueriesInput {
@@ -23,27 +24,6 @@ export interface ExpandQueriesInput {
   /** Number of ADDITIONAL variants to generate (not counting the original). Default: 2. */
   count?: number;
 }
-
-const SYSTEM_PROMPT = `Ты генерируешь альтернативные формулировки поискового запроса для базы знаний.
-
-Правила:
-1. Сохраняй смысл — только меняй слова/порядок/стиль, не искажай суть
-2. Используй синонимы, профессиональную лексику, другой порядок слов
-3. Каждая формулировка на ОТДЕЛЬНОЙ СТРОКЕ, без нумерации, без кавычек, без пояснений
-4. Не повторяй оригинальный запрос
-5. Если запрос слишком короткий или это смолток — верни одну строку с оригиналом
-
-Пример:
-запрос: сколько стоит квартира в ЖК Марина
-ответ:
-цена апартаментов в Marina Gate Dubai
-стоимость юнитов в Marsa Al Arab
-
-Пример:
-запрос: условия контракта для моделей
-ответ:
-требования к договору для моделей агентства
-правила трудового соглашения модельного бизнеса`;
 
 /**
  * Generate N alternative search queries for the given question.
@@ -63,7 +43,7 @@ export async function expandQueries(input: ExpandQueriesInput): Promise<string[]
   try {
     raw = await chat.complete(
       [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: MULTI_QUERY_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
       { temperature: 0.3 },

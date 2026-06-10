@@ -12,6 +12,7 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { EloOutcome } from "../elo.ts";
 import { eloUpdatePair } from "../elo.ts";
 import { extractJsonObject } from "../llm-json.ts";
+import { PAIRWISE_SYSTEM_PROMPT } from "../prompts/pairwise.ts";
 import type { IPairwiseMatchesRepo } from "../store.ts";
 import type { Style } from "../types.ts";
 import {
@@ -60,23 +61,6 @@ export interface PairwiseMatchResult {
   persisted: boolean;
 }
 
-const PAIRWISE_SYSTEM = (hint: string) =>
-  `You are an objective judge comparing TWO sales conversations between an agency salesperson (Russian-speaking recruiter for foreign work contracts) and the SAME candidate persona. The candidate said exactly the same opener in both transcripts; only the salesperson side differs.
-
-Pick which salesperson handled this candidate better.
-
-WHAT "BETTER" LOOKS LIKE FOR THIS PERSONA:
-${hint}
-
-Tie-breakers (in order):
-  1. Did the candidate explicitly commit to a next step (anketa / call / fly out / sign / send photos)?
-  2. Did the salesperson stay grounded (no fabricated dates, cities, numbers)?
-  3. Did the salesperson advance through the funnel (qualify → pitch → close) or stall?
-  4. Tone fit for the persona (gentle for anxious / direct for time-pressed / etc.).
-
-Return EXACTLY this JSON, nothing else:
-{"winner": "a" | "b" | "draw", "reason": "<one short sentence>"}`;
-
 function transcriptToString(t: SelfPlayMatchResult["transcript"]): string {
   return t
     .map(
@@ -96,7 +80,7 @@ export async function judgePairwise(args: {
   model?: string;
 }): Promise<PairwiseVerdict> {
   const messages: ChatMessage[] = [
-    { role: "system", content: PAIRWISE_SYSTEM(args.judgingHint) },
+    { role: "system", content: PAIRWISE_SYSTEM_PROMPT(args.judgingHint) },
     {
       role: "user",
       content:

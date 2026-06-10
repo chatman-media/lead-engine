@@ -3,6 +3,7 @@ import type { ChatClient } from "@chatman-media/llm-router";
 // Pipeline contract `StageClassifier` живёт в conversation-engine — это часть
 // pipeline-deps shape'а, не sales-domain. Sales реализует контракт.
 import type { StageClassifier } from "@chatman-media/conversation-engine";
+import { STAGE_CLASSIFIER_SYSTEM_PROMPT } from "./prompts/stage-classifier.ts";
 
 /**
  * Regex-based стратегия классификации sales-stage'а. Быстрая (без LLM
@@ -94,17 +95,7 @@ export class LlmStageClassifier implements StageClassifier {
       [
         {
           role: "system",
-          content:
-            `Ты классифицируешь sales-stage реплики кандидата в воронке найма. ` +
-            `Stages: ${stagesList}. ` +
-            `\nopener — первый контакт, приветствие.` +
-            `\nqualify — кандидат делится данными о себе (возраст, город, опыт).` +
-            `\npitch — кандидат интересуется условиями / деньгами.` +
-            `\nobjection — возражение, сомнение, "почему".` +
-            `\nclose — согласие, готовность к следующему шагу.` +
-            `\n\nОтветь строго JSON-объектом без markdown: ` +
-            `{"stage":"<one of stages>","confidence":<0..1>}. ` +
-            `Если уверенности нет — confidence < 0.5.`,
+          content: STAGE_CLASSIFIER_SYSTEM_PROMPT(stagesList),
         },
         {
           role: "user",

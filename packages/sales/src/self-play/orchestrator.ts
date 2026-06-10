@@ -19,6 +19,10 @@ import {
 import type { EloOutcome } from "../elo.ts";
 import { eloUpdate } from "../elo.ts";
 import type { SkillForPrompt } from "../prompt.ts";
+import {
+  SELF_PLAY_DEFAULT_STALL_REPLY,
+  SELF_PLAY_STALL_CTA_FALLBACK,
+} from "../prompts/orchestrator.ts";
 import { nextStage } from "../stage-router.ts";
 import type {
   IConversationsRepo,
@@ -208,19 +212,16 @@ export async function runSelfPlayMatch(
       if (consecutiveStalls >= STALL_LIMIT) {
         consecutiveStalls = 0;
         salesText =
-          input.style.voice.stallCtaReply ??
-          "Давай созвонимся — так быстрее всё объясню. В какое время удобно? 😊";
+          input.style.voice.stallCtaReply ?? SELF_PLAY_STALL_CTA_FALLBACK;
       } else {
-        salesText =
-          deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.";
+        salesText = deps.stallReply ?? SELF_PLAY_DEFAULT_STALL_REPLY;
       }
     } else {
       consecutiveStalls = 0;
     }
     transcript.push({ role: "salesperson", text: salesText });
 
-    const defaultStall =
-      deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.";
+    const defaultStall = deps.stallReply ?? SELF_PLAY_DEFAULT_STALL_REPLY;
     if (skills.length > 0 && salesText !== defaultStall) {
       try {
         const used = await gradeSkills({

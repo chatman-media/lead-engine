@@ -11,6 +11,10 @@ import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
 import {
+  LLM_REPLY_BASE_SYSTEM_PROMPT,
+  LLM_REPLY_TOOLS_SYSTEM_FRAGMENT,
+} from "../prompts/llm-reply.ts";
+import {
   type ExchangePolicyState,
   guardExchangePolicy,
 } from "./exchange-policy-guard.ts";
@@ -104,11 +108,6 @@ export interface LlmReplyStrategyOpts {
     toolCalls: readonly ToolCallRecord[];
   }) => Promise<void> | void;
 }
-
-const BASE_SYSTEM_PROMPT =
-  "Ты — операционный бот платформы lead-engine. Отвечай кратко, " +
-  "уважительно, по делу. Никогда не выдумывай факты которых нет в " +
-  "контексте — лучше скажи «уточню у партнёра» и поставь сообщение в очередь оператора.";
 
 function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
   const out: ChatMessage[] = [];
@@ -403,12 +402,8 @@ export class LlmReplyStrategy implements ReplyStrategy {
     }
 
     const systemPrompt = [
-      BASE_SYSTEM_PROMPT,
-      toolsActive
-        ? "Если для ответа есть подходящий инструмент (например, расчёт курса обмена) — " +
-          "ОБЯЗАТЕЛЬНО вызови его и дай конкретные числа. Не отсылай к оператору, если можешь " +
-          "ответить инструментом."
-        : "",
+      LLM_REPLY_BASE_SYSTEM_PROMPT,
+      toolsActive ? LLM_REPLY_TOOLS_SYSTEM_FRAGMENT : "",
       serviceOrderContext?.trim(),
       template.systemPromptFragment,
     ]

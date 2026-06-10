@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import { EXTRACT_USER_FACTS_SYSTEM_PROMPT } from "./prompts/extract-user-facts.ts";
 import { stripCodeFences, stripThinkBlocks } from "./sanitize.ts";
 
 /**
@@ -20,36 +21,6 @@ export interface ExtractFactsInput {
   existingFacts?: Record<string, string>;
 }
 
-const SYSTEM_PROMPT = `Ты извлекаешь факты О КАНДИДАТЕ из переписки рекрутингового агентства.
-Анализируй ТОЛЬКО реплики кандидата (role=user). Реплики бота (role=assistant) — для контекста.
-
-Извлекай только факты, которые КАНДИДАТ САМ ЯВНО СООБЩИЛ. Никаких догадок и вывода.
-
-Типичные ключи (используй их когда подходит):
-- name: имя кандидата
-- city: город/страна где живёт сейчас
-- age: возраст (число)
-- experience: опыт работы (что уже делал)
-- language: какие языки знает
-- country_target: куда хочет поехать работать
-- intent: что ищет ("работа моделью", "поездка в Дубай", "разовый контракт")
-- contact: telegram/instagram/email если давал
-
-Можешь добавлять свои ключи (snake_case) если кандидат сообщил что-то ещё.
-
-ВЕРНИ СТРОГО JSON-ОБЪЕКТ, без markdown, без \`\`\`, без комментариев.
-Если фактов нет — верни {}.
-Если факт уже есть в "Существующие факты" и не изменился — не повторяй его.
-Только новые или ОБНОВЛЁННЫЕ факты.
-
-Пример:
-Сообщения:
-user: привет, я Аня из новосибирска, мне 23
-user: ищу работу в дубае, хочу заработать
-Существующие факты: {}
-Ответ:
-{"name":"Аня","city":"Новосибирск","age":"23","country_target":"Дубай","intent":"работа, заработок"}`;
-
 const MAX_RETURNED_KEYS = 20;
 const MAX_VALUE_LEN = 200;
 
@@ -64,7 +35,7 @@ export async function extractUserFacts(input: ExtractFactsInput): Promise<Record
   const userPrompt = `Сообщения:\n${conversation}\n\nСуществующие факты: ${existingJson}\n\nОтвет:`;
 
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: EXTRACT_USER_FACTS_SYSTEM_PROMPT },
     { role: "user", content: userPrompt },
   ];
 
