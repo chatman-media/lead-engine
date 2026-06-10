@@ -1,3 +1,17 @@
+# [@chatman-media/conversation-engine-v1.28.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.27.0...@chatman-media/conversation-engine-v1.28.0) (2026-06-10)
+
+
+### Bug Fixes
+
+* **provider-relay:** gate console outreach by feature flag ([#476](https://github.com/chatman-media/lead-engine/issues/476)) ([113ba42](https://github.com/chatman-media/lead-engine/commit/113ba4281ddfd77f595ec0df0d50b3090ed1fef0))
+
+
+### Features
+
+* **api:** add provider relay ops controls ([#472](https://github.com/chatman-media/lead-engine/issues/472)) ([8746d4e](https://github.com/chatman-media/lead-engine/commit/8746d4eca9d7cfe1b44b26249958ec0e31698a5b))
+* **platform:** add provider order console ([#469](https://github.com/chatman-media/lead-engine/issues/469)) ([a1d286f](https://github.com/chatman-media/lead-engine/commit/a1d286f124cd54680484b8da8c8439a46f82017a))
+* **provider-relay:** add rollout observability controls ([#471](https://github.com/chatman-media/lead-engine/issues/471)) ([207cd35](https://github.com/chatman-media/lead-engine/commit/207cd359eb095e70a08d6b31b9fb67e8f0dc8477))
+
 # [@chatman-media/conversation-engine-v1.27.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.26.0...@chatman-media/conversation-engine-v1.27.0) (2026-06-10)
 
 
