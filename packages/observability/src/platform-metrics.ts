@@ -21,6 +21,14 @@ export interface PlatformMetrics {
   outboundFailed: Counter;
   outboundDispatchLatency: Histogram;
   stuckReleased: Counter;
+  // ── Provider relay marketplace ────────────────────────────────────────
+  providerOrdersCreated: Counter;
+  providerRequests: Counter;
+  providerResponses: Counter;
+  providerTimeToQuote: Histogram;
+  providerPaidOrders: Counter;
+  providerCommissionEarned: Counter;
+  providerFailures: Counter;
   // ── LLM ────────────────────────────────────────────────────────────────
   llmCalls: Counter;
   llmErrors: Counter;
@@ -74,6 +82,31 @@ export function makePlatformMetrics(): PlatformMetrics {
     ),
     stuckReleased: r.register(
       new Counter("lead_engine_outbound_stuck_released_total", "Stuck processing rows revived to pending"),
+    ),
+    providerOrdersCreated: r.register(
+      new Counter("lead_engine_provider_orders_created_total", "Provider relay service orders created"),
+    ),
+    providerRequests: r.register(
+      new Counter("lead_engine_provider_requests_total", "Provider outreach requests sent, by channel"),
+    ),
+    providerResponses: r.register(
+      new Counter("lead_engine_provider_responses_total", "Provider responses received, by outcome"),
+    ),
+    providerTimeToQuote: r.register(
+      new Histogram(
+        "lead_engine_provider_time_to_quote_seconds",
+        "Seconds from provider outreach sent to quoted response",
+        [30, 60, 120, 300, 600, 1800, 3600, 10800],
+      ),
+    ),
+    providerPaidOrders: r.register(
+      new Counter("lead_engine_provider_paid_orders_total", "Provider relay orders marked paid"),
+    ),
+    providerCommissionEarned: r.register(
+      new Counter("lead_engine_provider_commission_earned_total", "Provider relay commission amount earned"),
+    ),
+    providerFailures: r.register(
+      new Counter("lead_engine_provider_failures_total", "Provider relay failures, by channel and reason"),
     ),
     llmCalls: r.register(
       new Counter("lead_engine_llm_calls_total", "LLM API calls, by provider+purpose"),

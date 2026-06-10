@@ -1,4 +1,9 @@
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import {
+  type Db,
+  PROVIDER_RELAY_FEATURE_KEY,
+  TenantFeatureFlagRepo,
+  withTenant,
+} from "@chatman-media/conversation-engine";
 import { tenants } from "@chatman-media/storage";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -8,8 +13,10 @@ import { recordAudit } from "../lib/audit.ts";
  * Per-tenant tenant management endpoints — pause/resume bot, etc.
  *
  * Endpoints:
- *   GET  /api/admin/tenant         — tenant info (slug, plan, status, llmBillingMode)
- *   PUT  /api/admin/tenant/status  — { paused: boolean } toggle 'active' ↔ 'suspended'
+ *   GET  /api/admin/tenant                         — tenant info
+ *   PUT  /api/admin/tenant/status                  — { paused: boolean }
+ *   GET  /api/admin/tenant/features                — rollout flags
+ *   PUT  /api/admin/tenant/features/provider-relay — { enabled: boolean }
  *
  * Pause flow:
  *   tenant.status='suspended' → ChannelRegistry.loadFromDb filter exclude'ит
@@ -107,13 +114,15 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
     }
 
     if (result.kind === "changed") {
-      await recordAudit(opts.db, {
-        tenantId,
-        adminId: c.var.adminId,
-        action: body.paused ? "tenant.pause" : "tenant.resume",
-        targetKind: "tenant",
-        targetId: tenantId,
-        details: { from: result.from, to: result.to },
+      await withTenant(opts.db, tenantId, async (tx) => {
+        await recordAudit(tx as Db, {
+          tenantId,
+          adminId: c.var.adminId,
+          action: body.paused ? "tenant.pause" : "tenant.resume",
+          targetKind: "tenant",
+          targetId: tenantId,
+          details: { from: result.from, to: result.to },
+        });
       });
 
       // Hot-reload channels: ChannelRegistry фильтрует по tenants.status,
@@ -132,6 +141,61 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
     }
 
     return c.json({ ok: true, status: newStatus });
+  });
+
+  app.get("/api/admin/tenant/features", async (c) => {
+    const tenantId = c.var.tenantId;
+    const features = await withTenant(opts.db, tenantId, async (tx) => {
+      const flags = new TenantFeatureFlagRepo({ db: tx, tenantId });
+      return {
+        providerRelay: await flags.isEnabled(PROVIDER_RELAY_FEATURE_KEY),
+      };
+    });
+
+    return c.json({ features });
+  });
+
+  app.put("/api/admin/tenant/features/provider-relay", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: { enabled?: unknown };
+    try {
+      body = (await c.req.json()) as { enabled?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    if (typeof body.enabled !== "boolean") {
+      return c.json({ error: "enabled (boolean) required" }, 400);
+    }
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const row = await withTenant(opts.db, tenantId, async (tx) => {
+      return new TenantFeatureFlagRepo({ db: tx, tenantId }).setEnabled({
+        featureKey: PROVIDER_RELAY_FEATURE_KEY,
+        enabled: body.enabled as boolean,
+        nowEpoch,
+        metadata: { updatedByAdminId: c.var.adminId },
+      });
+    });
+
+    await withTenant(opts.db, tenantId, async (tx) => {
+      await recordAudit(tx as Db, {
+        tenantId,
+        adminId: c.var.adminId,
+        action: "tenant_feature.update",
+        targetKind: "tenant_feature",
+        targetId: PROVIDER_RELAY_FEATURE_KEY,
+        details: {
+          feature: PROVIDER_RELAY_FEATURE_KEY,
+          enabled: row.enabled,
+        },
+      });
+    });
+
+    return c.json({
+      ok: true,
+      feature: "providerRelay",
+      enabled: row.enabled,
+    });
   });
 
   return app;

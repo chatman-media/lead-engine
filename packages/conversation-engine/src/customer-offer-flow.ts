@@ -20,6 +20,7 @@ import {
 	type ServiceOrderRow,
 } from "./dal/index.ts";
 import type { RepoCtx } from "./dal/types.ts";
+import type { ProviderRelayMetrics } from "./provider-relay-metrics.ts";
 import { ProviderPaymentLedger } from "./provider-payment-ledger.ts";
 
 const defaultCustomerChannelKinds: ChannelKind[] = [
@@ -136,7 +137,10 @@ export class CustomerOfferFlow {
 	private readonly relay: ProviderRelayRepo;
 	private readonly outbound: OutboundQueueRepo;
 
-	constructor(private readonly ctx: RepoCtx) {
+	constructor(
+		private readonly ctx: RepoCtx,
+		private readonly opts: { metrics?: ProviderRelayMetrics } = {},
+	) {
 		this.relay = new ProviderRelayRepo(ctx);
 		this.outbound = new OutboundQueueRepo(ctx);
 	}
@@ -346,7 +350,9 @@ export class CustomerOfferFlow {
 
 		const paymentProvider = input.paymentProvider ?? "manual";
 		const paymentRef = input.paymentRef ?? `manual:${initialOrder.id}`;
-		const ledger = await new ProviderPaymentLedger(this.ctx).recordPaymentSucceeded({
+		const ledger = await new ProviderPaymentLedger(this.ctx, {
+			metrics: this.opts.metrics,
+		}).recordPaymentSucceeded({
 			orderId: initialOrder.id,
 			provider: paymentProvider,
 			externalIntentId: paymentRef,

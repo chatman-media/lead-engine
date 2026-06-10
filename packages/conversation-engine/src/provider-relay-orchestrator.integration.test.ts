@@ -119,6 +119,13 @@ beforeAll(async () => {
 		.returning({ id: schema.tenants.id });
 	if (!tenant) throw new Error("tenant insert returned no row");
 	tenantId = tenant.id;
+	await db.insert(schema.tenantFeatureFlags).values({
+		tenantId,
+		featureKey: "provider_relay",
+		enabled: true,
+		createdAt: now,
+		updatedAt: now,
+	});
 
 	customerContactId = await createContact("Relay customer");
 	providerContactId = await createContact("WhatsApp provider contact");
@@ -177,6 +184,36 @@ afterAll(async () => {
 }, 10_000);
 
 describe("ProviderRelayOrchestrator", () => {
+	it("fails closed when tenant provider relay flag is disabled", async () => {
+		if (!enabled) return;
+		await db
+			.update(schema.tenantFeatureFlags)
+			.set({ enabled: false, updatedAt: now + 1 })
+			.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+		const ordersBefore = await tableCount("service_orders");
+		const outboundBefore = await tableCount("outbound_queue");
+
+		try {
+			const result = await orchestrator().startProviderOutreach({
+				customerContactId,
+				requestType: "massage",
+				serviceArea: "Chaweng",
+				summary: "Should not reach provider",
+				orderIdempotencyKey: "orch-disabled-order",
+				nowEpoch: now + 2,
+			});
+
+			expect(result).toEqual({ ok: false, reason: "provider_relay_disabled" });
+			expect(await tableCount("service_orders")).toBe(ordersBefore);
+			expect(await tableCount("outbound_queue")).toBe(outboundBefore);
+		} finally {
+			await db
+				.update(schema.tenantFeatureFlags)
+				.set({ enabled: true, updatedAt: now + 3 })
+				.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+		}
+	});
+
 	it("creates order/request, enqueues provider outbound, and records sent events", async () => {
 		if (!enabled) return;
 		const result = await orchestrator().startProviderOutreach({
@@ -304,7 +341,14 @@ describe("ProviderRelayOrchestrator", () => {
 		});
 		expect(result.envelope.idempotencyKey).toBe("orch-existing-outbound");
 		const payload = JSON.parse(result.outbound.payloadJson);
-		expect(payload.channelMeta.whatsapp.orderId).toBe(existing.id);
+		expect(payload.transport.whatsapp).toMatchObject({
+			requiresTemplate: true,
+			template: {
+				name: "provider_request_v1",
+				languageCode: "en_US",
+				approved: true,
+			},
+		});
 
 		const events = await relayRepo().eventsForOrder(existing.id);
 		expect(new Set(events.map((event) => event.eventType))).toEqual(
@@ -330,6 +374,9 @@ describe("ProviderRelayOrchestrator", () => {
 			reason: "routing_failed",
 			routingReason: "no_provider_available",
 		});
+		if (result.ok || result.reason === "provider_relay_disabled") {
+			throw new Error("expected routing failure with order");
+		}
 		expect(await tableCount("provider_requests")).toBe(beforeRequests);
 		expect(await tableCount("outbound_queue")).toBe(beforeOutbound);
 		const events = await relayRepo().eventsForOrder(result.order.id);
@@ -357,6 +404,9 @@ describe("ProviderRelayOrchestrator", () => {
 			reason: "provider_channel_missing",
 			providerId: providerWithoutChannelId,
 		});
+		if (result.ok || result.reason === "provider_relay_disabled") {
+			throw new Error("expected provider channel failure with order");
+		}
 		expect(await tableCount("provider_requests")).toBe(beforeRequests);
 		expect(await tableCount("outbound_queue")).toBe(beforeOutbound);
 		const events = await relayRepo().eventsForOrder(result.order.id);

@@ -13,6 +13,10 @@ import {
 	type ServiceOrderRow,
 } from "./dal/provider-relay.ts";
 import type { RepoCtx } from "./dal/types.ts";
+import {
+	type ProviderRelayMetrics,
+	providerRelayTenantLabels,
+} from "./provider-relay-metrics.ts";
 
 const openProviderRequestStatuses = ["sent", "seen"] as const;
 const openServiceOrderStatuses = ["matching", "awaiting_provider"] as const;
@@ -78,7 +82,10 @@ interface MatchedProviderRequest {
 export class ProviderResponseHandler {
 	private readonly relay: ProviderRelayRepo;
 
-	constructor(private readonly ctx: RepoCtx) {
+	constructor(
+		private readonly ctx: RepoCtx,
+		private readonly opts: { metrics?: ProviderRelayMetrics } = {},
+	) {
 		this.relay = new ProviderRelayRepo(ctx);
 	}
 
@@ -119,6 +126,16 @@ export class ProviderResponseHandler {
 				data: responseData,
 			});
 			const order = await this.requireOrder(updatedRequest.orderId);
+			this.opts.metrics?.providerResponses.inc(1, {
+				...providerRelayTenantLabels(this.ctx.tenantId),
+				outcome: "quoted",
+			});
+			if (providerRequest.sentAt !== null) {
+				this.opts.metrics?.providerTimeToQuote.observe(
+					Math.max(0, nowEpoch - providerRequest.sentAt),
+					providerRelayTenantLabels(this.ctx.tenantId),
+				);
+			}
 			return {
 				ok: true,
 				action: "quoted",
@@ -136,6 +153,10 @@ export class ProviderResponseHandler {
 				data: responseData,
 			});
 			const order = await this.requireOrder(updatedRequest.orderId);
+			this.opts.metrics?.providerResponses.inc(1, {
+				...providerRelayTenantLabels(this.ctx.tenantId),
+				outcome: "declined",
+			});
 			return {
 				ok: true,
 				action: "declined",
@@ -159,6 +180,10 @@ export class ProviderResponseHandler {
 			nowEpoch,
 		});
 		const order = await this.requireOrder(providerRequest.orderId);
+		this.opts.metrics?.providerResponses.inc(1, {
+			...providerRelayTenantLabels(this.ctx.tenantId),
+			outcome: "ambiguous",
+		});
 		return {
 			ok: true,
 			action: "ambiguous",

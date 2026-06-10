@@ -889,6 +889,20 @@ export const tenants = pgTable("tenants", {
   check("tenants_llm_billing_check", sql`${t.llmBillingMode} IN ('byok','managed')`),
 ]);
 
+// Per-tenant feature flags for gradual rollout of high-risk flows.
+export const tenantFeatureFlags = pgTable("tenant_feature_flags", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  featureKey: text("feature_key").notNull(),
+  enabled: boolean("enabled").notNull().default(false),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_tenant_feature_flags_key").on(t.tenantId, t.featureKey),
+  index("idx_tenant_feature_flags_enabled").on(t.tenantId, t.enabled),
+]);
+
 // Зашифрованные секреты per-tenant: telegram-tokens, OpenAI keys, etc.
 // `encryptedValue` — opaque blob (формат: aes-256-gcm + master key из env).
 // Хранится отдельно от tenants чтобы select * tenants не светил секретов в логи.

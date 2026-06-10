@@ -12,6 +12,10 @@ import {
 	type ServiceOrderRow,
 } from "./dal/index.ts";
 import type { RepoCtx } from "./dal/types.ts";
+import {
+	type ProviderRelayMetrics,
+	providerRelayTenantLabels,
+} from "./provider-relay-metrics.ts";
 
 export type ServiceOrderPaymentStatus =
 	| "created"
@@ -103,7 +107,10 @@ export interface PaymentLedgerResult {
 export class ProviderPaymentLedger {
 	private readonly relay: ProviderRelayRepo;
 
-	constructor(private readonly ctx: RepoCtx) {
+	constructor(
+		private readonly ctx: RepoCtx,
+		private readonly opts: { metrics?: ProviderRelayMetrics } = {},
+	) {
 		this.relay = new ProviderRelayRepo(ctx);
 	}
 
@@ -222,6 +229,7 @@ export class ProviderPaymentLedger {
 		input: RecordPaymentWebhookInput,
 	): Promise<PaymentLedgerResult> {
 		const payment = await this.ensurePaymentForWebhook(input);
+		const wasAlreadyPaid = payment.status === "paid";
 		const order = await this.requireOrder(payment.orderId);
 		if (payment.status !== "paid") {
 			await this.updatePaymentStatus({
@@ -264,6 +272,19 @@ export class ProviderPaymentLedger {
 			amounts,
 			nowEpoch: input.nowEpoch,
 		});
+		if (!wasAlreadyPaid) {
+			this.opts.metrics?.providerPaidOrders.inc(1, {
+				...providerRelayTenantLabels(this.ctx.tenantId),
+				currency: paidPayment.currency,
+			});
+			this.opts.metrics?.providerCommissionEarned.inc(
+				commission.commissionAmount,
+				{
+					...providerRelayTenantLabels(this.ctx.tenantId),
+					currency: commission.currency,
+				},
+			);
+		}
 		await this.appendEventOnce({
 			orderId: updatedOrder.id,
 			eventType: "customer_payment_succeeded",

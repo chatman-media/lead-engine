@@ -423,16 +423,28 @@ Dependencies: BPR-4, BPR-7, BPR-8.
 
 Acceptance criteria:
 
-- Tenant feature flag for provider relay.
-- Metrics: orders created, provider response rate, time to quote, paid orders,
+- [x] Tenant feature flag for provider relay.
+- [x] Metrics: orders created, provider response rate, time to quote, paid orders,
   commission, failures by channel.
-- Audit events for provider assignment, quote approval, payment transitions, and
+- [x] Audit events for provider assignment, quote approval, payment transitions, and
   manual overrides.
-- Runbook section for stuck orders and WhatsApp send failures.
-- Integration tests cover end-to-end Telegram customer to WhatsApp provider flow
+- [x] Runbook section for stuck orders and WhatsApp send failures.
+- [x] Integration tests cover end-to-end Telegram customer to WhatsApp provider flow
   with fake adapters.
 
 Dependencies: all runtime tasks.
+
+Implementation notes:
+
+- Runtime gate: `tenant_feature_flags.feature_key='provider_relay'`; disabled
+  tenants fail closed before creating `service_orders`.
+- Metrics exposed through `PlatformMetrics`: provider orders, requests,
+  responses, time-to-quote histogram, paid orders, earned commission, and
+  failures by channel/reason.
+- Audit trail stays order-centric in `order_events`: provider assignment/request,
+  quote, operator-approved customer offer with manual override metadata, payment
+  events, commission, confirmation, and send failures.
+- Operations playbook: `docs/operations/SERVER_RUNBOOK.md#6-provider-relay-rollout-и-инциденты`.
 
 ## Suggested implementation slices
 
