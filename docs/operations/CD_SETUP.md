@@ -3,6 +3,16 @@
 Push в `main` → CI прогоняет тесты → job **`deploy`** заходит по SSH на сервер
 и запускает `./deploy.sh` (тот самый, что в [SERVER_RUNBOOK.md](SERVER_RUNBOOK.md)).
 
+Текущие публичные URL:
+
+| Среда | URL | Что проверять |
+|---|---|---|
+| Прод | `https://exchanges.agency` | лендинг, API/webhooks, `/healthz`, `/widget.js` |
+| Прод `www` | `https://www.exchanges.agency` | тот же лендинг |
+| Прод-админка | `https://client.exchanges.agency` | admin-ui SPA на корне; `/api` и `/ws` проксируются на prod API |
+| Прод `/admin` | `https://exchanges.agency/admin` | 301-редирект на `https://client.exchanges.agency/` |
+| Дев | `https://dev.exchanges.agency` | дев-лендинг/API; админка остаётся на `/admin/` |
+
 ```
 push main ──▶ workspace (tests) ──▶ deploy (ssh → ./deploy.sh) ──▶ health-check
                   │
@@ -27,7 +37,13 @@ Push в ветку **`dev`** → те же тесты → job **`deploy-dev`** �
 | Порт API         | 3000                          | 3001                                  |
 | База             | `lead_engine`                 | `lead_engine_dev` (тот же Postgres)   |
 | systemd          | `lead-engine-api` / `-worker` | `lead-engine-dev-api` / `-dev-worker` |
-| nginx            | `exchanges.agency`            | `dev.exchanges.agency`                |
+| nginx            | `exchanges.agency`, `www.exchanges.agency`, `client.exchanges.agency` | `dev.exchanges.agency` |
+| admin-ui         | `https://client.exchanges.agency/` (`ADMIN_UI_BASE=/`) | `https://dev.exchanges.agency/admin/` |
+
+На проде `PLATFORM_PUBLIC_URL=https://exchanges.agency`, а `ADMIN_UI_BASE=/`
+задан только в `/opt/lead-engine/.env`: это нужно, чтобы сборка admin-ui
+работала на корне `client.exchanges.agency`. На деве `ADMIN_UI_BASE` не задаём,
+иначе сломается `/admin/`.
 
 Ветку и юниты deploy.sh берёт из `/opt/lead-engine-dev/.deploy.env`:
 
@@ -110,6 +126,22 @@ gh secret set DEPLOY_SSH_KEY  --repo chatman-media/lead-engine \
 Закоммить и запушь в `main` (или замёрж PR). В **Actions** появится прогон
 `CI` с job'ом `Deploy`. Лог покажет шаги `deploy.sh` (pull → install → migrate →
 build → restart → health) и зелёный `Деплой завершён 🚀`.
+
+После prod-деплоя внешний smoke:
+
+```bash
+curl -fsS https://exchanges.agency/healthz
+curl -fsSI https://exchanges.agency/
+curl -fsSI https://client.exchanges.agency/
+curl -fsSI -L https://exchanges.agency/admin
+```
+
+После dev-деплоя:
+
+```bash
+curl -fsS https://dev.exchanges.agency/healthz
+curl -fsSI https://dev.exchanges.agency/admin/
+```
 
 Историю деплоев также видно в **Deployments → production** (GitHub Environment).
 

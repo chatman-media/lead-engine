@@ -9,6 +9,17 @@
 
 > Полный список env-переменных — [../engineering/CONFIGURATION.md](../engineering/CONFIGURATION.md).
 
+Текущая серверная разметка:
+
+| Среда | Каталог | API port | Public URL | Admin UI |
+|---|---|---:|---|---|
+| Prod | `/opt/lead-engine` | 3000 | `https://exchanges.agency` | `https://client.exchanges.agency/` |
+| Dev | `/opt/lead-engine-dev` | 3001 | `https://dev.exchanges.agency` | `https://dev.exchanges.agency/admin/` |
+
+`https://exchanges.agency/admin` на prod должен отдавать 301 на
+`https://client.exchanges.agency/`. `www.exchanges.agency` обслуживает тот же
+лендинг, что и apex.
+
 ## 1. Перед обновлением
 
 Проверить, что на сервере заданы обязательные env vars:
@@ -25,6 +36,11 @@ printenv PLATFORM_PUBLIC_URL
 - `PLATFORM_MASTER_KEY` — тот же ключ, которым шифровались tenant secrets.
 - `PLATFORM_PUBLIC_URL` — публичный URL API для webhook/snippet.
 - `TELEGRAM_WEBHOOK_SECRET` — если используются Telegram webhooks.
+
+Для prod ожидается `PLATFORM_PUBLIC_URL=https://exchanges.agency` и
+`ADMIN_UI_BASE=/`. Для dev ожидается
+`PLATFORM_PUBLIC_URL=https://dev.exchanges.agency`; `ADMIN_UI_BASE` там не
+задаём, потому что админка живёт под `/admin/`.
 
 Нельзя менять `PLATFORM_MASTER_KEY` на живом сервере: старые зашифрованные
 секреты перестанут расшифровываться.
