@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v2.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v2.0.0...@chatman-media/conversation-engine-v2.1.0) (2026-06-10)
+
+
+### Features
+
+* **exchange:** create actionable operator handoffs ([#522](https://github.com/chatman-media/lead-engine/issues/522)) ([1b9d40f](https://github.com/chatman-media/lead-engine/commit/1b9d40f29e37142928770ad4957b8fe6cf5ad23d))
+
 # [@chatman-media/conversation-engine-v2.0.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.28.1...@chatman-media/conversation-engine-v2.0.0) (2026-06-10)
 
 
