@@ -1,7 +1,7 @@
 // Integration test для admin-onboarding endpoint.
 //
 // Новые правила `done`:
-//   - generic тенант: channel + chat LLM (KB и embed — НЕ требуются).
+//   - generic тенант: channel + ready chat LLM (KB и embed — НЕ требуются).
 //   - exchange тенант (funnel slug='exchange'): + ≥1 активный курс + ≥1 реквизит.
 //
 // Изолированная PG; self-skip без DATABASE_URL.
@@ -61,6 +61,7 @@ interface StatusBody {
   channelExternalId?: string;
   chatProvider?: string;
   chatModel?: string;
+  chatLlmReady: boolean;
   chatHasSecret?: boolean;
   done: boolean;
 }
@@ -148,6 +149,20 @@ async function insertChatLlm(tid: number) {
   );
 }
 
+async function insertChatLlmConfigWithoutSecret(tid: number, provider: "ollama" | "openai") {
+  await withTenant(db, tid, (tx) =>
+    tx.insert(llmProviderConfigs).values({
+      tenantId: tid,
+      purpose: "chat",
+      provider,
+      model: provider === "ollama" ? "llama3.2" : "gpt-4o-mini",
+      secretRef: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }),
+  );
+}
+
 async function insertExchangeFunnel(tid: number) {
   await withTenant(db, tid, (tx) =>
     tx.insert(funnels).values({
@@ -197,6 +212,7 @@ describe("admin-onboarding-status — auth + generic", () => {
     const body = await getStatus(token);
     expect(body.channelConnected).toBe(false);
     expect(body.chatLlmConfigured).toBe(false);
+    expect(body.chatLlmReady).toBe(false);
     expect(body.hasKbDocuments).toBe(false);
     expect(body.isExchange).toBe(false);
     expect(body.done).toBe(false);
@@ -209,6 +225,7 @@ describe("admin-onboarding-status — auth + generic", () => {
     expect(body.chatLlmConfigured).toBe(true);
     expect(body.chatProvider).toBe("openai");
     expect(body.chatHasSecret).toBe(true);
+    expect(body.chatLlmReady).toBe(true);
     expect(body.done).toBe(false);
   });
 
@@ -235,6 +252,34 @@ describe("admin-onboarding-status — auth + generic", () => {
       .update(channels)
       .set({ status: "active", updatedAt: NOW })
       .where(eq(channels.tenantId, tenantId));
+  });
+
+  it("non-Ollama chat без secret_ref не завершает onboarding", async () => {
+    if (!sql) return;
+    const t = await signupReq("onb-chat-no-secret@demo.io");
+    await insertChannel(t.tenantId, "secretless_openai_bot");
+    await insertChatLlmConfigWithoutSecret(t.tenantId, "openai");
+    const body = await getStatus(t.token);
+    expect(body.channelConnected).toBe(true);
+    expect(body.chatLlmConfigured).toBe(true);
+    expect(body.chatProvider).toBe("openai");
+    expect(body.chatHasSecret).toBe(false);
+    expect(body.chatLlmReady).toBe(false);
+    expect(body.done).toBe(false);
+  });
+
+  it("Ollama chat без secret_ref считается готовым для generic onboarding", async () => {
+    if (!sql) return;
+    const t = await signupReq("onb-chat-ollama@demo.io");
+    await insertChannel(t.tenantId, "ollama_bot");
+    await insertChatLlmConfigWithoutSecret(t.tenantId, "ollama");
+    const body = await getStatus(t.token);
+    expect(body.channelConnected).toBe(true);
+    expect(body.chatLlmConfigured).toBe(true);
+    expect(body.chatProvider).toBe("ollama");
+    expect(body.chatHasSecret).toBe(false);
+    expect(body.chatLlmReady).toBe(true);
+    expect(body.done).toBe(true);
   });
 
   it("tampered token → 401", async () => {

@@ -553,6 +553,7 @@ export interface OnboardingStatus {
   channelKind?: string;
   channelExternalId?: string;
   chatLlmConfigured: boolean;
+  chatLlmReady?: boolean;
   chatProvider?: string;
   chatModel?: string;
   chatHasSecret?: boolean;
