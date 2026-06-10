@@ -1,6 +1,6 @@
 # Service catalog and provider marketplace
 
-_Обновлено: 2026-06-09._
+_Обновлено: 2026-06-11._
 
 Этот документ описывает слой каталога услуг: как tenant показывает клиенту набор
 услуг, как marketplace-провайдеры устанавливаются в каталог, и как заявка
@@ -108,6 +108,9 @@ Route factory: `apps/api/src/routes/admin-partners.ts`.
 | `GET/POST` | `/api/admin/partner-services` | Partner service CRUD |
 | `GET` / `POST` | `/api/admin/partner-deals` | List/create partner deals |
 | `PATCH` | `/api/admin/partner-deals/:id` | Deal status/amount updates |
+| `GET` | `/api/admin/partner-settlements` | List settlements (`?partnerId=`, `?status=`) with deal counts |
+| `POST` | `/api/admin/partner-settlements` | Aggregate completed deals of a period into a draft settlement |
+| `PATCH` | `/api/admin/partner-settlements/:id` | Settlement status transitions / notes |
 
 `partner_deals.handoff_mode` is:
 
@@ -115,6 +118,27 @@ Route factory: `apps/api/src/routes/admin-partners.ts`.
 |---|---|
 | `fire_and_forget` | Platform records/sends handoff, provider callback is not required |
 | `await_callback` | Provider/operator is expected to confirm acceptance/result |
+
+### Settlements
+
+A settlement is the payout document for one partner over one period.
+`POST /api/admin/partner-settlements` takes `{ partnerId, periodStart,
+periodEnd }` (epoch seconds, half-open `[start, end)`), collects all
+`completed` deals of that partner whose `completed_at` falls into the period
+and which are not yet claimed by another settlement
+(`partner_deals.settlement_id IS NULL`), snapshots `total_gross` /
+`total_commission`, and tags the deals with the new `settlement_id`. The tag
+guarantees a deal is counted by at most one settlement even when periods
+overlap. Mixed deal currencies within one settlement are rejected with `409`.
+
+Status lifecycle:
+
+```text
+draft -> issued -> paid      (paid_at set; tagged deals become status=settled)
+draft -> paid                (shortcut for small operators)
+draft | issued -> cancelled  (tagged deals are released: settlement_id=NULL)
+paid, cancelled              (terminal)
+```
 
 ## Data model
 
@@ -125,7 +149,8 @@ Main tables:
 | `service_catalog_items` | Tenant-visible service shelf; route type and target |
 | `partners` | Providers/partners with contact, commission, settlement currency |
 | `partner_services` | Specific service offered by partner; category, commission, optional stage/funnel |
-| `partner_deals` | Handoff/deal ledger; status, gross amount, commission, settlement |
+| `partner_deals` | Handoff/deal ledger; status, gross amount, commission, `settlement_id` link |
+| `partner_settlements` | Per-partner payout document for a period; totals snapshot, draft/issued/paid/cancelled |
 
 Marketplace install writes:
 
@@ -146,8 +171,8 @@ Metadata is stored in JSON fields:
 - `partner_services.notes` stores provider name, required fields and handoff
   mode.
 
-All four tables are tenant-scoped and protected by RLS. Production routes wrap
-reads/writes in `withTenant(db, tenantId, fn)`.
+All of these tables are tenant-scoped and protected by RLS. Production routes
+wrap reads/writes in `withTenant(db, tenantId, fn)`.
 
 ## Runtime semantics
 
@@ -181,6 +206,10 @@ service_catalog.delete
 partner.create
 partner.update
 partner_service.create
+partner_deal.create
+partner_deal.update
+partner_settlement.create
+partner_settlement.update
 ```
 
 Do not include provider credentials, channel tokens, LLM keys or payment
@@ -195,6 +224,7 @@ Relevant integration tests:
 | `apps/api/src/routes/admin-provider-marketplace.integration.test.ts` | list/install/custom provider, idempotency, tenant isolation |
 | `apps/api/src/routes/admin-service-catalog.integration.test.ts` | route type validation, target validation, CRUD |
 | `apps/api/src/routes/admin-partners.integration.test.ts` | partners, partner services, deals |
+| `apps/api/src/routes/admin-partner-settlements.integration.test.ts` | settlement aggregation, lifecycle, deal release on cancel, validation |
 
 Run targeted tests with:
 
