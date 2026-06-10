@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import { REWRITE_QUERY_SYSTEM_PROMPT } from "./prompts/rewrite-query.ts";
 import { stripThinkBlocks } from "./sanitize.ts";
 
 /**
@@ -19,28 +20,6 @@ export interface RewriteQueryInput {
   /** Cap output length to avoid the model writing essays. Default 200 chars. */
   maxLength?: number;
 }
-
-const SYSTEM_PROMPT = `Ты переформулируешь вопрос кандидата в самостоятельный поисковый запрос для базы знаний.
-
-Правила:
-1. Раскрывай местоимения и эллипсисы по контексту истории ("а там?" → "а в Дубае какие условия?")
-2. Сохраняй ВСЕ ключевые сущности из вопроса и недавней истории (страна, город, сумма, тема)
-3. Никаких вступлений, никакого markdown — ТОЛЬКО переформулированный запрос одной строкой
-4. Если вопрос и так самостоятельный и ясный — верни его без изменений
-5. Если вопрос вообще не про работу/услуги/факты (только смолток типа "привет"/"как дела") — верни его как есть
-6. Не отвечай на вопрос, не давай советов — только переформулируй
-
-Примеры:
-история: ассистент: в дубае платят 1500 в день, контракт 30 дней
-вопрос: а в стамбуле?
-ответ: какие условия и оплата в стамбуле
-
-история: ассистент: контракты бывают на 30, 60 и 90 дней
-вопрос: а виза как?
-ответ: как оформляется виза для работы по контракту
-
-вопрос: сколько платят моделям в дубае?
-ответ: сколько платят моделям в дубае?`;
 
 /**
  * Heuristic: skip rewriting when the question is already self-contained.
@@ -92,7 +71,7 @@ export async function rewriteQuery(input: RewriteQueryInput): Promise<string> {
       : `вопрос: ${original}\nответ:`;
 
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: REWRITE_QUERY_SYSTEM_PROMPT },
     { role: "user", content: userPrompt },
   ];
 

@@ -2,6 +2,11 @@ import type { Db } from "@chatman-media/conversation-engine";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import { defaultRegistry } from "@chatman-media/verticals";
 import { Hono } from "hono";
+import {
+  buildAdminCopilotSystemPrompt,
+  copilotUnknownPageHint,
+  PAGE_HINTS,
+} from "../prompts/admin-copilot.ts";
 import { FIELD_TYPES, type SeedStage, STAGE_KINDS, STAGE_TYPES } from "./admin-funnel.ts";
 import { normalizeStages, type StageDraft } from "./admin-workflow.ts";
 
@@ -32,74 +37,15 @@ const MAX_TURNS = 40;
 const PER_MESSAGE_CAP = 4000;
 const CONTEXT_CAP = 6000;
 
-/** Краткая подсказка ассистенту по текущей странице. */
-const PAGE_HINTS: Record<string, string> = {
-  onboarding:
-    "Пользователь проходит первичную настройку (онбординг). Помоги выбрать готовую воронку " +
-    "(вертикаль) или собрать свою, объясни шаги: канал → LLM-провайдер → база знаний. Если в " +
-    "данных видно, что chat-LLM ещё не настроен — подскажи настроить его на шаге «Провайдер».",
-  dashboard:
-    "Главная панель: метрики лидов, диалогов, воронки. Объясняй цифры и предлагай следующие шаги.",
-  leads: "Страница лидов. Помогай разбираться в списке лидов, их стадиях и полях.",
-  funnel: "Конструктор воронки (стадии и поля). Можешь предложить собрать или переработать воронку.",
-  conversations: "Диалоги с клиентами. Помогай анализировать переписку и стадии.",
-  exchange: "Настройки обменника: курсы и реквизиты. Помогай по данным страницы.",
-  channels: "Каналы (Telegram/WhatsApp/web). Помогай с подключением и статусами.",
-  settings: "Настройки LLM-провайдеров. Помогай выбрать модель и параметры.",
-  outreach: "Рассылки по лидам: кампании и шаблоны сообщений. Помогай готовить и анализировать рассылку.",
-  vacancies: "Каталог (вакансии/товары/услуги). Помогай разбираться в позициях каталога.",
-  skills: "Навыки бота — переиспользуемые фрагменты поведения. Объясняй и предлагай улучшения.",
-  hooks: "Director-хуки — точечные скрипты убеждения. Помогай формулировать и проверять.",
-  styles: "Стили продаж (тон и манера ответов). Помогай выбрать и настроить.",
-  experiments: "A/B-эксперименты над стилями. Помогай интерпретировать результаты.",
-  test: "Тест-бот — прогон диалога без реальной отправки. Помогай составить сценарий проверки.",
-  notifications: "Уведомления оператора. Помогай настроить триггеры и каналы доставки.",
-  webhooks: "Stage-вебхуки — POST при смене стадии. Помогай настроить интеграцию.",
-  tools: "Агентные инструменты бота (booking и т.п.). Помогай включить и настроить.",
-  referral: "Партнёрская/реферальная программа. Помогай по ссылкам и начислениям.",
-  audit: "Журнал аудита действий. Помогай искать и интерпретировать события.",
-  team: "Команда (админы, приглашения, роли). Помогай с управлением доступом.",
-  billing: "Использование LLM и тариф. Объясняй расход и лимиты плана.",
-  diagnostics: "Диагностика подсистем (LLM/каналы/БД). Помогай прочитать статусы и починить.",
-  superadmin: "Платформенная панель аккаунтов (суперадмин). Помогай по тенантам.",
-};
-
 function buildSystemPrompt(page: string, contextJson: string | null): string {
-  const pageHint = PAGE_HINTS[page] ?? `Текущая страница админки: «${page}».`;
-  return `Ты — встроенный AI-ассистент SaaS-платформы lead-engine (админка бота-продавца).
-Помогаешь оператору: отвечаешь на вопросы ПО ДАННЫМ ТЕКУЩЕЙ СТРАНИЦЫ и помогаешь настроить кабинет.
-Отвечай кратко, по-деловому, на языке оператора (по умолчанию русский).
-
-КОНТЕКСТ СТРАНИЦЫ: ${pageHint}
-${contextJson ? `ДАННЫЕ СТРАНИЦЫ (JSON, может быть обрезан):\n${contextJson}` : "Данные страницы не переданы."}
-
-ФОРМАТ ОТВЕТА: всегда возвращай ТОЛЬКО JSON-объект (без markdown, без префиксов):
-{ "reply": "ответ оператору", "action": <действие или null> }
-
-ДЕЙСТВИЕ (action) добавляй ТОЛЬКО когда оператор явно хочет что-то сделать или это очевидно полезно;
-иначе "action": null и просто отвечай в "reply". Доступные действия:
-
-1) Установить готовую воронку (вертикаль) — slug бери из списка доступных вертикалей в данных страницы:
-   { "type": "install_vertical", "slug": "<slug>" }
-
-2) Собрать кастомную воронку (когда собрал достаточно информации):
-   { "type": "build_funnel", "stages": [ <стадии> ] }
-   Схема стадии:
-   { "slug": "snake_case", "displayName": "Название",
-     "kind": один из ${JSON.stringify(STAGE_KINDS)},
-     "stageType": один из ${JSON.stringify(STAGE_TYPES)},
-     "supportMode": true|false (опц.), "nextStages": ["slug", ...],
-     "fields": [ { "slug": "snake_case", "displayName": "...",
-       "fieldType": один из ${JSON.stringify(FIELD_TYPES)},
-       "required": true|false, "aiExtractable": true|false,
-       "options": ["..."] (только для select/multiselect) } ] }
-   Правила: ровно одна стадия kind "intake", минимум одна "terminal_won" и одна "terminal_lost";
-   4–8 стадий; slug'и уникальны; nextStages ссылаются только на существующие slug'и.
-
-3) Перейти/подсказать шаг (без записи):
-   { "type": "navigate", "to": "/funnel" }  или  { "type": "navigate", "step": 1 }
-
-Не выдумывай данные, которых нет в контексте. Если информации не хватает — задай уточняющий вопрос.`;
+  const pageHint = PAGE_HINTS[page] ?? copilotUnknownPageHint(page);
+  return buildAdminCopilotSystemPrompt({
+    pageHint,
+    contextJson,
+    stageKinds: STAGE_KINDS,
+    stageTypes: STAGE_TYPES,
+    fieldTypes: FIELD_TYPES,
+  });
 }
 
 // ── Валидация предложенного действия (allowlist) ────────────────────────────

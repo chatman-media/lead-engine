@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import { REFLECT_SYSTEM_PROMPT } from "./prompts/reflect.ts";
 import { stripCodeFences, stripThinkBlocks } from "./sanitize.ts";
 
 /**
@@ -25,23 +26,6 @@ export interface ReflectResult {
   reason?: string;
 }
 
-const SYSTEM_PROMPT = `Ты проверяешь ответ бота на галлюцинации.
-Тебе дают: ВОПРОС кандидата, КОНТЕКСТ (выдержки из базы знаний), ОТВЕТ бота.
-
-Задача: проверить, что КАЖДЫЙ конкретный факт из ОТВЕТА (цифры, страны, города, валюты, сроки, названия услуг, условия) встречается в КОНТЕКСТЕ.
-
-Правила:
-- Общие фразы ("у нас хорошие условия", "напишу подробности"), приветствия, эмоции — НЕ требуют проверки
-- Конкретные числа, страны, города, валюты, сроки, % — ДОЛЖНЫ быть в контексте
-- Если ответ говорит "уточню у руководства" / "сейчас уточню" — это ОК, не требует проверки
-- Личные факты бота (имя, возраст, город, статус) — НЕ требуют проверки в контексте
-
-Верни СТРОГО JSON одной строкой, без markdown, без \`\`\`:
-{"grounded": true} — если все факты подтверждены или ответ общий
-{"grounded": false, "reason": "<какой именно факт не из контекста>"} — если есть выдуманное
-
-Только JSON, ничего больше.`;
-
 export async function verifyAnswer(input: ReflectInput): Promise<ReflectResult> {
   // Trivial / empty answers don't need a verifier — they cannot hallucinate.
   // This guards against pointless LLM calls on the NO_CONTEXT path and on
@@ -58,7 +42,7 @@ export async function verifyAnswer(input: ReflectInput): Promise<ReflectResult> 
   const userPrompt = `ВОПРОС: ${input.question}\n\nКОНТЕКСТ:\n${input.context}\n\nОТВЕТ: ${trimmed}\n\nJSON:`;
 
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: REFLECT_SYSTEM_PROMPT },
     { role: "user", content: userPrompt },
   ];
 

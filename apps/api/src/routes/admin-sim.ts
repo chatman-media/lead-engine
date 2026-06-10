@@ -37,6 +37,7 @@ import {
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import { scoreExchangeDialog } from "../lib/exchange/eval.ts";
+import { buildSimPersonaSystemPrompt } from "../prompts/admin-sim.ts";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
 import {
@@ -265,14 +266,7 @@ const MIN_STREAM_INTERVAL_SEC = 5;
 const MAX_STREAM_CLIENTS = 50;
 
 function personaSystemPrompt(brief: string): string {
-  return (
-    `${brief}\n\n` +
-    "ПРАВИЛА:\n" +
-    "- Ты пишешь как реальный человек в мессенджере: коротко, по одной мысли за сообщение.\n" +
-    "- Пиши ТОЛЬКО следующую реплику клиента, без кавычек и пояснений.\n" +
-    "- Реагируй на ответ собеседника естественно, продвигай диалог к своей цели.\n" +
-    `- Когда твой вопрос решён или диалог логически завершён — ответь ровно: ${DONE_TOKEN}`
-  );
+  return buildSimPersonaSystemPrompt(brief, DONE_TOKEN);
 }
 
 function firstPartText(parts: OutboundPart[]): string {

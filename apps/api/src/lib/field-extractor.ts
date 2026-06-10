@@ -27,6 +27,10 @@ import {
 } from "@chatman-media/storage";
 import { and, asc, desc, eq, notInArray } from "drizzle-orm";
 import type { LoadedRef } from "../llm-bootstrap.ts";
+import {
+  buildFieldExtractorSystemPrompt,
+  FIELD_EXTRACTOR_NEW_REQUEST_HINT,
+} from "../prompts/field-extractor.ts";
 import { chooseServiceRoute, type ServiceRouteSelection } from "./service-intent-router.ts";
 import {
   dispatchWorkflowEffects,
@@ -330,24 +334,12 @@ export function makeFieldExtractor(
         // типа (поле `_new_request`). Без доп. LLM-вызова.
         const inBranch =
           multiRequest && !!firstStage && lead.state !== firstStage.slug;
-        const newRequestHint = inBranch
-          ? '\n- ОТДЕЛЬНО: если гость в этом сообщении начинает СОВЕРШЕННО ДРУГУЮ услугу (не относящуюся к текущему запросу) — добавь поле "_new_request" со значением одного из: exchange|transfer|food. Если это продолжение текущего запроса — НЕ добавляй "_new_request".'
-          : "";
+        const newRequestHint = inBranch ? FIELD_EXTRACTOR_NEW_REQUEST_HINT : "";
 
-        const systemPrompt = `Ты — ассистент по извлечению данных из текста диалога.
-Из сообщения пользователя извлеки значения следующих полей (если они упомянуты):
-
-${fieldDescriptions}
-
-Верни JSON-объект, где ключи — slug'и полей, а значения — извлечённые данные.
-Правила:
-- Включай только те поля, которые явно упомянуты в тексте.
-- Для boolean полей: true/false.
-- Для select/multiselect: ровно одно из допустимых значений (value, не label).
-- Для number: только число без единиц измерения.
-- Для date: ISO-формат YYYY-MM-DD.
-- Если поле не упомянуто — не включай его в ответ.
-- Отвечай ТОЛЬКО JSON-объектом без markdown, без пояснений.${newRequestHint}`;
+        const systemPrompt = buildFieldExtractorSystemPrompt({
+          fieldDescriptions,
+          newRequestHint,
+        });
 
         let responseText: string;
         try {

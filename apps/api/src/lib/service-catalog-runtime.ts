@@ -14,6 +14,7 @@ import {
 	stageFields,
 } from "@chatman-media/storage";
 import { and, asc, desc, eq, isNull, notInArray, or } from "drizzle-orm";
+import { SERVICE_CATALOG_CLASSIFIER_SYSTEM_PROMPT } from "../prompts/service-catalog-runtime.ts";
 
 export type ServiceCatalogRouteType =
 	| "manual"
@@ -540,11 +541,7 @@ async function llmCatalogMatches(
 		[
 			{
 				role: "system",
-				content:
-					"Ты классифицируешь входящее сообщение по каталогу услуг. " +
-					'Верни только JSON: {"requests":[{"slug":"...","confidence":0.0-1.0,"fields":{},"note":"..."}]}. ' +
-					"Если в одном сообщении несколько услуг, верни несколько элементов. " +
-					"Используй только slug из каталога. Не выдумывай услуги.",
+				content: SERVICE_CATALOG_CLASSIFIER_SYSTEM_PROMPT,
 			},
 			{
 				role: "user",

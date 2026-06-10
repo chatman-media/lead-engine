@@ -278,6 +278,32 @@ All stages are opt-in via `AnswerInput` fields. See `packages/kb/README.md` for 
 
 ---
 
+## Prompts layer (`src/prompts/`)
+
+Все литеральные тексты LLM-промптов живут в `src/prompts/` своего workspace
+(`packages/kb`, `packages/sales`, `packages/conversation-engine`, `apps/api`),
+по файлу на домен + `index.ts`-реестр. Композиция (`composeSystemPrompt`,
+`buildSystemPrompt`, сборка блоков из retrieval/style) остаётся обычным кодом.
+
+Правила:
+
+- **Правишь формулировку промпта** → правь файл в `prompts/`, код не трогай.
+- **Новый промпт** → новый файл в `prompts/` (константа или template-функция,
+  если текст интерполирует runtime-значения) + ре-экспорт в `prompts/index.ts`.
+- `prompts/`-файлы **ничего не импортируют** (кроме `import type`) — чистые
+  данные, без циклов. Если промпту нужны значения из кода — делай
+  template-функцию и передавай их параметрами.
+- Имена с доменным префиксом: `REFLECT_SYSTEM_PROMPT`, `COACH_SYSTEM_PROMPT`,
+  `buildFieldExtractorSystemPrompt(...)`.
+- Не-промптовые тексты (реплики бота, лейблы UI, persona-конфиги) в
+  `prompts/` не кладём.
+
+Авто-улучшение промптов: `scripts/prompt-improve-loop.sh`
+(см. `docs/engineering/PROMPT_IMPROVE_LOOP.md`) — цикл работает поверх
+`prompts/`-слоя.
+
+---
+
 ## Common pitfalls
 
 | Mistake | Why it fails | Fix |

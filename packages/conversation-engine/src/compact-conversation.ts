@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import { COMPACT_CONVERSATION_SYSTEM_PROMPT } from "./prompts/compact-conversation.ts";
 
 /**
  * Conversation compaction — summarise a message list into a dense text block
@@ -26,21 +27,9 @@ export async function compactConversation(
     })
     .join("\n");
 
-  const systemPrompt = [
-    "Ты — суммаризатор диалогов продаж.",
-    "Тебе дан фрагмент переписки между ботом и кандидатом.",
-    "Напиши КРАТКОЕ резюме на русском языке — 3-7 пунктов:",
-    "  • Что узнал кандидат (вопросы, интересы).",
-    "  • Что уже выяснено (бюджет, сроки, параметры).",
-    "  • На каком этапе находится диалог.",
-    "  • Любые особые договорённости или отказы.",
-    "",
-    "Формат — маркированный список. Без вводных фраз. Только факты.",
-  ].join("\n");
-
   const raw = await chat.complete(
     [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: COMPACT_CONVERSATION_SYSTEM_PROMPT },
       { role: "user", content: `Диалог:\n${transcript}` },
     ],
     { temperature: 0, numPredict: 400 },

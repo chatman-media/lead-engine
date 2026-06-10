@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import { SUMMARIZE_CONVERSATION_SYSTEM_PROMPT } from "./prompts/summarize-conversation.ts";
 import { stripThinkBlocks } from "./sanitize.ts";
 
 /**
@@ -27,20 +28,6 @@ export interface SummarizeInput {
   maxLength?: number;
 }
 
-const SYSTEM_PROMPT = `Ты сжимаешь старую часть переписки рекрутингового агентства в одно короткое summary.
-
-Цель: чтобы бот в следующих репликах помнил что уже обсуждалось — что ОБЕЩАЛ, что ОТКЛАДЫВАЛ, в чём кандидат СОМНЕВАЛСЯ, какие условия УЖЕ ПРОЗВУЧАЛИ.
-
-Правила:
-1. Один абзац, без буллетов, без markdown, без заголовков. 3-6 коротких предложений.
-2. Пиши в третьем лице ("кандидат спросил…", "бот объяснил…").
-3. Сохраняй КОНКРЕТИКУ: суммы, страны, даты, обещания. ("обещал прислать договор завтра", "кандидат уточняет про Дубай vs Стамбул")
-4. НЕ повторяй имя/возраст/город кандидата — это уже хранится отдельно в memory.facts.
-5. Игнорируй смолток ("привет", "ок").
-6. Если есть "ПРЕДЫДУЩЕЕ SUMMARY" — обнови его, добавив что нового, удалив отжившее.
-
-Пиши ТОЛЬКО текст summary. Никаких префиксов, кавычек, "Ответ:".`;
-
 export async function summarizeConversation(input: SummarizeInput): Promise<string> {
   if (input.messagesToSummarize.length === 0) return input.previousSummary ?? "";
 
@@ -53,7 +40,7 @@ export async function summarizeConversation(input: SummarizeInput): Promise<stri
     : `РЕПЛИКИ:\n${dialogue}\n\nSUMMARY:`;
 
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: SUMMARIZE_CONVERSATION_SYSTEM_PROMPT },
     { role: "user", content: userPrompt },
   ];
 
