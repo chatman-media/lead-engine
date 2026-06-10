@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/observability",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "JsonLogger + Prometheus metrics (counters, histograms) для apps/api и apps/worker. Без npm-deps — самописный Prom-text формат.",
   "type": "module",
   "main": "./dist/index.js",
