@@ -137,6 +137,85 @@ describe("buildExchangeOperatorHandoff", () => {
 		});
 		expect(handoff?.reviewPath).toContain("kyc_approved");
 	});
+
+	it("неизвестный tool с needsOperator + текст про чек → payment handoff из fallback-результата", async () => {
+		const handoff = buildExchangeOperatorHandoff({
+			text: "Оплату получили, чек передан оператору.",
+			state: STATE,
+			telemetry: {
+				toolCalls: [
+					{
+						name: "lookup_exchange_order",
+						args: {},
+						// receiptAmount строкой — numberValue парсит её в число.
+						result: {
+							needsOperator: true,
+							receiptAmount: "95000",
+							sourceBank: "tinkoff",
+						},
+						cycle: 1,
+					},
+				],
+			},
+		});
+
+		expect(handoff).toMatchObject({
+			reason: "payment_review",
+			orderId: 77,
+			amount: "95000",
+			rail: "tinkoff",
+		});
+	});
+
+	it("нечисловой receiptAmount игнорируется → amount из order", async () => {
+		const handoff = buildExchangeOperatorHandoff({
+			text: "Оплата по заявке, чек во вложении.",
+			state: STATE,
+			telemetry: {
+				toolCalls: [
+					{
+						name: "lookup_exchange_order",
+						args: {},
+						result: { needsOperator: true, receiptAmount: "n/a" },
+						cycle: 1,
+					},
+				],
+			},
+		});
+
+		expect(handoff?.reason).toBe("payment_review");
+		expect(handoff?.amount).toBe("100000 RUB → 38000 THB");
+	});
+
+	it("текст про офис/выдачу без tool-результата → office handoff", async () => {
+		if (!STATE.order) throw new Error("test STATE must include order");
+		const handoff = buildExchangeOperatorHandoff({
+			text: "Приходите в офис за выдачей наличных.",
+			state: {
+				...STATE,
+				order: {
+					...STATE.order,
+					paymentProofReceived: false, // не payment-ветка
+					payoutMethod: "office_cash",
+					payoutCodeIssued: false,
+				},
+			},
+		});
+
+		expect(handoff).toMatchObject({
+			reason: "office_payout",
+			orderId: 77,
+			pending: "operator_office_confirmation",
+		});
+		expect(handoff?.context).toContain("office=Bangkok Asok");
+		expect(handoff?.context).toContain("pickup_window=15:00-16:00");
+	});
+
+	it("без состояния и сигналов → null", async () => {
+		expect(
+			buildExchangeOperatorHandoff({ text: "Спасибо, хорошего дня!" }),
+		).toBeNull();
+	});
 });
 
 describe("parsePickupWindow", () => {
@@ -148,5 +227,12 @@ describe("parsePickupWindow", () => {
 			"after 18:00",
 		);
 		expect(parsePickupWindow("not-json")).toBeNull();
+	});
+
+	it("non-object JSON (массив/число/null) → null", () => {
+		expect(parsePickupWindow('["15:00-16:00"]')).toBeNull();
+		expect(parsePickupWindow("42")).toBeNull();
+		expect(parsePickupWindow("null")).toBeNull();
+		expect(parsePickupWindow("   ")).toBeNull();
 	});
 });

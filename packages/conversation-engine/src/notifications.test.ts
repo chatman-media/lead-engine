@@ -453,6 +453,69 @@ describe("NotificationService.notify", () => {
 		expect(markup).toContain("opx:payout:111:78");
 	});
 
+	it("sendTestMessage: без токена → ok:false 'Бот не настроен'", async () => {
+		const svc = new NotificationService(makeRepo(), "", "http://app");
+		expect(await svc.sendTestMessage("chat-1")).toEqual({
+			ok: false,
+			error: "Бот не настроен (нет токена)",
+		});
+	});
+
+	it("sendTestMessage: успешная отправка тестового сообщения", async () => {
+		const sent: SendMessageInput[] = [];
+		const svc = new NotificationService(makeRepo(), "fake-token", "http://app");
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramClient((input) => sent.push(input));
+		expect(await svc.sendTestMessage("chat-1")).toEqual({ ok: true });
+		expect(sent[0]?.chatId).toBe("chat-1");
+		expect(sent[0]?.text).toContain("Тестовое уведомление");
+	});
+
+	it("sendTestMessage: ошибка клиента → ok:false + message", async () => {
+		const svc = new NotificationService(makeRepo(), "fake-token", "http://app");
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramClient(() => {
+			throw new Error("tg down");
+		});
+		expect(await svc.sendTestMessage("chat-1")).toEqual({
+			ok: false,
+			error: "tg down",
+		});
+	});
+
+	it("sendDirectMessage: без токена → ok:false 'Бот не настроен'", async () => {
+		const svc = new NotificationService(makeRepo(), "", "http://app");
+		expect(await svc.sendDirectMessage("chat-2", "<b>x</b>")).toEqual({
+			ok: false,
+			error: "Бот не настроен (нет токена)",
+		});
+	});
+
+	it("sendDirectMessage: успех — текст уходит как есть (HTML)", async () => {
+		const sent: SendMessageInput[] = [];
+		const svc = new NotificationService(makeRepo(), "fake-token", "http://app");
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramClient((input) => sent.push(input));
+		expect(await svc.sendDirectMessage("chat-2", "<b>прямое</b>")).toEqual({
+			ok: true,
+		});
+		expect(sent[0]?.chatId).toBe("chat-2");
+		expect(sent[0]?.text).toBe("<b>прямое</b>");
+	});
+
+	it("sendDirectMessage: не-Error throw → стрингифицированная ошибка", async () => {
+		const svc = new NotificationService(makeRepo(), "fake-token", "http://app");
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramClient(() => {
+			// eslint-style string throw — ветка String(err)
+			throw "boom";
+		});
+		expect(await svc.sendDirectMessage("chat-2", "x")).toEqual({
+			ok: false,
+			error: "boom",
+		});
+	});
+
 	it("with informer: skips owner in per-operator loop, still notifies other operators + calls informer", async () => {
 		const sent: string[] = [];
 		let emitted = 0;

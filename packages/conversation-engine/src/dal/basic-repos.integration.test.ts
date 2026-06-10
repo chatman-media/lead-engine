@@ -21,6 +21,7 @@ import { ContactsRepo } from "./contacts.ts";
 import { LeadsRepo } from "./leads.ts";
 import { MessagesRepo } from "./messages.ts";
 import { SkillOutcomesRepo } from "./skill-outcomes.ts";
+import { StylesRepo } from "./styles.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_dal_basic_${Math.random().toString(36).slice(2, 10)}`;
@@ -45,6 +46,7 @@ const leadsRepo = () => new LeadsRepo({ db, tenantId });
 const messagesRepo = () => new MessagesRepo({ db, tenantId });
 const outcomesRepo = () => new SkillOutcomesRepo({ db, tenantId });
 const agentToolCallsRepo = () => new AgentToolCallsRepo({ db, tenantId });
+const stylesRepo = () => new StylesRepo({ db, tenantId });
 
 beforeAll(async () => {
 	if (!ownerUrl) return;
@@ -408,6 +410,69 @@ describe("AgentToolCallsRepo", () => {
 				label: "good_reply",
 				nowEpoch: now + 5,
 			}),
+		).toBeNull();
+	});
+});
+
+describe("StylesRepo", () => {
+	it("create/byId/findActiveBySlug/listActive/listAll/update/softDelete", async () => {
+		if (!enabled) return;
+
+		const created = await stylesRepo().create({
+			slug: "warm",
+			displayName: "Warm",
+			configJson: "{}",
+			isActive: true,
+		});
+		expect(created.version).toBe(1);
+		expect(created.tenantId).toBe(tenantId);
+
+		// byId: свой тенант видит, чужой — нет, мимо — null.
+		expect((await stylesRepo().byId(created.id))?.slug).toBe("warm");
+		expect(await stylesRepo().byId(999_999)).toBeNull();
+		expect(
+			await new StylesRepo({ db, tenantId: otherTenantId }).byId(created.id),
+		).toBeNull();
+
+		// findActiveBySlug: только живая версия.
+		expect((await stylesRepo().findActiveBySlug("warm"))?.id).toBe(created.id);
+		expect(await stylesRepo().findActiveBySlug("missing")).toBeNull();
+
+		// list-методы: active отфильтровывает неактивные, listAll — нет.
+		const inactive = await stylesRepo().create({
+			slug: "cold",
+			displayName: "Cold",
+			configJson: "{}",
+			isActive: false,
+		});
+		expect(inactive.isActive).toBe(false);
+		const active = await stylesRepo().listActive();
+		expect(active.map((s) => s.slug)).toContain("warm");
+		expect(active.map((s) => s.slug)).not.toContain("cold");
+		const all = await stylesRepo().listAll();
+		expect(all.map((s) => s.slug)).toEqual(
+			expect.arrayContaining(["warm", "cold"]),
+		);
+
+		// update: частичный set; несуществующий id → null.
+		const updated = await stylesRepo().update(created.id, {
+			displayName: "Warm v2",
+			configJson: '{"tone":"warm"}',
+		});
+		expect(updated?.displayName).toBe("Warm v2");
+		expect(await stylesRepo().update(999_999, { displayName: "x" })).toBeNull();
+
+		// softDelete: первый раз true, повтор false; пропадает из выборок.
+		expect(await stylesRepo().softDelete(created.id)).toBe(true);
+		expect(await stylesRepo().softDelete(created.id)).toBe(false);
+		expect(await stylesRepo().findActiveBySlug("warm")).toBeNull();
+		expect((await stylesRepo().listAll()).map((s) => s.slug)).not.toContain(
+			"warm",
+		);
+		expect((await stylesRepo().byId(created.id))?.deletedAt).not.toBeNull();
+		// soft-deleted строка больше не апдейтится.
+		expect(
+			await stylesRepo().update(created.id, { displayName: "zombie" }),
 		).toBeNull();
 	});
 });

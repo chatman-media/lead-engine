@@ -143,6 +143,189 @@ describe("ScopedKbStore", () => {
   });
 });
 
+// ── ScopedKbStore: hybrid/priority + делегирование ingest-методов (без БД) ──
+
+/** Богатый фейк: пишет search-вызовы с topic и hybrid-вызовы со scope. */
+class RecordingKbStore implements IKbStore {
+  searchCalls: Array<{ topic: string | null | undefined; scope: string }> = [];
+  hybridCalls: string[] = [];
+  /** key: `${topic ?? ""}|${scopeKey}` */
+  searchHits = new Map<string, KbSearchHit[]>();
+  hybridHits = new Map<string, KbSearchHit[]>();
+  delegated: string[] = [];
+
+  async search(
+    _embedding: number[],
+    _k: number,
+    topic?: string | null,
+    scope?: KbScope | null,
+  ): Promise<KbSearchHit[]> {
+    const key = `${topic ?? ""}|${scopeKey(scope ?? null)}`;
+    this.searchCalls.push({ topic, scope: scopeKey(scope ?? null) });
+    return this.searchHits.get(key) ?? [];
+  }
+
+  async hybridSearch(input: {
+    embedding: number[];
+    query: string;
+    k?: number;
+    topic?: string | null;
+    scope?: KbScope | null;
+  }): Promise<KbSearchHit[]> {
+    this.hybridCalls.push(scopeKey(input.scope ?? null));
+    return this.hybridHits.get(scopeKey(input.scope ?? null)) ?? [];
+  }
+
+  async prioritySearch(): Promise<KbSearchHit[]> {
+    return [];
+  }
+
+  async getDocumentBySource(source: string) {
+    this.delegated.push(`doc:${source}`);
+    return { id: 5, content_hash: "h" };
+  }
+
+  async countChunksForDocument(documentId: number) {
+    this.delegated.push(`count:${documentId}`);
+    return 3;
+  }
+
+  async deleteDocument(id: number) {
+    this.delegated.push(`del:${id}`);
+    return true;
+  }
+
+  async upsertDocument(input: { source: string }) {
+    this.delegated.push(`upsert:${input.source}`);
+    return { id: 8 };
+  }
+
+  async insertChunkWithEmbedding(input: { chunkIndex: number }) {
+    this.delegated.push(`chunk:${input.chunkIndex}`);
+  }
+}
+
+describe("ScopedKbStore — hybrid/priority/delegates", () => {
+  const stageScope: KbScope = {
+    scopeType: "stage",
+    funnelId: 7,
+    stageSlug: "payment",
+  };
+
+  it("hybridSearch falls back stage -> funnel -> global", async () => {
+    const inner = new RecordingKbStore();
+    const globalHits = [hit("global doc")];
+    inner.hybridHits.set("global::", globalHits);
+
+    const store = new ScopedKbStore(inner, stageScope);
+    const res = await store.hybridSearch({
+      embedding: vec(0),
+      query: "курс",
+      k: 5,
+    });
+
+    expect(res).toBe(globalHits);
+    expect(inner.hybridCalls).toEqual(["stage:7:payment", "funnel:7:", "global::"]);
+  });
+
+  it("hybridSearch: funnel-scope чейн funnel -> global", async () => {
+    const inner = new RecordingKbStore();
+    const funnelHits = [hit("funnel doc")];
+    inner.hybridHits.set("funnel:7:", funnelHits);
+
+    const store = new ScopedKbStore(inner, {
+      scopeType: "funnel",
+      funnelId: 7,
+    });
+
+    expect(
+      await store.hybridSearch({ embedding: vec(0), query: "q" }),
+    ).toBe(funnelHits);
+    expect(inner.hybridCalls).toEqual(["funnel:7:"]);
+  });
+
+  it("prioritySearch: books-хиты возвращаются сразу (без hybrid)", async () => {
+    const inner = new RecordingKbStore();
+    const bookHits = [hit("book doc")];
+    inner.searchHits.set("books|stage:7:payment", bookHits);
+
+    const store = new ScopedKbStore(inner, stageScope);
+    const res = await store.prioritySearch({
+      embedding: vec(0),
+      query: "книга",
+    });
+
+    expect(res).toBe(bookHits);
+    expect(inner.hybridCalls).toEqual([]);
+    expect(inner.searchCalls[0]).toEqual({
+      topic: "books",
+      scope: "stage:7:payment",
+    });
+  });
+
+  it("prioritySearch vectorOnly: без books → чистый vector fallback", async () => {
+    const inner = new RecordingKbStore();
+    const vectorHits = [hit("vector doc")];
+    inner.searchHits.set("|global::", vectorHits);
+
+    const store = new ScopedKbStore(inner, null);
+    const res = await store.prioritySearch({
+      embedding: vec(0),
+      query: "q",
+      vectorOnly: true,
+    });
+
+    expect(res).toBe(vectorHits);
+    expect(inner.hybridCalls).toEqual([]);
+  });
+
+  it("prioritySearch default: без books → hybrid fallback", async () => {
+    const inner = new RecordingKbStore();
+    const hybridHits = [hit("hybrid doc")];
+    inner.hybridHits.set("global::", hybridHits);
+
+    const store = new ScopedKbStore(inner, { scopeType: "global" });
+    const res = await store.prioritySearch({ embedding: vec(0), query: "q" });
+
+    expect(res).toBe(hybridHits);
+    expect(inner.hybridCalls).toEqual(["global::"]);
+  });
+
+  it("ingest-методы делегируются внутреннему store как есть", async () => {
+    const inner = new RecordingKbStore();
+    const store = new ScopedKbStore(inner, stageScope);
+
+    expect(await store.getDocumentBySource("src.md")).toEqual({
+      id: 5,
+      content_hash: "h",
+    });
+    expect(await store.countChunksForDocument(5)).toBe(3);
+    expect(await store.deleteDocument(5)).toBe(true);
+    expect(
+      await store.upsertDocument({
+        source: "src.md",
+        title: "t",
+        contentHash: "h2",
+      }),
+    ).toEqual({ id: 8 });
+    await store.insertChunkWithEmbedding({
+      documentId: 8,
+      chunkIndex: 0,
+      text: "x",
+      tokenCount: 1,
+      embedding: null,
+    });
+
+    expect(inner.delegated).toEqual([
+      "doc:src.md",
+      "count:5",
+      "del:5",
+      "upsert:src.md",
+      "chunk:0",
+    ]);
+  });
+});
+
 describe("DrizzleKbStore — ingest", () => {
   it("upsertDocument → id, getDocumentBySource находит, dedup на (source,hash)", async () => {
     if (!enabled) return;

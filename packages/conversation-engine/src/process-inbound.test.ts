@@ -652,6 +652,229 @@ describe("processInbound", () => {
 		expect(memoryCalled).toBe(false);
 	});
 
+	it("exchange: фото с подписью про оплату → payment_review handoff (не KYC)", async () => {
+		const events: NotifyEvent[] = [];
+		const d = {
+			...makeDeps(),
+			template: {
+				slug: "exchange_v1",
+				displayName: "Exchange",
+				version: 1,
+				funnelStages: [],
+				systemPromptFragment: "",
+			},
+			notifications: fakeNotifications(events),
+		};
+		const inbound: Inbound = {
+			channelId: "tg-1",
+			externalMessageId: "210",
+			externalUserId: "u-pay",
+			parts: [
+				{
+					kind: "photo",
+					mediaRef: { channelId: "tg-1", externalRef: "ph-receipt" },
+					caption: "Чек об оплате 100000 RUB",
+				},
+			],
+			receivedAt: 1700000000,
+			raw: {},
+		};
+
+		await processInbound(inbound, d);
+
+		const handoff = events.find(
+			(e) => e.eventType === "operator_handoff_required",
+		);
+		expect(handoff?.data).toMatchObject({
+			reason: "payment_review",
+			title: "Проверить оплату по чеку",
+			pending: "operator_payment_review",
+			priority: "high",
+		});
+		expect(String(handoff?.data?.reviewPath)).toContain("payment_confirmed");
+	});
+
+	// ── Stage classifier + lead auto-advance (фейковый чейнящийся Db) ─────────
+	/**
+	 * Каждый await терминального drizzle-выражения забирает следующий элемент
+	 * script (Error → reject). Позволяет прогнать applyClassifiedStage +
+	 * ensureAndAdvanceLeadByPhase без Postgres.
+	 */
+	function scriptedDb(script: Array<unknown[] | Error>) {
+		let i = 0;
+		const next = (): Promise<unknown[]> => {
+			const entry = script[i++];
+			if (entry instanceof Error) return Promise.reject(entry);
+			return Promise.resolve(entry ?? []);
+		};
+		const makeChain = () => {
+			// biome-ignore lint/suspicious/noExplicitAny: фейковый query-builder
+			const chain: any = {};
+			for (const m of [
+				"from",
+				"where",
+				"innerJoin",
+				"orderBy",
+				"limit",
+				"set",
+				"values",
+				"returning",
+			]) {
+				chain[m] = () => chain;
+			}
+			// biome-ignore lint/suspicious/noThenProperty: thenable нужен, чтобы await drizzle-чейна забирал script
+			chain.then = (
+				res: (v: unknown) => unknown,
+				rej?: (e: unknown) => unknown,
+			) => next().then(res, rej);
+			return chain;
+		};
+		return {
+			select: () => makeChain(),
+			insert: () => makeChain(),
+			update: () => makeChain(),
+		} as unknown as Parameters<typeof processInbound>[1]["db"];
+	}
+
+	type SinkLog = {
+		level: string;
+		msg: string;
+		fields?: Record<string, unknown>;
+	};
+	function capturingSink(logs: SinkLog[]) {
+		return {
+			log: (level: string, msg: string, fields?: Record<string, unknown>) => {
+				logs.push({ level, msg, fields });
+			},
+		};
+	}
+
+	it("stage classifier: смена стадии логируется, лид auto-created и продвинут", async () => {
+		const logs: SinkLog[] = [];
+		const d = {
+			...makeDeps(),
+			db: scriptedDb([
+				[{ stage: null }], // applyClassifiedStage: текущая стадия
+				[], // applyClassifiedStage: UPDATE conversations
+				[
+					// lead-advance: стадии активной воронки
+					{ id: 1, slug: "new", phase: null, kind: "intake", position: 0 },
+					{
+						id: 2,
+						slug: "qualified",
+						phase: "qualify",
+						kind: "normal",
+						position: 1,
+					},
+				],
+				[], // lead-advance: существующий лид (нет)
+				[{ id: 42 }], // lead INSERT returning
+				[], // lead UPDATE (advance)
+			]),
+			leads: {} as Parameters<typeof processInbound>[1]["leads"],
+			stageClassifier: {
+				classify: async () => "qualify" as never,
+			} as Parameters<typeof processInbound>[1]["stageClassifier"],
+			sink: capturingSink(logs),
+		};
+
+		const res = await processInbound(
+			textInbound({
+				extUserId: "u-lead-new",
+				extMessageId: "401",
+				text: "хочу обменять 500 usdt",
+			}),
+			d,
+		);
+
+		expect(res.persisted).toBe(true);
+		expect(logs).toContainEqual(
+			expect.objectContaining({
+				level: "debug",
+				msg: "conversation stage classified",
+				fields: expect.objectContaining({ from: null, to: "qualify" }),
+			}),
+		);
+		const created = logs.find((l) => l.msg === "lead auto-created");
+		expect(created?.fields).toMatchObject({
+			leadId: 42,
+			stage: "qualified",
+			salesStage: "qualify",
+		});
+	});
+
+	it("stage classifier: существующий лид продвигается → 'lead advanced'", async () => {
+		const logs: SinkLog[] = [];
+		const d = {
+			...makeDeps(),
+			db: scriptedDb([
+				[{ stage: null }],
+				[],
+				[
+					{ id: 1, slug: "new", phase: null, kind: "intake", position: 0 },
+					{ id: 2, slug: "offer", phase: "offer", kind: "normal", position: 1 },
+				],
+				[{ id: 7, state: "new", stageDefinitionId: 1 }], // лид уже есть
+				[], // lead UPDATE (advance)
+			]),
+			leads: {} as Parameters<typeof processInbound>[1]["leads"],
+			stageClassifier: {
+				classify: async () => "pitch" as never,
+			} as Parameters<typeof processInbound>[1]["stageClassifier"],
+			sink: capturingSink(logs),
+		};
+
+		await processInbound(
+			textInbound({
+				extUserId: "u-lead-adv",
+				extMessageId: "402",
+				text: "какие условия?",
+			}),
+			d,
+		);
+
+		const advanced = logs.find((l) => l.msg === "lead advanced");
+		expect(advanced?.fields).toMatchObject({
+			leadId: 7,
+			stage: "offer",
+			salesStage: "pitch",
+		});
+	});
+
+	it("stage classifier: ошибка lead-advance → warn, pipeline продолжает", async () => {
+		const logs: SinkLog[] = [];
+		const d = {
+			...makeDeps(),
+			db: scriptedDb([
+				[{ stage: "qualify" }], // та же стадия → UPDATE не нужен
+				new Error("stages query down"), // lead-advance падает на выборке стадий
+			]),
+			leads: {} as Parameters<typeof processInbound>[1]["leads"],
+			stageClassifier: {
+				classify: async () => "qualify" as never,
+			} as Parameters<typeof processInbound>[1]["stageClassifier"],
+			sink: capturingSink(logs),
+		};
+
+		const res = await processInbound(
+			textInbound({
+				extUserId: "u-lead-err",
+				extMessageId: "403",
+				text: "обмен usdt",
+			}),
+			d,
+		);
+
+		expect(res.persisted).toBe(true);
+		expect(logs).toContainEqual(
+			expect.objectContaining({
+				level: "warn",
+				msg: "lead auto-advance failed",
+				fields: expect.objectContaining({ error: "stages query down" }),
+			}),
+		);
+	});
+
 	it("deferReply → возвращается до reply.generate (replyDeferred)", async () => {
 		let replyCalled = false;
 		const reply: ReplyStrategy = {

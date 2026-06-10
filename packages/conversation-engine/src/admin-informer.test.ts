@@ -1,5 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
+  AdminInformer,
   type InformerLevel,
   type InformerSeverity,
   inQuietHours,
@@ -10,8 +11,9 @@ import {
   topicEnabled,
 } from "./admin-informer.ts";
 import type { OperatorSettings } from "./dal/notifications.ts";
+import type { Db } from "./dal/types.ts";
 import type { NotificationEvent } from "./notifications.ts";
-import type { OpsAlert } from "./ops-alerts.ts";
+import type { OpsAlert, OpsTelegramSender } from "./ops-alerts.ts";
 
 function settings(over: Partial<OperatorSettings> = {}): OperatorSettings {
   return {
@@ -148,5 +150,81 @@ describe("notificationEventToInformer", () => {
   it("url строится из leadId + appUrl", () => {
     const e = notificationEventToInformer(ev({ eventType: "high_value_deal", leadId: 9 }), "http://x");
     expect(e?.url).toBe("http://x/leads/9");
+  });
+});
+
+// ── AdminInformer error-paths (фейковый Db, без Postgres) ───────────────────
+
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
+function throwingDb(): Db {
+  return {
+    transaction: async () => {
+      throw new Error("pg down");
+    },
+  } as unknown as Db;
+}
+
+describe("AdminInformer (unit)", () => {
+  it("resolveOwnerAdminId: ошибка БД → null (catch-ветка)", async () => {
+    const informer = new AdminInformer({
+      db: throwingDb(),
+      botToken: "",
+      appUrl: "http://x",
+      telegram: null,
+    });
+    expect(await informer.resolveOwnerAdminId(1)).toBeNull();
+  });
+
+  it("emitOpsAlert: ошибка резолва/записи → warn, без падения", async () => {
+    const warns: Array<{ msg: string; ctx: unknown }> = [];
+    const informer = new AdminInformer({
+      db: throwingDb(),
+      botToken: "",
+      appUrl: "http://x",
+      telegram: null,
+      log: { warn: (msg, ctx) => warns.push({ msg, ctx }) },
+    });
+    await informer.emitOpsAlert({
+      tenantId: 5,
+      kind: "order_stuck",
+      severity: "warning",
+      title: "t",
+      detail: "d",
+      dedupKey: "k",
+    });
+    expect(warns).toContainEqual(
+      expect.objectContaining({
+        msg: "[informer] resolve/insert failed",
+        ctx: expect.objectContaining({ tenantId: 5 }),
+      }),
+    );
+  });
+
+  it("botToken без telegram-override → отправка через TelegramClient (fetch)", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: unknown) => {
+      urls.push(String(url));
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 1, chat: { id: 1, type: "private" }, date: 0 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const informer = new AdminInformer({
+      db: throwingDb(),
+      botToken: "tok-informer",
+      appUrl: "http://x",
+    });
+    const telegram = (informer as unknown as { telegram: OpsTelegramSender })
+      .telegram;
+    await telegram.send("100", "<b>hi</b>");
+    expect(urls[0]).toContain("/bottok-informer/sendMessage");
   });
 });
