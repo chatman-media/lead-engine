@@ -39,6 +39,7 @@ let providerChannelId = 0;
 let orderId = 0;
 let requestId = 0;
 let confirmedOrderId = 0;
+let paidAwaitingOrderId = 0;
 let retryOrderId = 0;
 let now = 0;
 
@@ -293,6 +294,18 @@ async function seedBrokerOrder() {
 		dataJson: JSON.stringify({ availabilityText: "20:00" }),
 		createdAt: now + 4,
 	});
+	await db.insert(schema.orderEvents).values({
+		tenantId,
+		orderId,
+		providerRequestId: requestId,
+		actorType: "system",
+		eventType: "provider_request_send_failed",
+		dataJson: JSON.stringify({
+			error: "WhatsApp temporarily unavailable",
+			channelKind: "whatsapp",
+		}),
+		createdAt: now + 5,
+	});
 
 	const [confirmed] = await db
 		.insert(schema.serviceOrders)
@@ -304,6 +317,21 @@ async function seedBrokerOrder() {
 			status: "confirmed",
 			summary: "Paid booking",
 			paymentStatus: "paid",
+			createdAt: now,
+			updatedAt: now,
+		})
+		.returning({ id: schema.serviceOrders.id });
+	const [paidAwaiting] = await db
+		.insert(schema.serviceOrders)
+		.values({
+			tenantId,
+			customerContactId,
+			assignedProviderId: providerId,
+			requestType: "massage",
+			status: "awaiting_customer_payment",
+			summary: "Paid order awaiting confirmation",
+			paymentStatus: "paid",
+			commissionAmount: 180,
 			createdAt: now,
 			updatedAt: now,
 		})
@@ -322,12 +350,76 @@ async function seedBrokerOrder() {
 			updatedAt: now,
 		})
 		.returning({ id: schema.serviceOrders.id });
-	if (!confirmed || !retry) throw new Error("seed action orders failed");
+	if (!confirmed || !paidAwaiting || !retry) {
+		throw new Error("seed action orders failed");
+	}
 	confirmedOrderId = confirmed.id;
+	paidAwaitingOrderId = paidAwaiting.id;
 	retryOrderId = retry.id;
 }
 
 describe("admin provider orders", () => {
+	it("exposes ops settings and metrics and blocks writes when disabled", async () => {
+		if (!sql) return;
+
+		const opsRes = await authReq("/api/admin/provider-orders/ops");
+		expect(opsRes.status).toBe(200);
+		const ops = (await opsRes.json()) as {
+			settings: { enabled: boolean; source: string };
+			metrics: {
+				ordersCreated: number;
+				providerRequestsSent: number;
+				providerResponseRatePct: number | null;
+				avgTimeToQuoteSec: number | null;
+				paidOrders: number;
+				commissionAmountTotal: number;
+				failuresByChannel: Record<string, number>;
+				failedDispatches: number;
+				stuckOrders: { count: number };
+			};
+		};
+		expect(ops.settings).toMatchObject({ enabled: true, source: "default" });
+		expect(ops.metrics.ordersCreated).toBeGreaterThanOrEqual(4);
+		expect(ops.metrics.providerRequestsSent).toBe(1);
+		expect(ops.metrics.providerResponseRatePct).toBe(100);
+		expect(ops.metrics.avgTimeToQuoteSec).toBe(2);
+		expect(ops.metrics.paidOrders).toBeGreaterThanOrEqual(2);
+		expect(ops.metrics.commissionAmountTotal).toBeGreaterThanOrEqual(300);
+		expect(ops.metrics.failuresByChannel.whatsapp).toBe(1);
+		expect(ops.metrics.failedDispatches).toBe(1);
+		expect(ops.metrics.stuckOrders.count).toBeGreaterThanOrEqual(1);
+
+		const disableRes = await authReq(
+			"/api/admin/provider-orders/ops/settings",
+			{
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ enabled: false }),
+			},
+		);
+		expect(disableRes.status).toBe(200);
+
+		const blockedRes = await authReq(
+			`/api/admin/provider-orders/${orderId}/assign-provider`,
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ providerId }),
+			},
+		);
+		expect(blockedRes.status).toBe(403);
+		expect(await blockedRes.json()).toMatchObject({
+			error: "provider_relay_disabled",
+		});
+
+		const enableRes = await authReq("/api/admin/provider-orders/ops/settings", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ enabled: true }),
+		});
+		expect(enableRes.status).toBe(200);
+	});
+
 	it("lists order SLA columns and loads detail visibility sections", async () => {
 		if (!sql) return;
 
@@ -423,7 +515,10 @@ describe("admin provider orders", () => {
 			{
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ paymentInstructions: "Pay cash to operator" }),
+				body: JSON.stringify({
+					offerText: "Operator edited customer offer",
+					paymentInstructions: "Pay cash to operator",
+				}),
 			},
 		);
 		expect(offerRes.status).toBe(200);
@@ -450,5 +545,51 @@ describe("admin provider orders", () => {
 			.from(schema.serviceOrders)
 			.where(eq(schema.serviceOrders.id, confirmedOrderId));
 		expect(fulfilled?.status).toBe("fulfilled");
+
+		const transitionRes = await authReq(
+			`/api/admin/provider-orders/${paidAwaitingOrderId}/mark-fulfilled`,
+			{ method: "POST" },
+		);
+		expect(transitionRes.status).toBe(200);
+		const [paidTransitioned] = await db
+			.select({ status: schema.serviceOrders.status })
+			.from(schema.serviceOrders)
+			.where(eq(schema.serviceOrders.id, paidAwaitingOrderId));
+		expect(paidTransitioned?.status).toBe("fulfilled");
+
+		const auditRows = await db
+			.select({
+				action: schema.auditLog.action,
+				targetId: schema.auditLog.targetId,
+				detailsJson: schema.auditLog.detailsJson,
+			})
+			.from(schema.auditLog)
+			.where(eq(schema.auditLog.tenantId, tenantId));
+		const actions = auditRows.map((row) => row.action);
+		expect(actions).toContain("provider_relay.settings_update");
+		expect(actions).toContain("provider_order.assign_provider");
+		expect(actions).toContain("provider_order.send_provider_request");
+		expect(actions).toContain("provider_order.approve_quote");
+		expect(actions).toContain("provider_order.send_customer_offer");
+		expect(actions).toContain("provider_order.manual_offer_override");
+		expect(actions).toContain("provider_order.cancel");
+		expect(actions).toContain("provider_order.mark_fulfilled");
+		expect(actions).toContain("provider_order.payment_transition");
+		const manualOverride = auditRows.find(
+			(row) => row.action === "provider_order.manual_offer_override",
+		);
+		expect(manualOverride?.targetId).toBe(String(orderId));
+		const paymentTransition = auditRows.find(
+			(row) =>
+				row.action === "provider_order.payment_transition" &&
+				row.targetId === String(paidAwaitingOrderId),
+		);
+		expect(JSON.parse(paymentTransition?.detailsJson ?? "{}")).toMatchObject({
+			transitions: [
+				{ from: "awaiting_customer_payment", to: "paid" },
+				{ from: "paid", to: "confirmed" },
+				{ from: "confirmed", to: "fulfilled" },
+			],
+		});
 	});
 });
