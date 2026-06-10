@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.11.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.10.0...@chatman-media/kb-v1.11.0) (2026-06-10)
+
+
+### Features
+
+* **kb:** add tool regression runner ([#457](https://github.com/chatman-media/lead-engine/issues/457)) ([599be83](https://github.com/chatman-media/lead-engine/commit/599be8365b2f0296fb296619527991c567a21290))
+
 # [@chatman-media/kb-v1.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.9.0...@chatman-media/kb-v1.10.0) (2026-06-09)
 
 
