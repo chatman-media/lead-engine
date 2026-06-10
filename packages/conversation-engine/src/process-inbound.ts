@@ -26,7 +26,7 @@ import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.t
 import type { ITranscriber } from "./transcriber.ts";
 import type { NotificationService } from "./notifications.ts";
 import {
-  ChannelContext,
+  type ChannelContext,
   type Clock,
   type PipelineSink,
   type ProcessInboundResult,
@@ -262,6 +262,7 @@ export async function processInbound(
   // 2. Conversation.
   const { conversation, created: conversationCreated } = await resolveConversation({
     contactId: contact.id,
+    channelId: deps.channelDbId,
     channelKind: deps.channel.kind,
     conversations: deps.conversations,
     nowEpoch: now,

@@ -88,13 +88,25 @@ export class FakeConversationsRepo {
   async findByContactAndSource(contactId: number, source: string): Promise<ConversationRow | null> {
     return (
       this.rows.find(
-        (r) => r.userId === contactId && r.source === source && r.tenantId === this.tenantId,
+        (r) =>
+          r.userId === contactId &&
+          r.source === source &&
+          r.channelId === null &&
+          r.tenantId === this.tenantId,
+      ) ?? null
+    );
+  }
+  async findByContactAndChannel(contactId: number, channelId: number): Promise<ConversationRow | null> {
+    return (
+      this.rows.find(
+        (r) => r.userId === contactId && r.channelId === channelId && r.tenantId === this.tenantId,
       ) ?? null
     );
   }
   async create(opts: {
     contactId: number;
     source: string;
+    channelId?: number | null;
     mode?: "ai" | "queued" | "human";
     nowEpoch: number;
   }): Promise<ConversationRow> {
@@ -102,6 +114,7 @@ export class FakeConversationsRepo {
       id: this.nextId++,
       tenantId: this.tenantId,
       userId: opts.contactId,
+      channelId: opts.channelId ?? null,
       source: opts.source,
       mode: opts.mode ?? "ai",
       status: "open",
