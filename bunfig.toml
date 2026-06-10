@@ -1,6 +1,7 @@
 [test]
 coverageThreshold = { line = 0.95 }
 coveragePathIgnorePatterns = [
+  "apps/api/scripts/run-answer-step-eval.ts",
   "apps/api/src/routes/**",
   "apps/api/src/channel-registry.ts",
   "apps/api/src/llm-bootstrap.ts",
