@@ -384,12 +384,15 @@ async function main() {
   });
 
   const embedderResolver = makeEmbedderResolver(loadedRef);
-  if (embedderResolver) {
-    app.route("/", makeAdminKbRoutes({ db, resolveEmbedder: embedderResolver }));
-    log.info("admin-kb routes enabled (KB upload + list + delete)");
-  } else {
-    log.info("admin-kb routes disabled — no tenant has embed config (DB or env)");
-  }
+  app.route("/", makeAdminKbRoutes({
+    db,
+    resolveEmbedder: embedderResolver ?? ((tenantId: number) => {
+      throw new Error(`embedder is not configured for tenant ${tenantId}`);
+    }),
+  }));
+  log.info("admin-kb routes enabled (list/view; upload/search/reindex require embedder)", {
+    embedderConfigured: !!embedderResolver,
+  });
 
   // Per-tenant LLM provider config CRUD (GET/PUT/DELETE /api/admin/llm-configs).
   // NB: изменения вступают в силу после рестарта apps/api — текущий

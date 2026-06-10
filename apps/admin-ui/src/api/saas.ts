@@ -62,6 +62,7 @@ export interface ApproveEarlyAccessResult {
 }
 
 export type KbDocFormat = "text" | "markdown" | "pdf" | "json";
+export type KbIndexStatus = "empty" | "text_only" | "partial" | "embedded";
 
 export interface KbDoc {
   id: number;
@@ -77,6 +78,9 @@ export interface KbDoc {
   scopeType: "global" | "funnel" | "stage";
   funnelId: number | null;
   stageSlug: string | null;
+  chunksCount: number;
+  embeddedChunksCount: number;
+  indexStatus: KbIndexStatus;
   createdAt: number;
 }
 
@@ -120,6 +124,14 @@ export interface KbSearchResponse {
   items: KbSearchHit[];
 }
 
+export interface KbReindexResult {
+  ok: boolean;
+  documentId: number;
+  chunksCount: number;
+  embeddedChunksCount: number;
+  indexStatus: KbIndexStatus;
+}
+
 export interface KbSuggestion {
   id: number;
   tenantId: number;
@@ -143,6 +155,9 @@ export interface KbUploadResult {
   documentId: number;
   source: string;
   chunks: number;
+  chunksCount: number;
+  embeddedChunksCount: number;
+  indexStatus: KbIndexStatus;
   created: boolean;
   hasStoredFile?: boolean;
   fileName?: string | null;
@@ -2173,6 +2188,11 @@ export const saas = {
     const form = new FormData();
     form.append("file", file);
     return uploadMultipart<{ item: KbDocDetail }>(`/api/admin/kb/documents/${id}/file`, form);
+  },
+  reindexDoc(id: number) {
+    return request<KbReindexResult>(`/api/admin/kb/documents/${id}/reindex`, {
+      method: "POST",
+    });
   },
   searchKb(input: {
     query: string;

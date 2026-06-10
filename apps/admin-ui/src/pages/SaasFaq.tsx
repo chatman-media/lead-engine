@@ -5,6 +5,7 @@ import {
   EyeIcon,
   FileTextIcon,
   LightbulbIcon,
+  RefreshCwIcon,
   Trash2Icon,
   UploadIcon,
   XIcon,
@@ -74,6 +75,7 @@ export function SaasFaq() {
   const [originalFileText, setOriginalFileText] = useState<string | null>(null);
   const [originalFileError, setOriginalFileError] = useState("");
   const [replacingOriginalId, setReplacingOriginalId] = useState<number | null>(null);
+  const [reindexingDocId, setReindexingDocId] = useState<number | null>(null);
   const [kbSearchQuery, setKbSearchQuery] = useState("");
   const [kbSearchScope, setKbSearchScope] = useState<KbUploadScope | null>(null);
   const [kbSearchHits, setKbSearchHits] = useState<KbSearchHit[] | null>(null);
@@ -229,6 +231,24 @@ export function SaasFaq() {
     return f ? f.slug : "процесс";
   }
 
+  function indexLabel(doc: KbDoc): string {
+    const count = `${doc.embeddedChunksCount}/${doc.chunksCount}`;
+    switch (doc.indexStatus) {
+      case "embedded":
+        return `в поиске ${count}`;
+      case "partial":
+        return `частично ${count}`;
+      case "text_only":
+        return `только текст ${count}`;
+      case "empty":
+        return "пусто";
+    }
+  }
+
+  function canReindex(doc: KbDoc): boolean {
+    return doc.chunksCount > 0 && doc.indexStatus !== "embedded";
+  }
+
   function fillRequirement(req: KbRequirement) {
     setPasteTitle(req.title);
     setPasteTopic(req.topic);
@@ -327,6 +347,25 @@ export function SaasFaq() {
     } finally {
       setReplacingOriginalId(null);
       input.value = "";
+    }
+  }
+
+  async function handleReindexDoc(doc: KbDoc) {
+    setReindexingDocId(doc.id);
+    setError("");
+    try {
+      await saas.reindexDoc(doc.id);
+      await Promise.all([refreshDocs(), refreshRequirements()]);
+      if (viewingDoc?.id === doc.id) {
+        const res = await saas.getDoc(doc.id);
+        setViewingDoc(res.item);
+      }
+    } catch (err) {
+      if (!onAuthError(err)) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setReindexingDocId(null);
     }
   }
 
@@ -661,14 +700,17 @@ export function SaasFaq() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{d.title}</p>
-                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           <Badge variant="secondary">{scopeLabel(d)}</Badge>
                           <Badge variant="outline">{formatLabel(d.format)}</Badge>
+                          <Badge variant={d.indexStatus === "embedded" ? "secondary" : "outline"}>
+                            {indexLabel(d)}
+                          </Badge>
                           {d.hasStoredFile && <Badge variant="outline">оригинал</Badge>}
                           {d.topic && <Badge variant="outline">{d.topic}</Badge>}
                           <span className="font-mono">{d.source}</span>
                           <span>· {new Date(d.createdAt * 1000).toLocaleDateString("ru")}</span>
-                        </p>
+                        </div>
                       </div>
                       <Button
                         variant="ghost"
@@ -698,6 +740,19 @@ export function SaasFaq() {
                         onClick={() => document.getElementById(`kb-original-${d.id}`)?.click()}
                       >
                         <UploadIcon className="size-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-foreground"
+                        disabled={!canReindex(d) || reindexingDocId === d.id}
+                        aria-label={`Переиндексировать документ ${d.title}`}
+                        onClick={() => handleReindexDoc(d)}
+                      >
+                        <RefreshCwIcon
+                          className={`size-4 ${reindexingDocId === d.id ? "animate-spin" : ""}`}
+                        />
                       </Button>
                       <Button
                         variant="ghost"
@@ -793,6 +848,9 @@ export function SaasFaq() {
               <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-xs text-muted-foreground">
                 <Badge variant="secondary">{scopeLabel(viewingDoc)}</Badge>
                 <Badge variant="outline">{formatLabel(viewingDoc.format)}</Badge>
+                <Badge variant={viewingDoc.indexStatus === "embedded" ? "secondary" : "outline"}>
+                  {indexLabel(viewingDoc)}
+                </Badge>
                 {viewingDoc.hasStoredFile ? (
                   <Badge variant="outline">оригинал</Badge>
                 ) : (
@@ -800,7 +858,6 @@ export function SaasFaq() {
                 )}
                 {viewingDoc.topic && <Badge variant="outline">{viewingDoc.topic}</Badge>}
                 <span className="font-mono">{viewingDoc.source}</span>
-                <span>{viewingDoc.chunks.length} chunks</span>
                 {viewingDoc.fileSizeBytes !== null && <span>{formatBytes(viewingDoc.fileSizeBytes)}</span>}
                 {viewingDoc.hasStoredFile && originalFileUrl && (
                   <>
@@ -831,26 +888,47 @@ export function SaasFaq() {
                 {originalFileError && (
                   <span className="basis-full text-destructive">{originalFileError}</span>
                 )}
-                {viewingDoc.format === "markdown" && (
-                  <div className="ml-auto flex rounded-md border bg-background p-0.5">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={viewMode === "rendered" ? "secondary" : "ghost"}
-                      className="h-7 px-2 text-xs"
-                      onClick={() => setViewMode("rendered")}
-                    >
-                      Просмотр
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={viewMode === "raw" ? "secondary" : "ghost"}
-                      className="h-7 px-2 text-xs"
-                      onClick={() => setViewMode("raw")}
-                    >
-                      Markdown
-                    </Button>
+                {(canReindex(viewingDoc) || viewingDoc.format === "markdown") && (
+                  <div className="ml-auto flex items-center gap-2">
+                    {canReindex(viewingDoc) && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 gap-1.5 px-2 text-xs"
+                        disabled={reindexingDocId === viewingDoc.id}
+                        onClick={() => handleReindexDoc(viewingDoc)}
+                      >
+                        <RefreshCwIcon
+                          className={`size-3.5 ${
+                            reindexingDocId === viewingDoc.id ? "animate-spin" : ""
+                          }`}
+                        />
+                        Индексировать
+                      </Button>
+                    )}
+                    {viewingDoc.format === "markdown" && (
+                      <div className="flex rounded-md border bg-background p-0.5">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={viewMode === "rendered" ? "secondary" : "ghost"}
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setViewMode("rendered")}
+                        >
+                          Просмотр
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={viewMode === "raw" ? "secondary" : "ghost"}
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setViewMode("raw")}
+                        >
+                          Markdown
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
