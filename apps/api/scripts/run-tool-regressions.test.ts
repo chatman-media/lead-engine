@@ -338,7 +338,10 @@ describe("main()", () => {
 			console.log = originalLog;
 			console.error = originalError;
 			bunWithArgv.argv = originalArgv;
-			process.exitCode = originalExitCode;
+			// В Bun присваивание `process.exitCode = undefined` — no-op (оставляет
+			// прежнее значение), поэтому явно сбрасываем в 0, иначе exitCode=1 из
+			// error-path тестов доживает до конца процесса и валит весь bun test.
+			process.exitCode = originalExitCode ?? 0;
 		}
 	}
 
