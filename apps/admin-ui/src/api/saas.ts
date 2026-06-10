@@ -2263,6 +2263,22 @@ export interface ExchangeTurnover {
   }>;
 }
 
+export interface ExchangeKycContact {
+  contactId: number;
+  displayName: string | null;
+  verified: boolean;
+  status: string;
+  verificationId: string | null;
+  reviewedAt: number | null;
+  reviewedByAdminId: number | null;
+  source: string | null;
+  passportName: string | null;
+  passportNumberMasked: string | null;
+  passportExpiry: string | null;
+  ordersCount: number;
+  turnoverThb: number;
+}
+
 export interface ExchangeEvalResult {
   summary: { passed: number; total: number };
   report: Array<{
@@ -4235,5 +4251,11 @@ export const saas = {
   },
   exchangeTurnover() {
     return request<ExchangeTurnover>("/api/admin/exchange/turnover");
+  },
+  exchangeKycContacts(q?: string) {
+    const qs = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+    return request<{ contacts: ExchangeKycContact[] }>(
+      `/api/admin/exchange/kyc-contacts${qs}`,
+    );
   },
 };

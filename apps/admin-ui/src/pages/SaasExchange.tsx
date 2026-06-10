@@ -16,6 +16,7 @@ import {
   ApiError,
   clearToken,
   type ExchangeEvalResult,
+  type ExchangeKycContact,
   type ExchangeOrder,
   type ExchangeRate,
   type ExchangeRateCardProposal,
@@ -703,6 +704,7 @@ export function SaasExchange() {
         <TabsList>
           <TabsTrigger value="rates">Курсы</TabsTrigger>
           <TabsTrigger value="orders">Заявки</TabsTrigger>
+          <TabsTrigger value="kyc">Клиенты (KYC)</TabsTrigger>
           <TabsTrigger value="requisites">Реквизиты</TabsTrigger>
         </TabsList>
 
@@ -1215,6 +1217,11 @@ export function SaasExchange() {
           )}
         </TabsContent>
 
+        {/* ── Клиенты (KYC) ─────────────────────────────────────── */}
+        <TabsContent value="kyc" className="space-y-4">
+          <KycContactsCard />
+        </TabsContent>
+
         {/* ── Реквизиты ──────────────────────────────────────────── */}
         <TabsContent value="requisites" className="space-y-4">
           <Card>
@@ -1624,5 +1631,141 @@ function OrderRow({
         )}
       </TableCell>
     </TableRow>
+  );
+}
+
+// ── Клиенты (KYC) — реестр верификаций (#511) ──────────────────────────────
+
+const KYC_STATUS_RU: Record<string, { label: string; variant: "success" | "warning" | "destructive" | "secondary" }> = {
+  verified: { label: "Верифицирован", variant: "success" },
+  materials_requested: { label: "Ждём материалы", variant: "warning" },
+  rejected: { label: "Отклонён", variant: "destructive" },
+  unknown: { label: "—", variant: "secondary" },
+};
+
+function KycContactsCard() {
+  const [items, setItems] = useState<ExchangeKycContact[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = (q?: string) => {
+    setLoading(true);
+    saas
+      .exchangeKycContacts(q)
+      .then((r) => setItems(r.contacts))
+      .catch((e) => toast.error(e instanceof Error ? e.message : "Не удалось загрузить KYC-реестр"))
+      .finally(() => setLoading(false));
+  };
+
+  // Подгрузка при открытии вкладки; поиск — по Enter/кнопке.
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-base">Верифицированные клиенты</CardTitle>
+            <p className="text-muted-foreground text-xs">
+              Статус живёт на клиенте, а не на заявке: повторные обмены проходят без
+              нового KYC. Решение принимает оператор (подтверждение в оператор-боте).
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && load(query)}
+              placeholder="Имя, паспорт, ID…"
+              className="h-8 w-48 text-sm"
+            />
+            <Button type="button" size="sm" variant="outline" onClick={() => load(query)}>
+              <RefreshCwIcon className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Клиент</TableHead>
+              <TableHead>Паспорт (OCR)</TableHead>
+              <TableHead>Статус</TableHead>
+              <TableHead>ID верификации</TableHead>
+              <TableHead>Проверен</TableHead>
+              <TableHead className="text-right">Заявок</TableHead>
+              <TableHead className="text-right">Оборот THB</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading && (
+              <TableRow>
+                <TableCell colSpan={7}>
+                  <Skeleton className="h-5 w-full" />
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && items.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  Пока никто не проходил верификацию
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading &&
+              items.map((it) => {
+                const st = KYC_STATUS_RU[it.status] ?? KYC_STATUS_RU.unknown!;
+                return (
+                  <TableRow key={it.contactId}>
+                    <TableCell className="font-medium">
+                      {it.displayName ?? `Контакт #${it.contactId}`}
+                    </TableCell>
+                    <TableCell>
+                      {it.passportName || it.passportNumberMasked ? (
+                        <div className="text-sm">
+                          <span>{it.passportName ?? "—"}</span>{" "}
+                          {it.passportNumberMasked && (
+                            <span className="text-muted-foreground font-mono text-xs">
+                              {it.passportNumberMasked}
+                            </span>
+                          )}
+                          {it.passportExpiry && (
+                            <span className="text-muted-foreground text-xs"> до {it.passportExpiry}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">нет данных</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={st.variant}>{st.label}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{it.verificationId ?? "—"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {it.reviewedAt
+                        ? new Date(it.reviewedAt * 1000).toLocaleString("ru-RU", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "—"}
+                      {it.reviewedByAdminId ? ` · admin #${it.reviewedByAdminId}` : ""}
+                    </TableCell>
+                    <TableCell className="text-right">{it.ordersCount}</TableCell>
+                    <TableCell className="text-right font-medium">
+                      {it.turnoverThb.toLocaleString("ru-RU")}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }

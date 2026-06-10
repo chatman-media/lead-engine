@@ -590,6 +590,116 @@ describe("admin-exchange routes", () => {
 		);
 		expect(res.status).toBe(400);
 	});
+
+	// #511: реестр верификаций — маскирование паспорта, агрегаты, изоляция, поиск.
+	it("kyc-contacts lists verified clients with masked passport and aggregates", async () => {
+		if (!sql) return;
+		const now = Math.floor(Date.now() / 1000);
+		const contactId = await withTenant(db, tenantA, async (tx) => {
+			const [contact] = await tx
+				.insert(contacts)
+				.values({
+					tenantId: tenantA,
+					displayName: "Иван (KYC)",
+					attributesJson: JSON.stringify({
+						isVerified: true,
+						exchangeKyc: {
+							status: "verified",
+							verified: true,
+							verificationId: "KYC-REG-1",
+							reviewedAt: now,
+							reviewedByAdminId: 7,
+							source: "operator_bot",
+						},
+						passport_family_name: "IVANOV",
+						passport_given_name: "IVAN",
+						passport_number: "75 1234567",
+						passport_expiry: "01.01.2030",
+					}),
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: contacts.id });
+			const id = must(contact, "kyc contact").id;
+			await tx.insert(exchangeOrders).values([
+				{
+					tenantId: tenantA,
+					contactId: id,
+					direction: "USDT->THB",
+					assetFrom: "USDT",
+					network: "trc20",
+					amountFrom: 500,
+					rate: 31.5,
+					amountToThb: 15_750,
+					status: "completed",
+					completedAt: now,
+					idempotencyKey: `kyc-reg-completed-${now}`,
+					createdAt: now,
+					updatedAt: now,
+				},
+				{
+					tenantId: tenantA,
+					contactId: id,
+					direction: "USDT->THB",
+					assetFrom: "USDT",
+					network: "trc20",
+					amountFrom: 100,
+					rate: 31.5,
+					amountToThb: 3_150,
+					status: "awaiting_payment",
+					idempotencyKey: `kyc-reg-open-${now}`,
+					createdAt: now,
+					updatedAt: now,
+				},
+			]);
+			return id;
+		});
+
+		const res = await authReq(tokenA, "/api/admin/exchange/kyc-contacts");
+		expect(res.status).toBe(200);
+		const raw = await res.text();
+		// Полный номер паспорта наружу не уходит.
+		expect(raw).not.toContain("1234567");
+		const body = JSON.parse(raw) as {
+			contacts: Array<Record<string, unknown>>;
+		};
+		const item = must(
+			body.contacts.find((c) => c.contactId === contactId),
+			"kyc registry item",
+		);
+		expect(item.verified).toBe(true);
+		expect(item.status).toBe("verified");
+		expect(item.verificationId).toBe("KYC-REG-1");
+		expect(item.reviewedAt).toBe(now);
+		expect(item.passportName).toBe("IVANOV IVAN");
+		expect(item.passportNumberMasked).toBe("•••• 4567");
+		expect(item.passportExpiry).toBe("01.01.2030");
+		expect(item.ordersCount).toBe(2);
+		// Оборот — только completed-заявки.
+		expect(item.turnoverThb).toBe(15_750);
+
+		// Поиск по имени из паспорта.
+		const search = await authReq(
+			tokenA,
+			"/api/admin/exchange/kyc-contacts?q=ivanov",
+		);
+		const searchBody = (await search.json()) as {
+			contacts: Array<Record<string, unknown>>;
+		};
+		expect(searchBody.contacts.some((c) => c.contactId === contactId)).toBe(true);
+		const miss = await authReq(
+			tokenA,
+			"/api/admin/exchange/kyc-contacts?q=nope-nobody",
+		);
+		expect(((await miss.json()) as { contacts: unknown[] }).contacts).toHaveLength(0);
+
+		// Изоляция: tenant B чужих клиентов не видит.
+		const resB = await authReq(tokenB, "/api/admin/exchange/kyc-contacts");
+		const bodyB = (await resB.json()) as {
+			contacts: Array<Record<string, unknown>>;
+		};
+		expect(bodyB.contacts.some((c) => c.contactId === contactId)).toBe(false);
+	});
 });
 
 describe("admin-exchange settings (per-tenant частота/порог)", () => {
