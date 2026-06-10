@@ -1,3 +1,10 @@
+# [@chatman-media/channel-core-v1.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.5.0...@chatman-media/channel-core-v1.6.0) (2026-06-10)
+
+
+### Features
+
+* **whatsapp:** enforce template outbound policy ([#463](https://github.com/chatman-media/lead-engine/issues/463)) ([9110933](https://github.com/chatman-media/lead-engine/commit/91109335196fda7a2c1e120350e13bb6321472fe))
+
 # [@chatman-media/channel-core-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.4.0...@chatman-media/channel-core-v1.5.0) (2026-06-10)
 
 
