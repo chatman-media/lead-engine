@@ -1,3 +1,15 @@
+# [@chatman-media/conversation-engine-v1.26.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.25.0...@chatman-media/conversation-engine-v1.26.0) (2026-06-10)
+
+
+### Bug Fixes
+
+* **conversation-engine:** harden exchange bot quote flow ([#459](https://github.com/chatman-media/lead-engine/issues/459)) ([6c11c83](https://github.com/chatman-media/lead-engine/commit/6c11c8343df2a1080b4251a1928a6ba30947d906))
+
+
+### Features
+
+* **conversation-engine:** resolve conversations by channel ([#456](https://github.com/chatman-media/lead-engine/issues/456)) ([5c060c9](https://github.com/chatman-media/lead-engine/commit/5c060c944f973f019851740ac6c3c152759ed2a0))
+
 # [@chatman-media/conversation-engine-v1.25.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.24.0...@chatman-media/conversation-engine-v1.25.0) (2026-06-10)
 
 
