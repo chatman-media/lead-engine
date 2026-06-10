@@ -1,3 +1,17 @@
+# [@chatman-media/conversation-engine-v2.0.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.28.1...@chatman-media/conversation-engine-v2.0.0) (2026-06-10)
+
+
+* refactor(conversation-engine)!: consolidate RagReplyStrategy resolvers into loadTurnContext ([#518](https://github.com/chatman-media/lead-engine/issues/518)) ([fcaf51c](https://github.com/chatman-media/lead-engine/commit/fcaf51cfeb162f720d2a4e015f3d938b4fb94f9e)), closes [#514](https://github.com/chatman-media/lead-engine/issues/514)
+
+
+### BREAKING CHANGES
+
+* RagReplyStrategyOpts больше не принимает resolve*-колбэки;
+вместо них обязательный loadTurnContext. Конструктор RagReplyStrategy
+одноаргументный.
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
 # [@chatman-media/conversation-engine-v1.28.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.28.0...@chatman-media/conversation-engine-v1.28.1) (2026-06-10)
 
 
