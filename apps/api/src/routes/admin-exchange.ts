@@ -25,7 +25,7 @@ import {
 	outboundQueue,
 	tenantSecrets,
 } from "@chatman-media/storage";
-import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import {
 	buildDefaultRateCardProposal,
@@ -116,12 +116,22 @@ function serializeKycContact(
 		[attrs.passport_family_name, attrs.passport_given_name]
 			.filter((v): v is string => typeof v === "string" && v.length > 0)
 			.join(" ") || null;
+	// Прислал документы (OCR что-то распознал), но решения оператора ещё нет.
+	const hasDocuments = Boolean(
+		passportName || attrs.passport_number || attrs.passport_expiry,
+	);
 	return {
 		contactId: row.id,
 		displayName: row.displayName,
 		verified,
 		status:
-			typeof kyc.status === "string" ? kyc.status : verified ? "verified" : "unknown",
+			typeof kyc.status === "string"
+				? kyc.status
+				: verified
+					? "verified"
+					: hasDocuments
+						? "documents_received"
+						: "unknown",
 		verificationId:
 			typeof kyc.verificationId === "string" ? kyc.verificationId : null,
 		reviewedAt: typeof kyc.reviewedAt === "number" ? kyc.reviewedAt : null,
@@ -672,14 +682,22 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 	});
 
 	// ── Реестр верификаций (KYC) ───────────────────────────────────────────
-	// Контакты, у которых есть история KYC (#511): кто верифицирован, кем/когда,
-	// паспортные данные (номер — маскированный), заявки и оборот.
+	// Контакты с историей KYC (#511): решение оператора (exchangeKyc) ИЛИ
+	// присланные документы без решения (passport_* из vision-OCR). Номер
+	// паспорта — маскированный; плюс заявки и оборот по каждому клиенту.
 	app.get("/api/admin/exchange/kyc-contacts", async (c) => {
 		const tenantId = c.var.tenantId;
 		const q = (c.req.query("q") ?? "").trim().toLowerCase();
 		const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 500);
+		const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
 
-		const items = await withTenant(opts.db, tenantId, async (tx) => {
+		const page = await withTenant(opts.db, tenantId, async (tx) => {
+			const searchFilter = q
+				? or(
+						ilike(contacts.displayName, `%${q}%`),
+						sql`lower(coalesce(${contacts.attributesJson}, '')) like ${`%${q}%`}`,
+					)
+				: undefined;
 			const rows = await tx
 				.select({
 					id: contacts.id,
@@ -690,12 +708,18 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				.where(
 					and(
 						eq(contacts.tenantId, tenantId),
-						like(contacts.attributesJson, '%"exchangeKyc"%'),
+						or(
+							like(contacts.attributesJson, '%"exchangeKyc"%'),
+							like(contacts.attributesJson, '%"passport_number"%'),
+						),
+						searchFilter,
 					),
 				)
 				.orderBy(desc(contacts.updatedAt))
-				.limit(limit);
-			if (rows.length === 0) return [];
+				.limit(limit + 1)
+				.offset(offset);
+			if (rows.length === 0) return { items: [], nextOffset: null };
+			const pageRows = rows.slice(0, limit);
 
 			const agg = await tx
 				.select({
@@ -709,23 +733,26 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						eq(exchangeOrders.tenantId, tenantId),
 						inArray(
 							exchangeOrders.contactId,
-							rows.map((r) => r.id),
+							pageRows.map((r) => r.id),
 						),
 					),
 				)
 				.groupBy(exchangeOrders.contactId);
 			const byContact = new Map(agg.map((a) => [a.contactId, a]));
-			return rows.map((r) => serializeKycContact(r, byContact.get(r.id) ?? null));
+			return {
+				items: pageRows.map((r) =>
+					serializeKycContact(r, byContact.get(r.id) ?? null),
+				),
+				nextOffset: rows.length > limit ? offset + limit : null,
+			};
 		});
 
-		const filtered = q
-			? items.filter((it) =>
-					[it.displayName, it.passportName, it.verificationId, it.status]
-						.filter(Boolean)
-						.some((v) => String(v).toLowerCase().includes(q)),
-				)
-			: items;
-		return c.json({ contacts: filtered });
+		return c.json({
+			contacts: page.items,
+			limit,
+			offset,
+			nextOffset: page.nextOffset,
+		});
 	});
 
 	// Операторские правки заявки: код выдачи, ID верификации, статус, подтверждение оплаты.

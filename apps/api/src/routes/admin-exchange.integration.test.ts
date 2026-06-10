@@ -662,6 +662,7 @@ describe("admin-exchange routes", () => {
 		expect(raw).not.toContain("1234567");
 		const body = JSON.parse(raw) as {
 			contacts: Array<Record<string, unknown>>;
+			nextOffset: number | null;
 		};
 		const item = must(
 			body.contacts.find((c) => c.contactId === contactId),
@@ -699,6 +700,74 @@ describe("admin-exchange routes", () => {
 			contacts: Array<Record<string, unknown>>;
 		};
 		expect(bodyB.contacts.some((c) => c.contactId === contactId)).toBe(false);
+	});
+
+	// #511: документы распознаны OCR, решения оператора нет → documents_received.
+	it("kyc-contacts includes contacts with passport docs but no operator decision", async () => {
+		if (!sql) return;
+		const now = Math.floor(Date.now() / 1000);
+		const contactId = await withTenant(db, tenantA, async (tx) => {
+			const [contact] = await tx
+				.insert(contacts)
+				.values({
+					tenantId: tenantA,
+					displayName: "Пётр (только документы)",
+					attributesJson: JSON.stringify({
+						last_photo_class: "passport",
+						passport_family_name: "PETROV",
+						passport_given_name: "PETR",
+						passport_number: "70 7654321",
+					}),
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: contacts.id });
+			return must(contact, "docs-only contact").id;
+		});
+
+		const res = await authReq(tokenA, "/api/admin/exchange/kyc-contacts");
+		const raw = await res.text();
+		expect(raw).not.toContain("7654321");
+		const body = JSON.parse(raw) as {
+			contacts: Array<Record<string, unknown>>;
+		};
+		const item = must(
+			body.contacts.find((c) => c.contactId === contactId),
+			"docs-only registry item",
+		);
+		expect(item.status).toBe("documents_received");
+		expect(item.verified).toBe(false);
+		expect(item.passportName).toBe("PETROV PETR");
+		expect(item.passportNumberMasked).toBe("•••• 4321");
+		expect(item.verificationId).toBeNull();
+
+		// Поиск применяется до limit: старый контакт находится даже при limit=1.
+		const search = await authReq(
+			tokenA,
+			"/api/admin/exchange/kyc-contacts?q=petrov&limit=1",
+		);
+		const searchBody = (await search.json()) as {
+			contacts: Array<Record<string, unknown>>;
+			nextOffset: number | null;
+		};
+		expect(searchBody.contacts.map((c) => c.contactId)).toContain(contactId);
+		expect(searchBody.nextOffset).toBeNull();
+
+		const page1 = await authReq(tokenA, "/api/admin/exchange/kyc-contacts?limit=1");
+		const page1Body = (await page1.json()) as {
+			contacts: Array<Record<string, unknown>>;
+			nextOffset: number | null;
+		};
+		expect(page1Body.contacts).toHaveLength(1);
+		expect(page1Body.nextOffset).toBe(1);
+		const page2 = await authReq(
+			tokenA,
+			`/api/admin/exchange/kyc-contacts?limit=1&offset=${page1Body.nextOffset}`,
+		);
+		const page2Body = (await page2.json()) as {
+			contacts: Array<Record<string, unknown>>;
+		};
+		expect(page2Body.contacts).toHaveLength(1);
 	});
 });
 

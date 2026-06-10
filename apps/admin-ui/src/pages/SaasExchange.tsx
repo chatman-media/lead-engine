@@ -1636,9 +1636,14 @@ function OrderRow({
 
 // ── Клиенты (KYC) — реестр верификаций (#511) ──────────────────────────────
 
-const KYC_STATUS_RU: Record<string, { label: string; variant: "success" | "warning" | "destructive" | "secondary" }> = {
+const KYC_STATUS_RU: Record<
+  string,
+  { label: string; variant: "success" | "warning" | "destructive" | "secondary" }
+> = {
   verified: { label: "Верифицирован", variant: "success" },
+  documents_received: { label: "Прислал документы", variant: "warning" },
   materials_requested: { label: "Ждём материалы", variant: "warning" },
+  pending_review: { label: "На проверке", variant: "warning" },
   rejected: { label: "Отклонён", variant: "destructive" },
   unknown: { label: "—", variant: "secondary" },
 };
@@ -1646,13 +1651,17 @@ const KYC_STATUS_RU: Record<string, { label: string; variant: "success" | "warni
 function KycContactsCard() {
   const [items, setItems] = useState<ExchangeKycContact[]>([]);
   const [query, setQuery] = useState("");
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = (q?: string) => {
+  const load = (q?: string, offset = 0, append = false) => {
     setLoading(true);
     saas
-      .exchangeKycContacts(q)
-      .then((r) => setItems(r.contacts))
+      .exchangeKycContacts({ q, limit: 50, offset })
+      .then((r) => {
+        setItems((prev) => (append ? [...prev, ...r.contacts] : r.contacts));
+        setNextOffset(r.nextOffset);
+      })
       .catch((e) => toast.error(e instanceof Error ? e.message : "Не удалось загрузить KYC-реестр"))
       .finally(() => setLoading(false));
   };
@@ -1667,10 +1676,11 @@ function KycContactsCard() {
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <CardTitle className="text-base">Верифицированные клиенты</CardTitle>
+            <CardTitle className="text-base">KYC: верификации и документы</CardTitle>
             <p className="text-muted-foreground text-xs">
               Статус живёт на клиенте, а не на заявке: повторные обмены проходят без
-              нового KYC. Решение принимает оператор (подтверждение в оператор-боте).
+              нового KYC. «Прислал документы» — OCR распознал паспорт, решения оператора
+              ещё нет (подтверждение — в оператор-боте).
             </p>
           </div>
           <div className="flex gap-2">
@@ -1765,6 +1775,19 @@ function KycContactsCard() {
               })}
           </TableBody>
         </Table>
+        {nextOffset !== null && (
+          <div className="border-t p-3 text-center">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => load(query, nextOffset, true)}
+            >
+              Загрузить ещё
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -516,6 +516,7 @@ export function SaasLeadDetail() {
   const valueMap = new Map(fieldValues.map((v) => [v.fieldId, v.valueJson]));
 
   const editableFields = fields.filter((f) => f.fieldType !== "file" && f.fieldType !== "photo");
+  const kycBadge = getLeadKycBadge(contact?.attributesJson ?? null);
 
   return (
     <div className="flex flex-col gap-6">
@@ -529,6 +530,12 @@ export function SaasLeadDetail() {
           title={contact?.displayName ?? `Лид #${lead.id}`}
           description={lead.applicationId ? `ID: ${lead.applicationId}` : undefined}
         />
+        {kycBadge && (
+          <Badge variant={kycBadge.variant} className="gap-1">
+            {kycBadge.status === "verified" && <CheckIcon className="size-3" />}
+            {kycBadge.label}
+          </Badge>
+        )}
         <div className="ml-auto">
           {confirmDelete ? (
             <div className="flex items-center gap-1 text-sm">
@@ -1143,9 +1150,36 @@ const LEAD_KYC_STATUS_RU: Record<
   { label: string; variant: "success" | "warning" | "destructive" | "secondary" }
 > = {
   verified: { label: "Верифицирован", variant: "success" },
+  documents_received: { label: "Прислал документы", variant: "warning" },
   materials_requested: { label: "Ждём материалы", variant: "warning" },
+  pending_review: { label: "На проверке", variant: "warning" },
   rejected: { label: "Отклонён", variant: "destructive" },
 };
+
+function getLeadKycBadge(attributesJson: string | null) {
+  if (!attributesJson) return null;
+  let attrs: Record<string, unknown> = {};
+  try {
+    attrs = JSON.parse(attributesJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const kyc = (attrs.exchangeKyc ?? {}) as Record<string, unknown>;
+  const status =
+    typeof kyc.status === "string"
+      ? kyc.status
+      : attrs.isVerified === true
+        ? "verified"
+        : attrs.passport_number || attrs.passport_family_name || attrs.passport_given_name
+          ? "documents_received"
+          : null;
+  if (!status) return null;
+  const st = LEAD_KYC_STATUS_RU[status] ?? {
+    label: status,
+    variant: "secondary" as const,
+  };
+  return { status, ...st };
+}
 
 function LeadVerificationCard({ attributesJson }: { attributesJson: string | null }) {
   if (!attributesJson) return null;
@@ -1163,7 +1197,12 @@ function LeadVerificationCard({ attributesJson }: { attributesJson: string | nul
   const status = typeof kyc.status === "string" ? kyc.status : null;
   if (!status && !passportName && !passportNumber) return null;
 
-  const st = status ? LEAD_KYC_STATUS_RU[status] : undefined;
+  // Документы распознаны, но решения оператора ещё нет → «Прислал документы».
+  const st = status
+    ? LEAD_KYC_STATUS_RU[status]
+    : passportName || passportNumber
+      ? LEAD_KYC_STATUS_RU.documents_received
+      : undefined;
   const masked = passportNumber
     ? `•••• ${passportNumber.replace(/\s+/g, "").slice(-4)}`
     : null;
