@@ -132,8 +132,10 @@ export interface RagReplyStrategyOpts {
    */
   hybridSearch?: boolean;
   /**
-   * Query rewriting перед retrieval (LLM-вызов до search). Default true.
-   * Помогает на ambiguous follow-up'ах ("а что насчёт оплаты?" → "оплата контракта в UAE").
+   * Query rewriting перед retrieval (LLM-вызов до search). Default false (#515):
+   * замер на двух режимах корпуса не показал вклада (hybrid retrieval справляется
+   * с follow-up'ами сам), а шаг стоит +1 LLM-вызов на каждом ходе с историей.
+   * Включать точечно, если у тенанта подтверждена польза на его KB.
    */
   rewriteQueryBeforeRetrieval?: boolean;
   /**
@@ -337,7 +339,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       history: history as unknown as Parameters<typeof answerWithRag>[0]["history"],
       topK: this.opts.topK ?? 5,
       hybridSearch: this.opts.hybridSearch ?? true,
-      rewriteQueryBeforeRetrieval: this.opts.rewriteQueryBeforeRetrieval ?? true,
+      rewriteQueryBeforeRetrieval: this.opts.rewriteQueryBeforeRetrieval ?? false,
       reflect: this.opts.reflect ?? isExchange,
       numPredict: this.opts.maxOutputTokens ?? 600,
       // Style: если контекст содержит Style — answerWithRag использует его
