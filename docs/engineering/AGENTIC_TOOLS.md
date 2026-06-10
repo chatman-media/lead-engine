@@ -167,6 +167,20 @@ bun run quality:tool-regressions -- \
 bun run quality:tool-regressions -- --file tool-call-regression-cases.jsonl --json
 ```
 
+Для CI можно писать отчёты сразу в файлы:
+
+```bash
+bun run quality:tool-regressions -- \
+  --file tool-call-regression-cases.jsonl \
+  --out-json artifacts/tool-call-regressions.json \
+  --out-junit artifacts/tool-call-regressions.junit.xml \
+  --out-md artifacts/tool-call-regressions.md
+```
+
+JUnit содержит один testcase на regression case; failed cases попадают в
+`<failure>`, archived/unsupported skipped cases — в `<skipped>`. Markdown
+summary подходит для `GITHUB_STEP_SUMMARY`.
+
 ## Как добавить кастомный инструмент
 
 1. Реализовать `RagTool` (name / description / Zod `parameters` / `execute`).

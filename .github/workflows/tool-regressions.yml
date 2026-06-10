@@ -157,7 +157,9 @@ jobs:
             --api-base "$API_BASE"
             --status "$STATUS"
             --limit "$LIMIT"
-            --json
+            --out-json artifacts/tool-call-regressions.json
+            --out-junit artifacts/tool-call-regressions.junit.xml
+            --out-md artifacts/tool-call-regressions.md
           )
 
           if [[ -n "$SUPPORTED_TOOLS" ]]; then
@@ -167,27 +169,24 @@ jobs:
             cmd+=(--skip-unsupported)
           fi
 
-          "${cmd[@]}" | tee artifacts/tool-call-regressions.json
+          "${cmd[@]}"
 
       - name: Regression summary
         if: always() && steps.config.outputs.run_regressions == 'true'
         run: |
-          if [[ ! -s artifacts/tool-call-regressions.json ]]; then
+          if [[ ! -s artifacts/tool-call-regressions.md ]]; then
             echo "No regression report was produced." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          {
-            echo "## Tool-call regression report"
-            echo ""
-            echo '```json'
-            jq '.summary' artifacts/tool-call-regressions.json
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          cat artifacts/tool-call-regressions.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload regression report
         if: always() && steps.config.outputs.run_regressions == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: tool-call-regressions
-          path: artifacts/tool-call-regressions.json
+          path: |
+            artifacts/tool-call-regressions.json
+            artifacts/tool-call-regressions.junit.xml
+            artifacts/tool-call-regressions.md
           if-no-files-found: ignore
