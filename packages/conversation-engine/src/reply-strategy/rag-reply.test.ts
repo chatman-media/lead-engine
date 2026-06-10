@@ -1,7 +1,7 @@
 // Unit tests for RagReplyStrategy.generate — RAG reply orchestration. Все
-// коллабораторы (chat / embed / kb / messagesRepo / conversations / suggestions)
-// фейковые; answerWithRag прогоняется по-настоящему на фейковом KB/chat (как в
-// kb/answer.test). Без БД и сети.
+// коллабораторы (chat / embed / kb / messages / conversations / suggestions)
+// фейковые и собираются в RagTurnContext; answerWithRag прогоняется
+// по-настоящему на фейковом KB/chat (как в kb/answer.test). Без БД и сети.
 
 import { describe, expect, it } from "bun:test";
 import { makeBookingLinkTool } from "@chatman-media/kb";
@@ -9,7 +9,12 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { EXCHANGE_PAYMENT_FALLBACK } from "./exchange-policy-guard.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
-import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
+import {
+  RagReplyStrategy,
+  type RagReplyStrategyOpts,
+  type RagTurnContext,
+  type ResolvedStyleAssignment,
+} from "./rag-reply.ts";
 
 const TENANT = { tenantId: 1 };
 const CHANNEL = { channelId: 10 };
@@ -42,16 +47,17 @@ function chatThenFactCheck(reply: string, verdict: Record<string, unknown>): Cha
   } as unknown as ChatClient;
 }
 
-const embed: RagReplyStrategyOpts["resolveEmbed"] = () =>
-  ({ embed: async (xs: string[]) => xs.map(() => [1, 0, 0]), dim: 3 }) as never;
+const embedder: RagTurnContext["embedder"] = {
+  embed: async (xs: string[]) => xs.map(() => [1, 0, 0]),
+  dim: 3,
+} as never;
 
-function kbWith(hits: unknown[]): RagReplyStrategyOpts["resolveKb"] {
-  return () =>
-    ({
-      search: async () => hits,
-      hybridSearch: async () => hits,
-      prioritySearch: async () => hits,
-    }) as never;
+function kbWith(hits: unknown[]): RagTurnContext["kb"] {
+  return {
+    search: async () => hits,
+    hybridSearch: async () => hits,
+    prioritySearch: async () => hits,
+  } as never;
 }
 
 const HIT = {
@@ -63,6 +69,14 @@ const HIT = {
   title: "Курсы",
 };
 
+const GENERIC_TEMPLATE = {
+  slug: "generic_v1",
+  displayName: "Generic",
+  version: 1,
+  funnelStages: [],
+  systemPromptFragment: "",
+} as unknown as VerticalTemplate;
+
 const EXCHANGE_TEMPLATE = {
   slug: "exchange_v1",
   displayName: "Exchange",
@@ -71,9 +85,7 @@ const EXCHANGE_TEMPLATE = {
   systemPromptFragment: "",
 } as unknown as VerticalTemplate;
 
-type ResolvedStyle = NonNullable<Awaited<ReturnType<NonNullable<RagReplyStrategyOpts["resolveStyle"]>>>>;
-
-const STYLE: ResolvedStyle = {
+const STYLE: ResolvedStyleAssignment = {
   slug: "exch-pro",
   displayName: "Exchange Pro",
   persona: { name: "Alex", role: "human", company: "Acme" },
@@ -87,13 +99,12 @@ const STYLE: ResolvedStyle = {
 };
 
 /** Минимальный messagesRepo с recent/countByConversation/insert. */
-function fakeMessagesRepo(opts: { recent?: unknown[]; count?: number } = {}) {
-  return () =>
-    ({
-      recent: async () => opts.recent ?? [],
-      countByConversation: async () => opts.count ?? 0,
-      insert: async () => ({ id: 1 }),
-    }) as never;
+function fakeMessages(opts: { recent?: unknown[]; count?: number } = {}): RagTurnContext["messages"] {
+  return {
+    recent: async () => opts.recent ?? [],
+    countByConversation: async () => opts.count ?? 0,
+    insert: async () => ({ id: 1 }),
+  } as never;
 }
 
 const baseInput = () => ({
@@ -105,42 +116,40 @@ const baseInput = () => ({
   userMessageText: QUESTION,
 });
 
-type Repo = ConstructorParameters<typeof RagReplyStrategy>[1];
-function mk(opts: Partial<RagReplyStrategyOpts>, repo: Repo): RagReplyStrategy {
-  return new RagReplyStrategy(opts as RagReplyStrategyOpts, repo);
+/** Контекст хода с дефолтами; тесты переопределяют только нужные поля. */
+function ctxWith(partial: Partial<RagTurnContext>): RagTurnContext {
+  return {
+    template: GENERIC_TEMPLATE,
+    chat: chatReturning("x"),
+    embedder,
+    kb: kbWith([]),
+    messages: fakeMessages(),
+    ...partial,
+  };
+}
+
+function mk(ctx: RagTurnContext, opts: Partial<RagReplyStrategyOpts> = {}): RagReplyStrategy {
+  return new RagReplyStrategy({ loadTurnContext: () => ctx, ...opts });
 }
 
 describe("RagReplyStrategy.generate", () => {
   it("пустой userMessageText → null", async () => {
-    const s = mk(
-      { resolveChat: () => chatReturning("x"), resolveEmbed: embed, resolveKb: kbWith([]) },
-      fakeMessagesRepo(),
-    );
+    const s = mk(ctxWith({}));
     const r = await s.generate({ ...baseInput(), userMessageText: "" });
     expect(r).toBeNull();
   });
 
-  it("resolveIsSupport=true → null (оператор ведёт вручную)", async () => {
-    const s = mk(
-      {
-        resolveChat: () => chatReturning("x"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        resolveIsSupport: async () => true,
-      },
-      fakeMessagesRepo(),
-    );
+  it("isSupport=true → null (оператор ведёт вручную)", async () => {
+    const s = mk(ctxWith({ kb: kbWith([HIT]), isSupport: true }));
     expect(await s.generate(baseInput())).toBeNull();
   });
 
   it("happy: KB-хит → envelope с текстом ответа", async () => {
     const s = mk(
-      {
-        resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-      },
-      fakeMessagesRepo(),
+      ctxWith({
+        chat: chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+        kb: kbWith([HIT]),
+      }),
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
@@ -155,16 +164,13 @@ describe("RagReplyStrategy.generate", () => {
   it("injects brokered order context into RAG request context", async () => {
     const chat = new CapturingRagChat("По заявке есть предложение.");
     const s = mk(
-      {
-        resolveChat: () => chat,
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        rewriteQueryBeforeRetrieval: false,
-        reflect: false,
-        resolveServiceOrderContext: () =>
+      ctxWith({
+        chat,
+        kb: kbWith([HIT]),
+        serviceOrderContext:
           "BROKERED ORDER CONTEXT\n- order #12 service=massage status=offer_ready amount=1,200 THB",
-      },
-      fakeMessagesRepo(),
+      }),
+      { rewriteQueryBeforeRetrieval: false, reflect: false },
     );
 
     await s.generate({ ...baseInput(), userMessageText: "что по заявке?" });
@@ -178,36 +184,29 @@ describe("RagReplyStrategy.generate", () => {
   it("uses resolved KB scope for RAG retrieval", async () => {
     const scopes: string[] = [];
     const s = mk(
-      {
-        resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
-        resolveEmbed: embed,
-        resolveKbScope: () => ({
-          scopeType: "stage",
-          funnelId: 77,
-          stageSlug: "payment",
-        }),
-        resolveKb: () =>
-          ({
-            search: async () => [],
-            hybridSearch: async (input: {
-              scope?: {
-                scopeType: string;
-                funnelId?: number | null;
-                stageSlug?: string | null;
-              };
-            }) => {
-              const scope = input.scope;
-              scopes.push(
-                scope
-                  ? `${scope.scopeType}:${scope.funnelId ?? ""}:${scope.stageSlug ?? ""}`
-                  : "none",
-              );
-              return scope?.scopeType === "stage" ? [HIT] : [];
-            },
-            prioritySearch: async () => [],
-          }) as never,
-      },
-      fakeMessagesRepo(),
+      ctxWith({
+        chat: chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+        kbScope: { scopeType: "stage", funnelId: 77, stageSlug: "payment" },
+        kb: {
+          search: async () => [],
+          hybridSearch: async (input: {
+            scope?: {
+              scopeType: string;
+              funnelId?: number | null;
+              stageSlug?: string | null;
+            };
+          }) => {
+            const scope = input.scope;
+            scopes.push(
+              scope
+                ? `${scope.scopeType}:${scope.funnelId ?? ""}:${scope.stageSlug ?? ""}`
+                : "none",
+            );
+            return scope?.scopeType === "stage" ? [HIT] : [];
+          },
+          prioritySearch: async () => [],
+        } as never,
+      }),
     );
 
     const r = await s.generate(baseInput());
@@ -219,24 +218,16 @@ describe("RagReplyStrategy.generate", () => {
   it("passes resolved KB scope to no-context suggestions", async () => {
     let loggedScope: unknown = null;
     const s = mk(
-      {
-        resolveChat: () => chatReturning("Уточню детали и вернусь!"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([]),
-        resolveKbScope: () => ({
-          scopeType: "stage",
-          funnelId: 77,
-          stageSlug: "payment",
-        }),
-        softFallback: true,
-        resolveSuggestions: () =>
-          ({
-            log: async (opts: { scope?: unknown }) => {
-              loggedScope = opts.scope;
-            },
-          }) as never,
-      },
-      fakeMessagesRepo(),
+      ctxWith({
+        chat: chatReturning("Уточню детали и вернусь!"),
+        kbScope: { scopeType: "stage", funnelId: 77, stageSlug: "payment" },
+        suggestions: {
+          log: async (opts: { scope?: unknown }) => {
+            loggedScope = opts.scope;
+          },
+        } as never,
+      }),
+      { softFallback: true },
     );
 
     await s.generate(baseInput());
@@ -272,16 +263,12 @@ describe("RagReplyStrategy.generate", () => {
     const tool = makeBookingLinkTool("https://calendly.example/demo");
     const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
     const s = mk(
+      ctxWith({ chat, kb: kbWith([HIT]), tools: [tool] }),
       {
-        resolveChat: () => chat,
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        resolveTools: () => [tool],
         recordToolCalls: async (input) => {
           recorded.push(input);
         },
       },
-      fakeMessagesRepo(),
     );
 
     const r = await s.generate(baseInput());
@@ -306,28 +293,25 @@ describe("RagReplyStrategy.generate", () => {
   it("style assignment metadata сохраняется в conversation", async () => {
     const saved: Array<{ conversationId: number; styleId?: number | null; experimentId?: number | null }> = [];
     const s = mk(
-      {
-        resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        resolveStyle: async () => ({
+      ctxWith({
+        chat: chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+        kb: kbWith([HIT]),
+        style: {
           ...STYLE,
           styleId: 7,
           experimentId: 3,
           experimentSlug: "exp-a",
           variantSlug: "exch-pro",
-        }),
-        resolveConversations: () =>
-          ({
-            setAssignment: async (
-              conversationId: number,
-              assignment: { styleId?: number | null; experimentId?: number | null },
-            ) => {
-              saved.push({ conversationId, ...assignment });
-            },
-          }) as never,
-      },
-      fakeMessagesRepo(),
+        },
+        conversations: {
+          setAssignment: async (
+            conversationId: number,
+            assignment: { styleId?: number | null; experimentId?: number | null },
+          ) => {
+            saved.push({ conversationId, ...assignment });
+          },
+        } as never,
+      }),
     );
 
     const r = await s.generate(baseInput());
@@ -338,30 +322,11 @@ describe("RagReplyStrategy.generate", () => {
 
   it("exchange: неподкреплённый курс заменяется safe fallback", async () => {
     const s = mk(
-      {
+      ctxWith({
         template: EXCHANGE_TEMPLATE,
-        resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-      },
-      fakeMessagesRepo(),
-    );
-    const r = await s.generate(baseInput());
-    expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
-  });
-
-  it("exchange: resolved tenant template activates exchange guard", async () => {
-    const s = mk(
-      {
-        template: { ...EXCHANGE_TEMPLATE, slug: "fallback_v1" },
-        resolveTemplate: () => EXCHANGE_TEMPLATE,
-        resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-      },
-      fakeMessagesRepo(),
+        chat: chatReturning("Курс 31.5, получите 10553 THB."),
+        kb: kbWith([HIT]),
+      }),
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
@@ -371,14 +336,11 @@ describe("RagReplyStrategy.generate", () => {
 
   it("exchange: policy guard blocks payment confirmation without verified payment state", async () => {
     const s = mk(
-      {
+      ctxWith({
         template: EXCHANGE_TEMPLATE,
-        resolveChat: () => chatReturning("Оплата получена и подтверждена, готовлю выдачу."),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        rewriteQueryBeforeRetrieval: false,
-        reflect: false,
-        resolveExchangePolicyState: () => ({
+        chat: chatReturning("Оплата получена и подтверждена, готовлю выдачу."),
+        kb: kbWith([HIT]),
+        exchangePolicyState: {
           stageSlug: "payment_review",
           order: {
             id: 9,
@@ -390,9 +352,9 @@ describe("RagReplyStrategy.generate", () => {
             payoutCompleted: false,
             payoutCodeIssued: false,
           },
-        }),
-      },
-      fakeMessagesRepo(),
+        },
+      }),
+      { rewriteQueryBeforeRetrieval: false, reflect: false },
     );
 
     const r = await s.generate(baseInput());
@@ -404,14 +366,11 @@ describe("RagReplyStrategy.generate", () => {
 
   it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
     const s = mk(
-      {
+      ctxWith({
         template: EXCHANGE_TEMPLATE,
-        resolveChat: () => chatReturning("ответ"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([]),
-        softFallback: false,
-      },
-      fakeMessagesRepo(),
+        chat: chatReturning("ответ"),
+      }),
+      { softFallback: false },
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
@@ -421,18 +380,15 @@ describe("RagReplyStrategy.generate", () => {
 
   it("exchange: reflect срезает неподкреплённый статус и возвращает safe fallback", async () => {
     const s = mk(
-      {
+      ctxWith({
         template: EXCHANGE_TEMPLATE,
-        resolveChat: () =>
-          chatThenFactCheck("Курьер будет через 10 минут.", {
-            grounded: false,
-            vacancyOk: true,
-            reason: "delivery ETA not in context",
-          }),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-      },
-      fakeMessagesRepo(),
+        chat: chatThenFactCheck("Курьер будет через 10 минут.", {
+          grounded: false,
+          vacancyOk: true,
+          reason: "delivery ETA not in context",
+        }),
+        kb: kbWith([HIT]),
+      }),
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
@@ -443,19 +399,15 @@ describe("RagReplyStrategy.generate", () => {
   it("no-context + softFallback → envelope с fallback-текстом + лог в suggestions", async () => {
     let logged = false;
     const s = mk(
-      {
-        resolveChat: () => chatReturning("Уточню детали и вернусь!"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([]), // нет хитов → NO_CONTEXT
-        softFallback: true,
-        resolveSuggestions: () =>
-          ({
-            log: async () => {
-              logged = true;
-            },
-          }) as never,
-      },
-      fakeMessagesRepo(),
+      ctxWith({
+        chat: chatReturning("Уточню детали и вернусь!"),
+        suggestions: {
+          log: async () => {
+            logged = true;
+          },
+        } as never,
+      }),
+      { softFallback: true },
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
@@ -465,15 +417,7 @@ describe("RagReplyStrategy.generate", () => {
   });
 
   it("no-context без softFallback → null", async () => {
-    const s = mk(
-      {
-        resolveChat: () => chatReturning("ответ"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([]),
-        softFallback: false,
-      },
-      fakeMessagesRepo(),
-    );
+    const s = mk(ctxWith({ chat: chatReturning("ответ") }), { softFallback: false });
     expect(await s.generate(baseInput())).toBeNull();
   });
 
@@ -484,20 +428,18 @@ describe("RagReplyStrategy.generate", () => {
     }));
     let savedSummary: string | null = null;
     const s = mk(
-      {
-        resolveChat: () => chatReturning("краткое резюме диалога"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        compactAfterMessages: 20,
-        resolveConversations: () =>
-          ({
-            findById: async () => ({ id: 100, summaryJson: null }),
-            setSummaryJson: async (_id: number, json: string) => {
-              savedSummary = json;
-            },
-          }) as never,
-      },
-      fakeMessagesRepo({ recent: many, count: 21 }),
+      ctxWith({
+        chat: chatReturning("краткое резюме диалога"),
+        kb: kbWith([HIT]),
+        messages: fakeMessages({ recent: many, count: 21 }),
+        conversations: {
+          findById: async () => ({ id: 100, summaryJson: null }),
+          setSummaryJson: async (_id: number, json: string) => {
+            savedSummary = json;
+          },
+        } as never,
+      }),
+      { compactAfterMessages: 20 },
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();

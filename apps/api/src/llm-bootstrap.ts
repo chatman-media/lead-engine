@@ -18,7 +18,10 @@ import {
 	MessagesRepo,
 	parseStyleConfig,
 	RagReplyStrategy,
+	type RagTurnContext,
+	type RagTurnInput,
 	type ReplyStrategy,
+	type ResolvedStyleAssignment,
 	type StageClassifier,
 	StylesRepo,
 	withTenant,
@@ -91,13 +94,6 @@ import {
 } from "./lib/llm-config-loader.ts";
 import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
-
-type ResolvedStyleAssignment = Style & {
-	styleId?: number | null;
-	experimentId?: number | null;
-	experimentSlug?: string | null;
-	variantSlug?: string | null;
-};
 
 /**
  * Bootstrap LlmRouter + ReplyStrategy. Per-tenant configs приходят из
@@ -1021,65 +1017,118 @@ export function makeReplyStrategy(
 	const resolveSkills = makeSkillsResolver(db);
 	const resolveDirectorHooks = makeDirectorHooksResolver(db);
 	const resolveReranker = makeRerankerResolver(db, cfg.masterKeyHex);
+	const resolveIsSupport = makeSupportModeResolver(db);
+	const resolveKbScope = makeKbScopeResolver(db);
+	const resolveStageGuidance = makeStageGuidanceResolver(db);
+	const resolveRequestContext = makeRequestContextResolver(db);
+	const resolveAwaitingOperator = makeAwaitingOperatorResolver(db);
 
-	const strategy = new RagReplyStrategy(
-		{
-			template: fallbackTemplate,
-			resolveTemplate,
-			resolveChat: (tenantId: number) => {
-				const inner = ref.router.resolveChat(tenantId, "chat");
-				if (!metrics) return inner;
-				const chatCfg = getConfig(ref.current, tenantId, "chat");
-				return wrapChatClient(
-					inner,
-					metrics,
-					{
-						provider: chatCfg?.provider ?? "unknown",
-						purpose: "chat",
-						...(chatCfg?.model ? { model: chatCfg.model } : {}),
-					},
-					recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
-				);
+	const resolveWrappedChat = (tenantId: number) => {
+		const inner = ref.router.resolveChat(tenantId, "chat");
+		if (!metrics) return inner;
+		const chatCfg = getConfig(ref.current, tenantId, "chat");
+		return wrapChatClient(
+			inner,
+			metrics,
+			{
+				provider: chatCfg?.provider ?? "unknown",
+				purpose: "chat",
+				...(chatCfg?.model ? { model: chatCfg.model } : {}),
 			},
-			resolveEmbed: (tenantId: number) => {
-				const inner = ref.router.resolveEmbed(tenantId);
-				if (!metrics) return inner as unknown as RagEmbeddingClient;
-				const embedCfg = getConfig(ref.current, tenantId, "embed");
-				const wrapped = wrapEmbeddingClient(
-					inner,
-					metrics,
-					{
-						provider: embedCfg?.provider ?? "unknown",
-						purpose: "embed",
-						...(embedCfg?.model ? { model: embedCfg.model } : {}),
-					},
-					recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
-				);
-				return wrapped as unknown as RagEmbeddingClient;
+			recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+		);
+	};
+	const resolveWrappedEmbed = (tenantId: number): RagEmbeddingClient => {
+		const inner = ref.router.resolveEmbed(tenantId);
+		if (!metrics) return inner as unknown as RagEmbeddingClient;
+		const embedCfg = getConfig(ref.current, tenantId, "embed");
+		const wrapped = wrapEmbeddingClient(
+			inner,
+			metrics,
+			{
+				provider: embedCfg?.provider ?? "unknown",
+				purpose: "embed",
+				...(embedCfg?.model ? { model: embedCfg.model } : {}),
 			},
-			resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
-			resolveKbScope: makeKbScopeResolver(db),
-			resolveStyle,
-			resolveIsSupport: makeSupportModeResolver(db),
-			resolveStageGuidance: makeStageGuidanceResolver(db),
-			resolveRequestContext: makeRequestContextResolver(db),
-			resolveAwaitingOperator: makeAwaitingOperatorResolver(db),
-			resolveSkills,
-			resolveDirectorHooks,
-			resolveTools,
-			resolveExchangePolicyState,
-			resolveReranker,
-			recordToolCalls: makeToolCallRecorder(db, "rag_reply"),
-			resolveSuggestions: (tenantId: number) =>
-				new KbSuggestionsRepo({ db, tenantId }),
-			resolveConversations: (tenantId: number) =>
-				new ConversationsRepo({ db, tenantId }),
-			// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
-			// генерируем мягкий ответ в персоне, а не молчим.
-			softFallback: true,
-		},
-		(tenantId: number) => new MessagesRepo({ db, tenantId }),
-	);
+			recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+		);
+		return wrapped as unknown as RagEmbeddingClient;
+	};
+
+	// Весь контекст хода собирается здесь одним вызовом (#514): support-гейт
+	// первым (дёшево, и в support-mode остальное не грузим), затем независимые
+	// источники параллельно. Exchange policy state — только для exchange_v1.
+	const loadTurnContext = async (input: RagTurnInput): Promise<RagTurnContext> => {
+		const { tenantId, conversationId, contactId } = input;
+		const template = resolveTemplate?.(tenantId) ?? fallbackTemplate;
+		const base: RagTurnContext = {
+			template,
+			chat: resolveWrappedChat(tenantId),
+			embedder: resolveWrappedEmbed(tenantId),
+			kb: new DrizzleKbStore({ db, tenantId }),
+			messages: new MessagesRepo({ db, tenantId }),
+			conversations: new ConversationsRepo({ db, tenantId }),
+			suggestions: new KbSuggestionsRepo({ db, tenantId }),
+		};
+		if (await resolveIsSupport({ tenantId, contactId })) {
+			return { ...base, isSupport: true };
+		}
+		const isExchange = template?.slug === "exchange_v1";
+		const [
+			kbScope,
+			style,
+			skills,
+			directorHooks,
+			tools,
+			reranker,
+			stageGuidance,
+			requestContext,
+			awaitingOperator,
+			exchangePolicyState,
+		] = await Promise.all([
+			resolveKbScope({ tenantId, contactId }),
+			resolveStyle({ tenantId, contactId }),
+			resolveSkills({ tenantId }),
+			resolveDirectorHooks({ tenantId }),
+			resolveTools({ tenantId, conversationId, contactId }),
+			resolveReranker({ tenantId }),
+			resolveStageGuidance({ tenantId, contactId }),
+			resolveRequestContext({ tenantId, contactId }),
+			resolveAwaitingOperator({ tenantId, contactId }),
+			isExchange
+				? resolveExchangePolicyState({ tenantId, conversationId, contactId }).catch(
+						(err) => {
+							console.warn(
+								"[llm-bootstrap] failed to resolve exchange policy state:",
+								err,
+							);
+							return null;
+						},
+					)
+				: Promise.resolve(null),
+		]);
+		return {
+			...base,
+			kbScope,
+			style,
+			skills,
+			directorHooks,
+			tools,
+			reranker,
+			stageGuidance,
+			requestContext,
+			awaitingOperator,
+			exchangePolicyState,
+		};
+	};
+
+	const strategy = new RagReplyStrategy({
+		loadTurnContext,
+		recordToolCalls: makeToolCallRecorder(db, "rag_reply"),
+		// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
+		// генерируем мягкий ответ в персоне, а не молчим.
+		softFallback: true,
+	});
 
 	return {
 		strategy,
