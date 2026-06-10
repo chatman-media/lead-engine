@@ -57,6 +57,131 @@ Success criteria:
 6. Commission is recorded as platform revenue on the order. Payout can stay manual
    in MVP.
 
+## MVP product and compliance spec
+
+This section is the BPR-0 decision record. Later implementation slices should
+follow it unless a new issue explicitly changes the policy.
+
+### MVP service category
+
+The first provider-relay slice is **massage / wellness booking** for a single
+test tenant.
+
+Allowed MVP scope:
+
+- customer asks for massage booking by time window, area, number of guests,
+  duration, and optional preferences;
+- provider can quote availability, price, duration, and arrival/location notes;
+- one provider is contacted at a time in MVP;
+- operator can override provider selection and customer-facing offer copy.
+
+Out of scope for MVP:
+
+- medical treatment, licensed physiotherapy claims, controlled substances, adult
+  services, or anything requiring age/identity checks beyond normal booking;
+- automatic provider payout;
+- customer/provider direct contact exchange before payment;
+- multi-provider bidding exposed to the customer.
+
+### Pre-payment data sharing
+
+Before customer payment or explicit operator approval, provider-facing messages
+may include only the minimum booking context:
+
+- service type and requested duration;
+- requested date/time window;
+- general area or neighborhood, not exact address/room/unit;
+- number of guests;
+- customer preferences relevant to service fulfillment, such as oil preference
+  or therapist gender preference, if the customer provided it;
+- anonymized free-text notes after redaction.
+
+Do not share before payment:
+
+- customer full name, phone, Telegram/WhatsApp handle, channel external user ID,
+  email, or document/payment identifiers;
+- exact hotel room, unit number, house address, or live location;
+- raw customer message text when it contains contact details or sensitive data;
+- provider contact details back to the customer.
+
+After payment, exact rendezvous/contact details may be released only according to
+the order policy and audit event. If the policy is unclear, route to operator
+approval.
+
+### Provider opt-in and onboarding
+
+Providers must be manually onboarded by the tenant before receiving relay
+requests. Each provider profile records:
+
+- business/display name;
+- service categories and service area;
+- active/paused status;
+- one or more channel identities;
+- opt-in timestamp, channel, and onboarding copy version.
+
+Provider opt-in requirements:
+
+- provider agreed to receive booking requests from this tenant through the chosen
+  channel;
+- provider understands requests may be templated/redacted and attached to an
+  auditable order;
+- provider agrees not to contact the customer directly before the platform
+  confirms the booking and releases allowed contact details;
+- provider accepts tenant cancellation/no-show rules for the MVP.
+
+Suggested onboarding copy:
+
+> We will send you booking requests from our customers through this chat. Please
+> reply only with availability, price, timing, or decline. Customer contact
+> details are shared only after the platform confirms the booking. By replying,
+> you agree that each request is recorded for order tracking and support.
+
+WhatsApp outreach outside an active service window must use approved templates
+and provider opt-in records. Cold outreach is not part of MVP.
+
+### Cancellation and refund rules
+
+MVP refund handling is manual but stateful:
+
+- before provider quote is accepted by the customer: cancel without payment;
+- after customer accepts offer but before payment capture: cancel the pending
+  payment/order without commission;
+- after payment but before provider final confirmation: route to operator; default
+  outcome is full refund unless provider already committed non-refundable cost;
+- after provider final confirmation: route to operator; refund can be full,
+  partial, or rejected based on provider policy and tenant decision;
+- customer no-show and provider no-show must be recorded as order events.
+
+Every cancellation/refund decision writes an order event with actor, reason,
+amount if applicable, and final state.
+
+### Provider counter-offers
+
+Providers may counter-offer price, time, duration, or location constraints.
+Counter-offers are not forwarded raw to the customer by default. The system
+normalizes them into a customer-facing offer summary, and operator approval is
+required when:
+
+- price changed outside configured bounds;
+- time changed outside the requested window;
+- provider response is ambiguous;
+- provider includes direct contact details or sensitive content.
+
+The customer sees one active offer at a time in MVP.
+
+### Commission model
+
+MVP supports both:
+
+- percentage commission on customer payable amount;
+- optional fixed platform fee.
+
+Default policy for the first slice: **15% commission**, no fixed fee unless the
+tenant overrides it per provider service. Store all computed amounts on the
+order: provider quote, customer payable amount, commission amount, fixed fee,
+currency, and policy version. Provider payout remains manual in MVP but must be
+reconstructable from the order ledger.
+
 ## Proposed data model
 
 New tenant-scoped tables:
@@ -119,12 +244,12 @@ Candidate provider request statuses:
 
 Acceptance criteria:
 
-- Define which service categories are in MVP. Proposed first slice: massage.
-- Define exactly what customer data can be shared with providers before payment.
-- Define provider opt-in requirements and onboarding copy.
-- Define cancellation/refund rules for MVP.
-- Define whether providers can counter-offer price/time.
-- Define commission model: fixed, percentage, or both.
+- [x] Define which service categories are in MVP. First slice: massage / wellness booking.
+- [x] Define exactly what customer data can be shared with providers before payment.
+- [x] Define provider opt-in requirements and onboarding copy.
+- [x] Define cancellation/refund rules for MVP.
+- [x] Define whether providers can counter-offer price/time.
+- [x] Define commission model: fixed, percentage, or both.
 
 Dependencies: none.
 
