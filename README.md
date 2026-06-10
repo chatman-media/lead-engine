@@ -319,13 +319,18 @@ and [SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md).
 
 | Capability | Lead Engine | Intercom Fin | Chatbase | ManyChat |
 |---|:---:|:---:|:---:|:---:|
-| Telegram bot + personal account | yes | no | no | partial |
-| WhatsApp / Messenger / VK / MAX / Web | yes | partial | web | yes |
-| BYOK LLM per tenant | yes | no | partial | no |
-| RAG + workflow stages | yes | partial | RAG only | flow-builder |
-| Operator takeover | yes | yes | no | yes |
-| Service provider marketplace | yes | no | no | no |
-| Self-host / source-available | yes | no | no | no |
+| Telegram bot + personal account | ✅ | ❌ | ❌ | 🟡 bot only |
+| WhatsApp / Messenger / VK / MAX / Web | ✅ | 🟡 no VK/MAX/Telegram | 🟡 no VK/MAX/Telegram | 🟡 no VK/MAX/web chat |
+| BYOK LLM per tenant | ✅ | ❌ | ❌ | ❌ |
+| RAG + workflow stages | ✅ | 🟡 playbooks/procedures | 🟡 RAG + actions | 🟡 flow-builder + AI add-on |
+| Operator takeover | ✅ | ✅ | ✅ | ✅ |
+| Service provider marketplace | ✅ | ❌ | ❌ | ❌ |
+| Self-host / source-available | ✅ | ❌ | ❌ | ❌ |
+
+Legend: ✅ native fit · 🟡 partial or adjacent category · ❌ not native. Checked
+against public product docs in June 2026: [Intercom Fin channels](https://www.intercom.com/help/en/articles/13377077-choose-channels-to-deploy-fin-ai-agent),
+[Chatbase deploy/takeover](https://www.chatbase.co/docs/user-guides/chatbot/deploy),
+and [ManyChat channels](https://help.manychat.com/hc/en-us/categories/13556929063068-Channels).
 
 The niche is messenger-native AI operations for RU/CIS/MENA and service-heavy
 businesses: not "chatbot answers FAQ", but "messenger conversation becomes

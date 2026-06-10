@@ -317,13 +317,19 @@ quality lab и split-transaction pipeline. Подробнее:
 
 | Capability | Lead Engine | Intercom Fin | Chatbase | ManyChat |
 |---|:---:|:---:|:---:|:---:|
-| Telegram bot + personal account | да | нет | нет | частично |
-| WhatsApp / Messenger / VK / MAX / Web | да | частично | web | да |
-| BYOK LLM на тенанта | да | нет | частично | нет |
-| RAG + workflow stages | да | частично | только RAG | flow-builder |
-| Operator takeover | да | да | нет | да |
-| Service provider marketplace | да | нет | нет | нет |
-| Self-host / source-available | да | нет | нет | нет |
+| Telegram bot + personal account | ✅ | ❌ | ❌ | 🟡 только бот |
+| WhatsApp / Messenger / VK / MAX / Web | ✅ | 🟡 нет VK/MAX/Telegram | 🟡 нет VK/MAX/Telegram | 🟡 нет VK/MAX/web chat |
+| BYOK LLM на тенанта | ✅ | ❌ | ❌ | ❌ |
+| RAG + workflow stages | ✅ | 🟡 playbooks/procedures | 🟡 RAG + actions | 🟡 flow-builder + AI add-on |
+| Operator takeover | ✅ | ✅ | ✅ | ✅ |
+| Service provider marketplace | ✅ | ❌ | ❌ | ❌ |
+| Self-host / source-available | ✅ | ❌ | ❌ | ❌ |
+
+Легенда: ✅ нативное совпадение · 🟡 частично или соседняя категория · ❌ нет
+нативной поддержки. Сверено с публичными docs за июнь 2026:
+[Intercom Fin channels](https://www.intercom.com/help/en/articles/13377077-choose-channels-to-deploy-fin-ai-agent),
+[Chatbase deploy/takeover](https://www.chatbase.co/docs/user-guides/chatbot/deploy)
+и [ManyChat channels](https://help.manychat.com/hc/en-us/categories/13556929063068-Channels).
 
 Ниша: messenger-native AI operations для RU/CIS/MENA и service-heavy бизнесов.
 Не "бот отвечает FAQ", а "мессенджерный диалог превращается в revenue workflow".
