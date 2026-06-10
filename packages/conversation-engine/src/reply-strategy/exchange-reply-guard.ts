@@ -8,13 +8,44 @@ export interface ExchangeReplyGuardInput {
   telemetry?: Pick<AnswerTelemetry, "toolCall" | "toolCalls">;
 }
 
-export interface ExchangeReplyGuardResult {
+export type ExchangeResponseGuardAction =
+	| "pass"
+	| "rewrite"
+	| "escalate"
+	| "block";
+
+export interface ExchangeResponseGuardResult<Reason extends string = string> {
   ok: boolean;
+	action: ExchangeResponseGuardAction;
   text: string;
-  reason?: string;
+	originalText?: string;
+	reason?: Reason;
+	reasons: readonly Reason[];
+	requiredFixes: readonly string[];
 }
 
-const QUOTE_TOOLS = new Set(["compute_exchange_quote", "create_exchange_order"]);
+export type ExchangeReplyGuardReason =
+	| "rate_negotiation"
+	| "unbacked_quote"
+	| "unbacked_requisites"
+	| "unbacked_payout_code";
+
+export type ExchangeReplyGuardResult =
+	ExchangeResponseGuardResult<ExchangeReplyGuardReason>;
+
+export interface ExchangeResponseGuardFinding {
+	action: ExchangeResponseGuardAction;
+	reasons: readonly string[];
+	requiredFixes: readonly string[];
+	originalText: string;
+	finalText: string;
+	blocked: boolean;
+}
+
+const QUOTE_TOOLS = new Set([
+	"compute_exchange_quote",
+	"create_exchange_order",
+]);
 const REQUISITES_TOOLS = new Set(["fetch_exchange_requisites"]);
 const PAYOUT_TOOLS = new Set(["issue_exchange_payout"]);
 
@@ -24,22 +55,27 @@ const NUMBER_SCAN_RE =
   /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/gu;
 const QUOTE_RE =
   /(?:курс|rate|отда[её]те|получ(?:а(?:ете|ешь)|ите|у|ится|ить)|итог(?:овая)?\s+сумм|thb|бат|bhat)/iu;
-const SOURCE_ASSET_RE = /(?:usdt|btc|eth|usd|eur|rub|юсдт|битк|эфир|доллар|евро|руб|₽)/iu;
+const SOURCE_ASSET_RE =
+	/(?:usdt|btc|eth|usd|eur|rub|юсдт|битк|эфир|доллар|евро|руб|₽)/iu;
 const REQUISITES_RE =
   /(?:реквизит|кошел[её]к|wallet|адрес\s+(?:кошелька|для\s+оплаты)|оплат\w*|перев(?:од|ести)|sbp|сбп|qr|карта|card|binance\s*id)/iu;
-const PAYOUT_RE =
-  /(?:код\s+(?:выдачи|снятия|получения)|payout\s*code)/iu;
+const PAYOUT_RE = /(?:код\s+(?:выдачи|снятия|получения)|payout\s*code)/iu;
 const RATE_NEGOTIATION_RE =
   /(?:договор(?:имся|иться)|скидк|лучше\s+курс|курс\s+лучше|сдела(?:ю|ем)\s+курс|подвин(?:у|ем)\s+курс)/iu;
 
-const CRYPTO_ADDRESS_RE = /\b(?:T[A-Za-z0-9]{25,}|0x[a-fA-F0-9]{32,}|bc1[a-z0-9]{20,})\b/u;
+const CRYPTO_ADDRESS_RE =
+	/\b(?:T[A-Za-z0-9]{25,}|0x[a-fA-F0-9]{32,}|bc1[a-z0-9]{20,})\b/u;
 const CARDISH_RE = /\b(?:\d[ -]?){12,19}\b/u;
 const URL_PAYMENT_RE = /\bhttps?:\/\/\S+/iu;
 const CODE_RE = /\b\d{4,8}\b/u;
 
-function successfulToolNames(telemetry: ExchangeReplyGuardInput["telemetry"]): Set<string> {
+function successfulToolNames(
+	telemetry: ExchangeReplyGuardInput["telemetry"],
+): Set<string> {
   const names = new Set<string>();
-  const calls = telemetry?.toolCalls ?? (telemetry?.toolCall ? [{ ...telemetry.toolCall }] : []);
+	const calls =
+		telemetry?.toolCalls ??
+		(telemetry?.toolCall ? [{ ...telemetry.toolCall }] : []);
   for (const call of calls) {
     if (!call || ("error" in call && call.error)) continue;
     const result = call.result;
@@ -69,40 +105,124 @@ function hasAny(names: Set<string>, allowed: Set<string>): boolean {
 function hasConcreteQuoteClaim(text: string): boolean {
   if (!NUMBER_RE.test(text)) return false;
   if (QUOTE_RE.test(text)) return true;
-  return SOURCE_ASSET_RE.test(text) && [...text.matchAll(NUMBER_SCAN_RE)].length >= 2;
+	return (
+		SOURCE_ASSET_RE.test(text) && [...text.matchAll(NUMBER_SCAN_RE)].length >= 2
+	);
 }
 
 function hasConcreteRequisitesClaim(text: string): boolean {
   if (CRYPTO_ADDRESS_RE.test(text) || CARDISH_RE.test(text)) return true;
   if (!REQUISITES_RE.test(text)) return false;
-  return URL_PAYMENT_RE.test(text) || NUMBER_RE.test(text) || /(?:перев(?:едите|ести)|оплат(?:ите|ить)|адрес|ссылка)/iu.test(text);
+	return (
+		URL_PAYMENT_RE.test(text) ||
+		NUMBER_RE.test(text) ||
+		/(?:перев(?:едите|ести)|оплат(?:ите|ить)|адрес|ссылка)/iu.test(text)
+	);
 }
 
 function hasConcretePayoutClaim(text: string): boolean {
   return PAYOUT_RE.test(text) && CODE_RE.test(text);
 }
 
-export function guardExchangeReply(input: ExchangeReplyGuardInput): ExchangeReplyGuardResult {
+export function exchangeGuardPass<Reason extends string>(
+	text: string,
+): ExchangeResponseGuardResult<Reason> {
+	return {
+		ok: true,
+		action: "pass",
+		text,
+		reasons: [],
+		requiredFixes: [],
+	};
+}
+
+export function exchangeGuardViolation<Reason extends string>(input: {
+	action: Exclude<ExchangeResponseGuardAction, "pass">;
+	reason: Reason;
+	text: string;
+	originalText: string;
+	requiredFixes: readonly string[];
+}): ExchangeResponseGuardResult<Reason> {
+	return {
+		ok: false,
+		action: input.action,
+		text: input.text,
+		originalText: input.originalText,
+		reason: input.reason,
+		reasons: [input.reason],
+		requiredFixes: input.requiredFixes,
+	};
+}
+
+export function exchangeGuardFindingFromResult(
+	result: ExchangeResponseGuardResult,
+): ExchangeResponseGuardFinding | null {
+	if (result.action === "pass") return null;
+	return {
+		action: result.action,
+		reasons: result.reasons,
+		requiredFixes: result.requiredFixes,
+		originalText: result.originalText ?? result.text,
+		finalText: result.text,
+		blocked: result.action === "block",
+	};
+}
+
+export function guardExchangeReply(
+	input: ExchangeReplyGuardInput,
+): ExchangeReplyGuardResult {
   const text = input.text.trim();
-  if (!text) return { ok: true, text };
+	if (!text) return exchangeGuardPass(text);
 
   if (RATE_NEGOTIATION_RE.test(text)) {
-    return { ok: false, text: EXCHANGE_SAFE_FALLBACK, reason: "rate_negotiation" };
+		return exchangeGuardViolation({
+			action: "rewrite",
+			reason: "rate_negotiation",
+			text: EXCHANGE_SAFE_FALLBACK,
+			originalText: text,
+			requiredFixes: [
+				"Use configured rate table or compute_exchange_quote; do not negotiate rate manually.",
+			],
+		});
   }
 
   const tools = successfulToolNames(input.telemetry);
 
   if (hasConcreteQuoteClaim(text) && !hasAny(tools, QUOTE_TOOLS)) {
-    return { ok: false, text: EXCHANGE_SAFE_FALLBACK, reason: "unbacked_quote" };
+		return exchangeGuardViolation({
+			action: "rewrite",
+			reason: "unbacked_quote",
+			text: EXCHANGE_SAFE_FALLBACK,
+			originalText: text,
+			requiredFixes: [
+				"Call compute_exchange_quote or create_exchange_order before sending a concrete rate or THB amount.",
+			],
+		});
   }
 
   if (hasConcreteRequisitesClaim(text) && !hasAny(tools, REQUISITES_TOOLS)) {
-    return { ok: false, text: EXCHANGE_SAFE_FALLBACK, reason: "unbacked_requisites" };
+		return exchangeGuardViolation({
+			action: "rewrite",
+			reason: "unbacked_requisites",
+			text: EXCHANGE_SAFE_FALLBACK,
+			originalText: text,
+			requiredFixes: [
+				"Call fetch_exchange_requisites after the order is ready for payment; otherwise ask the next missing field.",
+			],
+		});
   }
 
   if (hasConcretePayoutClaim(text) && !hasAny(tools, PAYOUT_TOOLS)) {
-    return { ok: false, text: EXCHANGE_SAFE_FALLBACK, reason: "unbacked_payout_code" };
+		return exchangeGuardViolation({
+			action: "escalate",
+			reason: "unbacked_payout_code",
+			text: EXCHANGE_SAFE_FALLBACK,
+			originalText: text,
+			requiredFixes: [
+				"Issue payout through issue_exchange_payout or operator approval before sending a payout code.",
+			],
+		});
   }
 
-  return { ok: true, text };
+	return exchangeGuardPass(text);
 }

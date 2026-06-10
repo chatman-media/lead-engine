@@ -27,12 +27,16 @@ import { ScopedKbStore } from "../dal/kb-store.ts";
 import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
+import { buildExchangeOperatorHandoff } from "./exchange-operator-handoff.ts";
 import {
   type ExchangePolicyState,
   guardExchangePolicy,
 } from "./exchange-policy-guard.ts";
-import { buildExchangeOperatorHandoff } from "./exchange-operator-handoff.ts";
-import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
+import {
+	EXCHANGE_SAFE_FALLBACK,
+	type ExchangeResponseGuardFinding,
+	exchangeGuardFindingFromResult,
+} from "./exchange-reply-guard.ts";
 
 /**
  * RAG-aware ReplyStrategy. На каждый user message:
@@ -108,6 +112,8 @@ export interface RagTurnContext {
   awaitingOperator?: boolean;
   /** Снапшот exchange-workflow state для финального policy guard (только exchange_v1). */
   exchangePolicyState?: ExchangePolicyState | null;
+	/** false → exchange response guard bypassed for this tenant. Default: true. */
+	exchangeResponseGuardEnabled?: boolean;
   /** Repo для fire-and-forget логирования незакрытых вопросов (softFallback). */
   suggestions?: KbSuggestionsRepo | null;
   /** Repo для compaction summary + style assignment. Absent → ничего не персистится. */
@@ -174,6 +180,7 @@ export interface RagReplyStrategyOpts {
     userMessageText: string;
     assistantText: string;
     telemetry: AnswerTelemetry;
+		guardFindings?: readonly ExchangeResponseGuardFinding[];
   }) => Promise<void> | void;
 }
 
@@ -248,14 +255,21 @@ export class RagReplyStrategy implements ReplyStrategy {
 
     // Load conversation summary + message count in parallel.
     const [allRecent, totalCount] = await Promise.all([
-      messagesRepo.recent(input.conversationId, (this.opts.historyLimit ?? 12) + 1),
-      compactThreshold > 0 ? messagesRepo.countByConversation(input.conversationId) : Promise.resolve(0),
+			messagesRepo.recent(
+				input.conversationId,
+				(this.opts.historyLimit ?? 12) + 1,
+			),
+			compactThreshold > 0
+				? messagesRepo.countByConversation(input.conversationId)
+				: Promise.resolve(0),
     ]);
 
     if (compactThreshold > 0 && totalCount >= compactThreshold) {
       // Try loading a stored summary first (avoid re-compacting every turn).
       const convsRepo = ctx.conversations;
-      const convo = convsRepo ? await convsRepo.findById(input.conversationId) : null;
+			const convo = convsRepo
+				? await convsRepo.findById(input.conversationId)
+				: null;
 
       if (convo?.summaryJson) {
         // Parse previously stored summary.
@@ -267,7 +281,8 @@ export class RagReplyStrategy implements ReplyStrategy {
       }
 
       // Re-compact every `compactThreshold` messages to keep summary fresh.
-      const shouldRecompact = !conversationSummary || totalCount % compactThreshold === 0;
+			const shouldRecompact =
+				!conversationSummary || totalCount % compactThreshold === 0;
       if (shouldRecompact) {
         const chatHistory = messagesToChatHistory(allRecent);
         const freshSummary = await compactConversation(
@@ -283,14 +298,18 @@ export class RagReplyStrategy implements ReplyStrategy {
           // Persist async — don't block the reply.
           convsRepo
             ?.setSummaryJson(input.conversationId, JSON.stringify(freshSummary))
-            .catch((err) => console.warn("[rag-reply] failed to save summary:", err));
+						.catch((err) =>
+							console.warn("[rag-reply] failed to save summary:", err),
+						);
         }
       }
     }
 
     // Грузим history БЕЗ текущего user message (answerWithRag сам добавит
     // его как `question`). Берём + 1 чтобы исключить если оно уже persisted.
-    const historyWithoutCurrent = allRecent.filter((m) => m.text !== input.userMessageText);
+		const historyWithoutCurrent = allRecent.filter(
+			(m) => m.text !== input.userMessageText,
+		);
     const history = messagesToChatHistory(historyWithoutCurrent);
 
     const kbScope = ctx.kbScope ?? null;
@@ -302,9 +321,13 @@ export class RagReplyStrategy implements ReplyStrategy {
         await convsRepo
           .setAssignment(input.conversationId, {
             ...(style.styleId !== undefined ? { styleId: style.styleId } : {}),
-            ...(style.experimentId !== undefined ? { experimentId: style.experimentId } : {}),
+						...(style.experimentId !== undefined
+							? { experimentId: style.experimentId }
+							: {}),
           })
-          .catch((err) => console.warn("[rag-reply] failed to save style assignment:", err));
+					.catch((err) =>
+						console.warn("[rag-reply] failed to save style assignment:", err),
+					);
       }
     }
 
@@ -318,7 +341,9 @@ export class RagReplyStrategy implements ReplyStrategy {
     const requestContext = ctx.requestContext ?? null;
     const serviceOrderContext = ctx.serviceOrderContext ?? null;
     const awaitingOperator = ctx.awaitingOperator ?? false;
-    const exchangePolicyState = isExchange ? (ctx.exchangePolicyState ?? null) : null;
+		const exchangePolicyState = isExchange
+			? (ctx.exchangePolicyState ?? null)
+			: null;
 
     const combinedRequestContext =
       [requestContext, serviceOrderContext]
@@ -336,10 +361,13 @@ export class RagReplyStrategy implements ReplyStrategy {
       kb,
       embedder: ctx.embedder,
       chat: chat as unknown as Parameters<typeof answerWithRag>[0]["chat"],
-      history: history as unknown as Parameters<typeof answerWithRag>[0]["history"],
+			history: history as unknown as Parameters<
+				typeof answerWithRag
+			>[0]["history"],
       topK: this.opts.topK ?? 5,
       hybridSearch: this.opts.hybridSearch ?? true,
-      rewriteQueryBeforeRetrieval: this.opts.rewriteQueryBeforeRetrieval ?? false,
+			rewriteQueryBeforeRetrieval:
+				this.opts.rewriteQueryBeforeRetrieval ?? false,
       reflect: this.opts.reflect ?? isExchange,
       numPredict: this.opts.maxOutputTokens ?? 600,
       // Style: если контекст содержит Style — answerWithRag использует его
@@ -352,7 +380,9 @@ export class RagReplyStrategy implements ReplyStrategy {
       ...(reranker ? { reranker } : {}),
       ...(conversationSummary ? { conversationSummary } : {}),
       ...(stageGuidance ? { stageOverride: stageGuidance } : {}),
-      ...(combinedRequestContext ? { requestContext: combinedRequestContext } : {}),
+			...(combinedRequestContext
+				? { requestContext: combinedRequestContext }
+				: {}),
       ...(serviceOrderGrounding
         ? { vacanciesBlock: serviceOrderGrounding, vacancyGuard: false }
         : {}),
@@ -360,7 +390,11 @@ export class RagReplyStrategy implements ReplyStrategy {
     });
 
     // ── Soft fallback when RAG has no context ────────────────────────────────
-    if (result.text === NO_CONTEXT_MARKER || !result.text || result.text.trim().length === 0) {
+		if (
+			result.text === NO_CONTEXT_MARKER ||
+			!result.text ||
+			result.text.trim().length === 0
+		) {
       // Fire-and-forget: log unanswered question for the KB suggestions queue.
       if (ctx.suggestions) {
         const nowEpoch = Math.floor(Date.now() / 1000);
@@ -396,15 +430,21 @@ export class RagReplyStrategy implements ReplyStrategy {
         ? {
             name: style.persona.name,
             role: style.persona.role,
-            ...(style.persona.company?.trim() ? { company: style.persona.company.trim() } : {}),
+						...(style.persona.company?.trim()
+							? { company: style.persona.company.trim() }
+							: {}),
           }
         : DEFAULT_PERSONA;
 
       const fallbackText = await generateSoftFallback({
         question: input.userMessageText,
-        chat: chat as unknown as Parameters<typeof generateSoftFallback>[0]["chat"],
+				chat: chat as unknown as Parameters<
+					typeof generateSoftFallback
+				>[0]["chat"],
         persona,
-        history: history as unknown as Parameters<typeof generateSoftFallback>[0]["history"],
+				history: history as unknown as Parameters<
+					typeof generateSoftFallback
+				>[0]["history"],
       });
 
       if (!fallbackText || fallbackText.trim().length === 0) return null;
@@ -418,14 +458,26 @@ export class RagReplyStrategy implements ReplyStrategy {
       ];
     }
 
-    const guarded = isExchange
+		const exchangeGuardEnabled = ctx.exchangeResponseGuardEnabled ?? true;
+		const guarded =
+			isExchange && exchangeGuardEnabled
       ? guardExchangePolicy({
           text: result.text,
           telemetry: result.telemetry,
           history: historyWithoutCurrent,
           state: exchangePolicyState,
         })
-      : { ok: true, text: result.text };
+				: {
+						ok: true,
+						action: "pass" as const,
+						text: result.text,
+						reasons: [],
+						requiredFixes: [],
+					};
+		const guardFinding =
+			isExchange && exchangeGuardEnabled
+				? exchangeGuardFindingFromResult(guarded)
+				: null;
     if (!guarded.ok) {
       console.warn(
         `[exchange-policy-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
@@ -434,7 +486,9 @@ export class RagReplyStrategy implements ReplyStrategy {
 
     if (
       this.opts.recordToolCalls &&
-      ((result.telemetry.toolCalls?.length ?? 0) > 0 || result.telemetry.toolCall)
+			((result.telemetry.toolCalls?.length ?? 0) > 0 ||
+				result.telemetry.toolCall ||
+				guardFinding)
     ) {
       try {
         await this.opts.recordToolCalls({
@@ -444,6 +498,7 @@ export class RagReplyStrategy implements ReplyStrategy {
           userMessageText: input.userMessageText,
           assistantText: guarded.text,
           telemetry: result.telemetry,
+					...(guardFinding ? { guardFindings: [guardFinding] } : {}),
         });
       } catch (err) {
         console.warn("[rag-reply] failed to record tool calls:", err);

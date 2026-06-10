@@ -1,5 +1,6 @@
 import {
   type Db,
+	EXCHANGE_RESPONSE_GUARD_FEATURE_KEY,
   PROVIDER_RELAY_FEATURE_KEY,
   TenantFeatureFlagRepo,
   withTenant,
@@ -17,6 +18,7 @@ import { recordAudit } from "../lib/audit.ts";
  *   PUT  /api/admin/tenant/status                  — { paused: boolean }
  *   GET  /api/admin/tenant/features                — rollout flags
  *   PUT  /api/admin/tenant/features/provider-relay — { enabled: boolean }
+ *   PUT  /api/admin/tenant/features/exchange-response-guard — { enabled: boolean }
  *
  * Pause flow:
  *   tenant.status='suspended' → ChannelRegistry.loadFromDb filter exclude'ит
@@ -149,6 +151,10 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
       const flags = new TenantFeatureFlagRepo({ db: tx, tenantId });
       return {
         providerRelay: await flags.isEnabled(PROVIDER_RELAY_FEATURE_KEY),
+				exchangeResponseGuard: await flags.isEnabledOrDefault(
+					EXCHANGE_RESPONSE_GUARD_FEATURE_KEY,
+					true,
+				),
       };
     });
 
@@ -197,6 +203,49 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
       enabled: row.enabled,
     });
   });
+
+	app.put("/api/admin/tenant/features/exchange-response-guard", async (c) => {
+		const tenantId = c.var.tenantId;
+		let body: { enabled?: unknown };
+		try {
+			body = (await c.req.json()) as { enabled?: unknown };
+		} catch {
+			return c.json({ error: "invalid json" }, 400);
+		}
+		if (typeof body.enabled !== "boolean") {
+			return c.json({ error: "enabled (boolean) required" }, 400);
+		}
+
+		const nowEpoch = Math.floor(Date.now() / 1000);
+		const row = await withTenant(opts.db, tenantId, async (tx) => {
+			return new TenantFeatureFlagRepo({ db: tx, tenantId }).setEnabled({
+				featureKey: EXCHANGE_RESPONSE_GUARD_FEATURE_KEY,
+				enabled: body.enabled as boolean,
+				nowEpoch,
+				metadata: { updatedByAdminId: c.var.adminId },
+			});
+		});
+
+		await withTenant(opts.db, tenantId, async (tx) => {
+			await recordAudit(tx as Db, {
+				tenantId,
+				adminId: c.var.adminId,
+				action: "tenant_feature.update",
+				targetKind: "tenant_feature",
+				targetId: EXCHANGE_RESPONSE_GUARD_FEATURE_KEY,
+				details: {
+					feature: EXCHANGE_RESPONSE_GUARD_FEATURE_KEY,
+					enabled: row.enabled,
+				},
+			});
+		});
+
+		return c.json({
+			ok: true,
+			feature: "exchangeResponseGuard",
+			enabled: row.enabled,
+		});
+	});
 
   return app;
 }

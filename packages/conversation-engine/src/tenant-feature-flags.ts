@@ -3,8 +3,12 @@ import { and, eq } from "drizzle-orm";
 import type { RepoCtx } from "./dal/types.ts";
 
 export const PROVIDER_RELAY_FEATURE_KEY = "provider_relay";
+export const EXCHANGE_RESPONSE_GUARD_FEATURE_KEY = "exchange_response_guard";
 
-export type TenantFeatureKey = typeof PROVIDER_RELAY_FEATURE_KEY | string;
+export type TenantFeatureKey =
+	| typeof PROVIDER_RELAY_FEATURE_KEY
+	| typeof EXCHANGE_RESPONSE_GUARD_FEATURE_KEY
+	| string;
 
 export interface TenantFeatureFlagRow {
 	id: number;
@@ -20,6 +24,13 @@ export class TenantFeatureFlagRepo {
 	constructor(private readonly ctx: RepoCtx) {}
 
 	async isEnabled(featureKey: TenantFeatureKey): Promise<boolean> {
+		return this.isEnabledOrDefault(featureKey, false);
+	}
+
+	async isEnabledOrDefault(
+		featureKey: TenantFeatureKey,
+		defaultEnabled: boolean,
+	): Promise<boolean> {
 		const [row] = await this.ctx.db
 			.select({ enabled: tenantFeatureFlags.enabled })
 			.from(tenantFeatureFlags)
@@ -30,7 +41,7 @@ export class TenantFeatureFlagRepo {
 				),
 			)
 			.limit(1);
-		return row?.enabled === true;
+		return row?.enabled ?? defaultEnabled;
 	}
 
 	async setEnabled(opts: {

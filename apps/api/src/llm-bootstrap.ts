@@ -4,8 +4,10 @@ import {
 	ConversationsRepo,
 	type Db,
 	DrizzleKbStore,
+	EXCHANGE_RESPONSE_GUARD_FEATURE_KEY,
 	type ExchangeOrderPolicyState,
 	type ExchangePolicyState,
+	type ExchangeResponseGuardFinding,
 	type ExchangeVerificationPolicyState,
 	ExperimentsRepo,
 	getDecryptedSecret,
@@ -54,6 +56,7 @@ import {
 	llmProviderConfigs,
 	skills,
 	stageDefinitions,
+	tenantFeatureFlags,
 } from "@chatman-media/storage";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
@@ -86,7 +89,11 @@ export type RecordUsage = (
 	event: Parameters<OnUsage>[0],
 ) => void;
 
-import { makeConciergeRequestsTool, REQUEST_TYPE_LABEL, tenantSupportsMultiRequest } from "./lib/concierge-tools.ts";
+import {
+	makeConciergeRequestsTool,
+	REQUEST_TYPE_LABEL,
+	tenantSupportsMultiRequest,
+} from "./lib/concierge-tools.ts";
 import {
 	getConfig,
 	type LoadedLlmConfigs,
@@ -532,11 +539,7 @@ export function makeExchangePolicyStateResolver(db: Db) {
 				tenantId: input.tenantId,
 				contactId: input.contactId,
 			}),
-			getExchangeVerificationStatus(
-				db,
-				input.tenantId,
-				input.conversationId,
-			),
+			getExchangeVerificationStatus(db, input.tenantId, input.conversationId),
 			findActiveOrder(db, input.tenantId, input.conversationId),
 		]);
 		return buildExchangePolicyState({ stageSlug, verification, order });
@@ -613,7 +616,9 @@ export function makeSkillsResolver(
 	db: Db,
 ): (input: { tenantId: number }) => Promise<readonly SkillForPrompt[]> {
 	const cache = new Map<number, readonly SkillForPrompt[]>();
-	return async (input: { tenantId: number }): Promise<readonly SkillForPrompt[]> => {
+	return async (input: {
+		tenantId: number;
+	}): Promise<readonly SkillForPrompt[]> => {
 		const cached = cache.get(input.tenantId);
 		if (cached !== undefined) return cached;
 		const rows = await db
@@ -624,7 +629,9 @@ export function makeSkillsResolver(
 				applicableStagesJson: skills.applicableStagesJson,
 			})
 			.from(skills)
-			.where(and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)))
+			.where(
+				and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)),
+			)
 			.orderBy(asc(skills.family), asc(skills.displayName));
 		const result: SkillForPrompt[] = rows.map((r) => ({
 			slug: r.slug,
@@ -650,7 +657,9 @@ export function makeSkillsResolver(
 export function makeDirectorHooksResolver(
 	db: Db,
 ): (input: { tenantId: number }) => Promise<readonly DirectorHookForPrompt[]> {
-	return async (input: { tenantId: number }): Promise<readonly DirectorHookForPrompt[]> => {
+	return async (input: {
+		tenantId: number;
+	}): Promise<readonly DirectorHookForPrompt[]> => {
 		const rows = await db
 			.select({
 				name: directorHooks.name,
@@ -658,7 +667,12 @@ export function makeDirectorHooksResolver(
 				triggerHint: directorHooks.triggerHint,
 			})
 			.from(directorHooks)
-			.where(and(eq(directorHooks.tenantId, input.tenantId), eq(directorHooks.isActive, true)))
+			.where(
+				and(
+					eq(directorHooks.tenantId, input.tenantId),
+					eq(directorHooks.isActive, true),
+				),
+			)
 			.orderBy(asc(directorHooks.position), asc(directorHooks.id));
 		return rows;
 	};
@@ -706,7 +720,10 @@ export function makeRerankerResolver(
 				masterKeyHex,
 			});
 		} catch (err) {
-			console.warn(`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`, err);
+			console.warn(
+				`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`,
+				err,
+			);
 			cache.set(input.tenantId, null);
 			return null;
 		}
@@ -759,7 +776,8 @@ export function makeStyleResolver(
 	const styleCache = new Map<number, ResolvedStyleAssignment | null>();
 	const experimentCache = new Map<
 		number,
-		{ router: ABRouter; experimentId: number; experimentSlug: string } | "absent"
+		| { router: ABRouter; experimentId: number; experimentSlug: string }
+		| "absent"
 	>();
 	const { defaultSlug, experimentSlug } = opts;
 	const resolveStyle = async (input: {
@@ -860,7 +878,9 @@ export function makeToolsResolver(opts: {
 
 		let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
 		if (exchangeEnabled === undefined) {
-			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(() => false);
+			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(
+				() => false,
+			);
 			exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
 		}
 		if (exchangeEnabled) {
@@ -884,9 +904,10 @@ export function makeToolsResolver(opts: {
 
 		let multiRequestEnabled = multiRequestToolCache.get(input.tenantId);
 		if (multiRequestEnabled === undefined) {
-			multiRequestEnabled = await tenantSupportsMultiRequest(db, input.tenantId).catch(
-				() => false,
-			);
+			multiRequestEnabled = await tenantSupportsMultiRequest(
+				db,
+				input.tenantId,
+			).catch(() => false);
 			multiRequestToolCache.set(input.tenantId, multiRequestEnabled);
 		}
 		if (multiRequestEnabled) {
@@ -899,7 +920,9 @@ export function makeToolsResolver(opts: {
 			);
 		}
 
-		return conversationBound.length > 0 ? [...base, ...conversationBound] : base;
+		return conversationBound.length > 0
+			? [...base, ...conversationBound]
+			: base;
 	}
 
 	const invalidateTools = (tenantId: number) => {
@@ -911,10 +934,18 @@ export function makeToolsResolver(opts: {
 	return { resolveTools, invalidateTools };
 }
 
-type RecordedToolCall = Pick<ToolCallRecord, "name" | "args" | "result" | "error" | "cycle">;
+type RecordedToolCall = Pick<
+	ToolCallRecord,
+	"name" | "args" | "result" | "error" | "cycle"
+>;
 
-function toolCallsFromTelemetry(telemetry: AnswerTelemetry): RecordedToolCall[] {
-	if (telemetry.toolCalls && telemetry.toolCalls.length > 0) return telemetry.toolCalls;
+const EXCHANGE_RESPONSE_GUARD_TRACE_TOOL = "exchange_response_guard";
+
+function toolCallsFromTelemetry(
+	telemetry: AnswerTelemetry,
+): RecordedToolCall[] {
+	if (telemetry.toolCalls && telemetry.toolCalls.length > 0)
+		return telemetry.toolCalls;
 	if (!telemetry.toolCall) return [];
 	return [
 		{
@@ -933,13 +964,20 @@ function makeToolCallRecorder(db: Db, source: AgentToolCallSource) {
 		contactId: number;
 		telemetry?: AnswerTelemetry;
 		toolCalls?: readonly ToolCallRecord[];
+		guardFindings?: readonly ExchangeResponseGuardFinding[];
 	}): Promise<void> => {
-		const calls = input.toolCalls ?? (input.telemetry ? toolCallsFromTelemetry(input.telemetry) : []);
-		if (calls.length === 0) return;
+		const calls =
+			input.toolCalls ??
+			(input.telemetry ? toolCallsFromTelemetry(input.telemetry) : []);
+		const guardFindings = input.guardFindings ?? [];
+		if (calls.length === 0 && guardFindings.length === 0) return;
 		const nowEpoch = Math.floor(Date.now() / 1000);
 		await withTenant(db, input.tenantId, async (tx) => {
-			await new AgentToolCallsRepo({ db: tx, tenantId: input.tenantId }).recordMany(
-				calls.map((call, index) => ({
+			await new AgentToolCallsRepo({
+				db: tx,
+				tenantId: input.tenantId,
+			}).recordMany([
+				...calls.map((call, index) => ({
 					conversationId: input.conversationId,
 					contactId: input.contactId,
 					source,
@@ -951,8 +989,49 @@ function makeToolCallRecorder(db: Db, source: AgentToolCallSource) {
 					toolCallIndex: index,
 					nowEpoch,
 				})),
-			);
+				...guardFindings.map((finding, index) => ({
+					conversationId: input.conversationId,
+					contactId: input.contactId,
+					source,
+					toolName: EXCHANGE_RESPONSE_GUARD_TRACE_TOOL,
+					args: { originalText: finding.originalText },
+					result: finding,
+					error: finding.action !== "pass",
+					cycle: 0,
+					toolCallIndex: calls.length + index,
+					nowEpoch,
+				})),
+			]);
 		});
+	};
+}
+
+function makeExchangeResponseGuardFlagResolver(db: Db) {
+	return async (input: { tenantId: number }): Promise<boolean> => {
+		try {
+			return await withTenant(db, input.tenantId, async (tx) => {
+				const [row] = await tx
+					.select({ enabled: tenantFeatureFlags.enabled })
+					.from(tenantFeatureFlags)
+					.where(
+						and(
+							eq(tenantFeatureFlags.tenantId, input.tenantId),
+							eq(
+								tenantFeatureFlags.featureKey,
+								EXCHANGE_RESPONSE_GUARD_FEATURE_KEY,
+							),
+						),
+					)
+					.limit(1);
+				return row?.enabled !== false;
+			});
+		} catch (err) {
+			console.warn(
+				"[llm-bootstrap] failed to resolve exchange response guard flag:",
+				err,
+			);
+			return true;
+		}
 	};
 }
 
@@ -984,6 +1063,8 @@ export function makeReplyStrategy(
 		...(notifyRateGuard ? { notifyRateGuard } : {}),
 	});
 	const resolveExchangePolicyState = makeExchangePolicyStateResolver(db);
+	const resolveExchangeResponseGuardEnabled =
+		makeExchangeResponseGuardFlagResolver(db);
 
 	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
 	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
@@ -1001,6 +1082,7 @@ export function makeReplyStrategy(
 					resolveIsSupport: makeSupportModeResolver(db),
 					resolveTools,
 					resolveExchangePolicyState,
+					resolveExchangeResponseGuardEnabled,
 					recordToolCalls: makeToolCallRecorder(db, "llm_reply"),
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
@@ -1059,7 +1141,9 @@ export function makeReplyStrategy(
 	// Весь контекст хода собирается здесь одним вызовом (#514): support-гейт
 	// первым (дёшево, и в support-mode остальное не грузим), затем независимые
 	// источники параллельно. Exchange policy state — только для exchange_v1.
-	const loadTurnContext = async (input: RagTurnInput): Promise<RagTurnContext> => {
+	const loadTurnContext = async (
+		input: RagTurnInput,
+	): Promise<RagTurnContext> => {
 		const { tenantId, conversationId, contactId } = input;
 		const template = resolveTemplate?.(tenantId) ?? fallbackTemplate;
 		const base: RagTurnContext = {
@@ -1086,6 +1170,7 @@ export function makeReplyStrategy(
 			requestContext,
 			awaitingOperator,
 			exchangePolicyState,
+			exchangeResponseGuardEnabled,
 		] = await Promise.all([
 			resolveKbScope({ tenantId, contactId }),
 			resolveStyle({ tenantId, contactId }),
@@ -1097,16 +1182,21 @@ export function makeReplyStrategy(
 			resolveRequestContext({ tenantId, contactId }),
 			resolveAwaitingOperator({ tenantId, contactId }),
 			isExchange
-				? resolveExchangePolicyState({ tenantId, conversationId, contactId }).catch(
-						(err) => {
+				? resolveExchangePolicyState({
+						tenantId,
+						conversationId,
+						contactId,
+					}).catch((err) => {
 							console.warn(
 								"[llm-bootstrap] failed to resolve exchange policy state:",
 								err,
 							);
 							return null;
-						},
-					)
+					})
 				: Promise.resolve(null),
+			isExchange
+				? resolveExchangeResponseGuardEnabled({ tenantId })
+				: Promise.resolve(true),
 		]);
 		return {
 			...base,
@@ -1120,6 +1210,7 @@ export function makeReplyStrategy(
 			requestContext,
 			awaitingOperator,
 			exchangePolicyState,
+			exchangeResponseGuardEnabled,
 		};
 	};
 

@@ -37,7 +37,10 @@ class CapturingRagChat implements ChatClient {
   }
 }
 
-function chatThenFactCheck(reply: string, verdict: Record<string, unknown>): ChatClient {
+function chatThenFactCheck(
+	reply: string,
+	verdict: Record<string, unknown>,
+): ChatClient {
   let calls = 0;
   return {
     complete: async () => {
@@ -94,12 +97,18 @@ const STYLE: ResolvedStyleAssignment = {
   hooks: [],
   stages: {},
   fewShot: [],
-  guardrails: { noMinors: true, botDisclosureOnDirectQuestion: true, forbiddenTopics: [] },
+	guardrails: {
+		noMinors: true,
+		botDisclosureOnDirectQuestion: true,
+		forbiddenTopics: [],
+	},
   model: { id: "x", temperature: 0.5, maxTokens: 100 },
 };
 
 /** Минимальный messagesRepo с recent/countByConversation/insert. */
-function fakeMessages(opts: { recent?: unknown[]; count?: number } = {}): RagTurnContext["messages"] {
+function fakeMessages(
+	opts: { recent?: unknown[]; count?: number } = {},
+): RagTurnContext["messages"] {
   return {
     recent: async () => opts.recent ?? [],
     countByConversation: async () => opts.count ?? 0,
@@ -128,7 +137,10 @@ function ctxWith(partial: Partial<RagTurnContext>): RagTurnContext {
   };
 }
 
-function mk(ctx: RagTurnContext, opts: Partial<RagReplyStrategyOpts> = {}): RagReplyStrategy {
+function mk(
+	ctx: RagTurnContext,
+	opts: Partial<RagReplyStrategyOpts> = {},
+): RagReplyStrategy {
   return new RagReplyStrategy({ loadTurnContext: () => ctx, ...opts });
 }
 
@@ -242,7 +254,8 @@ describe("RagReplyStrategy.generate", () => {
   it("tool-loop telemetry пробрасывается в recordToolCalls", async () => {
     let toolLoopCalls = 0;
     const chat = {
-      complete: async () => "Вот ссылка для записи: https://calendly.example/demo",
+			complete: async () =>
+				"Вот ссылка для записи: https://calendly.example/demo",
       completeWithTools: async () => {
         toolLoopCalls += 1;
         if (toolLoopCalls === 1) {
@@ -257,19 +270,21 @@ describe("RagReplyStrategy.generate", () => {
             ],
           };
         }
-        return { content: "Вот ссылка для записи: https://calendly.example/demo", toolCalls: [] };
+				return {
+					content: "Вот ссылка для записи: https://calendly.example/demo",
+					toolCalls: [],
+				};
       },
     } as unknown as ChatClient;
     const tool = makeBookingLinkTool("https://calendly.example/demo");
-    const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
-    const s = mk(
-      ctxWith({ chat, kb: kbWith([HIT]), tools: [tool] }),
-      {
+		const recorded: Array<
+			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const s = mk(ctxWith({ chat, kb: kbWith([HIT]), tools: [tool] }), {
         recordToolCalls: async (input) => {
           recorded.push(input);
         },
-      },
-    );
+		});
 
     const r = await s.generate(baseInput());
 
@@ -291,7 +306,11 @@ describe("RagReplyStrategy.generate", () => {
   });
 
   it("style assignment metadata сохраняется в conversation", async () => {
-    const saved: Array<{ conversationId: number; styleId?: number | null; experimentId?: number | null }> = [];
+		const saved: Array<{
+			conversationId: number;
+			styleId?: number | null;
+			experimentId?: number | null;
+		}> = [];
     const s = mk(
       ctxWith({
         chat: chatReturning("Курс 36.5 бат за USDT, без комиссии"),
@@ -306,7 +325,10 @@ describe("RagReplyStrategy.generate", () => {
         conversations: {
           setAssignment: async (
             conversationId: number,
-            assignment: { styleId?: number | null; experimentId?: number | null },
+						assignment: {
+							styleId?: number | null;
+							experimentId?: number | null;
+						},
           ) => {
             saved.push({ conversationId, ...assignment });
           },
@@ -317,7 +339,11 @@ describe("RagReplyStrategy.generate", () => {
     const r = await s.generate(baseInput());
 
     expect(r).not.toBeNull();
-    expect(saved[0]).toEqual({ conversationId: 100, styleId: 7, experimentId: 3 });
+		expect(saved[0]).toEqual({
+			conversationId: 100,
+			styleId: 7,
+			experimentId: 3,
+		});
   });
 
   it("exchange: неподкреплённый курс заменяется safe fallback", async () => {
@@ -333,6 +359,61 @@ describe("RagReplyStrategy.generate", () => {
     const part = r![0]!.parts[0] as { text: string };
     expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
   });
+
+	it("exchange: guard finding is recorded even without tool calls", async () => {
+		const recorded: Array<
+			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat: chatReturning("Курс 31.5, получите 10553 THB."),
+				kb: kbWith([HIT]),
+			}),
+			{
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+		);
+
+		const r = await s.generate(baseInput());
+
+		expect(r).not.toBeNull();
+		expect(recorded).toHaveLength(1);
+		expect(recorded[0]?.guardFindings?.[0]).toMatchObject({
+			action: "rewrite",
+			reasons: ["unbacked_quote"],
+			originalText: "Курс 31.5, получите 10553 THB.",
+			finalText: EXCHANGE_SAFE_FALLBACK,
+		});
+	});
+
+	it("exchange: response guard can be disabled by tenant flag", async () => {
+		const recorded: Array<
+			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const unsafeText = "Курс 31.5, получите 10553 THB.";
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat: chatReturning(unsafeText),
+				kb: kbWith([HIT]),
+				exchangeResponseGuardEnabled: false,
+			}),
+			{
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+		);
+
+		const r = await s.generate(baseInput());
+
+		expect(r).not.toBeNull();
+		expect((r![0]!.parts[0] as { text: string }).text).toBe(unsafeText);
+		expect(recorded).toHaveLength(0);
+	});
 
   it("exchange: policy guard blocks payment confirmation without verified payment state", async () => {
     const s = mk(
@@ -466,7 +547,9 @@ describe("RagReplyStrategy.generate", () => {
   });
 
   it("no-context без softFallback → null", async () => {
-    const s = mk(ctxWith({ chat: chatReturning("ответ") }), { softFallback: false });
+		const s = mk(ctxWith({ chat: chatReturning("ответ") }), {
+			softFallback: false,
+		});
     expect(await s.generate(baseInput())).toBeNull();
   });
 

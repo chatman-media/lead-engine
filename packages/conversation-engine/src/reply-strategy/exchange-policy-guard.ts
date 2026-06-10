@@ -3,7 +3,10 @@ import type { MessageRow } from "../dal/messages.ts";
 import {
 	EXCHANGE_SAFE_FALLBACK,
 	type ExchangeReplyGuardInput,
-	type ExchangeReplyGuardResult,
+	type ExchangeReplyGuardReason,
+	type ExchangeResponseGuardResult,
+	exchangeGuardPass,
+	exchangeGuardViolation,
 	guardExchangeReply,
 } from "./exchange-reply-guard.ts";
 
@@ -22,14 +25,15 @@ export interface ExchangePolicyGuardInput extends ExchangeReplyGuardInput {
 	state?: ExchangePolicyState | null;
 }
 
-export interface ExchangePolicyGuardResult extends ExchangeReplyGuardResult {
-	reason?:
-		| ExchangeReplyGuardResult["reason"]
+export type ExchangePolicyGuardReason =
+	| ExchangeReplyGuardReason
 		| "kyc_auto_verified"
 		| "payment_auto_verified"
 		| "payout_auto_completed"
 		| "requisites_while_kyc_pending";
-}
+
+export type ExchangePolicyGuardResult =
+	ExchangeResponseGuardResult<ExchangePolicyGuardReason>;
 
 export interface ExchangePolicyState {
 	stageSlug?: string | null;
@@ -174,41 +178,57 @@ export function guardExchangePolicy(
 	if (!base.ok) return base;
 
 	const text = base.text.trim();
-	if (!text) return { ok: true, text };
+	if (!text) return exchangeGuardPass(text);
 
 	const tools = successfulToolNames(input.telemetry);
 
 	if (KYC_VERIFIED_RE.test(text) && !hasVerifiedKyc(input, tools)) {
-		return {
-			ok: false,
+		return exchangeGuardViolation({
+			action: "escalate",
 			text: EXCHANGE_KYC_FALLBACK,
+			originalText: text,
 			reason: "kyc_auto_verified",
-		};
+			requiredFixes: [
+				"Create a KYC operator handoff or use check_exchange_verification before confirming verification.",
+			],
+		});
 	}
 
 	if (PAYMENT_VERIFIED_RE.test(text) && !hasVerifiedPayment(input, tools)) {
-		return {
-			ok: false,
+		return exchangeGuardViolation({
+			action: "escalate",
 			text: EXCHANGE_PAYMENT_FALLBACK,
+			originalText: text,
 			reason: "payment_auto_verified",
-		};
+			requiredFixes: [
+				"Route payment proof to operator/payment service review before confirming payment.",
+			],
+		});
 	}
 
 	if (PAYOUT_COMPLETED_RE.test(text) && !hasIssuedPayout(input, tools)) {
-		return {
-			ok: false,
+		return exchangeGuardViolation({
+			action: "escalate",
 			text: EXCHANGE_PAYOUT_FALLBACK,
+			originalText: text,
 			reason: "payout_auto_completed",
-		};
+			requiredFixes: [
+				"Wait for issue_exchange_payout or operator payout approval before promising payout completion.",
+			],
+		});
 	}
 
 	if (hasPendingKyc(input) && CONCRETE_REQUISITES_OR_PAYMENT_RE.test(text)) {
-		return {
-			ok: false,
+		return exchangeGuardViolation({
+			action: "escalate",
 			text: EXCHANGE_SAFE_FALLBACK,
+			originalText: text,
 			reason: "requisites_while_kyc_pending",
-		};
+			requiredFixes: [
+				"Keep the customer in verification-pending state and trigger operator/KYC review before sending requisites.",
+			],
+		});
 	}
 
-	return { ok: true, text };
+	return exchangeGuardPass(text);
 }
