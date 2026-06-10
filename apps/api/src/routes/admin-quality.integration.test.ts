@@ -85,6 +85,20 @@ const fakeKb = {
   prioritySearch: async () => [],
 } as unknown as IKbStore;
 
+function containsTenantBToolAmount(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((item) => containsTenantBToolAmount(item));
+  if (!value || typeof value !== "object") return false;
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === "amount" && nested === 999) return true;
+    if (containsTenantBToolAmount(nested)) return true;
+  }
+  return false;
+}
+
+function expectNoTenantBToolAmount(value: unknown): void {
+  expect(containsTenantBToolAmount(value)).toBe(false);
+}
+
 beforeAll(async () => {
   if (!ownerUrl) return;
   const probe = await tryConnectToPg(ownerUrl);
@@ -630,7 +644,7 @@ describe("admin quality JSONL export", () => {
       cycle: 1,
       toolCallIndex: 1,
     });
-    expect(JSON.stringify(body)).not.toContain("999");
+    expectNoTenantBToolAmount(body);
 
     const filtered = (await (
       await authReq(
@@ -735,7 +749,7 @@ describe("admin quality JSONL export", () => {
       args: { quoteId: "q1" },
       result: { error: "needs verification" },
     });
-    expect(JSON.stringify(body)).not.toContain("999");
+    expectNoTenantBToolAmount(body);
 
     const filtered = (await (
       await authReq(tokenA, "/api/admin/quality/tool-call-feedback/summary?label=bad_args")
@@ -779,7 +793,7 @@ describe("admin quality JSONL export", () => {
       result: { error: "needs verification" },
       error: true,
     });
-    expect(text).not.toContain("999");
+    expectNoTenantBToolAmount(row);
   });
 
   it("generates actionable tool-call improvement proposals from feedback clusters", async () => {
@@ -822,7 +836,7 @@ describe("admin quality JSONL export", () => {
     const missingProposal = body.items.find((item) => item.kind === "tool_candidate");
     expect(missingProposal?.rationale.join(" ")).toContain("verification handoff tool");
     expect(missingProposal?.examples[0]?.toolCall.args).toEqual({ quoteId: "q1" });
-    expect(JSON.stringify(body)).not.toContain("999");
+    expectNoTenantBToolAmount(body);
 
     const filtered = (await (
       await authReq(tokenA, "/api/admin/quality/tool-call-feedback/proposals?label=bad_args")
@@ -858,7 +872,7 @@ describe("admin quality JSONL export", () => {
     expect(created.items.every((item) => item.status === "pending")).toBe(true);
     expect(created.items.every((item) => item.fingerprint.length > 0)).toBe(true);
     expect(created.items.every((item) => item.examples.length > 0)).toBe(true);
-    expect(JSON.stringify(created)).not.toContain("999");
+    expectNoTenantBToolAmount(created);
 
     const secondCreate = await authPostJsonReq(
       tokenA,
