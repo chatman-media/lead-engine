@@ -268,6 +268,7 @@ Authenticated endpoints live under `/api/admin/*`:
 - service catalog, provider marketplace, partners, partner deals
 - exchange rates, requisites, orders
 - notifications, outreach, templates
+- audit log list and CSV export
 - billing, audit, diagnostics, quality lab, superadmin
 
 Browse [`apps/api/src/routes/`](apps/api/src/routes) for route factories and

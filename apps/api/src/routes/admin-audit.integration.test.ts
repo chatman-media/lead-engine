@@ -41,6 +41,7 @@ let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
 let token = "";
 let tenantId = 0;
+let adminId = 0;
 
 // Fake fetch для Telegram (см. admin-channels test).
 const fakeTelegramFetch = (async (input: string | URL | Request): Promise<Response> => {
@@ -98,9 +99,13 @@ beforeAll(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "audit@demo.io", password: "strong-pwd-12345" }),
     });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+    const sba = (await sa.json()) as {
+      token: string;
+      admin: { id: number; tenantId: number };
+    };
     token = sba.token;
     tenantId = sba.admin.tenantId;
+    adminId = sba.admin.id;
   },
   30_000,
 );
@@ -124,6 +129,8 @@ describe("admin-audit", () => {
     if (!sql) return;
     const res = await app.request("/api/admin/audit-log");
     expect(res.status).toBe(401);
+    const exportRes = await app.request("/api/admin/audit-log/export.csv");
+    expect(exportRes.status).toBe(401);
   });
 
   it("fresh tenant → empty audit list", async () => {
@@ -277,6 +284,72 @@ describe("admin-audit", () => {
     expect(rows.find((r) => r.action === "llm_config.delete")).toBeDefined();
   });
 
+  it("GET export.csv → tenant-scoped filtered CSV with escaping", async () => {
+    if (!sql) return;
+    const createdAt = Math.floor(Date.parse("2026-06-10T10:00:00Z") / 1000);
+    const targetId = 'id, "quoted"';
+    const details = { note: 'hello,\n"world"', nested: { ok: true } };
+    const [otherTenant] = await db
+      .insert(schema.tenants)
+      .values({
+        slug: `audit-other-${createdAt}`,
+        status: "active",
+        createdAt,
+        updatedAt: createdAt,
+      })
+      .returning({ id: schema.tenants.id });
+    if (!otherTenant) throw new Error("other tenant insert failed");
+    await db.insert(auditLog).values([
+      {
+        tenantId,
+        adminId,
+        action: "csv.escape",
+        targetKind: "widget",
+        targetId,
+        detailsJson: JSON.stringify(details),
+        createdAt,
+      },
+      {
+        tenantId: otherTenant.id,
+        action: "csv.other_tenant",
+        targetKind: "widget",
+        targetId: "other",
+        detailsJson: JSON.stringify({ hidden: true }),
+        createdAt,
+      },
+    ]);
+
+    const res = await authReq(
+      `/api/admin/audit-log/export.csv?action=csv.escape&targetKind=widget&targetId=${encodeURIComponent(targetId)}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/csv");
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    const csv = await res.text();
+    expect(csv).toContain('"id, ""quoted"""');
+    expect(csv).not.toContain("csv.other_tenant");
+
+    const rows = parseCsv(csv);
+    expect(rows[0]).toEqual([
+      "id",
+      "createdAt",
+      "action",
+      "targetKind",
+      "targetId",
+      "adminId",
+      "adminEmail",
+      "details",
+    ]);
+    expect(rows).toHaveLength(2);
+    const row = rows[1]!;
+    expect(row[2]).toBe("csv.escape");
+    expect(row[3]).toBe("widget");
+    expect(row[4]).toBe(targetId);
+    expect(row[5]).toBe(String(adminId));
+    expect(row[6]).toBe("audit@demo.io");
+    expect(JSON.parse(row[7]!)).toEqual(details);
+  });
+
   it("tampered token → 401", async () => {
     if (!sql) return;
     const res = await app.request("/api/admin/audit-log", {
@@ -285,3 +358,35 @@ describe("admin-audit", () => {
     expect(res.status).toBe(401);
   });
 });
+
+function parseCsv(text: string): string[][] {
+  return text.trimEnd().split("\n").map(parseCsvLine);
+}
+
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else if (ch === '"') {
+        quoted = false;
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ",") {
+      cells.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current);
+  return cells;
+}

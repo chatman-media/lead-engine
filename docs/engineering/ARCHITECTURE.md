@@ -670,7 +670,8 @@ Fail-quiet: ошибка audit'а не валит request. Записи живу
 сейчас — добавится когда `audit_log` row count станет проблемой).
 
 Чтение — `GET /api/admin/audit-log?limit=N&cursor=<epoch>` (cursor по
-`createdAt DESC`). UI рендерит JSON details collapsibly.
+`createdAt DESC`). CSV export — `GET /api/admin/audit-log/export.csv`.
+UI рендерит JSON details collapsibly.
 
 **Текущая taxonomy actions:**
 
