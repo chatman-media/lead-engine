@@ -100,6 +100,42 @@ DELETE /api/admin/tools/booking     — отключить
 
 UI: страница «Инструменты» (`/tools`).
 
+## Regression runner
+
+Экспортированные из Quality Lab cases можно прогонять локально или в CI:
+
+```bash
+bun run quality:tool-regressions -- --file tool-call-regression-cases.jsonl
+```
+
+Runner читает JSONL, валидирует `recordType`, `toolName`, `input.args`,
+`expected.behavior`, reviewer label и shape исходного tool-call result/error.
+На schema/regression failures он печатает line/case/tool/path и возвращает
+non-zero exit code. По умолчанию archived cases не валидируются, а явно
+считаются skipped. Если нужно проверить весь export:
+
+```bash
+bun run quality:tool-regressions -- \
+  --file tool-call-regression-cases.jsonl \
+  --include-archived
+```
+
+Для CI можно зафиксировать allowlist реально поддержанных инструментов. Кейс с
+toolName вне allowlist считается failure; чтобы явно отложить такие cases:
+
+```bash
+bun run quality:tool-regressions -- \
+  --file tool-call-regression-cases.jsonl \
+  --tools offer_booking_link,quote_exchange_rate \
+  --skip-unsupported
+```
+
+Машиночитаемый отчёт:
+
+```bash
+bun run quality:tool-regressions -- --file tool-call-regression-cases.jsonl --json
+```
+
 ## Как добавить кастомный инструмент
 
 1. Реализовать `RagTool` (name / description / Zod `parameters` / `execute`).
