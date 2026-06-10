@@ -1,3 +1,10 @@
+# [@chatman-media/channel-core-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.4.0...@chatman-media/channel-core-v1.5.0) (2026-06-10)
+
+
+### Features
+
+* **conversation-engine:** add reactive operator bot previews ([#444](https://github.com/chatman-media/lead-engine/issues/444)) ([ced6e4d](https://github.com/chatman-media/lead-engine/commit/ced6e4ddd63bb6c607bee2627a1b290d605b78a8))
+
 # [@chatman-media/channel-core-v1.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.3.0...@chatman-media/channel-core-v1.4.0) (2026-06-09)
 
 
