@@ -142,7 +142,6 @@ const EXCHANGE_QUOTE_INTENT_RE =
   /курс|rate|сколько|получ(?:у|ится|ить)|итого|посчитай|рассчитай/i;
 const EXCHANGE_OUTPUT_CURRENCY_RE = /thb|бат|฿/i;
 const EXCHANGE_CONFIRMATION_RE = /точно|верно|правильно/i;
-const EXCHANGE_START_INTENT_RE = /(?:хочу|нужно|надо)?\s*(?:обменять|поменять)|обмен|помен/i;
 const EXCHANGE_KYC_TOPIC_RE = /верификац|kyc|документ|паспорт|видео|кружок/i;
 const EXCHANGE_KYC_MATERIAL_SENT_RE =
   /(?:отправил|отправила|прислал|прислала|загрузил|загрузила|вот|держи|лови)[^.!\n]{0,80}(?:видео|кружок|документ|паспорт)|(?:видео|кружок|документ|паспорт)[^.!\n]{0,80}(?:отправил|отправила|прислал|прислала|загрузил|загрузила)/i;
@@ -196,12 +195,17 @@ function amountCandidates(text: string, asset: string): AmountCandidate[] {
   return candidates;
 }
 
+function hasExchangeStartIntent(text: string): boolean {
+  const lower = text.toLowerCase();
+  return lower.includes("обмен") || lower.includes("помен");
+}
+
 function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
   const quoteIntent = EXCHANGE_QUOTE_INTENT_RE.test(text);
   const confirmationIntent =
     EXCHANGE_CONFIRMATION_RE.test(text) && EXCHANGE_OUTPUT_CURRENCY_RE.test(text);
   const strongIntent = quoteIntent || confirmationIntent;
-  if (!strongIntent && !EXCHANGE_START_INTENT_RE.test(text)) return null;
+  if (!strongIntent && !hasExchangeStartIntent(text)) return null;
   if (EXCHANGE_KYC_TOPIC_RE.test(text) && !strongIntent) return null;
   if (
     EXCHANGE_KYC_TOPIC_RE.test(text) &&
