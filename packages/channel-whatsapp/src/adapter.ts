@@ -111,10 +111,19 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
   }
 
   async send(envelope: OutboundEnvelope): Promise<Sent> {
-    if (envelope.parts.length === 0) {
+    const template = envelope.transport?.whatsapp?.template;
+    if (!template && envelope.parts.length === 0) {
       throw new Error("OutboundEnvelope.parts must be non-empty");
     }
     const to = envelope.externalUserId;
+    if (template) {
+      const sent = await this.client.sendTemplate({ to, template });
+      return {
+        channelId: this.id,
+        externalMessageId: sent.messageId,
+        sentAt: Math.floor(Date.now() / 1000),
+      };
+    }
     let firstMessageId: string | undefined;
     for (const part of envelope.parts as OutboundPart[]) {
       let sentId: string;

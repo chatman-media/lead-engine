@@ -197,7 +197,7 @@ Candidate order statuses:
 Candidate provider request statuses:
 
 `draft`, `sent`, `seen`, `quoted`, `accepted`, `declined`, `expired`,
-`cancelled`.
+`cancelled`, `failed`.
 
 ## Architecture notes
 
@@ -210,9 +210,10 @@ Candidate provider request statuses:
   compatibility/inbox field (`bot`, `userbot`, `self_play`), but WhatsApp, web,
   Facebook, VK, Max, and Telegram bot conversations are no longer distinguished
   by `source` alone.
-- WhatsApp proactive messages need a template-aware send path and provider opt-in
-  records. Free-form WhatsApp provider messaging should only happen when the
-  service window allows it.
+- WhatsApp proactive messages carry `OutboundEnvelope.transport.whatsapp`
+  metadata. Provider profile metadata records opt-in and approved provider
+  request templates; worker rejects cold/free-form sends without an approved
+  template.
 - Do not leak raw customer identifiers to providers unless the order policy says
   they are safe to share.
 
@@ -391,13 +392,13 @@ Dependencies: BPR-4.
 
 Acceptance criteria:
 
-- Extend outbound model to represent template messages, or add a WhatsApp-specific
+- [x] Extend outbound model to represent template messages, or add a WhatsApp-specific
   metadata path that worker can validate.
-- Provider onboarding records opt-in source, timestamp, and message categories.
-- Sending to WhatsApp outside free-form window requires an approved template.
-- Failed WhatsApp template send marks provider request as failed and notifies
+- [x] Provider onboarding records opt-in source, timestamp, and message categories.
+- [x] Sending to WhatsApp outside free-form window requires an approved template.
+- [x] Failed WhatsApp template send marks provider request as failed and notifies
   operator.
-- Tests cover template payload building and free-form rejection path.
+- [x] Tests cover template payload building and free-form rejection path.
 
 Dependencies: BPR-3, BPR-6.
 

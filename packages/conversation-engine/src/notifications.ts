@@ -362,6 +362,7 @@ export class NotificationService {
 			high_value_deal: "💎",
 			lead_stale: "⏰",
 			operator_confirm_needed: "✋",
+			provider_request_send_failed: "⚠️",
 		};
 		return map[type] ?? "🔔";
 	}
@@ -377,6 +378,7 @@ export class NotificationService {
 			high_value_deal: "Крупная сделка",
 			lead_stale: "Лид завис",
 			operator_confirm_needed: "Нужно подтверждение оператора",
+			provider_request_send_failed: "Ошибка отправки провайдеру",
 		};
 		return map[type] ?? "Уведомление";
 	}

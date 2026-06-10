@@ -111,6 +111,59 @@ export type OutboundPart =
   | { kind: "video"; mediaRef: MediaRef; caption?: string }
   | { kind: "document"; mediaRef: MediaRef; caption?: string };
 
+export type WhatsAppTemplateCategory =
+  | "marketing"
+  | "utility"
+  | "authentication";
+
+export type WhatsAppTemplateParameter =
+  | { type: "text"; text: string }
+  | { type: "currency"; currency: Record<string, unknown> }
+  | { type: "date_time"; date_time: Record<string, unknown> }
+  | { type: "image" | "video" | "document"; mediaRef: MediaRef };
+
+export interface WhatsAppTemplateComponent {
+  type: "header" | "body" | "footer" | "button";
+  subType?: "quick_reply" | "url" | "copy_code";
+  index?: string;
+  parameters?: WhatsAppTemplateParameter[];
+}
+
+export interface WhatsAppTemplateMessage {
+  /** Approved WhatsApp template name in Meta Business Manager. */
+  name: string;
+  /** BCP-47-ish Meta language code, e.g. "en_US". */
+  languageCode: string;
+  /** Category approved by Meta. Used by policy/ops checks. */
+  category?: WhatsAppTemplateCategory;
+  /** Worker must reject cold outbound unless this is true. */
+  approved?: boolean;
+  components?: WhatsAppTemplateComponent[];
+}
+
+export interface WhatsAppOptIn {
+  source: string;
+  acceptedAt: number;
+  categories?: WhatsAppTemplateCategory[];
+}
+
+export interface WhatsAppOutboundMeta {
+  /** True for cold/proactive WhatsApp sends where free-form is not allowed. */
+  requiresTemplate?: boolean;
+  /**
+   * Unix timestamp until which free-form WhatsApp messages are allowed. Outside
+   * this window, worker requires an approved template.
+   */
+  freeFormWindowUntil?: number;
+  template?: WhatsAppTemplateMessage;
+  optIn?: WhatsAppOptIn;
+  providerRequestId?: number;
+}
+
+export interface OutboundTransportMeta {
+  whatsapp?: WhatsAppOutboundMeta;
+}
+
 /**
  * Запрос на отправку. conversation-engine кладёт это в outbound-очередь,
  * worker дёргает соответствующий ChannelAdapter.send().
@@ -125,6 +178,8 @@ export interface OutboundEnvelope {
   idempotencyKey?: string;
   /** Operator-facing action card emitted alongside the client reply. */
   operatorHandoff?: OperatorHandoffMeta;
+  /** Channel-specific send policy/payload metadata. */
+  transport?: OutboundTransportMeta;
 }
 
 /** Результат успешной отправки. */

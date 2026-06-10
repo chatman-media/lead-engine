@@ -86,6 +86,89 @@ describe("sendText", () => {
   });
 });
 
+describe("sendTemplate", () => {
+  it("POST messages с type=template, language и components", async () => {
+    const calls: MockCall[] = [];
+    const c = new WhatsAppClient(opts(mockFetch(() => ({ body: okSend }), calls)));
+    const r = await c.sendTemplate({
+      to: "79161234567",
+      template: {
+        name: "provider_request_v1",
+        languageCode: "en_US",
+        approved: true,
+        category: "utility",
+        components: [
+          {
+            type: "body",
+            parameters: [
+              { type: "text", text: "massage" },
+              { type: "text", text: "Chaweng" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(r.messageId).toBe("wamid.1");
+    const body = JSON.parse(calls[0]?.init?.body as string);
+    expect(body).toMatchObject({
+      messaging_product: "whatsapp",
+      to: "79161234567",
+      type: "template",
+      template: {
+        name: "provider_request_v1",
+        language: { code: "en_US" },
+        components: [
+          {
+            type: "body",
+            parameters: [
+              { type: "text", text: "massage" },
+              { type: "text", text: "Chaweng" },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it("media template parameter maps mediaRef to Meta id payload", async () => {
+    const calls: MockCall[] = [];
+    const c = new WhatsAppClient(opts(mockFetch(() => ({ body: okSend }), calls)));
+    await c.sendTemplate({
+      to: "1",
+      template: {
+        name: "doc_notice",
+        languageCode: "en_US",
+        components: [
+          {
+            type: "header",
+            parameters: [
+              {
+                type: "document",
+                mediaRef: { channelId: "wa", externalRef: "media-doc-1" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const body = JSON.parse(calls[0]?.init?.body as string);
+    expect(body.template.components[0].parameters[0]).toEqual({
+      type: "document",
+      document: { id: "media-doc-1" },
+    });
+  });
+
+  it("non-ok → WhatsAppApiError с sendTemplate", async () => {
+    const c = new WhatsAppClient(opts(mockFetch(() => ({ status: 400, text: "bad template" }))));
+    await expect(
+      c.sendTemplate({
+        to: "1",
+        template: { name: "bad", languageCode: "en_US" },
+      }),
+    ).rejects.toThrow(/sendTemplate failed \(400\)/);
+  });
+});
+
 describe("getPhoneInfo", () => {
   it("маппит verified_name/display_phone_number/quality_rating", async () => {
     const c = new WhatsAppClient(

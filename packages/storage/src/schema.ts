@@ -1883,7 +1883,7 @@ export const providerRequests = pgTable("provider_requests", {
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
-  check("provider_requests_status_check", sql`${t.status} IN ('draft','sent','seen','quoted','accepted','declined','expired','cancelled')`),
+  check("provider_requests_status_check", sql`${t.status} IN ('draft','sent','seen','quoted','accepted','declined','expired','cancelled','failed')`),
   uniqueIndex("uniq_provider_requests_idem").on(t.idempotencyKey).where(sql`idempotency_key IS NOT NULL`),
   index("idx_provider_requests_order").on(t.tenantId, t.orderId),
   index("idx_provider_requests_provider_status").on(t.tenantId, t.providerId, t.status),

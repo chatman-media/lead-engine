@@ -63,6 +63,44 @@ describe("WhatsAppCloudAdapter", () => {
     });
   });
 
+  it("send template envelope → POST /messages type=template", async () => {
+    const { fetch, calls } = fakeFetch([
+      { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.TPL" }] } },
+    ]);
+    const a = new WhatsAppCloudAdapter({
+      id: "wa1",
+      phoneNumberId: "PNID",
+      accessToken: "TOK",
+      fetch,
+    });
+    const sent = await a.send({
+      channelId: "wa1",
+      externalUserId: "79161234567",
+      parts: [{ kind: "text", text: "fallback/audit text" }],
+      transport: {
+        whatsapp: {
+          template: {
+            name: "provider_request_v1",
+            languageCode: "en_US",
+            approved: true,
+            category: "utility",
+          },
+        },
+      },
+    });
+    expect(sent.externalMessageId).toBe("wa.TPL");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toMatchObject({
+      messaging_product: "whatsapp",
+      to: "79161234567",
+      type: "template",
+      template: {
+        name: "provider_request_v1",
+        language: { code: "en_US" },
+      },
+    });
+  });
+
   it("send photo с caption — image type + id+caption", async () => {
     const { fetch, calls } = fakeFetch([
       { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.PHOTO" }] } },

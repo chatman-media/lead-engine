@@ -35,6 +35,7 @@ export const PROVIDER_REQUEST_STATUSES = [
 	"declined",
 	"expired",
 	"cancelled",
+	"failed",
 ] as const;
 
 export type ProviderRequestStatus = (typeof PROVIDER_REQUEST_STATUSES)[number];
@@ -89,14 +90,15 @@ const providerRequestTransitions: Record<
 	ProviderRequestStatus,
 	readonly ProviderRequestStatus[]
 > = {
-	draft: ["sent", "cancelled"],
-	sent: ["seen", "quoted", "accepted", "declined", "expired", "cancelled"],
-	seen: ["quoted", "accepted", "declined", "expired", "cancelled"],
-	quoted: ["accepted", "declined", "expired", "cancelled"],
+	draft: ["sent", "cancelled", "failed"],
+	sent: ["seen", "quoted", "accepted", "declined", "expired", "cancelled", "failed"],
+	seen: ["quoted", "accepted", "declined", "expired", "cancelled", "failed"],
+	quoted: ["accepted", "declined", "expired", "cancelled", "failed"],
 	accepted: ["cancelled"],
 	declined: [],
 	expired: [],
 	cancelled: [],
+	failed: [],
 };
 
 export function canTransitionServiceOrder(
@@ -223,6 +225,21 @@ export class ProviderRelayRepo {
 			.where(
 				and(
 					eq(providerRequests.id, requestId),
+					eq(providerRequests.tenantId, this.ctx.tenantId),
+				),
+			);
+		return (row as ProviderRequestRow) ?? null;
+	}
+
+	async providerRequestByOutboundQueueId(
+		outboundQueueId: number,
+	): Promise<ProviderRequestRow | null> {
+		const [row] = await this.ctx.db
+			.select()
+			.from(providerRequests)
+			.where(
+				and(
+					eq(providerRequests.outboundQueueId, outboundQueueId),
 					eq(providerRequests.tenantId, this.ctx.tenantId),
 				),
 			);

@@ -78,6 +78,7 @@ async function main() {
     pollMs: cfg.dispatcherPollMs,
     batchSize: cfg.dispatcherBatchSize,
     metrics,
+    notifications,
     // Worker делает push-доставку: bot-API HTTP / WhatsApp Cloud / VK.
     // Web и telegram_userbot держат pinned-соединение (WS / MTProto) в
     // apps/api — у них отдельные in-process dispatcher'ы (web-dispatcher.ts /

@@ -109,6 +109,17 @@ describe("admin providers", () => {
         serviceArea: "Phuket",
         defaultCommissionPct: 20,
         notes: "prefers WhatsApp",
+        whatsappOptIn: {
+          source: "admin_form",
+          acceptedAt: 1_780_000_000,
+          categories: ["utility"],
+        },
+        whatsappProviderRequestTemplate: {
+          name: "provider_request_v1",
+          languageCode: "en_US",
+          category: "utility",
+          approved: true,
+        },
         identity: { channelId, externalUserId: "lotus-spa-wa" },
         services: [{ serviceType: "massage", name: "Thai massage", commissionPct: 18 }],
       }),
@@ -121,6 +132,7 @@ describe("admin providers", () => {
         category: string | null;
         servicesCount: number;
         activeServicesCount: number;
+        metadataJson: string;
         identities: Array<{ channelId: number; externalUserId: string }>;
         services: Array<{ id: number; serviceType: string; name: string; commissionPct: number | null }>;
       };
@@ -131,6 +143,19 @@ describe("admin providers", () => {
     expect(created.item.identities).toContainEqual(
       expect.objectContaining({ channelId, externalUserId: "lotus-spa-wa" }),
     );
+    expect(JSON.parse(created.item.metadataJson)).toMatchObject({
+      whatsappOptIn: {
+        source: "admin_form",
+        acceptedAt: 1_780_000_000,
+        categories: ["utility"],
+      },
+      whatsappProviderRequestTemplate: {
+        name: "provider_request_v1",
+        languageCode: "en_US",
+        category: "utility",
+        approved: true,
+      },
+    });
     expect(created.item.services[0]).toEqual(
       expect.objectContaining({ serviceType: "massage", name: "Thai massage", commissionPct: 18 }),
     );
