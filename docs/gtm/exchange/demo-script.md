@@ -6,6 +6,12 @@
 
 Длительность: 15-20 минут.
 
+Клиентский follow-up после демо:
+
+- [`one-pager.md`](one-pager.md) — что делает продукт, ROI, цена и безопасность.
+- [`screen-sequence.md`](screen-sequence.md) — порядок экранов для повторного показа.
+- [`objections.md`](objections.md) — ответы на типовые вопросы владельца.
+
 ## Before the call
 
 Поднять демо-тенант:
