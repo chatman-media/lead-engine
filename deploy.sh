@@ -8,6 +8,7 @@
 #   ./deploy.sh --no-restart    # без рестарта сервисов
 #   ./deploy.sh --no-test       # пропустить тесты (по умолчанию и так пропущены)
 #   ./deploy.sh --test          # прогнать тесты перед рестартом
+#   ./deploy.sh --no-typecheck  # пропустить server-side typecheck
 #   ./deploy.sh --skip-build    # только pull + миграции
 #
 # Настройка через env (можно положить в /opt/lead-engine/.deploy.env):
@@ -28,6 +29,7 @@ WORKER_SERVICE="${WORKER_SERVICE:-lead-engine-worker}"
 DO_RESTART=1
 DO_BUILD=1
 DO_TEST=0
+DO_TYPECHECK=1
 
 for arg in "$@"; do
   case "$arg" in
@@ -35,6 +37,7 @@ for arg in "$@"; do
     --skip-build) DO_BUILD=0 ;;
     --test)       DO_TEST=1 ;;
     --no-test)    DO_TEST=0 ;;
+    --no-typecheck) DO_TYPECHECK=0 ;;
     -h|--help)    sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
@@ -43,6 +46,7 @@ done
 # подхватить env-файлы, если они есть (.env — основной, .deploy.env — оверрайды)
 [ -f "$APP_DIR/.env" ]        && set -a && . "$APP_DIR/.env"        && set +a
 [ -f "$APP_DIR/.deploy.env" ] && set -a && . "$APP_DIR/.deploy.env" && set +a
+DO_TYPECHECK="${DEPLOY_TYPECHECK:-$DO_TYPECHECK}"
 
 # bun ставится в ~/.bun/bin, которого нет в PATH у non-interactive shell:
 # CI/CD заходит по SSH именно так, а ~/.bashrc на Ubuntu для неинтерактивных
@@ -89,8 +93,12 @@ ok "Миграции применены"
 
 # ── 4. сборка ────────────────────────────────────────────────────────────────
 if [ "$DO_BUILD" -eq 1 ]; then
-  log "Typecheck"
-  bun run typecheck
+  if [ "$DO_TYPECHECK" -eq 1 ]; then
+    log "Typecheck"
+    bun run typecheck
+  else
+    echo "  ⏭ typecheck пропущен (DEPLOY_TYPECHECK=0 / --no-typecheck)"
+  fi
   log "Сборка пакетов"
   bun run build:packages
   log "Сборка admin-ui"

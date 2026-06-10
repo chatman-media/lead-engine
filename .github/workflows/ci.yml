@@ -235,7 +235,7 @@ jobs:
           # deploy.sh внутри сам с `set -euo pipefail`; script_stop ловит обрыв
           # ещё на `cd`, если каталога нет. Любой ненулевой код — красный job.
           script_stop: true
-          # install + typecheck + сборка ui/landing/widget/пакетов бывает долгой.
+          # install + миграции + сборка ui/landing/widget/пакетов бывает долгой.
           command_timeout: 18m
           script: |
             # bun не в PATH у non-interactive SSH (его добавляет ~/.bashrc,
@@ -245,7 +245,14 @@ jobs:
             export BUN_INSTALL="$HOME/.bun"
             export PATH="$BUN_INSTALL/bin:$PATH"
             cd /opt/lead-engine
-            ./deploy.sh
+            git fetch origin
+            git checkout main
+            git pull --ff-only origin main
+            # workspace job уже выполнил полный typecheck+tests. На сервере
+            # оставляем миграции, production build, restart и health-check;
+            # повторный workspace typecheck на малом VPS уже упирался в SSH
+            # command_timeout и давал ложный красный deploy.
+            DEPLOY_TYPECHECK=0 ./deploy.sh
 
   deploy-dev:
     name: Deploy dev — SSH → сервер → /opt/lead-engine-dev
@@ -276,4 +283,7 @@ jobs:
             export BUN_INSTALL="$HOME/.bun"
             export PATH="$BUN_INSTALL/bin:$PATH"
             cd /opt/lead-engine-dev
-            APP_DIR=/opt/lead-engine-dev ./deploy.sh
+            git fetch origin
+            git checkout dev
+            git pull --ff-only origin dev
+            DEPLOY_TYPECHECK=0 APP_DIR=/opt/lead-engine-dev ./deploy.sh

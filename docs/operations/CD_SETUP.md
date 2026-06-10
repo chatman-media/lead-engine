@@ -23,6 +23,14 @@ Job описан в [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
 Деплоится только реальный `push` в `main` и только после зелёных тестов
 (`needs: workspace`). Деплои не пересекаются (`concurrency: deploy-production`).
 
+GitHub deploy перед запуском `deploy.sh` делает `git pull`, чтобы первый же
+деплой после изменения самого скрипта выполнял актуальную версию. В CI
+`deploy.sh` запускается с `DEPLOY_TYPECHECK=0`: полный workspace typecheck и
+tests уже прошли в job `workspace`, а повторный typecheck на сервере замедляет
+deploy и может упереться в SSH `command_timeout`. Ручной `./deploy.sh` по
+умолчанию typecheck не пропускает; для аварийного ручного деплоя можно явно
+задать `DEPLOY_TYPECHECK=0 ./deploy.sh`.
+
 ## Дев-окружение (dev.exchanges.agency)
 
 Push в ветку **`dev`** → те же тесты → job **`deploy-dev`** → SSH тем же ключом →
