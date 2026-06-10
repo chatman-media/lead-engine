@@ -9,7 +9,11 @@
  *   - WestWallet: если ключи и IPN URL настроены, crypto-инвойс создаётся через API.
  */
 
-import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";
+import {
+	type Db,
+	getDecryptedSecret,
+	withTenant,
+} from "@chatman-media/conversation-engine";
 import { isCryptoAsset, normNetwork } from "./rates.ts";
 import {
 	WestWalletApiError,
@@ -95,12 +99,14 @@ function compactLines(lines: Array<string | null | undefined>): string | null {
 }
 
 async function readSecret(deps: { db: Db; tenantId: number; masterKeyHex: string }, key: string) {
-	return getDecryptedSecret({
-		db: deps.db,
-		tenantId: deps.tenantId,
-		key,
-		masterKeyHex: deps.masterKeyHex,
-	});
+	return withTenant(deps.db, deps.tenantId, (tx) =>
+		getDecryptedSecret({
+			db: tx as Db,
+			tenantId: deps.tenantId,
+			key,
+			masterKeyHex: deps.masterKeyHex,
+		}),
+	);
 }
 
 async function readWalletDestTag(
