@@ -5,6 +5,7 @@ import {
   EditIcon,
   HandshakeIcon,
   SendIcon,
+  ShieldOffIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -270,6 +271,10 @@ export function SaasLeadDetail() {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Verification state
+  const [revokingVerification, setRevokingVerification] = useState(false);
+  const [confirmRevokeVerification, setConfirmRevokeVerification] = useState(false);
+
   // Send-photo (QR) state
   const [photoRef, setPhotoRef] = useState("");
   const [photoCaption, setPhotoCaption] = useState("");
@@ -441,6 +446,20 @@ export function SaasLeadDetail() {
     } catch (err) {
       onAuthError(err);
       setDeleting(false);
+    }
+  }
+
+  async function handleRevokeVerification() {
+    if (!id) return;
+    setConfirmRevokeVerification(false);
+    setRevokingVerification(true);
+    try {
+      await saas.revokeLeadVerification(Number(id));
+      reload();
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setRevokingVerification(false);
     }
   }
 
@@ -991,7 +1010,13 @@ export function SaasLeadDetail() {
             </CardContent>
           </Card>
 
-          <LeadVerificationCard attributesJson={contact?.attributesJson ?? null} />
+          <LeadVerificationCard
+            attributesJson={contact?.attributesJson ?? null}
+            confirmRevoke={confirmRevokeVerification}
+            revoking={revokingVerification}
+            onConfirmRevokeChange={setConfirmRevokeVerification}
+            onRevoke={handleRevokeVerification}
+          />
 
           {/* Заметки */}
           <Card>
@@ -1153,6 +1178,7 @@ const LEAD_KYC_STATUS_RU: Record<
   documents_received: { label: "Прислал документы", variant: "warning" },
   materials_requested: { label: "Ждём материалы", variant: "warning" },
   pending_review: { label: "На проверке", variant: "warning" },
+  revoked: { label: "Верификация отозвана", variant: "destructive" },
   rejected: { label: "Отклонён", variant: "destructive" },
 };
 
@@ -1181,7 +1207,19 @@ function getLeadKycBadge(attributesJson: string | null) {
   return { status, ...st };
 }
 
-function LeadVerificationCard({ attributesJson }: { attributesJson: string | null }) {
+function LeadVerificationCard({
+  attributesJson,
+  confirmRevoke = false,
+  revoking = false,
+  onConfirmRevokeChange,
+  onRevoke,
+}: {
+  attributesJson: string | null;
+  confirmRevoke?: boolean;
+  revoking?: boolean;
+  onConfirmRevokeChange?: (value: boolean) => void;
+  onRevoke?: () => void;
+}) {
   if (!attributesJson) return null;
   let attrs: Record<string, unknown> = {};
   try {
@@ -1207,6 +1245,8 @@ function LeadVerificationCard({ attributesJson }: { attributesJson: string | nul
     ? `•••• ${passportNumber.replace(/\s+/g, "").slice(-4)}`
     : null;
   const reviewedAt = typeof kyc.reviewedAt === "number" ? kyc.reviewedAt : null;
+  const canRevoke =
+    onRevoke && (status === "verified" || kyc.verified === true || attrs.isVerified === true);
 
   return (
     <Card>
@@ -1254,6 +1294,39 @@ function LeadVerificationCard({ attributesJson }: { attributesJson: string | nul
           <div className="flex justify-between">
             <span className="text-muted-foreground">Действителен до</span>
             <span>{attrs.passport_expiry}</span>
+          </div>
+        )}
+        {canRevoke && (
+          <div className="border-t pt-3">
+            {confirmRevoke ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-destructive text-xs">Отозвать KYC?</span>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="destructive" onClick={onRevoke} disabled={revoking}>
+                    Да
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onConfirmRevokeChange?.(false)}
+                    disabled={revoking}
+                  >
+                    Нет
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => onConfirmRevokeChange?.(true)}
+                disabled={revoking}
+              >
+                <ShieldOffIcon className="size-3.5" />
+                Отозвать верификацию
+              </Button>
+            )}
           </div>
         )}
       </CardContent>

@@ -2948,6 +2948,12 @@ export const saas = {
   getLead(id: number) {
     return request<LeadDetail>(`/api/admin/leads/${id}`);
   },
+  revokeLeadVerification(id: number) {
+    return request<{ ok: boolean; contactId: number; status: string; ordersPatched: number }>(
+      `/api/admin/leads/${id}/verification/revoke`,
+      { method: "POST" },
+    );
+  },
   getLeadKbGuidance(id: number) {
     return request<LeadKbGuidance>(`/api/admin/leads/${id}/kb-guidance`);
   },

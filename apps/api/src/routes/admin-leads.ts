@@ -49,6 +49,7 @@ import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webho
  * GET  /api/admin/leads                — список лидов с фильтром по стадии
  * POST /api/admin/leads                — создать лида вручную
  * GET  /api/admin/leads/:id            — карточка лида с полями и историей
+ * POST /api/admin/leads/:id/verification/revoke — отозвать KYC контакта
  * PATCH /api/admin/leads/:id/stage     — переместить в стадию
  * DELETE /api/admin/leads/:id          — удалить лида
  * GET  /api/admin/leads/:id/field-values — значения полей
@@ -92,6 +93,25 @@ function parseFieldValue(valueJson: string | null | undefined): unknown {
   } catch {
     return valueJson;
   }
+}
+
+function parseJsonObject(valueJson: string | null | undefined): Record<string, unknown> {
+  if (!valueJson) return {};
+  try {
+    const parsed = JSON.parse(valueJson);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore bad legacy attributes
+  }
+  return {};
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function fieldValueFilled(valueJson: string | null | undefined): boolean {
@@ -1107,6 +1127,144 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
     if (!result) return c.json({ error: "lead not found" }, 404);
     return c.json(result);
+  });
+
+  /**
+   * POST /api/admin/leads/:id/verification/revoke
+   * Отзывает контактную KYC-верификацию и чистит verificationId у активных
+   * exchange-заявок контакта, чтобы policy guard снова требовал проверку.
+   */
+  app.post("/api/admin/leads/:id/verification/revoke", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({
+          id: leads.id,
+          userId: leads.userId,
+          state: leads.state,
+        })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return { kind: "not_found" } as const;
+
+      const [contact] = await tx
+        .select({ id: contacts.id, attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)));
+      if (!contact) return { kind: "contact_not_found" } as const;
+
+      const attrs = parseJsonObject(contact.attributesJson);
+      const currentKyc = objectValue(attrs.exchangeKyc);
+      const previousStatus =
+        typeof currentKyc.status === "string"
+          ? currentKyc.status
+          : attrs.isVerified === true
+            ? "verified"
+            : null;
+      const previousVerificationId =
+        typeof currentKyc.verificationId === "string"
+          ? currentKyc.verificationId
+          : typeof attrs.verificationCrmId === "string"
+            ? attrs.verificationCrmId
+            : null;
+
+      const nextKyc = {
+        ...currentKyc,
+        status: "revoked",
+        verified: false,
+        needsVerification: true,
+        verificationId: null,
+        previousStatus,
+        previousVerificationId,
+        revokedByAdminId: adminId ?? null,
+        revokedAt: now,
+        source: "admin_lead_detail",
+      };
+      const nextAttrs = {
+        ...attrs,
+        exchangeKyc: nextKyc,
+        verificationStatus: "revoked",
+        kycStatus: "revoked",
+        isVerified: false,
+      };
+
+      await tx
+        .update(contacts)
+        .set({
+          attributesJson: JSON.stringify(nextAttrs),
+          updatedAt: now,
+        })
+        .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
+
+      const patchedOrders = await tx
+        .update(exchangeOrders)
+        .set({
+          verificationId: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(exchangeOrders.tenantId, tenantId),
+            eq(exchangeOrders.contactId, lead.userId),
+            inArray(exchangeOrders.status, ["quote", "awaiting_payment"]),
+          ),
+        )
+        .returning({ id: exchangeOrders.id });
+
+      await tx.insert(leadEvents).values({
+        tenantId,
+        leadId: id,
+        fromState: lead.state,
+        toState: lead.state,
+        byAdminId: adminId,
+        notes: JSON.stringify({
+          type: "verification_revoked",
+          contactId: contact.id,
+          previousStatus,
+          previousVerificationId,
+          ordersPatched: patchedOrders.length,
+        }),
+        createdAt: now,
+      });
+
+      return {
+        kind: "ok",
+        contactId: contact.id,
+        status: "revoked",
+        previousStatus,
+        previousVerificationId,
+        ordersPatched: patchedOrders.length,
+      } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.verification_revoke",
+      targetKind: "lead",
+      targetId: String(id),
+      details: {
+        contactId: outcome.contactId,
+        previousStatus: outcome.previousStatus,
+        previousVerificationId: outcome.previousVerificationId,
+        ordersPatched: outcome.ordersPatched,
+      },
+    });
+
+    return c.json({
+      ok: true,
+      contactId: outcome.contactId,
+      status: outcome.status,
+      ordersPatched: outcome.ordersPatched,
+    });
   });
 
   /**
