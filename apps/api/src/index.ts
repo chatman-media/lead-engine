@@ -28,6 +28,7 @@ import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
 import { LlmUsageWriter } from "./lib/llm-usage-writer.ts";
 import { checkUsageAlerts } from "./lib/usage-alerts.ts";
 import { makeMetricsSink } from "./lib/metrics-sink.ts";
+import { AuthRateLimiter } from "./lib/auth-rate-limiter.ts";
 import { InboundRateLimiter } from "./lib/rate-limiter.ts";
 import { ShadowEvalJobRunner } from "./lib/shadow-eval-job-runner.ts";
 import { makeTenantReloader } from "./lib/tenant-reloader.ts";
@@ -268,6 +269,13 @@ async function main() {
   // Auth routes — public (POST /api/auth/signup, /login, /logout, GET /me).
   // НЕ wrap'аются в tenant-middleware: signup создаёт tenant, login
   // резолвит его из email.
+  // Throttle public auth endpoints (login/signup/forgot/reset/accept-invite)
+  // против brute-force / credential stuffing / email-bombing. Keyed by IP
+  // (+email для login). Overridable via AUTH_RATE_LIMIT_PER_MIN / _HOUR.
+  const authRateLimiter = new AuthRateLimiter({
+    perMinute: Number.parseInt(process.env.AUTH_RATE_LIMIT_PER_MIN ?? "10", 10),
+    perHour: Number.parseInt(process.env.AUTH_RATE_LIMIT_PER_HOUR ?? "60", 10),
+  });
   app.route(
     "/",
     makeAuthRoutes({
@@ -277,6 +285,7 @@ async function main() {
       mailer,
       appUrl: cfg.mailer.appUrl,
       allowSignup: process.env.ALLOW_PUBLIC_SIGNUP === "1",
+      rateLimiter: authRateLimiter,
     }),
   );
   log.info("auth routes enabled", {
@@ -1091,12 +1100,14 @@ async function main() {
     registry: webRegistry,
     log,
     metrics,
-    ...(cfg.web.authSecret ? { sharedSecret: cfg.web.authSecret } : {}),
+    // Per-visitor identity binding — всегда включено, подписываем тем же
+    // strong-секретом, что и admin-токены (PLATFORM_AUTH_SECRET / MASTER_KEY).
+    signingSecret: cfg.authSecret,
   });
   if (webRegistry.size() > 0) {
     log.info("channel-web enabled", {
       channels: webRegistry.size(),
-      authSecret: cfg.web.authSecret ? "configured" : "off (dev mode)",
+      identityBinding: "per-visitor hmac token",
     });
   }
 
