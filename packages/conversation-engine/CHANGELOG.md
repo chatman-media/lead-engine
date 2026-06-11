@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.4.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.4.0...@chatman-media/conversation-engine-v3.4.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* **exchange:** scope lead routing by vertical ([#584](https://github.com/chatman-media/lead-engine/issues/584)) ([e74bc28](https://github.com/chatman-media/lead-engine/commit/e74bc28ad29a7440fbaeb4d407957e26a3eab33d))
+
 # [@chatman-media/conversation-engine-v3.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.3.0...@chatman-media/conversation-engine-v3.4.0) (2026-06-11)
 
 
