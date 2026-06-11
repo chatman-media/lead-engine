@@ -8,8 +8,17 @@ function Select(props: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root data-slot="select" {...props} />;
 }
 
-function SelectValue(props: React.ComponentProps<typeof SelectPrimitive.Value>) {
-  return <SelectPrimitive.Value data-slot="select-value" {...props} />;
+function SelectValue({
+  className,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Value>) {
+  return (
+    <SelectPrimitive.Value
+      data-slot="select-value"
+      className={cn("min-w-0 flex-1 truncate whitespace-nowrap text-left", className)}
+      {...props}
+    />
+  );
 }
 
 function SelectTrigger({
@@ -21,7 +30,7 @@ function SelectTrigger({
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       className={cn(
-        "border-input data-[placeholder]:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/40 flex h-9 w-full items-center justify-between gap-2 rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+        "border-input data-[placeholder]:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/40 flex h-9 w-full items-center justify-between gap-2 overflow-hidden rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
         className,
       )}
       {...props}
