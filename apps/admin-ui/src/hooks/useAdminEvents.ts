@@ -1,10 +1,17 @@
 import { useEffect, useRef } from "react";
-import { getToken } from "@/api/saas";
+import { getToken, type InformerNotification } from "@/api/saas";
 
 export type AdminEvent =
-  | { type: "new_message"; conversationId: number; contactId: number; preview: string | null }
+  | {
+      type: "new_message";
+      conversationId: number;
+      contactId: number;
+      preview: string | null;
+      role?: "user" | "assistant" | "human";
+    }
   | { type: "stage_changed"; leadId: number; toStage: string; toStageDisplayName: string }
-  | { type: "conversation_mode"; conversationId: number; mode: string };
+  | { type: "conversation_mode"; conversationId: number; mode: string }
+  | { type: "admin_notification"; notification: InformerNotification };
 
 /**
  * Subscribes to the admin SSE event stream (/api/admin/events).

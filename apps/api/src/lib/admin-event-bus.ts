@@ -1,7 +1,29 @@
 export type AdminEvent =
-  | { type: "new_message"; tenantId: number; conversationId: number; contactId: number; preview: string | null }
+  | {
+      type: "new_message";
+      tenantId: number;
+      conversationId: number;
+      contactId: number;
+      preview: string | null;
+      role: "user" | "assistant" | "human";
+    }
   | { type: "stage_changed"; tenantId: number; leadId: number; toStage: string; toStageDisplayName: string }
-  | { type: "conversation_mode"; tenantId: number; conversationId: number; mode: string };
+  | { type: "conversation_mode"; tenantId: number; conversationId: number; mode: string }
+  | {
+      type: "admin_notification";
+      tenantId: number;
+      notification: {
+        id: number;
+        topic: string;
+        severity: string;
+        kind: string;
+        title: string;
+        body: string;
+        deliveredAt: number | null;
+        readAt: number | null;
+        createdAt: number;
+      };
+    };
 
 type Handler = (event: AdminEvent) => void;
 
@@ -9,11 +31,15 @@ class AdminEventBus {
   private subs = new Map<number, Set<Handler>>();
 
   subscribe(tenantId: number, handler: Handler): () => void {
-    if (!this.subs.has(tenantId)) this.subs.set(tenantId, new Set());
-    this.subs.get(tenantId)!.add(handler);
+    let set = this.subs.get(tenantId);
+    if (!set) {
+      set = new Set();
+      this.subs.set(tenantId, set);
+    }
+    set.add(handler);
     return () => {
-      const set = this.subs.get(tenantId);
-      if (set) { set.delete(handler); if (set.size === 0) this.subs.delete(tenantId); }
+      const current = this.subs.get(tenantId);
+      if (current) { current.delete(handler); if (current.size === 0) this.subs.delete(tenantId); }
     };
   }
 

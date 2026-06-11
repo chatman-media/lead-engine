@@ -24,6 +24,7 @@ import { Hono } from "hono";
 import { ChannelRegistry } from "./channel-registry.ts";
 import { loadApiConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
+import { adminEventBus } from "./lib/admin-event-bus.ts";
 import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
 import { LlmUsageWriter } from "./lib/llm-usage-writer.ts";
 import { checkUsageAlerts } from "./lib/usage-alerts.ts";
@@ -361,6 +362,13 @@ async function main() {
     botToken: cfg.operatorBotToken,
     appUrl: cfg.mailer.appUrl,
     email: mailer,
+    realtime: (notification) => {
+      adminEventBus.emit({
+        type: "admin_notification",
+        tenantId: notification.tenantId,
+        notification,
+      });
+    },
     log: {
       warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
       info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),

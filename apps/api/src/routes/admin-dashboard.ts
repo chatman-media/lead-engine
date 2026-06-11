@@ -106,6 +106,11 @@ export function makeAdminDashboardRoutes(opts: AdminDashboardRoutesOpts): Hono {
           ),
         );
 
+      const [convUnread] = await tx
+        .select({ n: sql<number>`COALESCE(SUM(${conversations.unreadCount}), 0)::int` })
+        .from(conversations)
+        .where(eq(conversations.tenantId, tenantId));
+
       // Сообщения от пользователей за 7 дней
       const [msgs7d] = await tx
         .select({ n: count(messages.id) })
@@ -135,6 +140,7 @@ export function makeAdminDashboardRoutes(opts: AdminDashboardRoutesOpts): Hono {
           open: convOpen?.n ?? 0,
           escalated: convEscalated?.n ?? 0,
           today: convToday?.n ?? 0,
+          unread: convUnread?.n ?? 0,
         },
         messages: {
           last7days: msgs7d?.n ?? 0,
