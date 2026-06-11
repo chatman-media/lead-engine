@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { Inbound } from "@chatman-media/channel-core";
+import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
 import { normalizeReplyStrategyResult } from "@chatman-media/conversation-engine";
 import {
   CONCIERGE_INTAKE_STAGE,
@@ -74,10 +74,14 @@ describe("expandCallbackQuery", () => {
 
 // ── wrapWithConciergeButtons ───────────────────────────────────────────────────
 
-const MOCK_ENVELOPE = { text: "Здравствуйте!", replyMarkup: undefined };
+const MOCK_ENVELOPE: OutboundEnvelope = {
+	channelId: "ch1",
+	externalUserId: "u1",
+	parts: [{ kind: "text", text: "Здравствуйте!" }],
+};
 
-function makeStrategy(envelopes: unknown[]) {
-  return { generate: mock(async () => envelopes as never) };
+function makeStrategy(envelopes: OutboundEnvelope[]) {
+	return { generate: mock(async () => envelopes) };
 }
 
 async function makeDbWithStage(slug: string | null) {

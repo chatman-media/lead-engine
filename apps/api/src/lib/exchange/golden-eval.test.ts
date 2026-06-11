@@ -214,7 +214,7 @@ describe("exchange golden eval smoke", () => {
 			userMessageText: loadCases()[0]?.messages[0]?.text,
 		});
 		expect(result).not.toBeNull();
-		expect(firstReplyText(result)).toBe("Получите 10553 THB.");
+		expect(firstReplyText(result)).toBe(reply);
 	});
 
 	it("real RAG pipeline smoke: unbacked quote is replaced with safe fallback", async () => {
