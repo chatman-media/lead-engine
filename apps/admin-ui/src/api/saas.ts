@@ -2948,6 +2948,15 @@ export const saas = {
   getLead(id: number) {
     return request<LeadDetail>(`/api/admin/leads/${id}`);
   },
+  banLeadContact(id: number, reason?: string) {
+    return request<{ ok: boolean; contactId: number; status: string }>(
+      `/api/admin/leads/${id}/contact/ban`,
+      {
+        method: "POST",
+        body: JSON.stringify(reason ? { reason } : {}),
+      },
+    );
+  },
   revokeLeadVerification(id: number) {
     return request<{ ok: boolean; contactId: number; status: string; ordersPatched: number }>(
       `/api/admin/leads/${id}/verification/revoke`,
