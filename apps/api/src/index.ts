@@ -379,6 +379,16 @@ async function main() {
     cfg.operatorBotToken,
     cfg.mailer.appUrl,
     adminInformer,
+    async (ref) => {
+      const channelId = Number(ref.channelId);
+      if (!Number.isInteger(channelId) || channelId <= 0) return null;
+      const entry = channels.byChannelId(channelId);
+      if (!entry) return null;
+      return entry.adapter.downloadMedia({
+        channelId: ref.channelId,
+        externalRef: ref.externalRef,
+      });
+    },
   );
   const operatorBotHandler = new OperatorBotHandler(notificationsRepo, cfg.operatorBotToken, {
     db: db as never,
