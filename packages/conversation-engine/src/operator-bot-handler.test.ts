@@ -7,9 +7,12 @@ import {
 	contacts,
 	conversations,
 	exchangeOrders,
+	leadEvents,
+	leads,
 	messages,
 	operatorActionDrafts,
 	outboundQueue,
+	stageDefinitions,
 } from "@chatman-media/storage";
 import type {
 	AdminNotificationRow,
@@ -205,6 +208,7 @@ function makeSendDraftDb(
 		contactAttributesJson?: string | null;
 		order?: {
 			id: number;
+			leadId?: number | null;
 			status: string;
 			verificationId: string | null;
 			payoutCode: string | null;
@@ -212,6 +216,20 @@ function makeSendDraftDb(
 			payoutMethod?: string | null;
 			payoutLocation?: string | null;
 			payoutDestinationJson?: string | null;
+		};
+		lead?: {
+			id: number;
+			state: string;
+			stageDefinitionId: number | null;
+			stageSlug?: string | null;
+			stageFunnelId?: number | null;
+			stagePosition?: number | null;
+			stageNextStages?: string[];
+		};
+		riskReviewStage?: {
+			id: number;
+			slug?: string;
+			position: number;
 		};
 		conversationId?: number;
 		contactId?: number;
@@ -221,6 +239,10 @@ function makeSendDraftDb(
 	let contactAttributesJson = opts.contactAttributesJson ?? null;
 	let draftStatus = opts.draftStatus ?? "pending";
 	const order = opts.order ? { ...opts.order } : null;
+	const leadRow = opts.lead ? { ...opts.lead } : null;
+	const riskReviewStage = opts.riskReviewStage
+		? { slug: "risk_review", ...opts.riskReviewStage }
+		: null;
 	const conversationId = opts.conversationId ?? 109;
 	const contactId = opts.contactId ?? 55;
 	const updates: Array<{ table: string; values: Record<string, unknown> }> = [];
@@ -232,11 +254,14 @@ function makeSendDraftDb(
 		if (table === conversations) return "conversations";
 		if (table === channelIdentities) return "channel_identities";
 		if (table === exchangeOrders) return "exchange_orders";
+		if (table === leadEvents) return "lead_events";
+		if (table === leads) return "leads";
 		if (table === operatorActionDrafts) return "operator_action_drafts";
 		if (table === messages) return "messages";
 		if (table === outboundQueue) return "outbound_queue";
 		if (table === auditLog) return "audit_log";
 		if (table === channels) return "channels";
+		if (table === stageDefinitions) return "stage_definitions";
 		return "unknown";
 	}
 
@@ -286,6 +311,46 @@ function makeSendDraftDb(
 						}),
 					};
 				}
+				if (table === leads) {
+					const rows = async () =>
+						leadRow
+							? [
+									{
+										id: leadRow.id,
+										state: leadRow.state,
+										stageDefinitionId: leadRow.stageDefinitionId,
+										stageSlug: leadRow.stageSlug ?? leadRow.state,
+										stageFunnelId: leadRow.stageFunnelId ?? null,
+										stagePosition: leadRow.stagePosition ?? null,
+										stageNextStages: leadRow.stageNextStages ?? [],
+									},
+								]
+							: [];
+					return {
+						leftJoin: () => ({
+							where: () => ({
+								orderBy: () => ({ limit: rows }),
+							}),
+						}),
+					};
+				}
+				if (table === stageDefinitions) {
+					const rows = async () =>
+						riskReviewStage
+							? [
+									{
+										id: riskReviewStage.id,
+										slug: riskReviewStage.slug,
+										position: riskReviewStage.position,
+									},
+								]
+							: [];
+					return {
+						where: () => ({
+							limit: rows,
+						}),
+					};
+				}
 				return {
 					where: () => ({
 						limit: async () => [],
@@ -301,6 +366,15 @@ function makeSendDraftDb(
 				}
 				if (table === exchangeOrders && order) {
 					Object.assign(order, values);
+				}
+				if (table === leads && leadRow) {
+					Object.assign(leadRow, values);
+					if (typeof values.state === "string") {
+						leadRow.stageSlug = values.state;
+					}
+					if (typeof values.stageDefinitionId === "number") {
+						leadRow.stageDefinitionId = values.stageDefinitionId;
+					}
 				}
 				return {
 					where: () => ({
@@ -340,6 +414,7 @@ function makeSendDraftDb(
 		order,
 		updates,
 		draftStatus: () => draftStatus,
+		lead: () => (leadRow ? { ...leadRow } : null),
 		contactAttributes: () =>
 			JSON.parse(contactAttributesJson ?? "{}") as Record<string, unknown>,
 	};
@@ -1846,19 +1921,34 @@ describe("operator action callbacks", () => {
 			telegramChatId: "777",
 		});
 		const repo = new FakeRepo(settings);
-		const { audits, db, order, contactAttributes } = makeSendDraftDb({
-			contactAttributesJson: JSON.stringify({
-				city: "Bangkok",
-				exchangeKyc: { status: "pending" },
-			}),
-			order: {
-				id: 77,
-				status: "quote",
-				verificationId: null,
-				payoutCode: null,
-				payoutCodeExpiresAt: null,
-			},
-		});
+		const { audits, db, inserts, lead, order, contactAttributes } =
+			makeSendDraftDb({
+				contactAttributesJson: JSON.stringify({
+					city: "Bangkok",
+					exchangeKyc: { status: "pending" },
+				}),
+				order: {
+					id: 77,
+					leadId: 88,
+					status: "quote",
+					verificationId: null,
+					payoutCode: null,
+					payoutCodeExpiresAt: null,
+				},
+				lead: {
+					id: 88,
+					state: "kyc_collection",
+					stageDefinitionId: 30,
+					stageSlug: "kyc_collection",
+					stageFunnelId: 7,
+					stagePosition: 3,
+					stageNextStages: ["risk_review", "cancelled"],
+				},
+				riskReviewStage: {
+					id: 31,
+					position: 4,
+				},
+			});
 		const handler = new OperatorBotHandler(
 			repo as unknown as NotificationsRepo,
 			"token",
@@ -1901,6 +1991,23 @@ describe("operator action callbacks", () => {
 		const kyc = attrs.exchangeKyc as Record<string, unknown>;
 		expect(String(kyc.verificationId)).toBe("operator-bot-109-123");
 		expect(order?.verificationId).toBe("operator-bot-109-123");
+		expect(lead()).toMatchObject({
+			id: 88,
+			state: "risk_review",
+			stageDefinitionId: 31,
+		});
+
+		const leadEvent = inserts.find(
+			(row) => row.table === "lead_events",
+		)?.values;
+		expect(leadEvent).toMatchObject({
+			tenantId: 3,
+			leadId: 88,
+			fromState: "kyc_collection",
+			toState: "risk_review",
+			byAdminId: 10,
+			createdAt: 123,
+		});
 
 		const details = JSON.parse(String(audits[0]?.detailsJson)) as Record<
 			string,
@@ -1913,6 +2020,13 @@ describe("operator action callbacks", () => {
 			verified: true,
 			orderId: 77,
 			orderVerificationPatched: true,
+			leadAdvance: {
+				leadId: 88,
+				advanced: true,
+				fromState: "kyc_collection",
+				toState: "risk_review",
+				stageDefinitionId: 31,
+			},
 		});
 	});
 
