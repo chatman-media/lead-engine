@@ -424,6 +424,7 @@ export interface ConversationDetail {
   id: number;
   contactId: number;
   contactName: string | null;
+  contactAttributesJson: string | null;
   source: string;
   mode: string;
   status: string;

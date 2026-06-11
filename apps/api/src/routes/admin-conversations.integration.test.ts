@@ -94,7 +94,19 @@ beforeAll(
     for (let i = 0; i < 3; i++) {
       const [contact] = await db
         .insert(contacts)
-        .values({ tenantId: tenantA, displayName: `Contact A${i}` })
+        .values({
+          tenantId: tenantA,
+          displayName: `Contact A${i}`,
+          ...(i === 0
+            ? {
+                attributesJson: JSON.stringify({
+                  last_photo_class: "passport",
+                  passport_family_name: "IVANOV",
+                  passport_given_name: "IVAN",
+                }),
+              }
+            : {}),
+        })
         .returning({ id: contacts.id });
       const [conv] = await db
         .insert(conversations)
@@ -250,10 +262,11 @@ describe("admin-conversations", () => {
     const res = await authReq(tokenA, `/api/admin/conversations/${id}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      conversation: { id: number };
+      conversation: { id: number; contactAttributesJson: string | null };
       messages: Array<{ text: string; role: string; createdAt: number }>;
     };
     expect(body.conversation.id).toBe(id);
+    expect(body.conversation.contactAttributesJson).toContain("passport_family_name");
     expect(body.messages).toHaveLength(5);
     // Chronological: первое сообщение — старейшее, последнее — новейшее.
     expect(body.messages[0]!.text).toBe("Msg 0 in conv 0");
