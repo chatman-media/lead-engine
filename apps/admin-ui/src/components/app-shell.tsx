@@ -210,10 +210,37 @@ function notificationBadgeVariant(severity: string): React.ComponentProps<typeof
   return "secondary";
 }
 
+const CONVERSATION_DEDUP_FALLBACK_KINDS = new Set([
+  "document_uploaded",
+  "human_takeover",
+  "operator_handoff_required",
+  "verification_requested",
+]);
+
+function positiveId(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) return null;
+  return value;
+}
+
+function conversationIdFromLegacyDedup(notification: InformerNotification): number | null {
+  if (!CONVERSATION_DEDUP_FALLBACK_KINDS.has(notification.kind)) return null;
+  const match = /^[-a-z_]+:(\d+)$/.exec(notification.dedupKey);
+  const rawId = match?.[1];
+  if (!rawId) return null;
+  const parsed = Number.parseInt(rawId, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function notificationRoute(notification: InformerNotification): string {
+  const conversationId =
+    positiveId(notification.conversationId) ?? conversationIdFromLegacyDedup(notification);
+  const leadId = positiveId(notification.leadId);
+
   if (notification.kind === "channel_down") return "/channels";
   if (notification.kind.startsWith("rate_")) return "/exchange";
   if (notification.topic === "orders" || notification.kind.includes("provider")) return "/orders";
+  if (conversationId) return `/conversations/${conversationId}`;
+  if (leadId) return `/leads/${leadId}`;
   if (notification.topic === "escalation") return "/conversations";
   if (notification.topic === "leads") return "/leads";
   return "/diagnostics";

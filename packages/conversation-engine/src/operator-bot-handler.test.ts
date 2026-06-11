@@ -147,6 +147,8 @@ class FakeRepo implements Partial<NotificationsRepo> {
 				topic: "system",
 				kind: "test",
 				dedupKey: `fake-${row.id}`,
+				conversationId: null,
+				leadId: null,
 				targetChatId: null,
 				deliveredAt: null,
 				digestBatchId: null,

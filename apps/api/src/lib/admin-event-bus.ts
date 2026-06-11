@@ -14,11 +14,15 @@ export type AdminEvent =
       tenantId: number;
       notification: {
         id: number;
+        tenantId: number;
         topic: string;
         severity: string;
         kind: string;
         title: string;
         body: string;
+        dedupKey: string;
+        conversationId: number | null;
+        leadId: number | null;
         deliveredAt: number | null;
         readAt: number | null;
         createdAt: number;

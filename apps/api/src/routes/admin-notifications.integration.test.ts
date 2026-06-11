@@ -177,14 +177,19 @@ describe("admin-notifications", () => {
         title: "Канал упал",
         body: "Проверьте подключение канала",
         dedupKey: `test-read:${Date.now()}`,
+        conversationId: 32,
+        leadId: 7,
       })
       .returning({ id: schema.adminNotifications.id });
     if (!inserted) throw new Error("admin notification insert returned no row");
 
     const before = (await (await req("GET", "/informer/feed?limit=5")).json()) as {
-      items: Array<{ id: number; readAt: number | null }>;
+      items: Array<{ id: number; readAt: number | null; conversationId: number | null; leadId: number | null }>;
     };
-    expect(before.items.find((item) => item.id === inserted.id)?.readAt).toBeNull();
+    const beforeItem = before.items.find((item) => item.id === inserted.id);
+    expect(beforeItem?.readAt).toBeNull();
+    expect(beforeItem?.conversationId).toBe(32);
+    expect(beforeItem?.leadId).toBe(7);
 
     expect((await req("POST", "/informer/read")).status).toBe(200);
     const after = (await (await req("GET", "/informer/feed?limit=5")).json()) as {
