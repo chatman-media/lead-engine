@@ -8,6 +8,7 @@ import { DrizzleKbStore } from "@chatman-media/conversation-engine";
 import { ingestText } from "@chatman-media/kb";
 import { NullEmbeddingClient } from "@chatman-media/llm-router";
 import {
+  adminNotifications,
   applyAllMigrations,
   channelIdentities,
   channels,
@@ -1218,6 +1219,133 @@ describe("DELETE /api/admin/leads/:id", () => {
     // Verify lead is gone
     const check = await authReq(tokenA, `/api/admin/leads/${newLead!.id}`);
     expect(check.status).toBe(404);
+  });
+
+  it("clears notification links and contact KYC/OCR when deleting the last lead", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [c] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "KYC Cleanup",
+        attributesJson: JSON.stringify({
+          city: "Bangkok",
+          exchangeKyc: { status: "verified", verificationId: "kyc-delete" },
+          isVerified: true,
+          verificationStatus: "verified",
+          kycStatus: "manual_override",
+          verificationCrmId: "crm-delete",
+          last_photo_class: "passport",
+          passport_family_name: "IVANOV",
+          passport_given_name: "IVAN",
+          passport_number: "75 1234567",
+          passport_expiry: "01.01.2030",
+        }),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: contacts.id });
+    if (!c) throw new Error("expected cleanup contact");
+    const [newLead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: c.id,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    if (!newLead) throw new Error("expected cleanup lead");
+    await db.insert(adminNotifications).values({
+      tenantId: tenantA,
+      topic: "leads",
+      severity: "info",
+      kind: "lead_created",
+      title: "Lead created",
+      body: "",
+      dedupKey: `lead-delete-${newLead.id}`,
+      leadId: newLead.id,
+      createdAt: now,
+    });
+
+    const res = await authReq(tokenA, `/api/admin/leads/${newLead.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const [contactAfter] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(and(eq(contacts.tenantId, tenantA), eq(contacts.id, c.id)));
+    expect(JSON.parse(contactAfter?.attributesJson ?? "{}")).toEqual({ city: "Bangkok" });
+    const [notificationAfter] = await db
+      .select({ leadId: adminNotifications.leadId })
+      .from(adminNotifications)
+      .where(
+        and(
+          eq(adminNotifications.tenantId, tenantA),
+          eq(adminNotifications.dedupKey, `lead-delete-${newLead.id}`),
+        ),
+      );
+    expect(notificationAfter?.leadId).toBeNull();
+  });
+
+  it("keeps contact KYC/OCR while another lead for the same contact remains", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [c] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "KYC Shared",
+        attributesJson: JSON.stringify({
+          city: "Phuket",
+          exchangeKyc: { status: "verified", verificationId: "kyc-shared" },
+          passport_number: "70 7654321",
+        }),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: contacts.id });
+    if (!c) throw new Error("expected shared contact");
+    const inserted = await db
+      .insert(leads)
+      .values([
+        {
+          tenantId: tenantA,
+          userId: c.id,
+          state: "intake_pending",
+          stageDefinitionId: stageIdA,
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: tenantA,
+          userId: c.id,
+          state: "review",
+          stageDefinitionId: stageIdA2,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: leads.id });
+    const [deletedLead, remainingLead] = inserted;
+    if (!deletedLead || !remainingLead) throw new Error("expected shared leads");
+
+    const res = await authReq(tokenA, `/api/admin/leads/${deletedLead.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const [contactAfter] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(and(eq(contacts.tenantId, tenantA), eq(contacts.id, c.id)));
+    const attrs = JSON.parse(contactAfter?.attributesJson ?? "{}") as Record<string, unknown>;
+    expect(attrs.exchangeKyc).toEqual({ status: "verified", verificationId: "kyc-shared" });
+    expect(attrs.passport_number).toBe("70 7654321");
+
+    const check = await authReq(tokenA, `/api/admin/leads/${remainingLead.id}`);
+    expect(check.status).toBe(200);
   });
 
   it("cross-tenant: cannot delete another tenant's lead", async () => {
