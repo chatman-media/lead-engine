@@ -26,7 +26,6 @@ import {
   RocketIcon,
   ScrollTextIcon,
   SendIcon,
-  ShieldCheckIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
   StoreIcon,
@@ -80,10 +79,8 @@ interface NavGroup {
 
 const TOP_NAV_ITEM: NavItem = { to: "/dashboard", label: "Главная", icon: LayoutDashboardIcon };
 
-// Компоновка «Обмен во главе»: ядро бизнеса (Обменник/Процессы) сверху, затем
-// клиенты, бот/каналы, система. Пункты с hideForExchange скрываются у обменки,
-// exchangeOnly — показываются только ей.
-const NAV_GROUPS: NavGroup[] = [
+// Общая навигация для не-exchange тенантов: оставляем текущую структуру.
+const DEFAULT_NAV_GROUPS: NavGroup[] = [
   {
     label: "Продажи",
     items: [
@@ -118,12 +115,36 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Система",
     items: [
       { to: "/settings", label: "Настройки", icon: SlidersHorizontalIcon },
+      { to: "/team", label: "Команда", icon: UsersIcon, superadminOnly: true },
       { to: "/notifications", label: "Уведомления", icon: BellIcon },
       { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
       { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
       { to: "/referral", label: "Рефкоды", icon: LinkIcon, hideForExchange: true },
-      { to: "/superadmin", label: "Alpha", icon: ShieldCheckIcon, superadminOnly: true },
+    ],
+  },
+];
+
+// Exchange-first навигация: только ежедневные рабочие экраны и базовая настройка.
+const EXCHANGE_NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Операции",
+    items: [
+      { to: "/exchange", label: "Обменный пункт", icon: ArrowLeftRightIcon },
+      { to: "/leads", label: "Лиды", icon: UserCircleIcon },
+      { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
+      { to: "/channels", label: "Каналы", icon: CableIcon },
+    ],
+  },
+  {
+    label: "Настройки",
+    items: [
+      { to: "/settings", label: "Общие", icon: SlidersHorizontalIcon },
+      { to: "/notifications", label: "Уведомления", icon: BellIcon },
+      { to: "/team", label: "Команда", icon: UsersIcon, superadminOnly: true },
+      { to: "/funnel", label: "Процессы", icon: GitBranchIcon },
+      { to: "/faq", label: "База знаний", icon: BookOpenIcon },
+      { to: "/integrations", label: "Интеграции", icon: BlocksIcon },
     ],
   },
 ];
@@ -155,7 +176,7 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
       </span>
       {!collapsed && (
         <span className="text-[15px] font-semibold tracking-tight truncate">
-          lead<span className="text-primary">·</span>engine
+          exchanges<span className="text-primary">.</span>agency
         </span>
       )}
     </Link>
@@ -237,14 +258,18 @@ function NavLinks({
   hasExchangeWorkflow?: boolean;
   isExchangeTenant?: boolean;
 }) {
-  const groups = NAV_GROUPS.map((g) => ({
-    ...g,
-    items: visibleNavItems(g.items, {
-      hasExchangeWorkflow: hasExchangeWorkflow ?? false,
-      isExchangeTenant: isExchangeTenant ?? false,
-      isSuperadmin: isSuperadmin ?? false,
-    }),
-  })).filter((g) => g.items.length > 0);
+  const isExchangeMode = Boolean(hasExchangeWorkflow || isExchangeTenant);
+  const navGroups = isExchangeMode ? EXCHANGE_NAV_GROUPS : DEFAULT_NAV_GROUPS;
+  const groups = navGroups
+    .map((g) => ({
+      ...g,
+      items: visibleNavItems(g.items, {
+        hasExchangeWorkflow: hasExchangeWorkflow ?? false,
+        isExchangeTenant: isExchangeTenant ?? false,
+        isSuperadmin: isSuperadmin ?? false,
+      }),
+    }))
+    .filter((g) => g.items.length > 0);
   return (
     <nav className="flex flex-col gap-4">
       <div className="flex flex-col gap-0.5">
@@ -297,7 +322,6 @@ function AccountDropdown({
   // Показываем имя (если задано), иначе email.
   const displayName = admin?.name?.trim() || admin?.email || "—";
   const initials = (admin?.name?.trim() || admin?.email || "?").slice(0, 2).toUpperCase();
-  const isSuperadmin = admin?.role === "superadmin";
 
   const menuContent = (
     <DropdownMenuContent align="start" side={collapsed ? "right" : "top"} className="w-56">
@@ -314,20 +338,6 @@ function AccountDropdown({
             <UserCircleIcon /> Профиль
           </Link>
         </DropdownMenuItem>
-        {isSuperadmin && (
-          <>
-            <DropdownMenuItem asChild>
-              <Link to="/settings">
-                <SlidersHorizontalIcon /> Настройки
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link to="/team">
-                <UsersIcon /> Команда
-              </Link>
-            </DropdownMenuItem>
-          </>
-        )}
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
       <DropdownMenuSub>
@@ -572,8 +582,12 @@ function isFullWidthPath(pathname: string): boolean {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
   const fullWidth = isFullWidthPath(pathname);
+  const showSettingsReturn =
+    pathname !== "/settings" &&
+    (location.state as { fromSettings?: boolean } | null)?.fromSettings === true;
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [hasExchangeWorkflow, setHasExchangeWorkflow] = useState(false);
@@ -726,7 +740,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </header>
 
           <main className="flex-1 px-4 py-6 md:px-8 md:py-8">
-            <div className={fullWidth ? "w-full" : "mx-auto w-full max-w-6xl"}>{children}</div>
+            <div className={fullWidth ? "w-full" : "mx-auto w-full max-w-6xl"}>
+              {showSettingsReturn && (
+                <div className="mb-3 flex justify-end">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="icon"
+                        aria-label="Вернуться в настройки"
+                      >
+                        <Link to="/settings">
+                          <SlidersHorizontalIcon className="size-4" />
+                        </Link>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="text-xs">
+                      Вернуться в настройки
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
+              {children}
+            </div>
           </main>
         </div>
 
