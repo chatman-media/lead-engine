@@ -5,17 +5,22 @@ import {
   BlocksIcon,
   BookOpenIcon,
   CheckIcon,
+  ClipboardListIcon,
   FlaskConicalIcon,
+  HandshakeIcon,
   KeyRoundIcon,
   LinkIcon,
+  ListChecksIcon,
   Loader2Icon,
   type LucideIcon,
   PaletteIcon,
+  RocketIcon,
   SaveIcon,
   ScrollTextIcon,
-  ShieldCheckIcon,
+  SendIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
+  StoreIcon,
   Trash2Icon,
   UserCircleIcon,
   UsersIcon,
@@ -174,7 +179,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     items: [
       {
         to: "#llm",
-        label: "LLM",
+        label: "AI-модели",
         description: "Провайдеры, модели и BYOK-ключи.",
         icon: SlidersHorizontalIcon,
       },
@@ -227,7 +232,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     items: [
       {
         to: "/billing",
-        label: "LLM-использование",
+        label: "Расходы AI",
         description: "Расходы, лимиты и статистика моделей.",
         icon: BarChart2Icon,
       },
@@ -249,39 +254,88 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
         description: "Партнёрские коды и источники заявок.",
         icon: LinkIcon,
       },
+    ],
+  },
+  {
+    title: "Дополнительно",
+    items: [
       {
-        to: "/superadmin",
-        label: "Alpha",
-        description: "Платформенные аккаунты и ранний доступ.",
-        icon: ShieldCheckIcon,
+        to: "/services",
+        label: "Услуги",
+        description: "Каталог услуг и маршрутизация заявок.",
+        icon: ListChecksIcon,
+      },
+      {
+        to: "/partners",
+        label: "Партнёры",
+        description: "Передача заявок, комиссии и партнёрские услуги.",
+        icon: HandshakeIcon,
+      },
+      {
+        to: "/providers",
+        label: "Провайдеры",
+        description: "Исполнители relay, каналы связи и сервисы.",
+        icon: StoreIcon,
+      },
+      {
+        to: "/orders",
+        label: "Заказы провайдеров",
+        description: "Заявки, переданные внешним исполнителям.",
+        icon: ClipboardListIcon,
+      },
+      {
+        to: "/outreach",
+        label: "Рассылка",
+        description: "Операторские рассылки и ручной outreach.",
+        icon: SendIcon,
+      },
+      {
+        to: "/campaigns",
+        label: "Кампании",
+        description: "Drip-кампании и партии лидов.",
+        icon: RocketIcon,
       },
     ],
   },
 ];
 
 function SettingsDirectory() {
+  function handleShortcutClick(to: string): MouseEventHandler<HTMLAnchorElement> | undefined {
+    if (!to.startsWith("#")) return undefined;
+    return (event) => {
+      event.preventDefault();
+      const target = document.querySelector(to);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        window.history.replaceState(null, "", to);
+      }
+    };
+  }
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {SETTINGS_SECTIONS.map((section) => (
-        <section key={section.title} className="space-y-3">
+        <section key={section.title} className="space-y-2">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             {section.title}
           </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {section.items.map((item) => {
               const Icon = item.icon;
               return (
                 <Link
                   key={`${section.title}:${item.to}:${item.label}`}
                   to={item.to}
-                  className="group flex min-h-[92px] items-start gap-3 rounded-lg border bg-card p-4 text-card-foreground transition-colors hover:border-primary/40 hover:bg-accent/40"
+                  state={item.to.startsWith("#") ? undefined : { fromSettings: true }}
+                  onClick={handleShortcutClick(item.to)}
+                  className="group flex min-h-[70px] items-start gap-2.5 rounded-md border bg-card p-3 text-card-foreground transition-colors hover:border-primary/40 hover:bg-accent/40"
                 >
-                  <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
                     <Icon className="size-4" />
                   </span>
                   <span className="min-w-0 space-y-1">
                     <span className="block text-sm font-medium leading-none">{item.label}</span>
-                    <span className="block text-xs leading-5 text-muted-foreground">
+                    <span className="block text-xs leading-4 text-muted-foreground">
                       {item.description}
                     </span>
                   </span>
