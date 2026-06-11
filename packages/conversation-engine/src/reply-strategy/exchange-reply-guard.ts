@@ -229,3 +229,49 @@ export function guardExchangeReply(
 
 	return exchangeGuardPass(text);
 }
+
+/** Минимальный chat-интерфейс для перезапроса (совместим с llm-router ChatClient). */
+export interface UnbackedQuoteRewriteChat {
+	complete(
+		messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+		opts?: { temperature?: number },
+	): Promise<string>;
+}
+
+const UNBACKED_QUOTE_REWRITE_SYSTEM = [
+	"Ты — вежливый менеджер обменного пункта.",
+	"Твой черновик ответа содержал курс или сумму, которых нет от инструмента расчёта — так нельзя.",
+	"Перепиши ответ БЕЗ каких-либо конкретных чисел курса или суммы.",
+	"Если клиент ещё не назвал сумму и направление обмена — коротко и дружелюбно попроси назвать их.",
+	"Если клиент уже всё назвал — скажи, что считаешь курс и сейчас вернёшься с точной суммой.",
+	"Отвечай на языке клиента, 1–2 предложения, без чисел.",
+].join(" ");
+
+/**
+ * Перезапрос при unbacked_quote: вместо жёсткой заглушки просим модель переписать
+ * ответ без выдуманных чисел (нет суммы → просто спросить направление и сумму).
+ * Один дешёвый chat.complete. null — перезапрос не удался (вызывающий оставит
+ * безопасный фоллбэк).
+ */
+export async function rewriteUnbackedQuoteReply(input: {
+	chat: UnbackedQuoteRewriteChat;
+	userMessage: string;
+	draftReply: string;
+}): Promise<string | null> {
+	try {
+		const out = await input.chat.complete(
+			[
+				{ role: "system", content: UNBACKED_QUOTE_REWRITE_SYSTEM },
+				{
+					role: "user",
+					content: `Сообщение клиента: ${input.userMessage}\n\nТвой черновик ответа (содержит недопустимые числа): ${input.draftReply}\n\nПерепиши ответ.`,
+				},
+			],
+			{ temperature: 0.3 },
+		);
+		const text = out?.trim();
+		return text && text.length > 0 ? text : null;
+	} catch {
+		return null;
+	}
+}
