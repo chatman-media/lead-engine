@@ -97,12 +97,12 @@ function BarRow({
 }) {
   const width = max > 0 ? Math.max(2, (value / max) * 100) : 0;
   return (
-    <div className="flex items-center gap-3 py-1.5 text-sm">
-      <span className="w-32 shrink-0 truncate">{label}</span>
+    <div className="grid gap-1.5 py-1.5 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_7rem] sm:items-center sm:gap-3">
+      <span className="min-w-0 truncate">{label}</span>
       <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
         <div className="h-full rounded-full bg-primary/70" style={{ width: `${width}%` }} />
       </div>
-      <span className="w-28 shrink-0 text-right tabular-nums text-muted-foreground">{right}</span>
+      <span className="text-right tabular-nums text-muted-foreground">{right}</span>
     </div>
   );
 }
@@ -539,7 +539,7 @@ export function SaasDashboard() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Card>
               <CardContent className="pt-4 pb-3">
                 <p className="text-2xl font-bold tabular-nums">
@@ -878,54 +878,56 @@ export function SaasDashboard() {
                   По всем заявкам (не зависит от фильтра периода/валюты)
                 </p>
               </CardHeader>
-              <CardContent className="space-y-1">
-                {funnelStages.map((s, i) => {
-                  const val = funnelVals[i] ?? 0;
-                  const prev = funnelVals[i - 1] ?? 0;
-                  const conv = i > 0 && prev > 0 ? (val / prev) * 100 : null;
-                  const isDrop = i === biggestDrop;
-                  const terminal =
-                    s.kind === "terminal_won" ? "✓" : s.kind === "terminal_lost" ? "✗" : "";
-                  return (
-                    <div
-                      key={s.id}
-                      className={`flex items-center gap-3 rounded-md px-2 py-1.5 ${
-                        isDrop ? "border-l-2 border-l-red-500 bg-red-500/5" : ""
-                      }`}
-                    >
-                      <span className="flex w-44 shrink-0 items-center gap-1.5 truncate text-sm">
-                        {s.color && (
-                          <span
-                            className="size-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: s.color }}
+              <CardContent>
+                <div className="space-y-1 overflow-x-auto">
+                  {funnelStages.map((s, i) => {
+                    const val = funnelVals[i] ?? 0;
+                    const prev = funnelVals[i - 1] ?? 0;
+                    const conv = i > 0 && prev > 0 ? (val / prev) * 100 : null;
+                    const isDrop = i === biggestDrop;
+                    const terminal =
+                      s.kind === "terminal_won" ? "✓" : s.kind === "terminal_lost" ? "✗" : "";
+                    return (
+                      <div
+                        key={s.id}
+                        className={`flex min-w-[38rem] items-center gap-3 rounded-md px-2 py-1.5 ${
+                          isDrop ? "border-l-2 border-l-red-500 bg-red-500/5" : ""
+                        }`}
+                      >
+                        <span className="flex w-44 shrink-0 items-center gap-1.5 truncate text-sm">
+                          {s.color && (
+                            <span
+                              className="size-2 shrink-0 rounded-full"
+                              style={{ backgroundColor: s.color }}
+                            />
+                          )}
+                          <span className="truncate">{s.displayName}</span>
+                          {terminal && <span className="text-muted-foreground">{terminal}</span>}
+                        </span>
+                        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary/70"
+                            style={{ width: `${Math.max(2, (val / funnelFirst) * 100)}%` }}
                           />
+                        </div>
+                        <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums">
+                          {val}
+                        </span>
+                        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                          {conv !== null ? pct(conv) : "—"}
+                        </span>
+                        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                          {s.avgDaysInStage !== null ? `${s.avgDaysInStage}д` : "—"}
+                        </span>
+                        {isDrop && (
+                          <Badge variant="destructive" className="shrink-0 text-[10px]">
+                            −{Math.round(biggestDropPct)}% отвал
+                          </Badge>
                         )}
-                        <span className="truncate">{s.displayName}</span>
-                        {terminal && <span className="text-muted-foreground">{terminal}</span>}
-                      </span>
-                      <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary/70"
-                          style={{ width: `${Math.max(2, (val / funnelFirst) * 100)}%` }}
-                        />
                       </div>
-                      <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums">
-                        {val}
-                      </span>
-                      <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                        {conv !== null ? pct(conv) : "—"}
-                      </span>
-                      <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                        {s.avgDaysInStage !== null ? `${s.avgDaysInStage}д` : "—"}
-                      </span>
-                      {isDrop && (
-                        <Badge variant="destructive" className="shrink-0 text-[10px]">
-                          −{Math.round(biggestDropPct)}% отвал
-                        </Badge>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
                 <div className="flex justify-end pt-1 text-[10px] text-muted-foreground">
                   вошло · конверсия · ср. дней
                 </div>
@@ -1007,7 +1009,7 @@ export function SaasDashboard() {
       )}
 
       {!isExchange && stats && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Card>
             <CardContent className="pt-4 pb-3">
               <p className="text-2xl font-bold">{stats.leads.total}</p>

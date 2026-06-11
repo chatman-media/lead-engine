@@ -804,7 +804,7 @@ export function SaasExchange() {
       )}
 
       <Tabs defaultValue="rates">
-        <TabsList className="max-w-full justify-start overflow-x-auto">
+        <TabsList>
           <TabsTrigger value="rates">Курсы</TabsTrigger>
           <TabsTrigger value="orders">Заявки</TabsTrigger>
           <TabsTrigger value="kyc">Клиенты (KYC)</TabsTrigger>
