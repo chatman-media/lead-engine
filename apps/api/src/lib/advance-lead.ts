@@ -22,6 +22,7 @@ export interface PartnerPingConfig {
   appUrl: string;
   operatorBotToken: string;
   callbackSecret: string;
+  fetchImpl?: typeof fetch;
 }
 
 export type AdvanceResult =
@@ -247,6 +248,7 @@ export async function advanceLead(opts: {
         appUrl: ping.appUrl,
         operatorBotToken: ping.operatorBotToken,
         callbackSecret: ping.callbackSecret,
+        ...(ping.fetchImpl ? { fetchImpl: ping.fetchImpl } : {}),
       };
 
       const pingResult = await firePartnerPing(pingOpts);

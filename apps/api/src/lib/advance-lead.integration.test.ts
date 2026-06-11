@@ -399,7 +399,7 @@ describe("advanceLead", () => {
 	it("partner stage → создаёт deal, отправляет ping и сохраняет callback token", async () => {
 		if (!enabled) return;
 		const calls: Array<{ url: string; init?: RequestInit }> = [];
-		globalThis.fetch = (async (url, init) => {
+		const fetchImpl = (async (url, init) => {
 			calls.push({ url: String(url), init });
 			return new Response("ok", { status: 200 });
 		}) as typeof fetch;
@@ -417,6 +417,7 @@ describe("advanceLead", () => {
 				appUrl: "https://app.test",
 				operatorBotToken: "bot-token",
 				callbackSecret: "partner-secret",
+				fetchImpl,
 			},
 		});
 
@@ -491,7 +492,7 @@ describe("advanceLead", () => {
 	it("partner stage без service использует нулевую комиссию и переживает битый intakeJson", async () => {
 		if (!enabled) return;
 		const calls: Array<{ body: Record<string, unknown> }> = [];
-		globalThis.fetch = (async (_url, init) => {
+		const fetchImpl = (async (_url, init) => {
 			calls.push({
 				body: JSON.parse(String(init?.body)) as Record<string, unknown>,
 			});
@@ -511,6 +512,7 @@ describe("advanceLead", () => {
 				appUrl: "https://app.test",
 				operatorBotToken: "bot-token",
 				callbackSecret: "partner-secret",
+				fetchImpl,
 			},
 		});
 
@@ -548,7 +550,7 @@ describe("advanceLead", () => {
 	it("ошибка partner ping не откатывает продвижение лида", async () => {
 		if (!enabled) return;
 		const errors: unknown[][] = [];
-		globalThis.fetch = (async () =>
+		const fetchImpl = (async () =>
 			new Response("partner down", { status: 503 })) as unknown as typeof fetch;
 		console.error = (...args: unknown[]) => {
 			errors.push(args);
@@ -566,6 +568,7 @@ describe("advanceLead", () => {
 				appUrl: "https://app.test",
 				operatorBotToken: "bot-token",
 				callbackSecret: "partner-secret",
+				fetchImpl,
 			},
 		});
 
