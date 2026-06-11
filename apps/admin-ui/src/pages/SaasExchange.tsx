@@ -768,14 +768,14 @@ export function SaasExchange() {
   const savedByKey = new Map(visibleRequisites.map((r) => [r.key, r]));
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <PageHeader
         title="Обменник"
         description="Курсы по диапазонам, CRM заявок, оборот, реквизиты для приёма средств"
       />
 
       {turnover?.totals && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm text-muted-foreground">Оборот ({quoteCode})</CardTitle>
@@ -804,7 +804,7 @@ export function SaasExchange() {
       )}
 
       <Tabs defaultValue="rates">
-        <TabsList>
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="rates">Курсы</TabsTrigger>
           <TabsTrigger value="orders">Заявки</TabsTrigger>
           <TabsTrigger value="kyc">Клиенты (KYC)</TabsTrigger>
@@ -824,14 +824,14 @@ export function SaasExchange() {
                 обновлять реже (стабильнее котировки) под вашу пару.
               </p>
             </CardHeader>
-            <CardContent className="flex flex-wrap items-end gap-4">
-              <div className="space-y-1.5">
+            <CardContent className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="space-y-1.5 sm:w-auto">
                 <Label>Валюта выдачи</Label>
                 <Select
                   value={settings.quoteAsset ?? "PHP"}
                   onValueChange={(v) => setSettings((s) => ({ ...s, quoteAsset: v }))}
                 >
-                  <SelectTrigger className="w-56">
+                  <SelectTrigger className="w-full sm:w-64">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -843,20 +843,21 @@ export function SaasExchange() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 sm:w-auto">
                 <Label>Частота обновления</Label>
                 <Select
                   value={String(settings.rateRefreshSec)}
                   onValueChange={(v) => {
                     const sec = Number(v);
                     setSettings((s) => ({
+                      ...s,
                       rateRefreshSec: sec,
                       feedStaleSec:
                         s.feedStaleSec != null && s.feedStaleSec < sec ? null : s.feedStaleSec,
                     }));
                   }}
                 >
-                  <SelectTrigger className="w-44">
+                  <SelectTrigger className="w-full sm:w-44">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -868,7 +869,7 @@ export function SaasExchange() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 sm:w-auto">
                 <Label>Порог «курсы устарели»</Label>
                 <Select
                   value={settings.feedStaleSec == null ? "auto" : String(settings.feedStaleSec)}
@@ -876,7 +877,7 @@ export function SaasExchange() {
                     setSettings((s) => ({ ...s, feedStaleSec: v === "auto" ? null : Number(v) }))
                   }
                 >
-                  <SelectTrigger className="w-44">
+                  <SelectTrigger className="w-full sm:w-44">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -889,7 +890,12 @@ export function SaasExchange() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button type="button" onClick={saveSettings} disabled={savingSettings}>
+              <Button
+                type="button"
+                onClick={saveSettings}
+                disabled={savingSettings}
+                className="sm:w-auto"
+              >
                 <SaveIcon className="size-4" />
                 {savingSettings ? "Сохранение…" : "Сохранить"}
               </Button>
@@ -952,7 +958,7 @@ export function SaasExchange() {
 
           {/* Другие направления обмена (произвольные пары/сети) */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardHeader className="flex flex-col items-start gap-3 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle className="text-base">Другие направления обмена</CardTitle>
                 <p className="text-sm text-muted-foreground">
@@ -960,14 +966,14 @@ export function SaasExchange() {
                 </p>
               </div>
               {!addingRate && (
-                <Button size="sm" onClick={() => setAddingRate(true)}>
+                <Button size="sm" onClick={() => setAddingRate(true)} className="w-full sm:w-auto">
                   <PlusIcon className="size-4" /> Добавить направление
                 </Button>
               )}
             </CardHeader>
             {addingRate && (
               <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-1">
                     <Label className="text-xs">Отдаёт клиент</Label>
                     <Select
@@ -992,7 +998,7 @@ export function SaasExchange() {
                       value={rateForm.quoteAsset || quoteCode}
                       onValueChange={(v) => setRateForm({ ...rateForm, quoteAsset: v })}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="min-w-[9.5rem]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1095,7 +1101,7 @@ export function SaasExchange() {
                     />
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-start gap-2 sm:items-center">
                   <Switch
                     id="rate-auto"
                     checked={!!rateForm.autoUpdate}
@@ -1105,7 +1111,7 @@ export function SaasExchange() {
                     Авто-курс с рынка (если пара торгуется на Binance/ЦБ)
                   </Label>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button onClick={saveRate} disabled={savingRate}>
                     <SaveIcon className="size-4" /> {savingRate ? "Сохраняем…" : "Сохранить"}
                   </Button>
@@ -1125,62 +1131,124 @@ export function SaasExchange() {
 
           {/* Активные курсы (справочно) */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardHeader className="flex flex-col items-start gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="text-base">Активные курсы</CardTitle>
-              <Button variant="outline" size="sm" onClick={refreshRates} disabled={refreshing}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshRates}
+                disabled={refreshing}
+                className="w-full sm:w-auto"
+              >
                 <RefreshCwIcon className="size-4" /> Обновить с рынка
               </Button>
             </CardHeader>
             <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Актив</TableHead>
-                    <TableHead>Сеть</TableHead>
-                    <TableHead>Режим</TableHead>
-                    <TableHead>Базовый</TableHead>
-                    <TableHead>Авто</TableHead>
-                    <TableHead>Маржа %</TableHead>
-                    <TableHead>Лимиты</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rates.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center text-muted-foreground">
-                        Курсы не настроены — получите курс с рынка выше
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {rates.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-medium">
-                        {r.asset}→{r.quoteAsset}
-                      </TableCell>
-                      <TableCell>{r.network || "—"}</TableCell>
-                      <TableCell>{r.quoteMode}</TableCell>
-                      <TableCell>{r.baseRate}</TableCell>
-                      <TableCell>
+              <div className="space-y-2 px-4 pb-4 sm:hidden">
+                {rates.length === 0 && (
+                  <p className="rounded-lg border px-3 py-4 text-center text-sm text-muted-foreground">
+                    Курсы не настроены — получите курс с рынка выше
+                  </p>
+                )}
+                {rates.map((r) => (
+                  <div key={r.id} className="rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">
+                          {r.asset} → {r.quoteAsset}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {r.network || "сеть —"} · {r.quoteMode}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeRate(r.id)}
+                        className="size-8 shrink-0 p-0"
+                        aria-label="Удалить курс"
+                      >
+                        <Trash2Icon className="size-4 text-destructive" />
+                      </Button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <div className="text-xs text-muted-foreground">Базовый</div>
+                        <div className="font-medium">{r.baseRate}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Маржа</div>
+                        <div className="font-medium">{r.marginPct}%</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Авто</div>
                         {r.autoUpdate ? (
                           <Badge variant="success">рынок</Badge>
                         ) : (
                           <Badge variant="outline">ручной</Badge>
                         )}
-                      </TableCell>
-                      <TableCell>{r.marginPct}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {r.minAmountFrom ?? "—"} / {r.maxAmountFrom ?? "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => removeRate(r.id)}>
-                          <Trash2Icon className="size-4 text-destructive" />
-                        </Button>
-                      </TableCell>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Лимиты</div>
+                        <div className="font-medium">
+                          {r.minAmountFrom ?? "—"} / {r.maxAmountFrom ?? "—"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden sm:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Актив</TableHead>
+                      <TableHead>Сеть</TableHead>
+                      <TableHead>Режим</TableHead>
+                      <TableHead>Базовый</TableHead>
+                      <TableHead>Авто</TableHead>
+                      <TableHead>Маржа %</TableHead>
+                      <TableHead>Лимиты</TableHead>
+                      <TableHead />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {rates.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center text-muted-foreground">
+                          Курсы не настроены — получите курс с рынка выше
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {rates.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell className="font-medium">
+                          {r.asset}→{r.quoteAsset}
+                        </TableCell>
+                        <TableCell>{r.network || "—"}</TableCell>
+                        <TableCell>{r.quoteMode}</TableCell>
+                        <TableCell>{r.baseRate}</TableCell>
+                        <TableCell>
+                          {r.autoUpdate ? (
+                            <Badge variant="success">рынок</Badge>
+                          ) : (
+                            <Badge variant="outline">ручной</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>{r.marginPct}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {r.minAmountFrom ?? "—"} / {r.maxAmountFrom ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="sm" onClick={() => removeRate(r.id)}>
+                            <Trash2Icon className="size-4 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -1274,11 +1342,11 @@ export function SaasExchange() {
             </CardHeader>
             <CardContent className="space-y-4">
               {visibleRequisites.length > 0 ? (
-                <ul className="space-y-1.5">
+                <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   {visibleRequisites.map((r) => (
                     <li
                       key={r.key}
-                      className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                      className="flex min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-sm"
                     >
                       <CheckIcon className="size-4 shrink-0 text-[var(--success)]" />
                       <span className="shrink-0 font-medium">{requisiteLabel(r.key)}:</span>
@@ -1297,19 +1365,19 @@ export function SaasExchange() {
                 </p>
               )}
 
-              <div className="grid gap-3 xl:grid-cols-2">
+              <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                 {REQUISITE_GROUPS.map((group) => {
                   const groupHasSavedValue = group.fields.some((field) => {
                     const saved = savedByKey.get(field.key);
                     return Boolean(saved?.value || saved?.hasValue);
                   });
                   return (
-                    <div key={group.title} className="space-y-3 rounded-md border p-3">
+                    <div key={group.title} className="space-y-3 rounded-md border p-4">
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-medium text-sm">{group.title}</div>
                         {groupHasSavedValue && <Badge variant="outline">сохранено</Badge>}
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                         {group.fields.map((item) => {
                           const saved = savedByKey.get(item.key);
                           const current = reqValues[item.key] ?? "";
@@ -1591,7 +1659,7 @@ function OrderRow({
           value={order.paymentMethod ?? "none"}
           onValueChange={(v) => onPatch(order.id, { paymentMethod: v === "none" ? null : v })}
         >
-          <SelectTrigger className="h-7 w-36">
+          <SelectTrigger className="h-7 w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -1619,7 +1687,7 @@ function OrderRow({
           value={order.payoutMethod ?? "none"}
           onValueChange={(v) => onPatch(order.id, { payoutMethod: v === "none" ? null : v })}
         >
-          <SelectTrigger className="h-7 w-36">
+          <SelectTrigger className="h-7 w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
