@@ -856,14 +856,14 @@ describe("Exchange workflow fixtures", () => {
 		expect(row.proofJson).toContain('"verifiedOk":false');
 	});
 
-	// A3: бот читает бизнес-настройки (часы/контакт/выдача/KYC/адрес) из секретов.
+	// A3: бот читает бизнес-настройки (часы/контакт/выдача/KYC/адреса офисов) из секретов.
 	it("get_exchange_business_info returns configured settings (A3)", async () => {
 		if (!sql) return;
 		const now = Math.floor(Date.now() / 1000);
 		for (const [key, value] of [
 			["exchange_working_hours", "Пн–Вс 09:00–21:00"],
 			["exchange_operator_contact", "@phuket_operator"],
-			["exchange_office_address", "Бангтао, Soi 5"],
+			["exchange_office_address", "Бангтао — Soi 5\nПатонг — Jungceylon, 1 этаж"],
 		] as const) {
 			await setEncryptedSecret({ db, tenantId, key, value, masterKeyHex: MASTER_KEY, nowEpoch: now });
 		}
@@ -877,7 +877,8 @@ describe("Exchange workflow fixtures", () => {
 		)) as Record<string, unknown>;
 		expect(info.workingHours).toBe("Пн–Вс 09:00–21:00");
 		expect(info.operatorContact).toBe("@phuket_operator");
-		expect(info.officeAddress).toBe("Бангтао, Soi 5");
+		expect(info.officeAddress).toBe("Бангтао — Soi 5\nПатонг — Jungceylon, 1 этаж");
+		expect(info.officeAddresses).toEqual(["Бангтао — Soi 5", "Патонг — Jungceylon, 1 этаж"]);
 	});
 
 	// A4: срабатывание rate-guard вызывает алерт владельцу (notifyRateGuard).
