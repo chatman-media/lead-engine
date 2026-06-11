@@ -739,6 +739,7 @@ describe("processInbound", () => {
 				"from",
 				"where",
 				"innerJoin",
+				"leftJoin",
 				"orderBy",
 				"limit",
 				"set",
