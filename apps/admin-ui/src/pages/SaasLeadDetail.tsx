@@ -275,6 +275,8 @@ export function SaasLeadDetail() {
   // Verification state
   const [revokingVerification, setRevokingVerification] = useState(false);
   const [confirmRevokeVerification, setConfirmRevokeVerification] = useState(false);
+  const [unblockingVerification, setUnblockingVerification] = useState(false);
+  const [confirmUnblockVerification, setConfirmUnblockVerification] = useState(false);
 
   // Contact ban state
   const [banningContact, setBanningContact] = useState(false);
@@ -481,6 +483,20 @@ export function SaasLeadDetail() {
       onAuthError(err);
     } finally {
       setBanningContact(false);
+    }
+  }
+
+  async function handleUnblockVerification() {
+    if (!id) return;
+    setConfirmUnblockVerification(false);
+    setUnblockingVerification(true);
+    try {
+      await saas.unblockLeadVerification(Number(id));
+      reload();
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setUnblockingVerification(false);
     }
   }
 
@@ -1042,8 +1058,12 @@ export function SaasLeadDetail() {
             attributesJson={contact?.attributesJson ?? null}
             confirmRevoke={confirmRevokeVerification}
             revoking={revokingVerification}
+            confirmUnblock={confirmUnblockVerification}
+            unblocking={unblockingVerification}
             onConfirmRevokeChange={setConfirmRevokeVerification}
             onRevoke={handleRevokeVerification}
+            onConfirmUnblockChange={setConfirmUnblockVerification}
+            onUnblock={handleUnblockVerification}
           />
           <LeadContactBanCard
             attributesJson={contact?.attributesJson ?? null}
@@ -1284,14 +1304,22 @@ function LeadVerificationCard({
   attributesJson,
   confirmRevoke = false,
   revoking = false,
+  confirmUnblock = false,
+  unblocking = false,
   onConfirmRevokeChange,
   onRevoke,
+  onConfirmUnblockChange,
+  onUnblock,
 }: {
   attributesJson: string | null;
   confirmRevoke?: boolean;
   revoking?: boolean;
+  confirmUnblock?: boolean;
+  unblocking?: boolean;
   onConfirmRevokeChange?: (value: boolean) => void;
   onRevoke?: () => void;
+  onConfirmUnblockChange?: (value: boolean) => void;
+  onUnblock?: () => void;
 }) {
   if (!attributesJson) return null;
   let attrs: Record<string, unknown> = {};
@@ -1320,6 +1348,7 @@ function LeadVerificationCard({
   const reviewedAt = typeof kyc.reviewedAt === "number" ? kyc.reviewedAt : null;
   const canRevoke =
     onRevoke && (status === "verified" || kyc.verified === true || attrs.isVerified === true);
+  const canUnblock = onUnblock && (status === "rejected" || status === "revoked");
 
   return (
     <Card>
@@ -1369,9 +1398,9 @@ function LeadVerificationCard({
             <span>{attrs.passport_expiry}</span>
           </div>
         )}
-        {canRevoke && (
+        {(canRevoke || canUnblock) && (
           <div className="border-t pt-3">
-            {confirmRevoke ? (
+            {canRevoke && confirmRevoke ? (
               <div className="flex items-center justify-between gap-2">
                 <span className="text-destructive text-xs">Отозвать KYC?</span>
                 <div className="flex items-center gap-1">
@@ -1388,12 +1417,46 @@ function LeadVerificationCard({
                   </Button>
                 </div>
               </div>
+            ) : canUnblock && confirmUnblock ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">Снять KYC-блокировку?</span>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" onClick={onUnblock} disabled={unblocking}>
+                    Да
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onConfirmUnblockChange?.(false)}
+                    disabled={unblocking}
+                  >
+                    Нет
+                  </Button>
+                </div>
+              </div>
+            ) : canUnblock ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full justify-start gap-2"
+                onClick={() => {
+                  onConfirmRevokeChange?.(false);
+                  onConfirmUnblockChange?.(true);
+                }}
+                disabled={unblocking}
+              >
+                <ShieldOffIcon className="size-3.5" />
+                Снять блокировку
+              </Button>
             ) : (
               <Button
                 size="sm"
                 variant="outline"
                 className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => onConfirmRevokeChange?.(true)}
+                onClick={() => {
+                  onConfirmUnblockChange?.(false);
+                  onConfirmRevokeChange?.(true);
+                }}
                 disabled={revoking}
               >
                 <ShieldOffIcon className="size-3.5" />

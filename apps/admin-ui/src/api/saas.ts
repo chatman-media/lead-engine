@@ -2963,6 +2963,15 @@ export const saas = {
       { method: "POST" },
     );
   },
+  unblockLeadVerification(id: number) {
+    return request<{
+      ok: boolean;
+      contactId: number;
+      status: string;
+      attributesCleared: boolean;
+      ordersPatched: number;
+    }>(`/api/admin/leads/${id}/verification/unblock`, { method: "POST" });
+  },
   getLeadKbGuidance(id: number) {
     return request<LeadKbGuidance>(`/api/admin/leads/${id}/kb-guidance`);
   },
