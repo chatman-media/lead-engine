@@ -35,10 +35,17 @@ import {
   UsersIcon,
   ZapIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { type Admin, clearToken, type FunnelListItem, saas, type Tenant } from "@/api/saas";
+import {
+  type Admin,
+  clearToken,
+  type DashboardStats,
+  type FunnelListItem,
+  saas,
+  type Tenant,
+} from "@/api/saas";
 import { CopilotDock } from "@/components/copilot";
 import { ModeToggle } from "@/components/mode-toggle";
 import { useTheme } from "@/components/theme-provider";
@@ -58,6 +65,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { type AdminEvent, useAdminEvents } from "@/hooks/useAdminEvents";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -162,6 +170,23 @@ function visibleNavItems(
   });
 }
 
+type NewMessageEvent = Extract<AdminEvent, { type: "new_message" }>;
+type BadgeTone = "message" | "warning";
+
+function formatNotificationPreview(preview: string | null): string {
+  const text = preview?.trim();
+  if (!text) return "Медиа или вложение";
+  return text;
+}
+
+function newMessageTitle(event: NewMessageEvent): string {
+  return event.contactId > 0 ? `Новое сообщение · контакт #${event.contactId}` : "Новое сообщение";
+}
+
+function countBadgeLabel(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
+
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
     <Link
@@ -187,16 +212,21 @@ function NavItemLink({
   item,
   collapsed,
   badge,
+  badgeTone = "warning",
   onNavigate,
 }: {
   item: NavItem;
   collapsed: boolean;
   badge?: number | null;
+  badgeTone?: BadgeTone;
   onNavigate?: () => void;
 }) {
   const { pathname } = useLocation();
   const active = pathname === item.to || pathname.startsWith(`${item.to}/`);
   const { icon: Icon, label, to } = item;
+  const hasBadge = (badge ?? 0) > 0;
+  const badgeClass =
+    badgeTone === "message" ? "bg-primary text-primary-foreground" : "bg-amber-500 text-white";
 
   const link = (
     <NavLink
@@ -217,15 +247,20 @@ function NavItemLink({
       {!collapsed && (
         <>
           <span className="flex-1">{label}</span>
-          {(badge ?? 0) > 0 && (
-            <span className="ml-auto grid min-w-[18px] place-items-center rounded-full bg-amber-500 px-1 py-0.5 text-[10px] font-bold leading-none text-white">
-              {badge}
+          {hasBadge && (
+            <span
+              className={cn(
+                "ml-auto grid min-w-[18px] place-items-center rounded-full px-1 py-0.5 text-[10px] font-bold leading-none",
+                badgeClass,
+              )}
+            >
+              {countBadgeLabel(badge ?? 0)}
             </span>
           )}
         </>
       )}
-      {collapsed && (badge ?? 0) > 0 && (
-        <span className="absolute right-1 top-1 size-2 rounded-full bg-amber-500" />
+      {collapsed && hasBadge && (
+        <span className={cn("absolute right-1 top-1 size-2 rounded-full", badgeClass)} />
       )}
     </NavLink>
   );
@@ -237,7 +272,11 @@ function NavItemLink({
       <TooltipTrigger asChild>{link}</TooltipTrigger>
       <TooltipContent side="right" className="text-xs">
         {label}
-        {(badge ?? 0) > 0 && <span className="ml-1 text-amber-500">({badge})</span>}
+        {hasBadge && (
+          <span className={cn("ml-1", badgeTone === "message" ? "text-primary" : "text-amber-500")}>
+            ({countBadgeLabel(badge ?? 0)})
+          </span>
+        )}
       </TooltipContent>
     </Tooltip>
   );
@@ -245,14 +284,16 @@ function NavItemLink({
 
 function NavLinks({
   onNavigate,
-  escalatedCount,
+  conversationBadge,
+  conversationBadgeTone,
   collapsed,
   hasExchangeWorkflow,
   isExchangeTenant,
   isSuperadmin,
 }: {
   onNavigate?: () => void;
-  escalatedCount?: number;
+  conversationBadge?: number;
+  conversationBadgeTone?: BadgeTone;
   collapsed: boolean;
   isSuperadmin?: boolean;
   hasExchangeWorkflow?: boolean;
@@ -291,7 +332,8 @@ function NavLinks({
               key={item.to}
               item={item}
               collapsed={collapsed}
-              badge={item.to === "/conversations" ? escalatedCount : null}
+              badge={item.to === "/conversations" ? conversationBadge : null}
+              badgeTone={conversationBadgeTone}
               onNavigate={onNavigate}
             />
           ))}
@@ -425,7 +467,8 @@ function SidebarBody({
   tenant,
   onLogout,
   onNavigate,
-  escalatedCount,
+  conversationBadge,
+  conversationBadgeTone,
   collapsed,
   onToggleCollapse,
   hasExchangeWorkflow,
@@ -436,7 +479,8 @@ function SidebarBody({
   tenant: Tenant | null;
   onLogout: () => void;
   onNavigate?: () => void;
-  escalatedCount?: number;
+  conversationBadge?: number;
+  conversationBadgeTone?: BadgeTone;
   collapsed: boolean;
   onToggleCollapse?: () => void;
   hasExchangeWorkflow?: boolean;
@@ -494,7 +538,8 @@ function SidebarBody({
         )}
         <NavLinks
           onNavigate={onNavigate}
-          escalatedCount={escalatedCount}
+          conversationBadge={conversationBadge}
+          conversationBadgeTone={conversationBadgeTone}
           collapsed={collapsed}
           hasExchangeWorkflow={hasExchangeWorkflow}
           isExchangeTenant={isExchangeTenant}
@@ -594,7 +639,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isExchangeTenant, setIsExchangeTenant] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [escalatedCount, setEscalatedCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === "true");
+  const conversationBadge = unreadCount > 0 ? unreadCount : escalatedCount;
+  const conversationBadgeTone: BadgeTone = unreadCount > 0 ? "message" : "warning";
 
   function toggleCollapse() {
     setCollapsed((v) => {
@@ -642,28 +690,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Poll for escalated conversations every 30s; show toast on new escalations.
+  // Poll counters every 30s; SSE below makes new messages visible immediately.
   const prevEscalatedRef = useRef<number | null>(null);
+  const applyDashboardStats = useCallback(
+    (stats: DashboardStats, notifyEscalations: boolean) => {
+      const n = stats.conversations.escalated;
+      setEscalatedCount(n);
+      setUnreadCount(stats.conversations.unread ?? 0);
+      if (notifyEscalations && prevEscalatedRef.current !== null && n > prevEscalatedRef.current) {
+        const delta = n - prevEscalatedRef.current;
+        toast.warning(
+          delta === 1 ? "Новый диалог ждёт оператора" : `${delta} новых диалога ждут оператора`,
+          {
+            description: "Перейдите в Диалоги чтобы ответить",
+            action: { label: "Перейти", onClick: () => navigate("/conversations") },
+            duration: 8000,
+          },
+        );
+      }
+      prevEscalatedRef.current = n;
+    },
+    [navigate],
+  );
+
   useEffect(() => {
     let cancelled = false;
     async function poll() {
       try {
         const stats = await saas.getDashboardStats();
         if (cancelled) return;
-        const n = stats.conversations.escalated;
-        setEscalatedCount(n);
-        if (prevEscalatedRef.current !== null && n > prevEscalatedRef.current) {
-          const delta = n - prevEscalatedRef.current;
-          toast.warning(
-            delta === 1 ? "Новый диалог ждёт оператора" : `${delta} новых диалога ждут оператора`,
-            {
-              description: "Перейдите в Диалоги чтобы ответить",
-              action: { label: "Перейти", onClick: () => navigate("/conversations") },
-              duration: 8000,
-            },
-          );
-        }
-        prevEscalatedRef.current = n;
+        applyDashboardStats(stats, true);
       } catch {
         // ignore — no auth yet or network error
       }
@@ -674,7 +730,41 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [applyDashboardStats]);
+
+  useEffect(() => {
+    if (!/^\/conversations\/\d+$/.test(pathname)) return;
+    let cancelled = false;
+    const id = setTimeout(() => {
+      saas
+        .getDashboardStats()
+        .then((stats) => {
+          if (!cancelled) applyDashboardStats(stats, false);
+        })
+        .catch(() => {});
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [applyDashboardStats, pathname]);
+
+  useAdminEvents((event) => {
+    if (event.type === "new_message") {
+      if (event.role && event.role !== "user") return;
+      const target = `/conversations/${event.conversationId}`;
+      const visibleCurrentThread = pathname === target && document.visibilityState === "visible";
+      if (!visibleCurrentThread) setUnreadCount((count) => count + 1);
+      if (visibleCurrentThread) return;
+      toast.info(newMessageTitle(event), {
+        description: formatNotificationPreview(event.preview),
+        action: { label: "Открыть", onClick: () => navigate(target) },
+        duration: document.visibilityState === "hidden" ? 20_000 : 12_000,
+      });
+    } else if (event.type === "stage_changed") {
+      toast.info(`Стадия изменена → ${event.toStageDisplayName}`, { duration: 3000 });
+    }
+  });
 
   async function handleLogout() {
     try {
@@ -699,7 +789,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             admin={admin}
             tenant={tenant}
             onLogout={handleLogout}
-            escalatedCount={escalatedCount}
+            conversationBadge={conversationBadge}
+            conversationBadgeTone={conversationBadgeTone}
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
             hasExchangeWorkflow={hasExchangeWorkflow}
@@ -723,7 +814,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   tenant={tenant}
                   onLogout={handleLogout}
                   onNavigate={() => setMobileOpen(false)}
-                  escalatedCount={escalatedCount}
+                  conversationBadge={conversationBadge}
+                  conversationBadgeTone={conversationBadgeTone}
                   collapsed={false}
                   hasExchangeWorkflow={hasExchangeWorkflow}
                   isExchangeTenant={isExchangeTenant}

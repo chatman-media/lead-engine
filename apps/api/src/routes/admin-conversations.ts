@@ -401,7 +401,8 @@ export function makeAdminConversationsRoutes(
       tenantId,
       conversationId,
       contactId: 0,
-      preview: text.slice(0, 80),
+      preview: text.slice(0, 180),
+      role: "human",
     });
 
     return c.json({

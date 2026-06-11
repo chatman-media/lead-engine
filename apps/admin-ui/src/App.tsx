@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
-import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { CopilotProvider } from "@/components/copilot";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { getToken, saas } from "./api/saas.ts";
-import { useAdminEvents } from "./hooks/useAdminEvents.ts";
 import { SaasAcceptInvite } from "./pages/SaasAcceptInvite.tsx";
 import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasBilling } from "./pages/SaasBilling.tsx";
@@ -139,17 +137,6 @@ function RequireSuperadmin() {
 }
 
 function ShellLayout() {
-  useAdminEvents((event) => {
-    if (event.type === "new_message") {
-      toast.info("Новое сообщение", {
-        description: event.preview ?? undefined,
-        duration: 4000,
-      });
-    } else if (event.type === "stage_changed") {
-      toast.info(`Стадия изменена → ${event.toStageDisplayName}`, { duration: 3000 });
-    }
-  });
-
   return (
     <AppShell>
       <Outlet />

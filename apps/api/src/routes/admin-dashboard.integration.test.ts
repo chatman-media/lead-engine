@@ -5,6 +5,7 @@ import { withTenant } from "@chatman-media/conversation-engine";
 import {
   applyAllMigrations,
   contacts,
+  conversations,
   createIsolatedDb,
   funnels,
   leads,
@@ -78,7 +79,7 @@ async function get(withAuth = true): Promise<Response> {
 
 interface Dash {
   leads: { total: number; byStage: Array<{ slug: string; count: number }> };
-  conversations: { open: number; escalated: number; today: number };
+  conversations: { open: number; escalated: number; today: number; unread: number };
   messages: { last7days: number };
 }
 
@@ -95,8 +96,32 @@ describe("admin-dashboard", () => {
     const d = (await res.json()) as Dash;
     expect(d.leads.total).toBe(0);
     expect(d.leads.byStage).toEqual([]);
-    expect(d.conversations).toEqual({ open: 0, escalated: 0, today: 0 });
+    expect(d.conversations).toEqual({ open: 0, escalated: 0, today: 0, unread: 0 });
     expect(d.messages.last7days).toBe(0);
+  });
+
+  it("считает непрочитанные сообщения по диалогам", async () => {
+    if (!sql) return;
+    await withTenant(db, tenantId, async (tx) => {
+      const now = Math.floor(Date.now() / 1000);
+      const [contact] = await tx
+        .insert(contacts)
+        .values({ tenantId, displayName: "Unread Client" })
+        .returning({ id: contacts.id });
+
+      await tx.insert(conversations).values({
+        tenantId,
+        userId: contact!.id,
+        source: "bot",
+        mode: "ai",
+        unreadCount: 3,
+        createdAt: now,
+        lastMessageAt: now,
+      });
+    });
+
+    const d = (await (await get()).json()) as Dash;
+    expect(d.conversations.unread).toBe(3);
   });
 
   it("со стадией → byStage содержит запись (count 0)", async () => {
