@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { TgUpdate } from "@chatman-media/channel-telegram";
 import {
+	adminNotifications,
 	auditLog,
 	channelIdentities,
 	channels,
@@ -264,6 +265,7 @@ function makeSendDraftDb(
 		if (table === messages) return "messages";
 		if (table === outboundQueue) return "outbound_queue";
 		if (table === auditLog) return "audit_log";
+		if (table === adminNotifications) return "admin_notifications";
 		if (table === channels) return "channels";
 		if (table === stageDefinitions) return "stage_definitions";
 		if (table === funnels) return "funnels";
@@ -1932,7 +1934,7 @@ describe("operator action callbacks", () => {
 			telegramChatId: "777",
 		});
 		const repo = new FakeRepo(settings);
-		const { audits, db, inserts, lead, order, contactAttributes } =
+		const { audits, db, inserts, lead, order, contactAttributes, updates } =
 			makeSendDraftDb({
 				contactAttributesJson: JSON.stringify({
 					city: "Bangkok",
@@ -2007,6 +2009,14 @@ describe("operator action callbacks", () => {
 			state: "risk_review",
 			stageDefinitionId: 31,
 		});
+		expect(updates).toEqual(
+			expect.arrayContaining([
+				{
+					table: "admin_notifications",
+					values: { readAt: 123 },
+				},
+			]),
+		);
 
 		const leadEvent = inserts.find(
 			(row) => row.table === "lead_events",
