@@ -1946,6 +1946,7 @@ export interface DashboardStats {
     open: number;
     escalated: number;
     today: number;
+    unread: number;
   };
   messages: {
     last7days: number;

@@ -8,6 +8,7 @@ function newMessageEvent(tenantId: number, conversationId = 1): AdminEvent {
 		conversationId,
 		contactId: 10,
 		preview: "hello",
+		role: "user",
 	};
 }
 

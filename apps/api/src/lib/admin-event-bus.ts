@@ -1,5 +1,12 @@
 export type AdminEvent =
-  | { type: "new_message"; tenantId: number; conversationId: number; contactId: number; preview: string | null }
+  | {
+      type: "new_message";
+      tenantId: number;
+      conversationId: number;
+      contactId: number;
+      preview: string | null;
+      role: "user" | "assistant" | "human";
+    }
   | { type: "stage_changed"; tenantId: number; leadId: number; toStage: string; toStageDisplayName: string }
   | { type: "conversation_mode"; tenantId: number; conversationId: number; mode: string };
 

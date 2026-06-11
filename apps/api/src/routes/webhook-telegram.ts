@@ -315,7 +315,8 @@ export function makeTelegramWebhookRoutes(opts: {
         tenantId: entry.tenantId,
         conversationId: result.conversationId,
         contactId: result.contactId,
-        preview: preview?.text.slice(0, 80) ?? null,
+        preview: preview?.text.slice(0, 180) ?? null,
+        role: "user",
       });
     }
 
