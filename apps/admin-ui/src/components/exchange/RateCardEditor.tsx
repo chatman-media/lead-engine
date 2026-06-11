@@ -15,6 +15,12 @@ function formatRate(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function formatSignedPercent(n: number): string {
+  const rounded = Number.isFinite(n) ? round(n, 2) : 0;
+  const normalized = Object.is(rounded, -0) ? 0 : rounded;
+  return `${normalized >= 0 ? "+" : "-"} ${Math.abs(normalized).toFixed(2)}%`;
+}
+
 function formatAmount(n: number | null): string {
   if (n === null || !Number.isFinite(n)) return "";
   return new Intl.NumberFormat("ru-RU", {
@@ -46,8 +52,7 @@ function nonNegative(n: number): number {
 }
 
 function formatFormula(marketRate: number, deviationPct: number, displayRate: number): string {
-  const sign = deviationPct >= 0 ? "+" : "-";
-  return `${formatRate(marketRate)} ${sign} ${formatRate(Math.abs(deviationPct))}% = ${formatRate(displayRate)}`;
+  return `${formatRate(marketRate)} ${formatSignedPercent(deviationPct)} = ${formatRate(displayRate)}`;
 }
 
 function normalizeTier(
