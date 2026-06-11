@@ -1,3 +1,10 @@
+# [@chatman-media/verticals-v1.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.3.0...@chatman-media/verticals-v1.4.0) (2026-06-11)
+
+
+### Features
+
+* **exchange:** per-tenant quote currency (PHP default) + three-funnel client setup ([#552](https://github.com/chatman-media/lead-engine/issues/552)) ([a0afbe4](https://github.com/chatman-media/lead-engine/commit/a0afbe420791ef11e8bd90ccfba9c03065a67c45)), closes [#workflow](https://github.com/chatman-media/lead-engine/issues/workflow) [#services](https://github.com/chatman-media/lead-engine/issues/services)
+
 # [@chatman-media/verticals-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.2.0...@chatman-media/verticals-v1.3.0) (2026-06-10)
 
 
