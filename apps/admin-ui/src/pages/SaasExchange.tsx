@@ -831,8 +831,8 @@ export function SaasExchange() {
               <CardTitle className="text-base">Курсы обмена по диапазонам</CardTitle>
               <p className="text-sm text-muted-foreground">
                 Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои курсы
-                по диапазонам сумм — отдельно для рублей и USDT (как на табло). Бот выдаёт клиенту
-                ровно эти значения.
+                по диапазонам сумм — отдельно для рублей и USDT (как на табло). Система сохраняет
+                отклонение от рынка и обновляет значения вместе с рынком.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
