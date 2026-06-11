@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.2.0...@chatman-media/conversation-engine-v3.3.0) (2026-06-11)
+
+
+### Features
+
+* **exchange:** retry unbacked-quote replies instead of stubbing to operator ([#553](https://github.com/chatman-media/lead-engine/issues/553)) ([0c7f887](https://github.com/chatman-media/lead-engine/commit/0c7f887ebbc0c10bcb90d4309bdcda0ac5a98c9a))
+
 # [@chatman-media/conversation-engine-v3.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.1.1...@chatman-media/conversation-engine-v3.2.0) (2026-06-11)
 
 
