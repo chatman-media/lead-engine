@@ -96,6 +96,7 @@ export interface ServiceRequestMatch {
 interface StageTarget {
 	stageId: number | null;
 	stageSlug: string;
+	funnelId: number | null;
 }
 
 interface PendingWebhook {
@@ -231,10 +232,15 @@ export function makeServiceCatalogRuntime(
 			const catalog = await loadCatalog(input.db, input.tenantId);
 			if (catalog.length === 0) return { created: [], skipped: [] };
 
+			const heuristicMatches = deterministicCatalogMatches(text, catalog);
+			const heuristicRequestTypes = new Set(
+				heuristicMatches.map((match) => match.requestType),
+			);
 			const matches = await resolveMatches({
 				tenantId: input.tenantId,
 				text,
 				catalog,
+				heuristic: heuristicMatches,
 				resolveChat: deps.resolveChat,
 			});
 			if (matches.length === 0) return { created: [], skipped: [] };
@@ -245,17 +251,47 @@ export function makeServiceCatalogRuntime(
 				const created: ServiceCatalogRuntimeResult["created"] = [];
 				const skipped: ServiceCatalogRuntimeResult["skipped"] = [];
 				const epoch = now();
+				const hasAnyOpenLead = await hasAnyOpenLeadForContact({
+					tx,
+					tenantId: input.tenantId,
+					contactId: input.contactId,
+				});
 
 				for (const match of matches) {
 					const item = bySlug.get(match.serviceSlug);
 					if (!item) continue;
+					if (
+						hasAnyOpenLead &&
+						match.source === "llm" &&
+						!heuristicRequestTypes.has(match.requestType)
+					) {
+						skipped.push({
+							serviceSlug: item.slug,
+							reason: "llm_uncorroborated_active_request",
+						});
+						continue;
+					}
+
+					const target = await resolveStageTarget(tx, input.tenantId, item);
 					const existing = await findOpenLeadForRequest({
 						tx,
 						tenantId: input.tenantId,
 						contactId: input.contactId,
 						requestType: match.requestType,
+						targetFunnelId: explicitTargetFunnelId(item, target),
 					});
 					if (existing) {
+						if (!existing.requestType) {
+							await tx
+								.update(leads)
+								.set({ requestType: match.requestType, updatedAt: epoch })
+								.where(
+									and(
+										eq(leads.tenantId, input.tenantId),
+										eq(leads.id, existing.id),
+									),
+								);
+						}
 						skipped.push({
 							serviceSlug: item.slug,
 							reason: "open_request_exists",
@@ -263,7 +299,6 @@ export function makeServiceCatalogRuntime(
 						continue;
 					}
 
-					const target = await resolveStageTarget(tx, input.tenantId, item);
 					const intake = buildIntake({
 						item,
 						match,
@@ -513,9 +548,11 @@ async function resolveMatches(opts: {
 	tenantId: number;
 	text: string;
 	catalog: CatalogRow[];
+	heuristic?: ServiceRequestMatch[];
 	resolveChat?: (tenantId: number) => ChatClient | null;
 }): Promise<ServiceRequestMatch[]> {
-	const heuristic = deterministicCatalogMatches(opts.text, opts.catalog);
+	const heuristic =
+		opts.heuristic ?? deterministicCatalogMatches(opts.text, opts.catalog);
 	const chat = opts.resolveChat?.(opts.tenantId) ?? null;
 	if (!chat) return heuristic;
 
@@ -592,7 +629,41 @@ async function findOpenLeadForRequest(opts: {
 	tenantId: number;
 	contactId: number;
 	requestType: string;
-}): Promise<{ id: number } | null> {
+	targetFunnelId?: number | null;
+}): Promise<{ id: number; requestType: string | null } | null> {
+	const [row] = await opts.tx
+		.select({ id: leads.id, requestType: leads.requestType })
+		.from(leads)
+		.leftJoin(
+			stageDefinitions,
+			eq(leads.stageDefinitionId, stageDefinitions.id),
+		)
+		.where(
+			and(
+				eq(leads.tenantId, opts.tenantId),
+				eq(leads.userId, opts.contactId),
+				opts.targetFunnelId
+					? or(
+							eq(leads.requestType, opts.requestType),
+							eq(stageDefinitions.funnelId, opts.targetFunnelId),
+						)
+					: eq(leads.requestType, opts.requestType),
+				or(
+					isNull(stageDefinitions.kind),
+					notInArray(stageDefinitions.kind, ["terminal_won", "terminal_lost"]),
+				),
+			),
+		)
+		.orderBy(desc(leads.updatedAt))
+		.limit(1);
+	return row ?? null;
+}
+
+async function hasAnyOpenLeadForContact(opts: {
+	tx: Db;
+	tenantId: number;
+	contactId: number;
+}): Promise<boolean> {
 	const [row] = await opts.tx
 		.select({ id: leads.id })
 		.from(leads)
@@ -604,16 +675,24 @@ async function findOpenLeadForRequest(opts: {
 			and(
 				eq(leads.tenantId, opts.tenantId),
 				eq(leads.userId, opts.contactId),
-				eq(leads.requestType, opts.requestType),
 				or(
 					isNull(stageDefinitions.kind),
 					notInArray(stageDefinitions.kind, ["terminal_won", "terminal_lost"]),
 				),
 			),
 		)
-		.orderBy(desc(leads.updatedAt))
 		.limit(1);
-	return row ?? null;
+	return Boolean(row);
+}
+
+function explicitTargetFunnelId(
+	item: CatalogRow,
+	target: StageTarget,
+): number | null {
+	if (item.routeType === "funnel" && item.funnelId) return target.funnelId;
+	if (item.partnerServiceFunnelId) return target.funnelId;
+	if (item.partnerServiceStageDefinitionId) return target.funnelId;
+	return null;
 }
 
 async function resolveStageTarget(
@@ -631,6 +710,7 @@ async function resolveStageTarget(
 			.select({
 				stageId: stageDefinitions.id,
 				stageSlug: stageDefinitions.slug,
+				funnelId: stageDefinitions.funnelId,
 			})
 			.from(stageDefinitions)
 			.where(
@@ -640,7 +720,12 @@ async function resolveStageTarget(
 				),
 			)
 			.limit(1);
-		if (stage) return { stageId: stage.stageId, stageSlug: stage.stageSlug };
+		if (stage)
+			return {
+				stageId: stage.stageId,
+				stageSlug: stage.stageSlug,
+				funnelId: stage.funnelId,
+			};
 	}
 
 	if (item.partnerServiceFunnelId) {
@@ -653,7 +738,11 @@ async function resolveStageTarget(
 	}
 
 	const [awaiting] = await tx
-		.select({ stageId: stageDefinitions.id, stageSlug: stageDefinitions.slug })
+		.select({
+			stageId: stageDefinitions.id,
+			stageSlug: stageDefinitions.slug,
+			funnelId: stageDefinitions.funnelId,
+		})
 		.from(stageDefinitions)
 		.innerJoin(funnels, eq(funnels.id, stageDefinitions.funnelId))
 		.where(
@@ -667,10 +756,18 @@ async function resolveStageTarget(
 		.orderBy(asc(stageDefinitions.position))
 		.limit(1);
 	if (awaiting)
-		return { stageId: awaiting.stageId, stageSlug: awaiting.stageSlug };
+		return {
+			stageId: awaiting.stageId,
+			stageSlug: awaiting.stageSlug,
+			funnelId: awaiting.funnelId,
+		};
 
 	const [first] = await tx
-		.select({ stageId: stageDefinitions.id, stageSlug: stageDefinitions.slug })
+		.select({
+			stageId: stageDefinitions.id,
+			stageSlug: stageDefinitions.slug,
+			funnelId: stageDefinitions.funnelId,
+		})
 		.from(stageDefinitions)
 		.innerJoin(funnels, eq(funnels.id, stageDefinitions.funnelId))
 		.where(
@@ -682,9 +779,18 @@ async function resolveStageTarget(
 		)
 		.orderBy(asc(stageDefinitions.position))
 		.limit(1);
-	if (first) return { stageId: first.stageId, stageSlug: first.stageSlug };
+	if (first)
+		return {
+			stageId: first.stageId,
+			stageSlug: first.stageSlug,
+			funnelId: first.funnelId,
+		};
 
-	return { stageId: null, stageSlug: `service_${item.slug}`.slice(0, 96) };
+	return {
+		stageId: null,
+		stageSlug: `service_${item.slug}`.slice(0, 96),
+		funnelId: null,
+	};
 }
 
 async function firstStageInFunnel(
@@ -693,7 +799,11 @@ async function firstStageInFunnel(
 	funnelId: number,
 ): Promise<StageTarget | null> {
 	const [stage] = await tx
-		.select({ stageId: stageDefinitions.id, stageSlug: stageDefinitions.slug })
+		.select({
+			stageId: stageDefinitions.id,
+			stageSlug: stageDefinitions.slug,
+			funnelId: stageDefinitions.funnelId,
+		})
 		.from(stageDefinitions)
 		.where(
 			and(
@@ -703,7 +813,13 @@ async function firstStageInFunnel(
 		)
 		.orderBy(asc(stageDefinitions.position))
 		.limit(1);
-	return stage ? { stageId: stage.stageId, stageSlug: stage.stageSlug } : null;
+	return stage
+		? {
+				stageId: stage.stageId,
+				stageSlug: stage.stageSlug,
+				funnelId: stage.funnelId,
+			}
+		: null;
 }
 
 async function writeFieldValues(opts: {
