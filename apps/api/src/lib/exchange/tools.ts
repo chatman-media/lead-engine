@@ -13,8 +13,8 @@
 
 import { type Db, getDecryptedSecret, QUOTE_CURRENCY, withTenant } from "@chatman-media/conversation-engine";
 import type { AnyRagTool } from "@chatman-media/kb";
-import { exchangeRates } from "@chatman-media/storage";
-import { and, eq } from "drizzle-orm";
+import { conversations, exchangeRates, funnels, leads, stageDefinitions } from "@chatman-media/storage";
+import { and, asc, desc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_TX_MAX_AGE_SECONDS, extractTxHash, verifyTronUsdt } from "./chain.ts";
 import {
@@ -75,6 +75,83 @@ function parseOfficeAddresses(value: string | null | undefined): string[] {
           .map((line) => line.trim())
           .filter(Boolean);
   return candidates.map((candidate) => candidate.replace(/\s*\r?\n\s*/g, "; "));
+}
+
+async function moveExchangeLeadToStage(opts: {
+  db: Db;
+  tenantId: number;
+  conversationId: number;
+  stageSlug: string;
+}): Promise<{ leadId: number; stageSlug: string; changed: boolean } | null> {
+  const { db, tenantId, conversationId, stageSlug } = opts;
+  const nowEpoch = Math.floor(Date.now() / 1000);
+
+  return withTenant(db, tenantId, async (tx) => {
+    const [lead] = await tx
+      .select({
+        id: leads.id,
+        state: leads.state,
+        stageDefinitionId: leads.stageDefinitionId,
+        currentPosition: stageDefinitions.position,
+        funnelId: stageDefinitions.funnelId,
+      })
+      .from(conversations)
+      .innerJoin(
+        leads,
+        and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)),
+      )
+      .leftJoin(stageDefinitions, eq(stageDefinitions.id, leads.stageDefinitionId))
+      .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
+      .orderBy(desc(leads.updatedAt), desc(leads.id))
+      .limit(1);
+    if (!lead) return null;
+
+    const targetWhere = lead.funnelId
+      ? and(
+          eq(stageDefinitions.tenantId, tenantId),
+          eq(stageDefinitions.funnelId, lead.funnelId),
+          eq(stageDefinitions.slug, stageSlug),
+        )
+      : and(
+          eq(stageDefinitions.tenantId, tenantId),
+          eq(stageDefinitions.slug, stageSlug),
+          eq(funnels.tenantId, tenantId),
+          or(eq(funnels.verticalTemplateId, "exchange_v1"), eq(funnels.slug, "exchange")),
+        );
+
+    const [target] = await tx
+      .select({
+        id: stageDefinitions.id,
+        slug: stageDefinitions.slug,
+        position: stageDefinitions.position,
+      })
+      .from(stageDefinitions)
+      .innerJoin(funnels, eq(stageDefinitions.funnelId, funnels.id))
+      .where(targetWhere)
+      .orderBy(desc(funnels.isActive), asc(stageDefinitions.position))
+      .limit(1);
+    if (!target) return null;
+
+    if (
+      lead.stageDefinitionId === target.id &&
+      lead.state === target.slug
+    ) {
+      return { leadId: lead.id, stageSlug: target.slug, changed: false };
+    }
+
+    const currentPosition =
+      typeof lead.currentPosition === "number" ? lead.currentPosition : null;
+    if (currentPosition != null && target.position < currentPosition) {
+      return { leadId: lead.id, stageSlug: lead.state, changed: false };
+    }
+
+    await tx
+      .update(leads)
+      .set({ stageDefinitionId: target.id, state: target.slug, updatedAt: nowEpoch })
+      .where(and(eq(leads.id, lead.id), eq(leads.tenantId, tenantId)));
+
+    return { leadId: lead.id, stageSlug: target.slug, changed: true };
+  });
 }
 
 function resolveTxMaxAgeSeconds(): number {
@@ -139,7 +216,7 @@ const KNOWN_EXCHANGE_STAGES = new Set([
 ]);
 
 const TOOL_STAGE_MATRIX: Record<string, Set<string> | "any"> = {
-  compute_exchange_quote: new Set(["exchange_request", "quote_calculated"]),
+  compute_exchange_quote: new Set(["exchange_request", "quote_calculated", "kyc_collection"]),
   check_exchange_verification: new Set([
     "quote_calculated",
     "verification_check",
@@ -230,9 +307,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
   const computeQuoteTool: AnyRagTool = {
     name: "compute_exchange_quote",
     description: [
-      `Посчитать актуальный курс и сумму к получению в ${QUOTE_CURRENCY.code} для обмена.`,
-      "Вызывай ВСЕГДА, когда нужно назвать курс или итог — НИКОГДА не считай курс сам.",
-      "Возвращает direction, rate, amountToThb. Покажи клиенту эти значения как есть.",
+      `Посчитать актуальную сумму к получению в ${QUOTE_CURRENCY.code} для обмена.`,
+      "Вызывай ВСЕГДА, когда нужно назвать итог — НИКОГДА не считай сумму сам.",
+      "Клиенту показывай только amountToThb/quoteAsset. Курс в ответе клиенту не пиши.",
     ].join(" "),
     parameters: z.object({
       asset: AssetEnum,
@@ -263,7 +340,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amountFrom: q.amountFrom,
         rate: q.rate,
         amountToThb: q.amountToThb,
-        display: `Обмен ${q.asset} — ${q.quoteAsset}\nКурс: ${q.rate}\n\nОтдаёте: ${q.amountFrom} ${q.asset}\nПолучаете: ${q.amountToThb} ${q.quoteAsset}`,
+        display: `Отдаёте: ${q.amountFrom} ${q.asset}\nПолучаете: ${q.amountToThb} ${q.quoteAsset}`,
       };
     },
   };
@@ -316,6 +393,12 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
 
       const verification = await getExchangeVerificationStatus(db, tenantId, conversationId);
       if (!verification.verified) {
+        await moveExchangeLeadToStage({
+          db,
+          tenantId,
+          conversationId,
+          stageSlug: "kyc_collection",
+        });
         return {
           ok: false,
           needsVerification: true,

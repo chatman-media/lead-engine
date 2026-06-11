@@ -1,6 +1,6 @@
 import { TelegramApiError, TelegramClient } from "@chatman-media/channel-telegram";
 import { type Db, getDecryptedSecret, withTenant } from "@chatman-media/conversation-engine";
-import type { ChatClient } from "@chatman-media/llm-router";
+import type { ChatClient, EmbeddingClient } from "@chatman-media/llm-router";
 import { channels, llmProviderConfigs, tenantSecrets } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -28,6 +28,12 @@ export interface AdminDiagnosticsRoutesOpts {
    * Стоит ~1 токен — не вызывается по умолчанию.
    */
   resolveChat?: (tenantId: number) => ChatClient;
+  /**
+   * Optional: если передан, `/api/admin/diagnostics?live=1` сделает
+   * реальный EmbeddingClient.embed() ping. Это ловит битый baseUrl/model/key,
+   * из-за которых RAG молча не может найти контекст.
+   */
+  resolveEmbedder?: (tenantId: number) => EmbeddingClient;
   /** Custom fetch для тестов (intercept'ит Telegram getMe). */
   fetchImpl?: typeof fetch;
 }
@@ -280,6 +286,31 @@ export function makeAdminDiagnosticsRoutes(opts: AdminDiagnosticsRoutesOpts): Ho
           status: "pass",
           message: `${embedCfg.provider} / ${embedCfg.model} (dim=${embedCfg.embedDim ?? "?"})`,
         });
+      }
+
+      if (
+        livePing &&
+        opts.resolveEmbedder &&
+        checks.some((ch) => ch.name === "llm.embed" && ch.status === "pass")
+      ) {
+        const embedStart = performance.now();
+        try {
+          const embedder = opts.resolveEmbedder(tenantId);
+          const [vector] = await embedder.embed(["ping"]);
+          checks.push({
+            name: "llm.embed_ping",
+            status: "pass",
+            latencyMs: Math.round(performance.now() - embedStart),
+            message: `live embedding received (dim=${vector?.length ?? embedder.dim})`,
+          });
+        } catch (err) {
+          checks.push({
+            name: "llm.embed_ping",
+            status: "fail",
+            latencyMs: Math.round(performance.now() - embedStart),
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // 4. tenant_secrets sanity — мастер-ключ работает (decrypt'ит хотя

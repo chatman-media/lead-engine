@@ -146,13 +146,16 @@ export class InMemoryLlmRouter {
     switch (cfg.provider) {
       case "openai":
       case "openrouter": {
-        // OpenRouter не даёт embeddings — используем тот же OpenAI-совместимый
-        // клиент (apiKey + baseUrl от tenant'а). Если кому-то нужен Voyage —
-        // расширим в отдельном провайдере.
+        // OpenRouter endpoint тоже OpenAI-compatible, но дефолтный host другой.
+        // Tenant может переопределить baseUrl для прямого OpenAI/Voyage proxy.
         if (!cfg.apiKey) throw new Error(`${cfg.provider} embed requires apiKey`);
         return new OpenAIEmbeddingClient({
           apiKey: cfg.apiKey,
-          baseUrl: cfg.baseUrl ?? "https://api.openai.com/v1",
+          baseUrl:
+            cfg.baseUrl ??
+            (cfg.provider === "openrouter"
+              ? "https://openrouter.ai/api/v1"
+              : "https://api.openai.com/v1"),
           model: cfg.model,
           dim: cfg.embedDim,
           ...(cfg.timeoutMs !== undefined ? { timeoutMs: cfg.timeoutMs } : {}),

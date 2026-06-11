@@ -19,15 +19,21 @@ import {
 } from "@chatman-media/kb";
 import type {
   ChatClient,
-  ChatMessage,
   EmbeddingClient as RagEmbeddingClient,
 } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
-import { compactConversation } from "../compact-conversation.ts";
+import {
+  loadRollingConversationContext,
+  messageRowsToChatHistory,
+} from "../conversation-summary.ts";
 import type { ConversationsRepo } from "../dal/conversations.ts";
 import { ScopedKbStore } from "../dal/kb-store.ts";
 import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
+import {
+	ANY_QUOTE_CURRENCY_MENTION_RE,
+	resolveQuoteCurrency,
+} from "../exchange-quote-currency.ts";
 import type {
   ReplyStrategy,
   ReplyStrategyOutput,
@@ -196,16 +202,6 @@ export interface RagReplyStrategyOpts {
   }) => Promise<void> | void;
 }
 
-function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
-  const out: ChatMessage[] = [];
-  for (const m of history) {
-    if (m.role === "user") out.push({ role: "user", content: m.text });
-    else if (m.role === "assistant" || m.role === "human")
-      out.push({ role: "assistant", content: m.text });
-  }
-  return out;
-}
-
 /**
  * Helper: распарсить style.config_json (из storage StyleRow) в типизированный
  * rag's Style через zod StyleSchema. Возвращает null если JSON невалидный —
@@ -240,11 +236,20 @@ type ExchangeOrderArgs = {
 	payoutMethod?: string;
 };
 
+type ExchangeQuoteArgs = {
+	asset: string;
+	amount: number;
+	amountMode: "source_amount";
+	network?: string;
+};
+
 type ExchangeForcedReply = {
 	text: string;
 	toolCalls: ToolCallRecord[];
 };
 
+const EXCHANGE_QUOTE_FOLLOWUP_RE =
+	/курс|rate|сколько|получ(?:у|ится|ить)|итого|посчитай|рассчитай|пересчитай/iu;
 const EXCHANGE_ORDER_CONFIRMATION_RE =
 	/(?:^|[\s,.!?])(?:да|ок|окей|супер|давай|подходит|готов|готовы|оформ|создавай|делаем|соглас(?:ен|на)?|начинаем|поехали)(?:$|[\s,.!?])/iu;
 const EXCHANGE_KYC_MATERIAL_SENT_RE =
@@ -319,6 +324,86 @@ function parseExchangeSourceArgs(text: string): ExchangeOrderArgs | null {
 	return null;
 }
 
+function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
+	const parsed = parseExchangeSourceArgs(text);
+	if (!parsed) return null;
+	return {
+		asset: parsed.asset,
+		amount: parsed.amount,
+		amountMode: "source_amount",
+		...(parsed.network ? { network: parsed.network } : {}),
+	};
+}
+
+function latestExchangeQuoteArgs(
+	history: MessageRow[],
+	userMessageText: string,
+): ExchangeQuoteArgs | null {
+	const current = parseExchangeQuoteArgs(userMessageText);
+	if (current) return current;
+	if (!EXCHANGE_QUOTE_FOLLOWUP_RE.test(userMessageText)) return null;
+	for (const item of [...history].reverse()) {
+		if (item.role !== "user") continue;
+		const parsed = parseExchangeQuoteArgs(item.text);
+		if (parsed) return parsed;
+	}
+	return null;
+}
+
+function numberLike(value: unknown): number | null {
+	const n =
+		typeof value === "number"
+			? value
+			: typeof value === "string"
+				? Number(value)
+				: NaN;
+	return Number.isFinite(n) ? n : null;
+}
+
+function forcedExchangeQuoteText(result: unknown): string | null {
+	if (!result || typeof result !== "object") return null;
+	const row = result as Record<string, unknown>;
+	if (typeof row.error === "string" && row.error.trim()) return row.error.trim();
+	const amountToThb = numberLike(row.amountToThb);
+	if (amountToThb === null) return null;
+	const directionQuote =
+		typeof row.direction === "string" ? row.direction.split("->")[1] : null;
+	const currency = resolveQuoteCurrency(
+		typeof row.quoteAsset === "string" ? row.quoteAsset : directionQuote,
+	);
+	return `Получите ${amountToThb} ${currency.code}.`;
+}
+
+async function maybeForceExchangeQuoteReply(input: {
+	userMessageText: string;
+	history: MessageRow[];
+	tools: AnyRagTool[];
+}): Promise<ExchangeForcedReply | null> {
+	if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(input.userMessageText)) return null;
+	const quoteTool = input.tools.find(
+		(tool) => tool.name === "compute_exchange_quote",
+	);
+	if (!quoteTool) return null;
+	const args = latestExchangeQuoteArgs(input.history, input.userMessageText);
+	if (!args) return null;
+	const result = await quoteTool.execute(args);
+	const text = forcedExchangeQuoteText(result);
+	if (!text) return null;
+	return {
+		text,
+		toolCalls: [{ name: quoteTool.name, args, result, cycle: 0 }],
+	};
+}
+
+function hasRecentExchangeQuote(history: MessageRow[]): boolean {
+	return history.slice(-8).some(
+		(item) =>
+			item.role === "assistant" &&
+			/\d/.test(item.text) &&
+			ANY_QUOTE_CURRENCY_MENTION_RE.test(item.text),
+	);
+}
+
 function latestExchangeOrderArgs(
 	history: MessageRow[],
 	userMessageText: string,
@@ -364,7 +449,12 @@ async function maybeForceExchangeOrderReply(input: {
 	state: ExchangePolicyState | null;
 	tools: AnyRagTool[];
 }): Promise<ExchangeForcedReply | null> {
-	if (input.state?.stageSlug !== "quote_calculated") return null;
+	if (
+		input.state?.stageSlug !== "quote_calculated" &&
+		!hasRecentExchangeQuote(input.history)
+	) {
+		return null;
+	}
 	if (!EXCHANGE_ORDER_CONFIRMATION_RE.test(input.userMessageText)) return null;
 	if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(input.userMessageText)) return null;
 	const createOrderTool = input.tools.find(
@@ -429,6 +519,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     contactId: number;
     inbound: { externalUserId: string };
     userMessageText: string;
+    userMessageId?: number;
   }): Promise<ReplyStrategyResult> {
     if (input.userMessageText.length === 0) return null;
 
@@ -442,71 +533,24 @@ export class RagReplyStrategy implements ReplyStrategy {
     if (ctx.isSupport) return null;
 
     const { template, chat, messages: messagesRepo } = ctx;
-
-    // ── Conversation compaction ───────────────────────────────────────────────
-    // When the conversation grows past the configured threshold, generate a
-    // compressed summary and persist it so future turns can trim the raw history.
-    const compactThreshold = this.opts.compactAfterMessages ?? 20;
-    let conversationSummary: string | undefined;
-
-    // Load conversation summary + message count in parallel.
-    const [allRecent, totalCount] = await Promise.all([
-			messagesRepo.recent(
-				input.conversationId,
-				(this.opts.historyLimit ?? 12) + 1,
-			),
-			compactThreshold > 0
-				? messagesRepo.countByConversation(input.conversationId)
-				: Promise.resolve(0),
-    ]);
-
-    if (compactThreshold > 0 && totalCount >= compactThreshold) {
-      // Try loading a stored summary first (avoid re-compacting every turn).
-      const convsRepo = ctx.conversations;
-			const convo = convsRepo
-				? await convsRepo.findById(input.conversationId)
-				: null;
-
-      if (convo?.summaryJson) {
-        // Parse previously stored summary.
-        try {
-          conversationSummary = JSON.parse(convo.summaryJson) as string;
-        } catch {
-          conversationSummary = convo.summaryJson;
-        }
-      }
-
-      // Re-compact every `compactThreshold` messages to keep summary fresh.
-			const shouldRecompact =
-				!conversationSummary || totalCount % compactThreshold === 0;
-      if (shouldRecompact) {
-        const chatHistory = messagesToChatHistory(allRecent);
-        const freshSummary = await compactConversation(
-          chatHistory,
-          chat as unknown as Parameters<typeof compactConversation>[1],
-        ).catch((err) => {
-          console.warn("[rag-reply] compaction failed:", err);
-          return null;
-        });
-
-        if (freshSummary) {
-          conversationSummary = freshSummary;
-          // Persist async — don't block the reply.
-          convsRepo
-            ?.setSummaryJson(input.conversationId, JSON.stringify(freshSummary))
-						.catch((err) =>
-							console.warn("[rag-reply] failed to save summary:", err),
-						);
-        }
-      }
-    }
-
-    // Грузим history БЕЗ текущего user message (answerWithRag сам добавит
-    // его как `question`). Берём + 1 чтобы исключить если оно уже persisted.
-		const historyWithoutCurrent = allRecent.filter(
-			(m) => m.text !== input.userMessageText,
-		);
-    const history = messagesToChatHistory(historyWithoutCurrent);
+    const { history: historyWithoutCurrent, conversationSummary } =
+      await loadRollingConversationContext({
+        conversationId: input.conversationId,
+        messages: messagesRepo,
+        conversations: ctx.conversations ?? null,
+        chat,
+        ...(input.userMessageId !== undefined
+          ? { currentMessageId: input.userMessageId }
+          : { currentMessageText: input.userMessageText }),
+        options: {
+          recentWindow: this.opts.historyLimit ?? 12,
+          summarizeAfterMessages: this.opts.compactAfterMessages ?? 20,
+        },
+        onWarn: (_message, err) => {
+          console.warn("[rag-reply] conversation summary failed:", err);
+        },
+      });
+    const history = messageRowsToChatHistory(historyWithoutCurrent);
 
     const kbScope = ctx.kbScope ?? null;
     const kb = kbScope ? new ScopedKbStore(ctx.kb, kbScope) : ctx.kb;
@@ -541,33 +585,38 @@ export class RagReplyStrategy implements ReplyStrategy {
 				? (ctx.exchangePolicyState ?? null)
 				: null;
 
-			const forcedExchangeOrderReply = isExchange
-				? await maybeForceExchangeOrderReply({
-						userMessageText: input.userMessageText,
-						history: historyWithoutCurrent,
-						state: exchangePolicyState,
-						tools,
-					})
-				: null;
-			if (forcedExchangeOrderReply) {
-					const telemetry: AnswerTelemetry = {
-						path: "ok",
-						...buildToolTelemetry(forcedExchangeOrderReply.toolCalls),
-					};
-				const guarded = ctx.exchangeResponseGuardEnabled ?? true
-					? guardExchangePolicy({
-							text: forcedExchangeOrderReply.text,
-							telemetry,
+				const forcedExchangeReply = isExchange
+					? ((await maybeForceExchangeOrderReply({
+							userMessageText: input.userMessageText,
 							history: historyWithoutCurrent,
 							state: exchangePolicyState,
-						})
-					: {
-							ok: true,
-							action: "pass" as const,
-							text: forcedExchangeOrderReply.text,
-							reasons: [],
-							requiredFixes: [],
+							tools,
+						})) ??
+						(await maybeForceExchangeQuoteReply({
+							userMessageText: input.userMessageText,
+							history: historyWithoutCurrent,
+							tools,
+						})))
+					: null;
+				if (forcedExchangeReply) {
+						const telemetry: AnswerTelemetry = {
+							path: "ok",
+							...buildToolTelemetry(forcedExchangeReply.toolCalls),
 						};
+					const guarded = ctx.exchangeResponseGuardEnabled ?? true
+						? guardExchangePolicy({
+								text: forcedExchangeReply.text,
+								telemetry,
+								history: historyWithoutCurrent,
+								state: exchangePolicyState,
+							})
+					: {
+								ok: true,
+								action: "pass" as const,
+								text: forcedExchangeReply.text,
+								reasons: [],
+								requiredFixes: [],
+							};
 				const guardFinding =
 					ctx.exchangeResponseGuardEnabled ?? true
 						? exchangeGuardFindingFromResult(guarded)
@@ -583,12 +632,12 @@ export class RagReplyStrategy implements ReplyStrategy {
 							telemetry,
 							...(guardFinding ? { guardFindings: [guardFinding] } : {}),
 						});
-					} catch (err) {
-						console.warn(
-							"[rag-reply] failed to record forced exchange order tool call:",
-							err,
-						);
-					}
+						} catch (err) {
+							console.warn(
+								"[rag-reply] failed to record forced exchange tool call:",
+								err,
+							);
+						}
 				}
 				const operatorHandoff =
 					buildExchangeOperatorHandoff({

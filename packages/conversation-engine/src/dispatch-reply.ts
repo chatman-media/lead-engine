@@ -103,6 +103,9 @@ export async function generateReplyAndEnqueue(
       contactId: result.contactId,
       inbound,
       userMessageText: text,
+      ...(result.userMessageId !== undefined
+        ? { userMessageId: result.userMessageId }
+        : {}),
     }),
   );
   if (!replyOutput) {
