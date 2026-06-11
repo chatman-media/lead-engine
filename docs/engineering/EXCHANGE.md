@@ -35,8 +35,9 @@ SERVER_RUNBOOK. Онбординг обменного тенанта (визар
   (`multiply`/`divide`), `marginPct`, `feeFixedThb`, мин/макс суммы, флаг
   авто-обновления с рыночного фида (`rate-feed`).
 - **`exchange_rate_tiers`** — approved объёмные ступени: `targetThb`,
-  `display_rate` (показывается клиенту), `market_rate` (live-референс),
-  отклонение от рынка. Перекрывают базовый курс в своём диапазоне.
+  `deviation_pct` (источник истины для спреда), `display_rate` (текущий
+  пересчитанный снимок для клиента), `market_rate` (live-референс).
+  Перекрывают базовый курс в своём диапазоне.
 - **`exchange_settings`** — per-tenant настройки фида (нет строки → дефолты):
   `rate_refresh_sec` (как часто планировщик обновляет auto-курсы; дефолт 180с, пол
   60с) и `feed_stale_sec` (порог `rate_feed_stale`; NULL → авто `max(env, 3 × refresh)`).

@@ -29,18 +29,22 @@ import {
 } from "@chatman-media/storage";
 import { and, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { recordAudit } from "../lib/audit.ts";
 import {
 	buildDefaultRateCardProposal,
 	type RateCardProposal,
+	rateDeviationPct,
 	refreshTenantRates,
 	renderRateCardMessage,
 } from "../lib/exchange/rate-feed.ts";
-import { getTenantQuoteCurrency } from "../lib/exchange/rates.ts";
+import {
+	applyRateDeviation,
+	getTenantQuoteCurrency,
+} from "../lib/exchange/rates.ts";
 import {
 	isAllowedExchangeSecretKey,
 	isSensitiveExchangeSecretKey,
 } from "../lib/exchange/requisite-keys.ts";
-import { recordAudit } from "../lib/audit.ts";
 
 export interface AdminExchangeRoutesOpts {
 	db: Db;
@@ -50,6 +54,11 @@ export interface AdminExchangeRoutesOpts {
 }
 
 const QUOTE_MODES = ["multiply", "divide"] as const;
+
+function roundRate(n: number, dp = 6): number {
+	const f = 10 ** dp;
+	return Math.round(n * f) / f;
+}
 
 function resolveExchangeWorkflowStage(
 	order: typeof exchangeOrders.$inferSelect,
@@ -65,7 +74,10 @@ function resolveExchangeWorkflowStage(
 		return { slug: "payout_or_completion", label: "Выдача / Завершено" };
 	}
 	if (order.status === "payout") {
-		return { slug: "payout_or_completion", label: `Выдача ${QUOTE_CURRENCY.code}` };
+		return {
+			slug: "payout_or_completion",
+			label: `Выдача ${QUOTE_CURRENCY.code}`,
+		};
 	}
 	if (order.status === "paid") {
 		return { slug: "payment_verified", label: "Оплата подтверждена" };
@@ -102,7 +114,11 @@ function maskPassportNumber(raw: unknown): string | null {
  * оператор-бот при confirm) + паспортные поля из vision-OCR (photo-processor).
  */
 function serializeKycContact(
-	row: { id: number; displayName: string | null; attributesJson: string | null },
+	row: {
+		id: number;
+		displayName: string | null;
+		attributesJson: string | null;
+	},
 	agg: { ordersCount: number; turnoverThb: number } | null,
 ) {
 	let attrs: Record<string, unknown> = {};
@@ -191,10 +207,18 @@ async function deliverExchangeMessage(
 			.limit(1);
 		if (conv && conv.source !== "self_play" && row.contactId) {
 			const [identity] = await tx
-				.select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
+				.select({
+					channelDbId: channels.id,
+					externalUserId: channelIdentities.externalUserId,
+				})
 				.from(channelIdentities)
 				.innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-				.where(and(eq(channelIdentities.contactId, row.contactId), eq(channels.status, "active")))
+				.where(
+					and(
+						eq(channelIdentities.contactId, row.contactId),
+						eq(channels.status, "active"),
+					),
+				)
 				.limit(1);
 			if (identity) {
 				await tx.insert(outboundQueue).values({
@@ -275,7 +299,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		// Save-time guardrails: не даём сохранить заведомо убыточную/абсурдную формулу.
 		// Плавающую проверку «спред vs рынок» делает computeQuote (guardrails.ts) на лету.
 		if (feeFixedThb < 0) {
-			return c.json({ error: "fee_fixed_thb не может быть отрицательной" }, 400);
+			return c.json(
+				{ error: "fee_fixed_thb не может быть отрицательной" },
+				400,
+			);
 		}
 		if (marginPct < 0) {
 			return c.json(
@@ -390,14 +417,20 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 
 		const refresh = Math.floor(Number(body?.rateRefreshSec));
 		if (!Number.isFinite(refresh) || refresh < 60 || refresh > 86400) {
-			return c.json({ error: "rateRefreshSec должен быть 60..86400 секунд" }, 400);
+			return c.json(
+				{ error: "rateRefreshSec должен быть 60..86400 секунд" },
+				400,
+			);
 		}
 		let stale: number | null = null;
 		if (body?.feedStaleSec != null && body.feedStaleSec !== "") {
 			stale = Math.floor(Number(body.feedStaleSec));
 			if (!Number.isFinite(stale) || stale < refresh) {
 				return c.json(
-					{ error: "feedStaleSec должен быть ≥ rateRefreshSec (или пусто = авто)" },
+					{
+						error:
+							"feedStaleSec должен быть ≥ rateRefreshSec (или пусто = авто)",
+					},
 					400,
 				);
 			}
@@ -407,7 +440,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				? body.quoteAsset.trim().toUpperCase()
 				: QUOTE_CURRENCY.code;
 		if (!/^[A-Z]{3}$/.test(quoteAssetRaw)) {
-			return c.json({ error: "quoteAsset должен быть ISO-кодом валюты (PHP, THB…)" }, 400);
+			return c.json(
+				{ error: "quoteAsset должен быть ISO-кодом валюты (PHP, THB…)" },
+				400,
+			);
 		}
 		const now = Math.floor(Date.now() / 1000);
 		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
@@ -468,6 +504,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			? (body.proposals as RateCardProposal[])
 			: await buildDefaultRateCardProposal(currency);
 		const now = Math.floor(Date.now() / 1000);
+		const normalizedProposals: RateCardProposal[] = [];
 
 		await withTenant(opts.db, tenantId, async (tx) => {
 			for (const proposal of proposals) {
@@ -481,6 +518,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				const marketRate = Number(proposal.marketRate);
 				if (!asset || !(marketRate > 0) || !Array.isArray(proposal.tiers))
 					continue;
+				const normalizedTiers: RateCardProposal["tiers"] = [];
 
 				await tx
 					.insert(exchangeRates)
@@ -521,14 +559,32 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				for (const tier of proposal.tiers) {
 					const minAmount = Number(tier.minThb);
 					const maxAmount = tier.maxThb === null ? null : Number(tier.maxThb);
-					const displayRate = Number(tier.displayRate);
-					const deviationPct = Number(tier.deviationPct);
-					if (
-						!(minAmount >= 0) ||
-						!(displayRate > 0) ||
-						!Number.isFinite(deviationPct)
-					)
-						continue;
+					const rawDeviationPct = Number(
+						(tier as { deviationPct?: unknown }).deviationPct,
+					);
+					const rawDisplayRate = Number(
+						(tier as { displayRate?: unknown }).displayRate,
+					);
+					const deviationPct = Number.isFinite(rawDeviationPct)
+						? roundRate(rawDeviationPct, 8)
+						: rateDeviationPct(marketRate, rawDisplayRate, 8);
+					const displayRate = Number.isFinite(rawDeviationPct)
+						? roundRate(applyRateDeviation(marketRate, deviationPct))
+						: rawDisplayRate;
+					if (!(minAmount >= 0) || !(displayRate > 0)) continue;
+					const formula =
+						typeof tier.formula === "string" && tier.formula.trim()
+							? tier.formula
+							: `${marketRate} ${deviationPct >= 0 ? "+" : "-"} ${Math.abs(
+									deviationPct,
+								)}% = ${displayRate}`;
+					normalizedTiers.push({
+						minThb: minAmount,
+						maxThb: maxAmount,
+						displayRate,
+						deviationPct,
+						formula,
+					});
 					await tx
 						.insert(exchangeRateTiers)
 						.values({
@@ -548,7 +604,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 								marketRate,
 								displayRate,
 								deviationPct,
-								formula: tier.formula,
+								formula,
 							}),
 							isActive: true,
 							approvedByAdminId: adminId ?? null,
@@ -576,7 +632,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 									marketRate,
 									displayRate,
 									deviationPct,
-									formula: tier.formula,
+									formula,
 								}),
 								isActive: true,
 								approvedByAdminId: adminId ?? null,
@@ -585,11 +641,24 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 							},
 						});
 				}
+				if (normalizedTiers.length > 0) {
+					normalizedProposals.push({
+						asset,
+						network,
+						quoteMode,
+						marketRate,
+						tiers: normalizedTiers,
+						message: "",
+					});
+				}
 			}
 		});
 
 		opts.onReload?.(tenantId);
-		return c.json({ ok: true, message: renderRateCardMessage(proposals, currency) });
+		return c.json({
+			ok: true,
+			message: renderRateCardMessage(normalizedProposals, currency),
+		});
 	});
 
 	app.delete("/api/admin/exchange/rates/:id", async (c) => {
@@ -617,8 +686,18 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			const rows = await tx
 				.select({ key: tenantSecrets.key })
 				.from(tenantSecrets)
-				.where(and(eq(tenantSecrets.tenantId, tenantId), like(tenantSecrets.key, "exchange_%")));
-			const out: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }> = [];
+				.where(
+					and(
+						eq(tenantSecrets.tenantId, tenantId),
+						like(tenantSecrets.key, "exchange_%"),
+					),
+				);
+			const out: Array<{
+				key: string;
+				value: string;
+				hasValue?: boolean;
+				sensitive?: boolean;
+			}> = [];
 			for (const row of rows) {
 				if (!isAllowedExchangeSecretKey(row.key)) continue;
 				let value = "";
@@ -634,7 +713,12 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 					value = "";
 				}
 				if (isSensitiveExchangeSecretKey(row.key)) {
-					out.push({ key: row.key, value: "", hasValue: value.length > 0, sensitive: true });
+					out.push({
+						key: row.key,
+						value: "",
+						hasValue: value.length > 0,
+						sensitive: true,
+					});
 					continue;
 				}
 				out.push({ key: row.key, value });
@@ -867,7 +951,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 							conversationId: row.conversationId!,
 							role: "assistant",
 							text: note,
-							metaJson: JSON.stringify({ sentVia: "exchange-status", status: row.status }),
+							metaJson: JSON.stringify({
+								sentVia: "exchange-status",
+								status: row.status,
+							}),
 							createdAt: now,
 						})
 						.returning({ id: messages.id });
@@ -883,10 +970,18 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						.limit(1);
 					if (conv && conv.source !== "self_play" && row.contactId) {
 						const [identity] = await tx
-							.select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
+							.select({
+								channelDbId: channels.id,
+								externalUserId: channelIdentities.externalUserId,
+							})
 							.from(channelIdentities)
 							.innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-							.where(and(eq(channelIdentities.contactId, row.contactId), eq(channels.status, "active")))
+							.where(
+								and(
+									eq(channelIdentities.contactId, row.contactId),
+									eq(channels.status, "active"),
+								),
+							)
 							.limit(1);
 						if (identity) {
 							await tx.insert(outboundQueue).values({
@@ -936,7 +1031,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				? `CODE-${id}-${crypto.randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`
 				: null);
 		if (!code)
-			return c.json({ error: "payoutCode required (or pass generate:true)" }, 400);
+			return c.json(
+				{ error: "payoutCode required (or pass generate:true)" },
+				400,
+			);
 
 		const ttlMinutes =
 			typeof body?.ttlMinutes === "number" && body.ttlMinutes > 0
@@ -958,7 +1056,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			tx
 				.update(exchangeOrders)
 				.set(patch)
-				.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)))
+				.where(
+					and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)),
+				)
 				.returning(),
 		);
 		if (!row) return c.json({ error: "not found" }, 404);
@@ -969,7 +1069,12 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				tx
 					.update(exchangeOrders)
 					.set({ status: "payout", updatedAt: now })
-					.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id))),
+					.where(
+						and(
+							eq(exchangeOrders.tenantId, tenantId),
+							eq(exchangeOrders.id, id),
+						),
+					),
 			);
 			row.status = "payout";
 		}
@@ -1023,12 +1128,17 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			tx
 				.update(exchangeOrders)
 				.set({ status: "paid", updatedAt: now })
-				.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)))
+				.where(
+					and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)),
+				)
 				.returning(),
 		);
 		if (!row) return c.json({ error: "not found" }, 404);
 
-		const custom = typeof body?.text === "string" && body.text.trim() ? body.text.trim() : null;
+		const custom =
+			typeof body?.text === "string" && body.text.trim()
+				? body.text.trim()
+				: null;
 		const note = custom ?? "✅ Оплата получена и подтверждена. Готовим выдачу.";
 		const delivered = await deliverExchangeMessage(
 			opts.db,
