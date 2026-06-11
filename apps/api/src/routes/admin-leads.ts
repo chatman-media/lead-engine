@@ -50,6 +50,7 @@ import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webho
  * POST /api/admin/leads                — создать лида вручную
  * GET  /api/admin/leads/:id            — карточка лида с полями и историей
  * POST /api/admin/leads/:id/verification/revoke — отозвать KYC контакта
+ * POST /api/admin/leads/:id/contact/ban — забанить контакт лида
  * PATCH /api/admin/leads/:id/stage     — переместить в стадию
  * DELETE /api/admin/leads/:id          — удалить лида
  * GET  /api/admin/leads/:id/field-values — значения полей
@@ -1264,6 +1265,116 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       contactId: outcome.contactId,
       status: outcome.status,
       ordersPatched: outcome.ordersPatched,
+    });
+  });
+
+  /**
+   * POST /api/admin/leads/:id/contact/ban
+   * Блокирует контакт лида. Inbound pipeline продолжит сохранять входящие
+   * сообщения, но не будет генерировать ответы для isBanned контакта.
+   */
+  app.post("/api/admin/leads/:id/contact/ban", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    let reason = "";
+    try {
+      const body = (await c.req.json()) as { reason?: unknown };
+      if (typeof body.reason === "string") reason = body.reason.trim().slice(0, 500);
+    } catch {
+      // empty body is allowed
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({
+          id: leads.id,
+          userId: leads.userId,
+          state: leads.state,
+        })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return { kind: "not_found" } as const;
+
+      const [contact] = await tx
+        .select({ id: contacts.id, attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)));
+      if (!contact) return { kind: "contact_not_found" } as const;
+
+      const attrs = parseJsonObject(contact.attributesJson);
+      const currentBan = objectValue(attrs.ban);
+      const nextBan = {
+        ...currentBan,
+        status: "banned",
+        banned: true,
+        bannedByAdminId: adminId ?? null,
+        bannedAt: now,
+        reason: reason || null,
+        source: "admin_lead_detail",
+      };
+      const nextAttrs = {
+        ...attrs,
+        isBanned: true,
+        banStatus: "banned",
+        bannedAt: now,
+        bannedByAdminId: adminId ?? null,
+        banReason: reason || null,
+        ban: nextBan,
+      };
+
+      await tx
+        .update(contacts)
+        .set({
+          attributesJson: JSON.stringify(nextAttrs),
+          updatedAt: now,
+        })
+        .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
+
+      await tx.insert(leadEvents).values({
+        tenantId,
+        leadId: id,
+        fromState: lead.state,
+        toState: lead.state,
+        byAdminId: adminId,
+        notes: JSON.stringify({
+          type: "contact_banned",
+          contactId: contact.id,
+          reason: reason || null,
+        }),
+        createdAt: now,
+      });
+
+      return {
+        kind: "ok",
+        contactId: contact.id,
+        status: "banned",
+        reason: reason || null,
+      } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.contact_ban",
+      targetKind: "lead",
+      targetId: String(id),
+      details: {
+        contactId: outcome.contactId,
+        reason: outcome.reason,
+      },
+    });
+
+    return c.json({
+      ok: true,
+      contactId: outcome.contactId,
+      status: outcome.status,
     });
   });
 
