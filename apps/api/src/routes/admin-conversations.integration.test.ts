@@ -400,6 +400,16 @@ describe("admin-conversations", () => {
         tenantId: tenantA,
         topic: "escalation",
         severity: "important",
+        kind: "operator_handoff_required",
+        title: "Проверить KYC клиента",
+        body: "Клиент прислал документ и видео для проверки.",
+        dedupKey: `operator_handoff_required:${id}`,
+        createdAt: now - 12,
+      },
+      {
+        tenantId: tenantA,
+        topic: "escalation",
+        severity: "important",
         kind: "verification_requested",
         title: "Проверить KYC клиента",
         body: "Нужно проверить документ и видео.",
@@ -450,12 +460,16 @@ describe("admin-conversations", () => {
       .where(eq(adminNotifications.tenantId, tenantA));
     const relevantRows = notificationRows.filter((row) =>
       [
+        `operator_handoff_required:${id}`,
         `verification_requested:${id}`,
         `document_uploaded:${id}`,
         `human_takeover:${id}`,
       ].includes(row.dedupKey),
     );
     expect(relevantRows.find((row) => row.kind === "verification_requested")?.readAt).toBeGreaterThan(
+      0,
+    );
+    expect(relevantRows.find((row) => row.kind === "operator_handoff_required")?.readAt).toBeGreaterThan(
       0,
     );
     expect(relevantRows.find((row) => row.kind === "document_uploaded")?.readAt).toBeGreaterThan(

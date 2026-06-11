@@ -1314,6 +1314,7 @@ export class OperatorBotHandler {
 				and(
 					eq(adminNotifications.tenantId, draft.tenantId),
 					inArray(adminNotifications.dedupKey, [
+						`operator_handoff_required:${draft.conversationId}`,
 						`verification_requested:${draft.conversationId}`,
 						`document_uploaded:${draft.conversationId}`,
 					]),
