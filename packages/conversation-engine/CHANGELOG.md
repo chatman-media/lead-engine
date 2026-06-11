@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.5.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.5.0...@chatman-media/conversation-engine-v3.5.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* **api:** resolve completed kyc handoffs ([0b68e54](https://github.com/chatman-media/lead-engine/commit/0b68e5480f901ae0196944ff7045bc0458309b76))
+
 # [@chatman-media/conversation-engine-v3.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.4.2...@chatman-media/conversation-engine-v3.5.0) (2026-06-11)
 
 
