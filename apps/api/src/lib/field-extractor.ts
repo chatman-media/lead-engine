@@ -10,7 +10,8 @@
  *   4. Writes extracted values to lead_field_values.
  *   5. Sends field_updated to WorkflowRuntime for auto-advance evaluation.
  *
- * Non-fatal: any LLM or DB error is caught. The calling webhook never waits.
+ * Non-fatal: any LLM or DB error is caught by post-inbound automation; callers
+ * may await it before reply so the response sees fresh lead/stage context.
  */
 
 import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";

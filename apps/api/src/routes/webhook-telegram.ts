@@ -48,8 +48,10 @@ import type { ServiceCatalogRuntime } from "../lib/service-catalog-runtime.ts";
  *   5. Если есть voice-part — download + STT до DB transaction.
  *   6. Дёргаем processInbound() — persist + cheap DB hooks.
  *   7. Делаем stage/memory post-processing: LLM outside tx, writes in short tx.
- *   8. Генерируем reply вне DB transaction и enqueue'им outbound.
- *   9. 200 ack Telegram'у после обработки текущего inbound.
+ *   8. Делаем post-inbound automation (service catalog/field extraction)
+ *      вне DB transaction, чтобы reply видел актуальный lead context.
+ *   9. Генерируем reply вне DB transaction и enqueue'им outbound.
+ *   10. 200 ack Telegram'у после обработки текущего inbound.
  *
  * Outbound HTTP delivery делается в apps/worker; reply LLM/STT выполняются
  * в apps/api, но без открытой Postgres transaction.
@@ -264,7 +266,22 @@ export function makeTelegramWebhookRoutes(opts: {
       });
     }
 
-    // ── Phase 3: reply.generate (LLM ВНЕ tx) + enqueue в новой короткой tx ──
+    // ── Phase 3: service catalog / field extraction (вне phase1 tx) ─────────
+    // Reply должен видеть lead/stage, который может создать service catalog
+    // на этом же сообщении: "хочу трансфер" → transfer lead → stage guidance.
+    if (result.persisted) {
+      await runPostInboundAutomation({
+        db: opts.db,
+        tenantId: entry.tenantId,
+        contactId: result.contactId,
+        conversationId: result.conversationId,
+        inbound,
+        fieldExtractor: opts.fieldExtractor,
+        serviceCatalogRuntime: opts.serviceCatalogRuntime,
+      });
+    }
+
+    // ── Phase 4: reply.generate (LLM ВНЕ tx) + enqueue в новой короткой tx ──
     // Освобождает Postgres pool connection на время LLM call'а (~1-2s).
     // Pool=10, под нагрузкой это устраняет typical bottleneck.
     if (result.replyDeferred && opts.replyStrategy) {
@@ -295,18 +312,6 @@ export function makeTelegramWebhookRoutes(opts: {
           db: opts.db,
         })
         .catch(() => {});
-    }
-
-    if (result.persisted) {
-      void runPostInboundAutomation({
-        db: opts.db,
-        tenantId: entry.tenantId,
-        contactId: result.contactId,
-        conversationId: result.conversationId,
-        inbound,
-        fieldExtractor: opts.fieldExtractor,
-        serviceCatalogRuntime: opts.serviceCatalogRuntime,
-      });
     }
 
     if (result.persisted) {

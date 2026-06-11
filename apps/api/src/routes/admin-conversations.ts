@@ -35,6 +35,11 @@ export interface AdminConversationsRoutesOpts {
 
 const kycHandoffKinds = new Set(["verification_requested", "document_uploaded"]);
 
+function hasKycMarker(row: { title: string; body: string }): boolean {
+  const text = `${row.title}\n${row.body}`.toLowerCase();
+  return text.includes("kyc") || text.includes("верификац");
+}
+
 function parseJsonObject(value: string | null): Record<string, unknown> {
   if (!value) return {};
   try {
@@ -58,10 +63,14 @@ function numberValue(value: unknown): number | null {
 }
 
 function isResolvedKycHandoff(
-  row: { kind: string; createdAt: number },
+  row: { kind: string; title: string; body: string; createdAt: number },
   contactAttributesJson: string | null,
 ): boolean {
-  if (!kycHandoffKinds.has(row.kind)) return false;
+  if (!kycHandoffKinds.has(row.kind)) {
+    if (row.kind !== "operator_handoff_required" || !hasKycMarker(row)) {
+      return false;
+    }
+  }
 
   const attrs = parseJsonObject(contactAttributesJson);
   const kyc = objectValue(attrs.exchangeKyc);

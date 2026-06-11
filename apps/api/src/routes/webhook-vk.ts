@@ -199,6 +199,18 @@ export function makeVkWebhookRoutes(opts: {
         });
       }
 
+      if (result.persisted) {
+        await runPostInboundAutomation({
+          db: opts.db,
+          tenantId: entry.tenantId,
+          contactId: result.contactId,
+          conversationId: result.conversationId,
+          inbound,
+          fieldExtractor: opts.fieldExtractor,
+          serviceCatalogRuntime: opts.serviceCatalogRuntime,
+        });
+      }
+
       if (result.replyDeferred && opts.replyStrategy) {
         const gen = await generateReplyAndEnqueue({
           db: opts.db,
@@ -223,17 +235,6 @@ export function makeVkWebhookRoutes(opts: {
             db: opts.db,
           })
           .catch(() => {});
-      }
-      if (result.persisted) {
-        void runPostInboundAutomation({
-          db: opts.db,
-          tenantId: entry.tenantId,
-          contactId: result.contactId,
-          conversationId: result.conversationId,
-          inbound,
-          fieldExtractor: opts.fieldExtractor,
-          serviceCatalogRuntime: opts.serviceCatalogRuntime,
-        });
       }
       if (result.persisted) {
         const preview = inbound.parts.find((p) => p.kind === "text") as

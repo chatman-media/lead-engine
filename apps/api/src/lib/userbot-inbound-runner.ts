@@ -119,6 +119,17 @@ export function startUserbotInboundRunner(opts: {
               ...(opts.sink ? { sink: opts.sink } : {}),
             });
           }
+          if (result.persisted) {
+            await runPostInboundAutomation({
+              db,
+              tenantId: entry.tenantId,
+              contactId: result.contactId,
+              conversationId: result.conversationId,
+              inbound,
+              fieldExtractor: opts.fieldExtractor,
+              serviceCatalogRuntime: opts.serviceCatalogRuntime,
+            });
+          }
           if (result.replyDeferred && opts.replyStrategy) {
             const gen = await generateReplyAndEnqueue({
               db,
@@ -143,17 +154,6 @@ export function startUserbotInboundRunner(opts: {
                 db,
               })
               .catch(() => {});
-          }
-          if (result.persisted) {
-            void runPostInboundAutomation({
-              db,
-              tenantId: entry.tenantId,
-              contactId: result.contactId,
-              conversationId: result.conversationId,
-              inbound,
-              fieldExtractor: opts.fieldExtractor,
-              serviceCatalogRuntime: opts.serviceCatalogRuntime,
-            });
           }
           if (result.persisted) {
             const inboundParts = inbound.parts as Array<{ kind: string; text?: string }>;
