@@ -1,11 +1,12 @@
 import {
   type Db,
   DrizzleKbStore,
-  withTenant,
   type NotificationService,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
 import {
+  adminNotifications,
   channelIdentities,
   channels,
   contacts,
@@ -20,8 +21,8 @@ import {
   messages,
   outboundQueue,
   partnerDeals,
-  partners,
   partnerServices,
+  partners,
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
@@ -80,6 +81,14 @@ type LeadKbRawHit = {
 
 const DEFAULT_LEAD_KB_GUIDANCE_LIMIT = 5;
 const MAX_LEAD_KB_GUIDANCE_LIMIT = 8;
+const CONTACT_KYC_ATTRIBUTE_KEYS = new Set([
+  "exchangeKyc",
+  "isVerified",
+  "verificationStatus",
+  "kycStatus",
+  "verificationCrmId",
+  "last_photo_class",
+]);
 
 function parseLeadKbGuidanceLimit(value: string | undefined): number {
   const n = Number.parseInt(value ?? "", 10);
@@ -113,6 +122,32 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function stripContactKycAttributes(
+  attributesJson: string | null | undefined,
+): { changed: boolean; attributesJson: string | null } {
+  if (!attributesJson) return { changed: false, attributesJson: null };
+  let attrs: Record<string, unknown>;
+  try {
+    attrs = JSON.parse(attributesJson) as Record<string, unknown>;
+  } catch {
+    return { changed: false, attributesJson };
+  }
+
+  let changed = false;
+  for (const key of Object.keys(attrs)) {
+    if (CONTACT_KYC_ATTRIBUTE_KEYS.has(key) || key.startsWith("passport_")) {
+      delete attrs[key];
+      changed = true;
+    }
+  }
+
+  if (!changed) return { changed: false, attributesJson };
+  return {
+    changed: true,
+    attributesJson: Object.keys(attrs).length > 0 ? JSON.stringify(attrs) : null,
+  };
 }
 
 function fieldValueFilled(valueJson: string | null | undefined): boolean {
@@ -1523,25 +1558,60 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
   /**
    * DELETE /api/admin/leads/:id
-   * Удаляет лида вместе с field_values, events и notes.
+   * Удаляет лида вместе с field_values, events и notes. Если это последняя
+   * заявка контакта и нет exchange orders, очищает контактный KYC/OCR след.
    */
   app.delete("/api/admin/leads/:id", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = (c.var.adminId as number | null) ?? undefined;
     const id = Number(c.req.param("id"));
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+    const now = Math.floor(Date.now() / 1000);
 
     await withTenant(opts.db, tenantId, async (tx) => {
       const [lead] = await tx
-        .select({ id: leads.id })
+        .select({ id: leads.id, contactId: leads.userId })
         .from(leads)
         .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
       if (!lead) return;
 
+      await tx
+        .update(adminNotifications)
+        .set({ leadId: null })
+        .where(and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.leadId, id)));
       await tx.delete(leadFieldValues).where(eq(leadFieldValues.leadId, id));
       await tx.delete(leadEvents).where(eq(leadEvents.leadId, id));
       await tx.delete(leadNotes).where(eq(leadNotes.leadId, id));
       await tx.delete(leads).where(eq(leads.id, id));
+
+      const [remainingLead] = await tx
+        .select({ id: leads.id })
+        .from(leads)
+        .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, lead.contactId)))
+        .limit(1);
+      if (remainingLead) return;
+
+      const [remainingExchangeOrder] = await tx
+        .select({ id: exchangeOrders.id })
+        .from(exchangeOrders)
+        .where(
+          and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.contactId, lead.contactId)),
+        )
+        .limit(1);
+      if (remainingExchangeOrder) return;
+
+      const [contact] = await tx
+        .select({ attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.tenantId, tenantId), eq(contacts.id, lead.contactId)))
+        .limit(1);
+      const stripped = stripContactKycAttributes(contact?.attributesJson);
+      if (stripped.changed) {
+        await tx
+          .update(contacts)
+          .set({ attributesJson: stripped.attributesJson, updatedAt: now })
+          .where(and(eq(contacts.tenantId, tenantId), eq(contacts.id, lead.contactId)));
+      }
     });
 
     await recordAudit(opts.db, {
