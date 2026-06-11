@@ -1,5 +1,13 @@
 export { defaultRegistry, VerticalRegistry } from "./registry.ts";
 export {
+  ANY_QUOTE_CURRENCY_MENTION_RE,
+  KNOWN_QUOTE_CURRENCIES,
+  QUOTE_CURRENCY,
+  QUOTE_CURRENCY_CODES,
+  type QuoteCurrency,
+  resolveQuoteCurrency,
+} from "./quote-currency.ts";
+export {
   ACTIVE_PHASES,
   buildSkeletonFunnel,
   deriveDefaultPhase,

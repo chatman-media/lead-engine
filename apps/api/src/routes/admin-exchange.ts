@@ -9,6 +9,8 @@
 import {
 	type Db,
 	getDecryptedSecret,
+	QUOTE_CURRENCY,
+	QUOTE_CURRENCY_CODES,
 	setEncryptedSecret,
 	withTenant,
 } from "@chatman-media/conversation-engine";
@@ -33,6 +35,7 @@ import {
 	refreshTenantRates,
 	renderRateCardMessage,
 } from "../lib/exchange/rate-feed.ts";
+import { getTenantQuoteCurrency } from "../lib/exchange/rates.ts";
 import {
 	isAllowedExchangeSecretKey,
 	isSensitiveExchangeSecretKey,
@@ -62,7 +65,7 @@ function resolveExchangeWorkflowStage(
 		return { slug: "payout_or_completion", label: "Выдача / Завершено" };
 	}
 	if (order.status === "payout") {
-		return { slug: "payout_or_completion", label: "Выдача THB" };
+		return { slug: "payout_or_completion", label: `Выдача ${QUOTE_CURRENCY.code}` };
 	}
 	if (order.status === "paid") {
 		return { slug: "payment_verified", label: "Оплата подтверждена" };
@@ -242,7 +245,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		const quoteAsset =
 			typeof body?.quoteAsset === "string" && body.quoteAsset.trim()
 				? body.quoteAsset.trim().toUpperCase()
-				: "THB";
+				: (await getTenantQuoteCurrency(opts.db, tenantId)).code;
 		const network =
 			typeof body?.network === "string"
 				? body.network.trim().toLowerCase().replace(/-/g, "")
@@ -355,7 +358,8 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		}
 	});
 
-	// Per-tenant настройки обновления курсов (нет строки → дефолты 180с / авто-порог).
+	// Per-tenant настройки обновления курсов (нет строки → дефолты 180с / авто-порог)
+	// + котируемая валюта выдачи (quoteAsset; дефолт платформы — PHP).
 	app.get("/api/admin/exchange/settings", async (c) => {
 		const tenantId = c.var.tenantId;
 		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
@@ -363,6 +367,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				.select({
 					rateRefreshSec: exchangeSettings.rateRefreshSec,
 					feedStaleSec: exchangeSettings.feedStaleSec,
+					quoteAsset: exchangeSettings.quoteAsset,
 				})
 				.from(exchangeSettings)
 				.where(eq(exchangeSettings.tenantId, tenantId))
@@ -371,11 +376,14 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		return c.json({
 			rateRefreshSec: row?.rateRefreshSec ?? 180,
 			feedStaleSec: row?.feedStaleSec ?? null,
+			quoteAsset: row?.quoteAsset ?? QUOTE_CURRENCY.code,
+			quoteAssetOptions: QUOTE_CURRENCY_CODES,
 		});
 	});
 
 	// Сохранить: rateRefreshSec (сек, 60..86400) + feedStaleSec (сек, ≥ refresh или
-	// пусто = авто). Планировщик (api) и ops-watch (worker) читают это per-tenant.
+	// пусто = авто) + quoteAsset (ISO-код котируемой валюты). Планировщик (api),
+	// ops-watch (worker) и расчёт котировок читают это per-tenant.
 	app.put("/api/admin/exchange/settings", async (c) => {
 		const tenantId = c.var.tenantId;
 		const body = await c.req.json().catch(() => ({}));
@@ -394,6 +402,13 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				);
 			}
 		}
+		const quoteAssetRaw =
+			typeof body?.quoteAsset === "string" && body.quoteAsset.trim()
+				? body.quoteAsset.trim().toUpperCase()
+				: QUOTE_CURRENCY.code;
+		if (!/^[A-Z]{3}$/.test(quoteAssetRaw)) {
+			return c.json({ error: "quoteAsset должен быть ISO-кодом валюты (PHP, THB…)" }, 400);
+		}
 		const now = Math.floor(Date.now() / 1000);
 		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
 			tx
@@ -402,16 +417,23 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 					tenantId,
 					rateRefreshSec: refresh,
 					feedStaleSec: stale,
+					quoteAsset: quoteAssetRaw,
 					createdAt: now,
 					updatedAt: now,
 				})
 				.onConflictDoUpdate({
 					target: exchangeSettings.tenantId,
-					set: { rateRefreshSec: refresh, feedStaleSec: stale, updatedAt: now },
+					set: {
+						rateRefreshSec: refresh,
+						feedStaleSec: stale,
+						quoteAsset: quoteAssetRaw,
+						updatedAt: now,
+					},
 				})
 				.returning({
 					rateRefreshSec: exchangeSettings.rateRefreshSec,
 					feedStaleSec: exchangeSettings.feedStaleSec,
+					quoteAsset: exchangeSettings.quoteAsset,
 				}),
 		);
 		return c.json({ ok: true, settings: row });
@@ -419,11 +441,12 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 
 	app.post("/api/admin/exchange/rate-card/preview", async (c) => {
 		try {
-			const proposals = await buildDefaultRateCardProposal();
+			const currency = await getTenantQuoteCurrency(opts.db, c.var.tenantId);
+			const proposals = await buildDefaultRateCardProposal(currency);
 			return c.json({
 				ok: true,
 				proposals,
-				message: renderRateCardMessage(proposals),
+				message: renderRateCardMessage(proposals, currency),
 			});
 		} catch (err) {
 			return c.json(
@@ -440,9 +463,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		const tenantId = c.var.tenantId;
 		const adminId = c.var.adminId as number | undefined;
 		const body = await c.req.json().catch(() => ({}));
+		const currency = await getTenantQuoteCurrency(opts.db, tenantId);
 		const proposals = Array.isArray(body?.proposals)
 			? (body.proposals as RateCardProposal[])
-			: await buildDefaultRateCardProposal();
+			: await buildDefaultRateCardProposal(currency);
 		const now = Math.floor(Date.now() / 1000);
 
 		await withTenant(opts.db, tenantId, async (tx) => {
@@ -463,7 +487,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 					.values({
 						tenantId,
 						asset,
-						quoteAsset: "THB",
+						quoteAsset: currency.code,
 						network,
 						baseRate: marketRate,
 						quoteMode,
@@ -510,7 +534,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						.values({
 							tenantId,
 							asset,
-							quoteAsset: "THB",
+							quoteAsset: currency.code,
 							network,
 							rangeBasis: "target_thb",
 							minAmount,
@@ -565,7 +589,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		});
 
 		opts.onReload?.(tenantId);
-		return c.json({ ok: true, message: renderRateCardMessage(proposals) });
+		return c.json({ ok: true, message: renderRateCardMessage(proposals, currency) });
 	});
 
 	app.delete("/api/admin/exchange/rates/:id", async (c) => {
@@ -820,13 +844,15 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		// «висит» — бот сам про операторское решение не узнаёт.
 		if (typeof body?.status === "string" && row.conversationId) {
 			const thb = row.amountToThb ? Math.round(Number(row.amountToThb)) : null;
+			// Валюта — из направления заявки ("USDT->PHP"), не из платформенного дефолта.
+			const orderQuote = row.direction?.split("->")[1] || QUOTE_CURRENCY.code;
 			const note =
 				row.status === "paid"
 					? "✅ Оплата получена и подтверждена. Готовим выдачу."
 					: row.status === "payout"
 						? "💸 Выдача в работе — скоро пришлём детали получения."
 						: row.status === "completed"
-							? `🎉 Обмен завершён!${thb ? ` Вы получаете ${thb} THB.` : ""}` +
+							? `🎉 Обмен завершён!${thb ? ` Вы получаете ${thb} ${orderQuote}.` : ""}` +
 								`${row.payoutCode ? ` Код выдачи: ${row.payoutCode}.` : ""}` +
 								`${row.payoutLocation ? ` Место: ${row.payoutLocation}.` : ""}`
 							: row.status === "cancelled"

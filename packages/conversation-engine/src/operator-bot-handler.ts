@@ -19,6 +19,7 @@ import {
 import { and, desc, eq, gt } from "drizzle-orm";
 import type { NotificationsRepo } from "./dal/notifications.ts";
 import type { Db } from "./dal/types.ts";
+import { QUOTE_CURRENCY } from "./exchange-quote-currency.ts";
 import {
 	type OperatorActionPayload,
 	type OperatorBotActionKind,
@@ -105,12 +106,12 @@ const EXCHANGE_QUICK_REPLIES: Record<
 	},
 	payment_under_review: {
 		title: "Оплата на проверке",
-		text: "Чек получили. Проверяем поступление средств; как только платёж подтвердится, перейдём к выдаче THB.",
+		text: `Чек получили. Проверяем поступление средств; как только платёж подтвердится, перейдём к выдаче ${QUOTE_CURRENCY.code}.`,
 		metadata: { exchangeAction: "payment_under_review" },
 	},
 	payment_confirmed: {
 		title: "Оплата подтверждена",
-		text: "✅ Оплата подтверждена. Готовим выдачу THB; оператор сейчас согласует способ и место получения.",
+		text: `✅ Оплата подтверждена. Готовим выдачу ${QUOTE_CURRENCY.code}; оператор сейчас согласует способ и место получения.`,
 		metadata: {
 			exchangeAction: "payment_confirmed",
 			patchLatestOrderStatus: "paid",
@@ -123,7 +124,7 @@ const EXCHANGE_QUICK_REPLIES: Record<
 	},
 	payout_ready: {
 		title: "Выдача готовится",
-		text: "Выдача THB готовится. Сейчас оператор подтвердит финальные детали: способ, место или код получения.",
+		text: `Выдача ${QUOTE_CURRENCY.code} готовится. Сейчас оператор подтвердит финальные детали: способ, место или код получения.`,
 		metadata: { exchangeAction: "payout_ready", issuePayoutCode: true },
 	},
 	office_details: {
@@ -771,7 +772,7 @@ export class OperatorBotHandler {
 		return {
 			kind: "ready",
 			quickReply: {
-				title: "Код выдачи THB",
+				title: `Код выдачи ${QUOTE_CURRENCY.code}`,
 				text: `🔐 Код выдачи: ${code}.${location}${method} Код действует ${minutes} мин.`,
 				metadata: {
 					...input.quickReply.metadata,

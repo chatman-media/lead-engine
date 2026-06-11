@@ -20,7 +20,7 @@ describe("guardExchangeReply", () => {
 			action: "rewrite",
 			reasons: ["unbacked_quote"],
 			requiredFixes: [
-				"Call compute_exchange_quote or create_exchange_order before sending a concrete rate or THB amount.",
+				"Call compute_exchange_quote or create_exchange_order before sending a concrete rate or payout amount.",
 			],
 			originalText: "Курс 31.5, получите 10553 THB.",
 			finalText: EXCHANGE_SAFE_FALLBACK,

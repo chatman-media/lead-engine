@@ -9,8 +9,14 @@
  *                          маржа увеличивает курс: eff = base * (1 + margin/100).
  */
 
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import { exchangeRates, exchangeRateTiers } from "@chatman-media/storage";
+import {
+  type Db,
+  QUOTE_CURRENCY,
+  type QuoteCurrency,
+  resolveQuoteCurrency,
+  withTenant,
+} from "@chatman-media/conversation-engine";
+import { exchangeRates, exchangeRateTiers, exchangeSettings } from "@chatman-media/storage";
 import { and, asc, eq } from "drizzle-orm";
 import {
   checkRateGuard,
@@ -18,13 +24,40 @@ import {
   type RateGuardTrip,
 } from "./guardrails.ts";
 
-export const QUOTE_ASSET = "THB";
+/** @deprecated Платформенный дефолт; рабочая валюта — per-tenant (getTenantQuoteCurrency). */
+export const QUOTE_ASSET = QUOTE_CURRENCY.code;
+
+/**
+ * Котируемая валюта тенанта. Порядок: настройка exchange_settings.quote_asset
+ * (правится в админке) → валюта активных курсов тенанта (legacy-тенанты без
+ * настройки) → платформенный дефолт (PHP / env EXCHANGE_QUOTE_ASSET).
+ */
+export async function getTenantQuoteCurrency(db: Db, tenantId: number): Promise<QuoteCurrency> {
+  return withTenant(db, tenantId, async (tx) => {
+    const [s] = await tx
+      .select({ quoteAsset: exchangeSettings.quoteAsset })
+      .from(exchangeSettings)
+      .where(eq(exchangeSettings.tenantId, tenantId))
+      .limit(1);
+    if (s?.quoteAsset) return resolveQuoteCurrency(s.quoteAsset);
+    const [rate] = await tx
+      .select({ quoteAsset: exchangeRates.quoteAsset })
+      .from(exchangeRates)
+      .where(and(eq(exchangeRates.tenantId, tenantId), eq(exchangeRates.isActive, true)))
+      .orderBy(asc(exchangeRates.id))
+      .limit(1);
+    if (rate?.quoteAsset) return resolveQuoteCurrency(rate.quoteAsset);
+    return QUOTE_CURRENCY;
+  });
+}
 export const CRYPTO_ASSETS = ["USDT", "USDC", "BTC", "ETH", "LTC", "TRX", "TON"] as const;
 
 export interface QuoteResult {
   ok: true;
-  direction: string; // "USDT->THB"
+  direction: string; // "USDT->PHP"
   asset: string; // "USDT"
+  /** Котируемая валюта тенанта на момент расчёта. */
+  quoteAsset: string; // "PHP"
   network: string; // "TRC20" | ""
   amountMode: "source_amount" | "target_thb";
   amountFrom: number;
@@ -86,6 +119,7 @@ async function findActiveRateRow(
   tenantId: number,
   asset: string,
   network: string,
+  quoteAsset: string,
 ): Promise<RateRow | null> {
   return withTenant(db, tenantId, async (tx) => {
     // Точное совпадение по сети, затем fallback на network=''.
@@ -105,7 +139,7 @@ async function findActiveRateRow(
           and(
             eq(exchangeRates.tenantId, tenantId),
             eq(exchangeRates.asset, asset),
-            eq(exchangeRates.quoteAsset, QUOTE_ASSET),
+            eq(exchangeRates.quoteAsset, quoteAsset),
             eq(exchangeRates.network, net),
             eq(exchangeRates.isActive, true),
           ),
@@ -132,6 +166,7 @@ async function findActiveTierRows(
   tenantId: number,
   asset: string,
   network: string,
+  quoteAsset: string,
 ): Promise<TierRow[]> {
   return withTenant(db, tenantId, async (tx) => {
     for (const net of network ? [network, ""] : [""]) {
@@ -148,7 +183,7 @@ async function findActiveTierRows(
           and(
             eq(exchangeRateTiers.tenantId, tenantId),
             eq(exchangeRateTiers.asset, asset),
-            eq(exchangeRateTiers.quoteAsset, QUOTE_ASSET),
+            eq(exchangeRateTiers.quoteAsset, quoteAsset),
             eq(exchangeRateTiers.network, net),
             eq(exchangeRateTiers.rangeBasis, "target_thb"),
             eq(exchangeRateTiers.isActive, true),
@@ -197,8 +232,9 @@ export async function computeQuote(
     return { ok: false, error: "Сумма должна быть положительным числом." };
   }
   const network = resolveNetwork(asset, input.network);
+  const currency = await getTenantQuoteCurrency(db, tenantId);
 
-  const row = await findActiveRateRow(db, tenantId, asset, network);
+  const row = await findActiveRateRow(db, tenantId, asset, network, currency.code);
   if (!row) {
     return {
       ok: false,
@@ -214,7 +250,7 @@ export async function computeQuote(
   }
 
   const mode = row.quoteMode === "divide" ? "divide" : "multiply";
-  const tiers = await findActiveTierRows(db, tenantId, asset, network);
+  const tiers = await findActiveTierRows(db, tenantId, asset, network, currency.code);
   const marketGross = amountMode === "target_thb"
     ? amount
     : mode === "divide"
@@ -257,8 +293,9 @@ export async function computeQuote(
 
   return {
     ok: true,
-    direction: `${asset}->${QUOTE_ASSET}`,
+    direction: `${asset}->${currency.code}`,
     asset,
+    quoteAsset: currency.code,
     network: network.toUpperCase(),
     amountMode,
     amountFrom,

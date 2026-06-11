@@ -36,6 +36,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import {
 	type Db,
+	type QuoteCurrency,
+	resolveQuoteCurrency,
 	setEncryptedSecret,
 	withTenant,
 } from "@chatman-media/conversation-engine";
@@ -45,6 +47,7 @@ import {
 	channels,
 	contacts,
 	conversations,
+	directorHooks,
 	exchangeOrders,
 	exchangeRates,
 	exchangeRateTiers,
@@ -56,6 +59,7 @@ import {
 	llmProviderConfigs,
 	messages,
 	schema,
+	serviceCatalogItems,
 	stageDefinitions,
 	stageFields,
 	tenants,
@@ -65,6 +69,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { hashPassword } from "../src/lib/auth.ts";
 import { seedExchangeFixtures } from "../src/lib/exchange/fixtures.ts";
+import { fetchMarketBaseRate } from "../src/lib/exchange/rate-feed.ts";
 import { seedFunnelByKey } from "../src/routes/admin-funnel.ts";
 
 const DEFAULT_SLUG = "exchange-demo";
@@ -93,6 +98,10 @@ interface Args {
 	llmBaseUrl: string | null;
 	publicUrl: string | null;
 	setTelegramWebhook: boolean;
+	/** Котируемая валюта демо-тенанта; пусто → платформенный дефолт (PHP). */
+	quoteAsset: string | null;
+	/** Имя бренда для веб-канала/виджета (--brand / EXCHANGE_DEMO_BRAND). */
+	brand: string;
 }
 
 interface DemoMessage {
@@ -139,225 +148,526 @@ interface DemoLead {
 	order?: DemoOrder;
 }
 
-const SAMPLE_LEADS: DemoLead[] = [
-	{
-		key: "rate-request",
-		stage: "exchange_request",
-		name: "Илья Новиков",
-		telegramId: "demo_exchange_001",
-		fields: {
-			asset_from: "usdt",
-			network: "trc20",
-			amount_from: 500,
-			payout_method: "office",
-		},
-		messages: [
-			{
-				role: "user",
-				text: "Здравствуйте, хочу поменять 500 USDT TRC20 на баты.",
-			},
-			{
-				role: "assistant",
-				text: "Здравствуйте. Принял: 500 USDT в сети TRC20. Получение хотите наличными в офисе или переводом на тайский банк?",
-			},
-		],
+// Демо-данные параметризованы котируемой валютой тенанта (--quote-asset /
+// EXCHANGE_DEMO_QUOTE_ASSET; пусто → платформенный дефолт, сейчас PHP).
+// Курсы в диалогах берутся с ЖИВОГО рынка на момент сидинга (см.
+// freshenSeededRates); значения здесь — офлайн-фоллбэк, если фид недоступен.
+// Суммы считаются от курсов, чтобы диалоги и заявки были согласованы.
+interface DemoQuoteParams {
+	/** Курс quote за 1 USDT в демо-диалогах (фоллбэк без сети). */
+	usdtRate: number;
+	/** Курс в отменённой заявке (чуть хуже; фоллбэк без сети). */
+	usdtRateCancelled: number;
+	/** RUB за 1 единицу quote (фоллбэк без сети). */
+	rubRate: number;
+	/** «Нужно N <quote>» в KYC-диалоге. */
+	kycTargetQuote: number;
+	/** Сумма выдачи в завершённой заявке. */
+	completedQuote: number;
+	office1Label: string;
+	office1Key: string;
+	office2Label: string;
+	office2Key: string;
+}
+
+const DEMO_QUOTE_PARAMS: Record<string, DemoQuoteParams> = {
+	THB: {
+		usdtRate: 32.7,
+		usdtRateCancelled: 32.6,
+		rubRate: 2.22,
+		kycTargetQuote: 180_000,
+		completedQuote: 50_000,
+		office1Label: "Bangkok Asok",
+		office1Key: "bangkok_asok",
+		office2Label: "Phuket Central",
+		office2Key: "phuket_central",
 	},
-	{
-		key: "quote-confirmed",
-		stage: "quote_calculated",
-		name: "Мария Соколова",
-		telegramId: "demo_exchange_002",
-		fields: {
-			exchange_rate: 36.05,
-			thb_amount: 72100,
-			rate_confirmed: true,
-		},
-		messages: [
-			{ role: "user", text: "Сколько получу за 2000 USDT?" },
-			{
-				role: "assistant",
-				text: "По текущей approved rate-card: 2000 USDT TRC20 -> 72 100 THB. Зафиксировать заявку?",
-			},
-			{ role: "user", text: "Да, фиксируем. Получение в Bangkok Asok." },
-		],
+	PHP: {
+		usdtRate: 61.2,
+		usdtRateCancelled: 61.0,
+		rubRate: 1.18,
+		kycTargetQuote: 340_000,
+		completedQuote: 100_000,
+		office1Label: "Manila Makati",
+		office1Key: "manila_makati",
+		office2Label: "Cebu IT Park",
+		office2Key: "cebu_it_park",
 	},
-	{
-		key: "kyc-needed",
-		stage: "kyc_collection",
-		name: "Андрей Морозов",
-		telegramId: "demo_exchange_003",
-		operator: true,
-		fields: {
-			verification_video: "telegram:file_id/demo-kyc-video",
-			customer_name_kyc: "Андрей Морозов",
-		},
-		messages: [
-			{ role: "user", text: "Нужно 180000 бат, рублями с карты." },
-			{
-				role: "assistant",
-				text: "Для этой суммы нужна быстрая KYC-проверка: документ и короткое видео с ФИО и направлением обмена.",
+};
+
+/** Живые демо-курсы, выведенные из рыночного фида на момент сидинга. */
+interface LiveDemoRates {
+	/** Display-курс USDT (средний тир: рынок − 0.4878%). */
+	usdtRate: number;
+	/** Display-курс отменённой заявки (нижний тир: рынок − 0.813%). */
+	usdtRateCancelled: number;
+	/** RUB за 1 quote (тир 60–240k: рынок + 1.7094%). */
+	rubRate: number;
+}
+
+const fmtAmount = (n: number) => n.toLocaleString("ru-RU");
+
+function roundTo(n: number, dp: number): number {
+	const f = 10 ** dp;
+	return Math.round(n * f) / f;
+}
+
+/**
+ * Освежает посеянные курсы живым рынком: base_rate строк тенанта в его валюте
+ * + market/display тиров (рынок × (1 + deviationPct/100)). Возвращает живые
+ * курсы для демо-диалогов; null — фид недоступен (остаёмся на статических
+ * фоллбэках DEMO_QUOTE_PARAMS, табло поправит планировщик после старта api).
+ */
+async function freshenSeededRates(input: {
+	db: Db;
+	tenantId: number;
+	currency: QuoteCurrency;
+	now: number;
+}): Promise<LiveDemoRates | null> {
+	try {
+		const usdtMarket = await fetchMarketBaseRate(
+			"USDT",
+			"multiply",
+			input.currency.code,
+		);
+		const rubMarket = await fetchMarketBaseRate(
+			"RUB",
+			"divide",
+			input.currency.code,
+		);
+		const usdMarket = await fetchMarketBaseRate(
+			"USD",
+			"multiply",
+			input.currency.code,
+		);
+		if (!usdtMarket || !rubMarket) return null;
+
+		const marketByAsset: Record<string, number> = {
+			USDT: usdtMarket,
+			RUB: rubMarket,
+			...(usdMarket ? { USD: usdMarket } : {}),
+		};
+
+		await withTenant(input.db, input.tenantId, async (tx) => {
+			for (const [asset, market] of Object.entries(marketByAsset)) {
+				await tx
+					.update(exchangeRates)
+					.set({ baseRate: roundTo(market, 6), updatedAt: input.now })
+					.where(
+						and(
+							eq(exchangeRates.tenantId, input.tenantId),
+							eq(exchangeRates.asset, asset),
+							eq(exchangeRates.quoteAsset, input.currency.code),
+						),
+					);
+			}
+			const tiers = await tx
+				.select({
+					id: exchangeRateTiers.id,
+					asset: exchangeRateTiers.asset,
+					deviationPct: exchangeRateTiers.deviationPct,
+				})
+				.from(exchangeRateTiers)
+				.where(
+					and(
+						eq(exchangeRateTiers.tenantId, input.tenantId),
+						eq(exchangeRateTiers.quoteAsset, input.currency.code),
+					),
+				);
+			for (const tier of tiers) {
+				const market = marketByAsset[tier.asset];
+				if (!market) continue;
+				await tx
+					.update(exchangeRateTiers)
+					.set({
+						marketRate: roundTo(market, 6),
+						displayRate: roundTo(
+							market * (1 + Number(tier.deviationPct) / 100),
+							2,
+						),
+						updatedAt: input.now,
+					})
+					.where(
+						and(
+							eq(exchangeRateTiers.tenantId, input.tenantId),
+							eq(exchangeRateTiers.id, tier.id),
+						),
+					);
+			}
+		});
+
+		// Демо-диалоги показывают те же display-курсы, что и тир-карта
+		// (девиации совпадают с PHP/THB-тирами фикстур): USDT — средний тир
+		// (−0.4878%), отменённая заявка — нижний (−0.813%), RUB — тир 60–240k
+		// (+1.7094%).
+		return {
+			usdtRate: roundTo(usdtMarket * (1 - 0.004878), 2),
+			usdtRateCancelled: roundTo(usdtMarket * (1 - 0.00813), 2),
+			rubRate: roundTo(rubMarket * 1.017094, 2),
+		};
+	} catch (err) {
+		console.warn(
+			"[seed-exchange-demo] live rate freshen skipped:",
+			err instanceof Error ? err.message : err,
+		);
+		return null;
+	}
+}
+
+function buildSampleLeads(
+	currency: QuoteCurrency,
+	live: LiveDemoRates | null,
+): DemoLead[] {
+	const QUOTE = currency.code;
+	const QUOTE_WORD_PL = currency.tabloWord.toLowerCase(); // «баты»/«песо»
+	const base: DemoQuoteParams =
+		DEMO_QUOTE_PARAMS[QUOTE] ?? (DEMO_QUOTE_PARAMS.PHP as DemoQuoteParams);
+	const P: DemoQuoteParams = live ? { ...base, ...live } : base;
+
+	const QUOTE_CONFIRMED_TO = Math.round(2000 * P.usdtRate);
+	const KYC_FROM_RUB = Math.round(P.kycTargetQuote * P.rubRate);
+	const REQUISITES_TO = Math.round(1000 * P.usdtRate);
+	const PROOF_TO = Math.round(335 * P.usdtRate);
+	const COMPLETED_FROM_RUB = Math.round(P.completedQuote * P.rubRate);
+	const CANCELLED_TO = Math.round(150 * P.usdtRateCancelled);
+
+	return [
+		{
+			key: "rate-request",
+			stage: "exchange_request",
+			name: "Илья Новиков",
+			telegramId: "demo_exchange_001",
+			fields: {
+				asset_from: "usdt",
+				network: "trc20",
+				amount_from: 500,
+				payout_method: "office",
 			},
-			{
-				role: "human",
-				text: "Андрей, получил видео. Проверяю данные и после подтверждения выдам реквизиты.",
+			messages: [
+				{
+					role: "user",
+					text: `Здравствуйте, хочу поменять 500 USDT TRC20 на ${QUOTE_WORD_PL}.`,
+				},
+				{
+					role: "assistant",
+					text: `Здравствуйте. Принял: 500 USDT в сети TRC20. Получение хотите наличными в офисе или переводом на ${currency.bankLabel}?`,
+				},
+			],
+		},
+		{
+			key: "quote-confirmed",
+			stage: "quote_calculated",
+			name: "Мария Соколова",
+			telegramId: "demo_exchange_002",
+			fields: {
+				exchange_rate: P.usdtRate,
+				thb_amount: QUOTE_CONFIRMED_TO,
+				rate_confirmed: true,
 			},
-		],
-		order: {
-			status: "awaiting_payment",
-			direction: "RUB->THB",
-			assetFrom: "RUB",
-			network: "",
-			amountFrom: 468000,
-			rate: 2.6,
-			amountToThb: 180000,
-			paymentMethod: "sbp_qr",
-			paymentRail: "rub_sbp",
-			payoutMethod: "thai_bank_transfer",
-			requisitesJson: {
-				type: "sbp",
-				recipient: "LE Demo Ops",
-				phone: "+7 999 488-00-00",
-				bank: "T-Bank",
-				ttlMinutes: 30,
+			messages: [
+				{ role: "user", text: "Сколько получу за 2000 USDT?" },
+				{
+					role: "assistant",
+					text: `По текущей approved rate-card: 2000 USDT TRC20 -> ${fmtAmount(QUOTE_CONFIRMED_TO)} ${QUOTE}. Зафиксировать заявку?`,
+				},
+				{ role: "user", text: `Да, фиксируем. Получение в ${P.office1Label}.` },
+			],
+		},
+		{
+			key: "kyc-needed",
+			stage: "kyc_collection",
+			name: "Андрей Морозов",
+			telegramId: "demo_exchange_003",
+			operator: true,
+			fields: {
+				verification_video: "telegram:file_id/demo-kyc-video",
+				customer_name_kyc: "Андрей Морозов",
 			},
-			riskJson: { decision: "manual", reason: "first_time_large_rub_deal" },
-		},
-	},
-	{
-		key: "requisites-sent",
-		stage: "requisites_sent",
-		name: "Елена Ким",
-		telegramId: "demo_exchange_004",
-		fields: {
-			requisites_text: "USDT TRC20 wallet: TLEdemoUSDTTRC20Wallet1111111111111",
-			requisites_ttl: 30,
-		},
-		messages: [
-			{ role: "user", text: "Подтверждаю 1000 USDT, выдача Phuket Central." },
-			{
-				role: "assistant",
-				text: "Заявка создана. Отправьте 1000 USDT TRC20 на кошелёк TLEdemoUSDTTRC20Wallet1111111111111. Реквизиты действуют 30 минут.",
+			messages: [
+				{
+					role: "user",
+					text: `Нужно ${P.kycTargetQuote} ${currency.wordGen}, рублями с карты.`,
+				},
+				{
+					role: "assistant",
+					text: "Для этой суммы нужна быстрая KYC-проверка: документ и короткое видео с ФИО и направлением обмена.",
+				},
+				{
+					role: "human",
+					text: "Андрей, получил видео. Проверяю данные и после подтверждения выдам реквизиты.",
+				},
+			],
+			order: {
+				status: "awaiting_payment",
+				direction: `RUB->${QUOTE}`,
+				assetFrom: "RUB",
+				network: "",
+				amountFrom: KYC_FROM_RUB,
+				rate: P.rubRate,
+				amountToThb: P.kycTargetQuote,
+				paymentMethod: "sbp_qr",
+				paymentRail: "rub_sbp",
+				payoutMethod: "thai_bank_transfer",
+				requisitesJson: {
+					type: "sbp",
+					recipient: "LE Demo Ops",
+					phone: "+7 999 488-00-00",
+					bank: "T-Bank",
+					ttlMinutes: 30,
+				},
+				riskJson: { decision: "manual", reason: "first_time_large_rub_deal" },
 			},
-		],
-		order: {
-			status: "awaiting_payment",
-			direction: "USDT->THB",
-			assetFrom: "USDT",
-			network: "trc20",
-			amountFrom: 1000,
-			rate: 36.05,
-			amountToThb: 36050,
-			paymentMethod: "crypto_transfer",
-			paymentRail: "trc20",
-			payoutMethod: "office_cash",
-			payoutLocation: "phuket_central",
-			requisitesJson: {
-				type: "wallet",
-				asset: "USDT",
-				network: "TRC20",
-				address: "TLEdemoUSDTTRC20Wallet1111111111111",
-				ttlMinutes: 30,
+		},
+		{
+			key: "requisites-sent",
+			stage: "requisites_sent",
+			name: "Елена Ким",
+			telegramId: "demo_exchange_004",
+			fields: {
+				requisites_text:
+					"USDT TRC20 wallet: TLEdemoUSDTTRC20Wallet1111111111111",
+				requisites_ttl: 30,
 			},
-			riskJson: { decision: "pass" },
-		},
-	},
-	{
-		key: "proof-waiting",
-		stage: "payment_proof_waiting",
-		name: "Олег Власов",
-		telegramId: "demo_exchange_005",
-		fields: {
-			payment_proof_text: "0xdemo-trc20-proof-hash",
-		},
-		messages: [
-			{ role: "user", text: "Отправил USDT, хэш 0xdemo-trc20-proof-hash." },
-			{
-				role: "assistant",
-				text: "Спасибо, вижу хэш. Передал оплату на проверку, после подтверждения подготовим выдачу THB.",
+			messages: [
+				{
+					role: "user",
+					text: `Подтверждаю 1000 USDT, выдача ${P.office2Label}.`,
+				},
+				{
+					role: "assistant",
+					text: "Заявка создана. Отправьте 1000 USDT TRC20 на кошелёк TLEdemoUSDTTRC20Wallet1111111111111. Реквизиты действуют 30 минут.",
+				},
+			],
+			order: {
+				status: "awaiting_payment",
+				direction: `USDT->${QUOTE}`,
+				assetFrom: "USDT",
+				network: "trc20",
+				amountFrom: 1000,
+				rate: P.usdtRate,
+				amountToThb: REQUISITES_TO,
+				paymentMethod: "crypto_transfer",
+				paymentRail: "trc20",
+				payoutMethod: "office_cash",
+				payoutLocation: P.office2Key,
+				requisitesJson: {
+					type: "wallet",
+					asset: "USDT",
+					network: "TRC20",
+					address: "TLEdemoUSDTTRC20Wallet1111111111111",
+					ttlMinutes: 30,
+				},
+				riskJson: { decision: "pass" },
 			},
-		],
-		order: {
-			status: "paid",
-			direction: "USDT->THB",
-			assetFrom: "USDT",
-			network: "trc20",
-			amountFrom: 335,
-			rate: 36.05,
-			amountToThb: 12077,
-			paymentMethod: "crypto_transfer",
-			paymentRail: "trc20",
-			payoutMethod: "cardless_atm",
-			proofJson: { txHash: "0xdemo-trc20-proof-hash", confirmations: 3 },
-			riskJson: { decision: "pass" },
 		},
-	},
-	{
-		key: "completed",
-		stage: "payout_or_completion",
-		name: "Наталья Орлова",
-		telegramId: "demo_exchange_006",
-		fields: {
-			final_thb_paid: 50000,
-			payout_code_final: "LE-4881",
-		},
-		messages: [
-			{ role: "user", text: "Чек отправила, деньги дошли?" },
-			{
-				role: "human",
-				text: "Оплата подтверждена. Выдача 50 000 THB готова в Bangkok Asok, код LE-4881.",
+		{
+			key: "proof-waiting",
+			stage: "payment_proof_waiting",
+			name: "Олег Власов",
+			telegramId: "demo_exchange_005",
+			fields: {
+				payment_proof_text: "0xdemo-trc20-proof-hash",
 			},
-			{ role: "user", text: "Получила, спасибо!" },
-		],
-		order: {
-			status: "completed",
-			direction: "RUB->THB",
-			assetFrom: "RUB",
-			network: "",
-			amountFrom: 130000,
-			rate: 2.6,
-			amountToThb: 50000,
-			paymentMethod: "card_transfer",
-			paymentRail: "rub_card",
-			payoutMethod: "office_cash",
-			payoutLocation: "bangkok_asok",
-			payoutCode: "LE-4881",
-			proofJson: {
-				receipt: "telegram:file_id/demo-rub-receipt",
-				checkedBy: "operator",
+			messages: [
+				{ role: "user", text: "Отправил USDT, хэш 0xdemo-trc20-proof-hash." },
+				{
+					role: "assistant",
+					text: `Спасибо, вижу хэш. Передал оплату на проверку, после подтверждения подготовим выдачу ${QUOTE}.`,
+				},
+			],
+			order: {
+				status: "paid",
+				direction: `USDT->${QUOTE}`,
+				assetFrom: "USDT",
+				network: "trc20",
+				amountFrom: 335,
+				rate: P.usdtRate,
+				amountToThb: PROOF_TO,
+				paymentMethod: "crypto_transfer",
+				paymentRail: "trc20",
+				payoutMethod: "cardless_atm",
+				proofJson: { txHash: "0xdemo-trc20-proof-hash", confirmations: 3 },
+				riskJson: { decision: "pass" },
 			},
-			riskJson: { decision: "pass" },
 		},
-	},
-	{
-		key: "cancelled",
-		stage: "cancelled",
-		name: "Сергей Павлов",
-		telegramId: "demo_exchange_007",
-		fields: {
-			cancel_reason: "rate",
-		},
-		messages: [
-			{ role: "user", text: "Курс не подходит, отменяем." },
-			{
-				role: "assistant",
-				text: "Понял, заявку отменяю. Если сумма или способ получения изменятся, пересчитаю свежую котировку.",
+		{
+			key: "completed",
+			stage: "payout_or_completion",
+			name: "Наталья Орлова",
+			telegramId: "demo_exchange_006",
+			fields: {
+				final_thb_paid: P.completedQuote,
+				payout_code_final: "LE-4881",
 			},
-		],
-		order: {
-			status: "cancelled",
-			direction: "USDT->THB",
-			assetFrom: "USDT",
-			network: "trc20",
-			amountFrom: 150,
-			rate: 35.95,
-			amountToThb: 5393,
-			paymentMethod: "crypto_transfer",
-			paymentRail: "trc20",
-			payoutMethod: "office_cash",
-			riskJson: { decision: "cancelled_by_customer" },
+			messages: [
+				{ role: "user", text: "Чек отправила, деньги дошли?" },
+				{
+					role: "human",
+					text: `Оплата подтверждена. Выдача ${fmtAmount(P.completedQuote)} ${QUOTE} готова в ${P.office1Label}, код LE-4881.`,
+				},
+				{ role: "user", text: "Получила, спасибо!" },
+			],
+			order: {
+				status: "completed",
+				direction: `RUB->${QUOTE}`,
+				assetFrom: "RUB",
+				network: "",
+				amountFrom: COMPLETED_FROM_RUB,
+				rate: P.rubRate,
+				amountToThb: P.completedQuote,
+				paymentMethod: "card_transfer",
+				paymentRail: "rub_card",
+				payoutMethod: "office_cash",
+				payoutLocation: P.office1Key,
+				payoutCode: "LE-4881",
+				proofJson: {
+					receipt: "telegram:file_id/demo-rub-receipt",
+					checkedBy: "operator",
+				},
+				riskJson: { decision: "pass" },
+			},
 		},
-	},
-];
+		{
+			key: "cancelled",
+			stage: "cancelled",
+			name: "Сергей Павлов",
+			telegramId: "demo_exchange_007",
+			fields: {
+				cancel_reason: "rate",
+			},
+			messages: [
+				{ role: "user", text: "Курс не подходит, отменяем." },
+				{
+					role: "assistant",
+					text: "Понял, заявку отменяю. Если сумма или способ получения изменятся, пересчитаю свежую котировку.",
+				},
+			],
+			order: {
+				status: "cancelled",
+				direction: `USDT->${QUOTE}`,
+				assetFrom: "USDT",
+				network: "trc20",
+				amountFrom: 150,
+				rate: P.usdtRateCancelled,
+				amountToThb: CANCELLED_TO,
+				paymentMethod: "crypto_transfer",
+				paymentRail: "trc20",
+				payoutMethod: "office_cash",
+				riskJson: { decision: "cancelled_by_customer" },
+			},
+		},
+	];
+}
+
+// Демо-лиды воронки «Трансфер» (стадии transfer_* — слоги уникальны между
+// воронками, merged stage-контекст кладёт лид в нужную воронку). Цены PHP,
+// филиппинский колорит: NAIA, Makati, BGC.
+function buildTransferLeads(): DemoLead[] {
+	return [
+		{
+			key: "transfer-request",
+			stage: "transfer_request",
+			name: "Дмитрий Соколов",
+			telegramId: "demo_transfer_001",
+			fields: {
+				pickup: "NAIA Terminal 3",
+				dropoff: "Fairmont Makati",
+				date: "завтра",
+				time: "рейс SQ916, прилёт 14:40",
+				passengers: 2,
+			},
+			messages: [
+				{
+					role: "user",
+					text: "Прилетаю завтра рейсом SQ916 в 14:40, NAIA Terminal 3. Нужен минивэн до Fairmont Makati, нас двое и два чемодана.",
+				},
+				{
+					role: "assistant",
+					text: "Принял: завтра, SQ916, NAIA T3 → Fairmont Makati, 2 пассажира с багажом, минивэн. Передаю оператору на подтверждение цены — отвечу в этом чате в течение нескольких минут.",
+				},
+			],
+		},
+		{
+			key: "transfer-confirmed",
+			stage: "transfer_offer",
+			name: "Анна Ким",
+			telegramId: "demo_transfer_002",
+			fields: {
+				price: 2800,
+				vehicle: "седан",
+				confirmed: true,
+			},
+			messages: [
+				{
+					role: "user",
+					text: "Сколько будет седан NAIA Terminal 1 → Shangri-La The Fort (BGC)?",
+				},
+				{
+					role: "assistant",
+					text: "Седан NAIA T1 → Shangri-La The Fort — 2 800 PHP. Водитель встретит с табличкой в зоне прилёта, ожидание по рейсу бесплатно до 60 минут. Подтверждаем?",
+				},
+				{ role: "user", text: "Да, подтверждаю." },
+			],
+		},
+		{
+			key: "transfer-done",
+			stage: "transfer_done",
+			name: "Олег Тарасов",
+			telegramId: "demo_transfer_003",
+			fields: {},
+			messages: [
+				{
+					role: "assistant",
+					text: "Водитель назначен: Marco, белый Toyota Innova, табличка с вашим именем у выхода NAIA T3. Ночной тариф — 4 500 PHP, оплата наличными или GCash.",
+				},
+				{ role: "user", text: "Доехали, спасибо! Всё отлично." },
+			],
+		},
+	];
+}
+
+// Демо-лиды воронки «Зелёный коридор» (VIP-встреча в аэропорту, стадии gc_*).
+function buildGreenCorridorLeads(): DemoLead[] {
+	return [
+		{
+			key: "gc-family-request",
+			stage: "gc_confirm",
+			name: "Семья Волковых",
+			telegramId: "demo_gc_001",
+			fields: {
+				price: 12000,
+				confirmed: false,
+			},
+			messages: [
+				{
+					role: "user",
+					text: "Нужен зелёный коридор: прилетаем семьёй из 4 человек, рейс EK332, NAIA Terminal 1. Что входит и сколько стоит?",
+				},
+				{
+					role: "assistant",
+					text: "Встретим у выхода с рейса, проведём через паспортный контроль без очереди и поможем с багажом. Пакет Family на 4 человек — 12 000 PHP. Подтвердить бронь на рейс EK332?",
+				},
+			],
+		},
+		{
+			key: "gc-done",
+			stage: "gc_done",
+			name: "Павел Орлов",
+			telegramId: "demo_gc_002",
+			fields: {},
+			messages: [
+				{
+					role: "assistant",
+					text: "Встречающий: Liza, место встречи — у выхода с телетрапа NAIA T3, табличка с вашим именем. Пакет Standard — 8 000 PHP.",
+				},
+				{
+					role: "user",
+					text: "Встретили у трапа, паспортный контроль прошли за 15 минут. Супер-сервис!",
+				},
+			],
+		},
+	];
+}
 
 function parseArgs(): Args {
 	const out: Partial<Args> = {
@@ -385,6 +695,8 @@ function parseArgs(): Args {
 			null,
 		publicUrl: process.env.PLATFORM_PUBLIC_URL ?? null,
 		setTelegramWebhook: false,
+		quoteAsset: process.env.EXCHANGE_DEMO_QUOTE_ASSET ?? null,
+		brand: process.env.EXCHANGE_DEMO_BRAND ?? "Lead Engine Exchange Demo",
 	};
 
 	for (const arg of process.argv.slice(2)) {
@@ -407,6 +719,8 @@ function parseArgs(): Args {
 		else if (rawKey === "llm-api-key") out.llmApiKey = value;
 		else if (rawKey === "llm-base-url") out.llmBaseUrl = value;
 		else if (rawKey === "public-url") out.publicUrl = value;
+		else if (rawKey === "quote-asset") out.quoteAsset = value;
+		else if (rawKey === "brand") out.brand = value;
 	}
 
 	const llmProvider = normalizeLlmProvider(
@@ -430,6 +744,8 @@ function parseArgs(): Args {
 		llmBaseUrl: normalizePublicUrl(out.llmBaseUrl ?? null),
 		publicUrl: normalizePublicUrl(out.publicUrl ?? null),
 		setTelegramWebhook: out.setTelegramWebhook ?? false,
+		quoteAsset: normalizeOptional(out.quoteAsset ?? null),
+		brand: out.brand?.trim() || "Lead Engine Exchange Demo",
 	};
 }
 
@@ -576,7 +892,7 @@ async function seedChannelsAndLlm(input: {
 				status: "active",
 				metadataJson: JSON.stringify({
 					demoSeed: DEMO_SEED,
-					brandName: "Lead Engine Exchange Demo",
+					brandName: input.args.brand,
 				}),
 				createdAt: input.now,
 				updatedAt: input.now,
@@ -587,7 +903,7 @@ async function seedChannelsAndLlm(input: {
 					status: "active",
 					metadataJson: JSON.stringify({
 						demoSeed: DEMO_SEED,
-						brandName: "Lead Engine Exchange Demo",
+						brandName: input.args.brand,
 					}),
 					updatedAt: input.now,
 				},
@@ -700,86 +1016,238 @@ async function seedChannelsAndLlm(input: {
 	});
 }
 
-async function seedExchangeFunnel(input: {
+// Три воронки демо-тенанта. Exchange сидится ПЕРВЫМ: наименьший funnel id =
+// корректный fallback интент-роутера (первая активная воронка) и primary-funnel
+// в дашборде. У transfer/green_corridor vertical_template_id нет — их персона
+// задаётся goal/guidance стадий + KB; exchange_v1 остаётся шаблоном тенанта.
+const DEMO_FUNNELS: Array<{ key: string; verticalTemplateId: string | null }> =
+	[
+		{ key: "exchange", verticalTemplateId: "exchange_v1" },
+		{ key: "transfer", verticalTemplateId: null },
+		{ key: "green_corridor", verticalTemplateId: null },
+	];
+
+async function seedDemoFunnels(input: {
 	db: Db;
 	tenantId: number;
 	ownerAdminId: number;
 	now: number;
-}): Promise<{ funnelId: number; stagesCreated: number }> {
-	const seeded = await seedFunnelByKey(
-		input.db,
-		input.tenantId,
-		"exchange",
-		input.ownerAdminId,
-	);
-	if ("error" in seeded) throw new Error(`seedFunnel: ${seeded.error}`);
-	await withTenant(input.db, input.tenantId, async (tx) => {
-		await tx
-			.update(funnels)
-			.set({
-				verticalTemplateId: "exchange_v1",
-				isActive: true,
-				updatedAt: input.now,
-			})
-			.where(
-				and(
-					eq(funnels.tenantId, input.tenantId),
-					eq(funnels.id, seeded.funnelId),
-				),
-			);
-	});
-	return seeded;
+}): Promise<Map<string, { funnelId: number; stagesCreated: number }>> {
+	const byKey = new Map<string, { funnelId: number; stagesCreated: number }>();
+	for (const item of DEMO_FUNNELS) {
+		const seeded = await seedFunnelByKey(
+			input.db,
+			input.tenantId,
+			item.key,
+			input.ownerAdminId,
+		);
+		if ("error" in seeded)
+			throw new Error(`seedFunnel(${item.key}): ${seeded.error}`);
+		await withTenant(input.db, input.tenantId, async (tx) => {
+			await tx
+				.update(funnels)
+				.set({
+					verticalTemplateId: item.verticalTemplateId,
+					isActive: true,
+					updatedAt: input.now,
+				})
+				.where(
+					and(
+						eq(funnels.tenantId, input.tenantId),
+						eq(funnels.id, seeded.funnelId),
+					),
+				);
+		});
+		byKey.set(item.key, seeded);
+	}
+	return byKey;
 }
+
+// Каталог услуг: явный маршрут «текст клиента → воронка». Дополняет интент-
+// роутер (каталог матчится первым) и даёт аудит маршрута в lead-notes.
+// Токены дизъюнктны: «аэропорт» только у трансфера, коридор — по своим словам.
+async function seedServiceCatalog(input: {
+	db: Db;
+	tenantId: number;
+	funnelIdByKey: Map<string, { funnelId: number }>;
+	now: number;
+}): Promise<number> {
+	const items = [
+		{
+			slug: "exchange",
+			name: "Обмен валют",
+			category: "exchange",
+			description: "обмен, курс, USDT, крипта, рубли, песо, наличные",
+			funnelKey: "exchange",
+			sortOrder: 0,
+		},
+		{
+			slug: "transfer",
+			name: "Трансфер из аэропорта",
+			category: "transfer",
+			description:
+				"трансфер, аэропорт, NAIA, встретить, довезти, минивэн, такси",
+			funnelKey: "transfer",
+			sortOrder: 1,
+		},
+		{
+			slug: "green_corridor",
+			name: "Зелёный коридор",
+			category: "vip",
+			description:
+				"зелёный коридор, зеленый коридор, fast track, vip встреча, сопровождение, паспортный контроль",
+			funnelKey: "green_corridor",
+			sortOrder: 2,
+		},
+	];
+	await withTenant(input.db, input.tenantId, async (tx) => {
+		for (const item of items) {
+			const funnelId = input.funnelIdByKey.get(item.funnelKey)?.funnelId;
+			if (!funnelId)
+				throw new Error(`catalog: no funnel for ${item.funnelKey}`);
+			await tx
+				.insert(serviceCatalogItems)
+				.values({
+					tenantId: input.tenantId,
+					slug: item.slug,
+					name: item.name,
+					category: item.category,
+					description: item.description,
+					routeType: "funnel",
+					funnelId,
+					isActive: true,
+					sortOrder: item.sortOrder,
+					metadataJson: JSON.stringify({ demoSeed: DEMO_SEED }),
+					createdAt: input.now,
+					updatedAt: input.now,
+				})
+				.onConflictDoUpdate({
+					target: [serviceCatalogItems.tenantId, serviceCatalogItems.slug],
+					set: {
+						name: item.name,
+						category: item.category,
+						description: item.description,
+						routeType: "funnel",
+						funnelId,
+						isActive: true,
+						sortOrder: item.sortOrder,
+						updatedAt: input.now,
+					},
+				});
+		}
+	});
+	return items.length;
+}
+
+// Director hooks: пер-тенантные инструкции в каждый промпт (данные, не код).
+// (а) кросс-сейл трансфера/коридора по дате прилёта; (б) мульти-сервисная
+// идентичность + поведение на «вопрос про курс».
+async function seedDirectorHooks(input: {
+	db: Db;
+	tenantId: number;
+	now: number;
+}): Promise<number> {
+	const hooks = [
+		{
+			name: "Кросс-сейл по прилёту",
+			body: "Если клиент упоминает дату прилёта, номер рейса или что он скоро прилетает — после ответа на его вопрос предложи ОДНОЙ фразой трансфер из аэропорта и VIP-встречу «зелёный коридор» (встреча у выхода, проход без очередей). Не настаивай и не повторяй предложение в каждом сообщении.",
+			triggerHint: "прилёт, рейс, дата прилёта",
+			position: 0,
+		},
+		{
+			name: "Три сервиса в одном боте",
+			body: "Компания делает не только обмен валют: также аэропорт-трансфер и VIP-встречу в аэропорту («зелёный коридор»). Если клиент спрашивает про трансфер или встречу — собери заявку, не отправляй его «в другую компанию». Если клиент просто спрашивает курс — назови курс строго через инструмент compute_exchange_quote и мягко предложи оформить обмен, без давления.",
+			triggerHint: "трансфер, зелёный коридор, курс",
+			position: 1,
+		},
+	];
+	await withTenant(input.db, input.tenantId, async (tx) => {
+		for (const hook of hooks) {
+			await tx
+				.delete(directorHooks)
+				.where(
+					and(
+						eq(directorHooks.tenantId, input.tenantId),
+						eq(directorHooks.name, hook.name),
+					),
+				);
+			await tx.insert(directorHooks).values({
+				tenantId: input.tenantId,
+				name: hook.name,
+				body: hook.body,
+				triggerHint: hook.triggerHint,
+				isActive: true,
+				position: hook.position,
+				createdAt: input.now,
+				updatedAt: input.now,
+			});
+		}
+	});
+	return hooks.length;
+}
+
+// KB-сэмплы трёх сервисов: каждый dir сидится глобально-скоупленными доками
+// (бот видит их во всех воронках; маршрут по воронкам решает интент-роутер).
+const KB_SAMPLE_SETS: Array<{ dir: string; topic: string; files: string[] }> = [
+	{ dir: "exchange", topic: "exchange", files: ["faq.md", "how-to-pay.md"] },
+	{
+		dir: "transfer",
+		topic: "transfer",
+		files: ["pricing-zones.md", "rules.md"],
+	},
+	{ dir: "green_corridor", topic: "green_corridor", files: ["service.md"] },
+];
 
 async function seedSampleKb(input: {
 	db: Db;
 	tenantId: number;
 	now: number;
 }): Promise<number> {
-	const dir = resolve(__dirname, "..", "kb-samples", "exchange");
-	const files = ["faq.md", "how-to-pay.md"];
 	let count = 0;
 	await withTenant(input.db, input.tenantId, async (tx) => {
-		for (const file of files) {
-			const path = resolve(dir, file);
-			if (!existsSync(path)) throw new Error(`KB sample missing: ${path}`);
-			const text = readFileSync(path, "utf8");
-			const source = `kb-samples/exchange/${basename(file)}`;
-			await tx
-				.delete(kbDocuments)
-				.where(
-					and(
-						eq(kbDocuments.tenantId, input.tenantId),
-						eq(kbDocuments.source, source),
-					),
-				);
-			const [doc] = await tx
-				.insert(kbDocuments)
-				.values({
+		for (const set of KB_SAMPLE_SETS) {
+			const dir = resolve(__dirname, "..", "kb-samples", set.dir);
+			for (const file of set.files) {
+				const path = resolve(dir, file);
+				if (!existsSync(path)) throw new Error(`KB sample missing: ${path}`);
+				const text = readFileSync(path, "utf8");
+				const source = `kb-samples/${set.dir}/${basename(file)}`;
+				await tx
+					.delete(kbDocuments)
+					.where(
+						and(
+							eq(kbDocuments.tenantId, input.tenantId),
+							eq(kbDocuments.source, source),
+						),
+					);
+				const [doc] = await tx
+					.insert(kbDocuments)
+					.values({
+						tenantId: input.tenantId,
+						source,
+						title: `${set.topic} sample: ${basename(file, ".md")}`,
+						contentHash: stableHash(text),
+						topic: set.topic,
+						scopeType: "global",
+						fileName: file,
+						fileMimeType: "text/markdown",
+						fileSizeBytes: Buffer.byteLength(text, "utf8"),
+						fileUploadedAt: input.now,
+						createdAt: input.now,
+					})
+					.returning({ id: kbDocuments.id });
+				if (!doc) throw new Error(`failed to seed KB sample ${file}`);
+				await tx.insert(kbChunks).values({
 					tenantId: input.tenantId,
-					source,
-					title: `Exchange sample: ${basename(file, ".md")}`,
-					contentHash: stableHash(text),
-					topic: "exchange",
-					scopeType: "global",
-					fileName: file,
-					fileMimeType: "text/markdown",
-					fileSizeBytes: Buffer.byteLength(text, "utf8"),
-					fileUploadedAt: input.now,
+					documentId: doc.id,
+					chunkIndex: 0,
+					text,
+					tokenCount: roughTokenCount(text),
+					embedding: null,
 					createdAt: input.now,
-				})
-				.returning({ id: kbDocuments.id });
-			if (!doc) throw new Error(`failed to seed KB sample ${file}`);
-			await tx.insert(kbChunks).values({
-				tenantId: input.tenantId,
-				documentId: doc.id,
-				chunkIndex: 0,
-				text,
-				tokenCount: roughTokenCount(text),
-				embedding: null,
-				createdAt: input.now,
-			});
-			count++;
+				});
+				count++;
+			}
 		}
 	});
 	return count;
@@ -815,16 +1283,18 @@ async function cleanDemoRows(input: {
 	});
 }
 
+// Слоги стадий всех демо-воронок (exchange_*, transfer_*, gc_*) не пересекаются,
+// поэтому stage-контекст можно безопасно слить в одну карту slug→id.
 async function loadStageContext(input: {
 	db: Db;
 	tenantId: number;
-	funnelId: number;
+	funnelIds: number[];
 }) {
 	return withTenant(input.db, input.tenantId, async (tx) => {
 		const stageRows = await tx
 			.select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
 			.from(stageDefinitions)
-			.where(eq(stageDefinitions.funnelId, input.funnelId));
+			.where(inArray(stageDefinitions.funnelId, input.funnelIds));
 		const fieldRows = await tx
 			.select({
 				id: stageFields.id,
@@ -833,7 +1303,7 @@ async function loadStageContext(input: {
 			})
 			.from(stageFields)
 			.innerJoin(stageDefinitions, eq(stageDefinitions.id, stageFields.stageId))
-			.where(eq(stageDefinitions.funnelId, input.funnelId));
+			.where(inArray(stageDefinitions.funnelId, input.funnelIds));
 
 		const stageIdBySlug = new Map(
 			stageRows.map((stage) => [stage.slug, stage.id]),
@@ -855,9 +1325,11 @@ async function seedDemoWorkflow(input: {
 	slug: string;
 	channelId: number;
 	operatorAdminId: number;
-	funnelId: number;
+	funnelIds: number[];
 	now: number;
+	sampleLeads: DemoLead[];
 }): Promise<{ leads: number; messages: number; orders: number }> {
+	const SAMPLE_LEADS = input.sampleLeads;
 	await cleanDemoRows({
 		db: input.db,
 		tenantId: input.tenantId,
@@ -866,7 +1338,7 @@ async function seedDemoWorkflow(input: {
 	const { stageIdBySlug, fieldIdByStage } = await loadStageContext({
 		db: input.db,
 		tenantId: input.tenantId,
-		funnelId: input.funnelId,
+		funnelIds: input.funnelIds,
 	});
 
 	let leadCount = 0;
@@ -951,7 +1423,11 @@ async function seedDemoWorkflow(input: {
 					channelId: input.channelId,
 					source: "bot",
 					mode: sample.operator ? "human" : "ai",
-					status: sample.stage === "payout_or_completion" ? "resolved" : "open",
+					status: ["payout_or_completion", "transfer_done", "gc_done"].includes(
+						sample.stage,
+					)
+						? "resolved"
+						: "open",
 					unreadCount: lastMessage?.role === "user" ? 1 : 0,
 					lastMessageText: lastMessage?.text ?? null,
 					lastMessageAt: lastAt,
@@ -1179,17 +1655,29 @@ async function main() {
 			masterKeyHex,
 			now,
 		});
-		const funnelResult = await seedExchangeFunnel({
+		const funnelsByKey = await seedDemoFunnels({
 			db,
 			tenantId,
 			ownerAdminId,
 			now,
 		});
+		const exchangeFunnel = funnelsByKey.get("exchange");
+		if (!exchangeFunnel) throw new Error("exchange funnel missing after seed");
+		const catalogItems = await seedServiceCatalog({
+			db,
+			tenantId,
+			funnelIdByKey: funnelsByKey,
+			now,
+		});
+		const directorHookCount = await seedDirectorHooks({ db, tenantId, now });
+		const currency = resolveQuoteCurrency(args.quoteAsset);
 		const fixtureResult = await seedExchangeFixtures({
 			db,
 			tenantId,
 			masterKeyHex,
+			quoteAsset: currency.code,
 		});
+		const liveRates = await freshenSeededRates({ db, tenantId, currency, now });
 		const sampleKbDocs = await seedSampleKb({ db, tenantId, now });
 		const workflowResult = await seedDemoWorkflow({
 			db,
@@ -1197,8 +1685,13 @@ async function main() {
 			slug: args.slug,
 			channelId: channelResult.telegramChannelId ?? channelResult.webChannelId,
 			operatorAdminId,
-			funnelId: funnelResult.funnelId,
+			funnelIds: [...funnelsByKey.values()].map((f) => f.funnelId),
 			now,
+			sampleLeads: [
+				...buildSampleLeads(currency, liveRates),
+				...buildTransferLeads(),
+				...buildGreenCorridorLeads(),
+			],
 		});
 		const webhookSet = await setTelegramWebhook(args);
 		const counts = await readinessCounts({ db, tenantId });
@@ -1226,12 +1719,26 @@ async function main() {
 						telegramUsername: channelResult.telegramUsername,
 						telegramWebhookSet: webhookSet,
 					},
-					funnel: {
-						id: funnelResult.funnelId,
-						verticalTemplateId: "exchange_v1",
-						stagesCreated: funnelResult.stagesCreated,
-					},
+					funnels: Object.fromEntries(
+						[...funnelsByKey.entries()].map(([key, value]) => [
+							key,
+							{
+								id: value.funnelId,
+								stagesCreated: value.stagesCreated,
+								verticalTemplateId:
+									DEMO_FUNNELS.find((f) => f.key === key)?.verticalTemplateId ??
+									null,
+							},
+						]),
+					),
+					serviceCatalogItems: catalogItems,
+					directorHooks: directorHookCount,
 					fixtures: fixtureResult,
+					quote: {
+						asset: currency.code,
+						liveRates:
+							liveRates ?? "feed unavailable — static fallback rates used",
+					},
 					sampleKbDocs,
 					demoWorkflow: workflowResult,
 					readiness: counts,

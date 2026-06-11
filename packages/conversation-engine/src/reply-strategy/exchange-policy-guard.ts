@@ -1,5 +1,6 @@
 import type { AnswerTelemetry } from "@chatman-media/kb";
 import type { MessageRow } from "../dal/messages.ts";
+import { ANY_QUOTE_CURRENCY_MENTION_RE } from "../exchange-quote-currency.ts";
 import {
 	EXCHANGE_SAFE_FALLBACK,
 	type ExchangeReplyGuardInput,
@@ -51,6 +52,8 @@ export interface ExchangeVerificationPolicyState {
 export interface ExchangeOrderPolicyState {
 	id: number;
 	status: string;
+	/** Направление заявки, например "RUB->PHP" — источник валюты в текстах. */
+	direction?: string | null;
 	assetFrom?: string | null;
 	network?: string | null;
 	amountMode?: string | null;
@@ -86,8 +89,10 @@ const KYC_VERIFIED_RE =
 const PAYMENT_VERIFIED_RE =
 	/(?:оплат|перевод|чек|receipt|proof)[^.!\n]{0,120}(?:подтвержден|подтверждена|получен|получена|зачислен|зачислена|проверен|проверена|успешн)|(?:я\s+)?проверил(?:а|и)?[^.!\n]{0,80}(?:оплат|перевод|чек)/iu;
 
-const PAYOUT_COMPLETED_RE =
-	/(?:выдач|выплат|payout|код\s+(?:выдачи|снятия|получения)|деньги|баты|thb)[^.!\n]{0,120}(?:готов|готова|выдан|выдана|отправлен|отправлена|завершен|завершена|исполнен|исполнена|можно\s+забирать|можно\s+снимать)|(?:заявка|обмен)[^.!\n]{0,80}(?:завершен|завершена|выполнен|выполнена)/iu;
+const PAYOUT_COMPLETED_RE = new RegExp(
+	`(?:выдач|выплат|payout|код\\s+(?:выдачи|снятия|получения)|деньги|${ANY_QUOTE_CURRENCY_MENTION_RE.source})[^.!\\n]{0,120}(?:готов|готова|выдан|выдана|отправлен|отправлена|завершен|завершена|исполнен|исполнена|можно\\s+забирать|можно\\s+снимать)|(?:заявка|обмен)[^.!\\n]{0,80}(?:завершен|завершена|выполнен|выполнена)`,
+	"iu",
+);
 
 const CONCRETE_REQUISITES_OR_PAYMENT_RE =
 	/(?:оплатите|переведите|отправьте|внесите|кошел[её]к|адрес\s+(?:кошелька|для\s+оплаты)|карта|card|sbp|сбп|qr|binance\s*id|реквизит(?:ы|ам)?)[^.!\n]{0,160}(?:\d{4,}|https?:\/\/|T[A-Za-z0-9]{25,}|0x[a-fA-F0-9]{32,}|bc1[a-z0-9]{20,}|оплатите|переведите|отправьте)/iu;

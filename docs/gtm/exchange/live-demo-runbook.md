@@ -73,6 +73,36 @@ PLATFORM_MASTER_KEY=<64hex> \
 bun run --cwd apps/api seed:exchange-demo
 ```
 
+The quote currency is PER-TENANT: Admin UI → Обменка → «Валюта выдачи»
+(exchange_settings.quote_asset). The platform default is PHP (Philippines), so
+a plain seed produces a peso demo (rates ~61 PHP/USDT, Manila/Cebu offices,
+BDO/GCash payout texts). For a Thai demo seed with the THB set:
+
+```sh
+DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
+PLATFORM_MASTER_KEY=<64hex> \
+bun run --cwd apps/api seed:exchange-demo -- --quote-asset=THB
+```
+
+After switching the currency in the admin UI, recreate the tenant's rates via
+the rate-card preview/approve card — old-currency rates stay in the DB but are
+no longer used for quotes.
+
+The seed now provisions THREE funnels in one tenant: exchange + transfer
+(аэропорт-трансфер) + green_corridor (VIP-встреча в аэропорту), plus 3
+service-catalog routes, 2 director hooks (arrival cross-sell + multi-service
+identity) and demo leads in every funnel. One Telegram bot serves all three:
+the intent router sends «хочу обменять…» to exchange, «нужен трансфер…» to
+transfer, «зелёный коридор…» to green_corridor; keyword-less follow-ups stick
+to the client's open lead. Checkin reminders (день 1) нудят клиента по
+незаконченному обмену до автозакрытия (3 дня) — needs the worker running.
+Custom brand for the web widget: `--brand="Client Name"`. Sim personas for the
+new funnels: `transfer_naia`, `transfer_night_bgc`, `green_corridor_family`.
+
+Note: seed THB and PHP demo tenants into DIFFERENT databases — the KB sample
+docs collide on a global `uniq_kb_source_hash` index if both live in one DB
+(fixed upstream by a per-tenant index migration; check it is merged).
+
 6. Start API/UI if using a local screen-share environment:
 
 ```sh

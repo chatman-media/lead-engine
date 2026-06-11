@@ -1,17 +1,23 @@
 /**
- * Рыночный фид базового курса (base_rate). Тянет рыночную цену asset→THB и
- * отдаёт значение в ориентации quote_mode. Маржа/комиссия НЕ трогаются — это
- * спред обменника поверх рыночного курса.
+ * Рыночный фид базового курса (base_rate). Тянет рыночную цену asset→котируемая
+ * валюта (per-row quote_asset; дефолты — QUOTE_CURRENCY) и отдаёт значение
+ * в ориентации quote_mode. Маржа/комиссия НЕ трогаются — это спред обменника
+ * поверх рыночного курса.
  *
  * Источники (публичные, без ключей):
  *   - крипта (BTC/ETH): Binance ticker <SYM>USDT → цена в USDT (≈USD);
- *   - FX (USD/RUB/EUR→THB): open.er-api.com/v6/latest/USD → курсы за 1 USD.
+ *   - FX (USD/RUB/EUR→quote): open.er-api.com/v6/latest/USD → курсы за 1 USD.
  *   USDT принимаем ≈ USD.
  *
  * Точка расширения: RateProvider можно заменить на платный фид/свой источник.
  */
 
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import {
+  type Db,
+  QUOTE_CURRENCY,
+  type QuoteCurrency,
+  withTenant,
+} from "@chatman-media/conversation-engine";
 import { exchangeRates, exchangeSettings, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 
@@ -44,11 +50,11 @@ async function fetchJson(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<u
   }
 }
 
-/** Курсы валют за 1 USD (включая THB, RUB, EUR). С кэшем. */
+/** Курсы валют за 1 USD (включая котируемые, RUB, EUR). С кэшем. */
 async function getFxPerUsd(): Promise<Record<string, number>> {
   if (fxCache && Date.now() - fxCache.at < FX_TTL_MS) return fxCache.rates;
   const json = (await fetchJson(FX_API)) as { result?: string; rates?: Record<string, number> };
-  if (json.result !== "success" || !json.rates?.THB) {
+  if (json.result !== "success" || !json.rates || Object.keys(json.rates).length === 0) {
     throw new Error("FX feed: bad response");
   }
   fxCache = { at: Date.now(), rates: json.rates };
@@ -66,51 +72,59 @@ async function getBinanceUsdt(symbolBase: string): Promise<number> {
 }
 
 /**
- * Рыночная цена THB за 1 единицу актива (THB per unit).
+ * Рыночная цена котируемой валюты за 1 единицу актива (quote per unit).
+ * quoteCode — валюта выдачи (per-tenant/per-row); дефолт — платформенный.
  * Возвращает null если актив не поддержан фидом.
  */
-export async function fetchMarketThbPerUnit(asset: string): Promise<number | null> {
+export async function fetchMarketQuotePerUnit(
+  asset: string,
+  quoteCode: string = QUOTE_CURRENCY.code,
+): Promise<number | null> {
   const a = asset.trim().toUpperCase();
   const fx = await getFxPerUsd();
-  const thbPerUsd = fx.THB ?? 0;
-  if (!(thbPerUsd > 0)) throw new Error("FX feed: no THB");
+  const quotePerUsd = fx[quoteCode] ?? 0;
+  if (!(quotePerUsd > 0)) throw new Error(`FX feed: no ${quoteCode}`);
 
   switch (a) {
     case "USDT":
     case "USD":
-      return thbPerUsd;
+      return quotePerUsd;
     case "EUR": {
       const eurPerUsd = fx.EUR ?? 0;
       if (!(eurPerUsd > 0)) return null;
-      return thbPerUsd / eurPerUsd; // THB за 1 EUR
+      return quotePerUsd / eurPerUsd; // quote за 1 EUR
     }
     case "RUB": {
       const rubPerUsd = fx.RUB ?? 0;
       if (!(rubPerUsd > 0)) return null;
-      return thbPerUsd / rubPerUsd; // THB за 1 RUB
+      return quotePerUsd / rubPerUsd; // quote за 1 RUB
     }
     case "BTC":
-      return (await getBinanceUsdt("BTC")) * thbPerUsd;
+      return (await getBinanceUsdt("BTC")) * quotePerUsd;
     case "ETH":
-      return (await getBinanceUsdt("ETH")) * thbPerUsd;
+      return (await getBinanceUsdt("ETH")) * quotePerUsd;
     default:
       return null;
   }
 }
 
+/** @deprecated Старое THB-имя; считает в платформенной котируемой валюте. */
+export const fetchMarketThbPerUnit = fetchMarketQuotePerUnit;
+
 /**
  * Базовый курс в ориентации quote_mode:
- *   multiply → THB за 1 единицу asset;
- *   divide   → единиц asset за 1 THB (1/thbPerUnit).
+ *   multiply → quote за 1 единицу asset;
+ *   divide   → единиц asset за 1 quote (1/quotePerUnit).
  * null — если актив не поддержан.
  */
 export async function fetchMarketBaseRate(
   asset: string,
   quoteMode: QuoteMode,
+  quoteCode: string = QUOTE_CURRENCY.code,
 ): Promise<number | null> {
-  const thbPerUnit = await fetchMarketThbPerUnit(asset);
-  if (thbPerUnit === null || thbPerUnit <= 0) return null;
-  return quoteMode === "divide" ? 1 / thbPerUnit : thbPerUnit;
+  const quotePerUnit = await fetchMarketQuotePerUnit(asset, quoteCode);
+  if (quotePerUnit === null || quotePerUnit <= 0) return null;
+  return quoteMode === "divide" ? 1 / quotePerUnit : quotePerUnit;
 }
 
 /**
@@ -171,7 +185,7 @@ export interface RateCardProposal {
 // Дефолтные тиры — под типовое табло обменника (Пхукет). Подобраны как стартовые;
 // тенант правит под себя в онбординге/кабинете. Для больших сумм курс выгоднее
 // клиенту (RUB/THB ниже, THB/USDT выше), но спред не схлопывается в ноль.
-const DEFAULT_RATE_CARD: Record<string, RateCardTierSpec[]> = {
+const DEFAULT_RATE_CARD_THB: Record<string, RateCardTierSpec[]> = {
   RUB: [
     { minThb: 2_000, maxThb: 3_000, displayRate: 2.6 },
     { minThb: 3_000, maxThb: 7_000, displayRate: 2.52 },
@@ -186,11 +200,34 @@ const DEFAULT_RATE_CARD: Record<string, RateCardTierSpec[]> = {
   ],
 };
 
-function formatThbRange(min: number, max: number | null): string {
+// Для не-THB котируемых валют (PHP и др.) абсолютные THB-курсы не имеют смысла —
+// задаём спред относительно рыночного курса (deviationPct), displayRate
+// вычислится из живого фида. Диапазоны — в единицах котируемой валюты.
+const DEFAULT_RATE_CARD_RELATIVE: Record<string, RateCardTierSpec[]> = {
+  RUB: [
+    { minThb: 2_000, maxThb: 5_000, deviationPct: 8 },
+    { minThb: 5_000, maxThb: 15_000, deviationPct: 5 },
+    { minThb: 15_000, maxThb: 40_000, deviationPct: 3.5 },
+    { minThb: 40_000, maxThb: 100_000, deviationPct: 2.5 },
+    { minThb: 100_000, maxThb: null, deviationPct: 1.5 },
+  ],
+  USDT: [
+    { minThb: 2_000, maxThb: 20_000, deviationPct: -4.5 },
+    { minThb: 20_000, maxThb: 200_000, deviationPct: -4 },
+    { minThb: 200_000, maxThb: null, deviationPct: -3.5 },
+  ],
+};
+
+function defaultRateCard(currency: QuoteCurrency): Record<string, RateCardTierSpec[]> {
+  return currency.code === "THB" ? DEFAULT_RATE_CARD_THB : DEFAULT_RATE_CARD_RELATIVE;
+}
+
+function formatThbRange(min: number, max: number | null, currency: QuoteCurrency): string {
   const fmt = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
-  if (max === null) return `от${fmt(min)} бат`;
-  if (min <= 0) return `до ${fmt(max)} бат`;
-  return `от${fmt(min)} до${fmt(max)} бат`;
+  const word = currency.word;
+  if (max === null) return `от${fmt(min)} ${word}`;
+  if (min <= 0) return `до ${fmt(max)} ${word}`;
+  return `от${fmt(min)} до${fmt(max)} ${word}`;
 }
 
 function formatRate(n: number): string {
@@ -201,7 +238,10 @@ function deviationPct(marketRate: number, displayRate: number): number {
   return round(((displayRate - marketRate) / marketRate) * 100, 4);
 }
 
-export function renderRateCardMessage(proposals: RateCardProposal[]): string {
+export function renderRateCardMessage(
+  proposals: RateCardProposal[],
+  currency: QuoteCurrency = QUOTE_CURRENCY,
+): string {
   const rub = proposals.find((p) => p.asset === "RUB");
   const usdt = proposals.find((p) => p.asset === "USDT");
   const lines = ["🙏 АКТУАЛЬНЫЙ КУРС НА СЕГОДНЯ 🙏", ""];
@@ -210,7 +250,7 @@ export function renderRateCardMessage(proposals: RateCardProposal[]): string {
     rub.tiers.forEach((tier, idx) => {
       const marker = idx === 0 ? ">" : idx === 1 ? "-" : "<";
       lines.push(
-        `🇷🇺RUB // Баты - ${formatRate(tier.displayRate)} ${marker} (${formatThbRange(tier.minThb, tier.maxThb)}🇹🇭`,
+        `🇷🇺RUB // ${currency.tabloWord} - ${formatRate(tier.displayRate)} ${marker} (${formatThbRange(tier.minThb, tier.maxThb, currency)}${currency.flag}`,
       );
     });
     lines.push("***", "", "🏪💲———💳💳 💰 💳💳———💲🏪", "");
@@ -219,7 +259,7 @@ export function renderRateCardMessage(proposals: RateCardProposal[]): string {
   if (usdt) {
     usdt.tiers.forEach((tier) => {
       lines.push(
-        `💲USDT // Баты < ${formatRate(tier.displayRate)} - (${formatThbRange(tier.minThb, tier.maxThb)})🇹🇭`,
+        `💲USDT // ${currency.tabloWord} < ${formatRate(tier.displayRate)} - (${formatThbRange(tier.minThb, tier.maxThb, currency)})${currency.flag}`,
       );
     });
     lines.push(
@@ -237,7 +277,9 @@ export function renderRateCardMessage(proposals: RateCardProposal[]): string {
   return lines.join("\n");
 }
 
-export async function buildDefaultRateCardProposal(): Promise<RateCardProposal[]> {
+export async function buildDefaultRateCardProposal(
+  currency: QuoteCurrency = QUOTE_CURRENCY,
+): Promise<RateCardProposal[]> {
   const assets: Array<{ asset: "RUB" | "USDT"; quoteMode: QuoteMode; network: string }> = [
     { asset: "RUB", quoteMode: "divide", network: "" },
     { asset: "USDT", quoteMode: "multiply", network: "trc20" },
@@ -245,10 +287,10 @@ export async function buildDefaultRateCardProposal(): Promise<RateCardProposal[]
 
   const proposals: RateCardProposal[] = [];
   for (const item of assets) {
-    const marketRateRaw = await fetchMarketBaseRate(item.asset, item.quoteMode);
+    const marketRateRaw = await fetchMarketBaseRate(item.asset, item.quoteMode, currency.code);
     if (marketRateRaw === null) continue;
     const marketRate = round(marketRateRaw, 6);
-    const spec = DEFAULT_RATE_CARD[item.asset] ?? [];
+    const spec = defaultRateCard(currency)[item.asset] ?? [];
     const tiers = spec.map((tier) => {
       const displayRate = round(
         tier.displayRate ?? marketRate * (1 + (tier.deviationPct ?? 0) / 100),
@@ -272,7 +314,7 @@ export async function buildDefaultRateCardProposal(): Promise<RateCardProposal[]
       message: "",
     });
   }
-  const message = renderRateCardMessage(proposals);
+  const message = renderRateCardMessage(proposals, currency);
   return proposals.map((p) => ({ ...p, message }));
 }
 
@@ -291,6 +333,7 @@ export async function refreshTenantRates(
       .select({
         id: exchangeRates.id,
         asset: exchangeRates.asset,
+        quoteAsset: exchangeRates.quoteAsset,
         quoteMode: exchangeRates.quoteMode,
         baseRate: exchangeRates.baseRate,
       })
@@ -313,6 +356,7 @@ export async function refreshTenantRates(
       const next = await fetchMarketBaseRate(
         row.asset,
         row.quoteMode === "divide" ? "divide" : "multiply",
+        row.quoteAsset,
       );
       if (next === null) {
         result.skipped++;

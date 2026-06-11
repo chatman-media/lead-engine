@@ -323,3 +323,57 @@ describe("field-extractor service catalog routing", () => {
     expect(note?.body).toContain(`партнёрская услуга #${service!.id}`);
   });
 });
+
+describe("field-extractor sticky intent routing", () => {
+  it("keyword-less follow-up stays in the open lead's funnel (no spurious first-funnel lead)", async () => {
+    if (!sql) return;
+    const contactId = await freshContact();
+    // Открытый лид в real_estate (интент совпал напрямую).
+    await makeFieldExtractor(stubRef()).extract({
+      tenantId,
+      contactId,
+      text: "ищу квартиру в аренду",
+      db,
+    });
+    const first = await allLeads(contactId);
+    expect(first.length).toBe(1);
+    expect(first[0]?.stageDefinitionId).toBe(await firstStageId(realEstateFunnelId));
+
+    // Бес-ключевое сообщение: раньше fallback rows[0] родил бы exchange-лид.
+    await makeFieldExtractor(stubRef()).extract({
+      tenantId,
+      contactId,
+      text: "созвонимся завтра в 10 утра",
+      db,
+    });
+    const after = await allLeads(contactId);
+    expect(after.length).toBe(1);
+    expect(after[0]?.stageDefinitionId).toBe(await firstStageId(realEstateFunnelId));
+  });
+
+  it("explicit intent mid-conversation creates a parallel lead in the matching funnel", async () => {
+    if (!sql) return;
+    const contactId = await freshContact();
+    await makeFieldExtractor(stubRef()).extract({
+      tenantId,
+      contactId,
+      text: "ищу квартиру в аренду",
+      db,
+    });
+    await makeFieldExtractor(stubRef()).extract({
+      tenantId,
+      contactId,
+      text: "и ещё хочу обменять 500 USDT",
+      db,
+    });
+
+    const rows = await allLeads(contactId);
+    expect(rows.length).toBe(2);
+    expect(rows.map((row) => row.stageDefinitionId)).toContain(
+      await firstStageId(exchangeFunnelId),
+    );
+    expect(rows.map((row) => row.stageDefinitionId)).toContain(
+      await firstStageId(realEstateFunnelId),
+    );
+  });
+});

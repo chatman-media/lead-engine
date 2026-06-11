@@ -1617,11 +1617,14 @@ export const exchangeSettings = pgTable("exchange_settings", {
   rateRefreshSec: integer("rate_refresh_sec").notNull().default(180),
   // порог «курсы устарели» для ops-watch (сек). NULL → авто: max(env, 3 × refresh).
   feedStaleSec: integer("feed_stale_sec"),
+  // котируемая (локальная) валюта обменника: PHP (дефолт платформы), THB, VND…
+  quoteAsset: text("quote_asset").notNull().default("PHP"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   check("exchange_settings_refresh_check", sql`${t.rateRefreshSec} >= 60 AND ${t.rateRefreshSec} <= 86400`),
   check("exchange_settings_stale_check", sql`${t.feedStaleSec} IS NULL OR ${t.feedStaleSec} >= 60`),
+  check("exchange_settings_quote_asset_check", sql`${t.quoteAsset} ~ '^[A-Z]{3}$'`),
 ]);
 
 // Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.

@@ -1,4 +1,5 @@
 import type { AnswerTelemetry } from "@chatman-media/kb";
+import { ANY_QUOTE_CURRENCY_MENTION_RE } from "../exchange-quote-currency.ts";
 
 export const EXCHANGE_SAFE_FALLBACK =
   "Сейчас уточню у оператора и вернусь с точной суммой/реквизитами.";
@@ -53,8 +54,10 @@ const NUMBER_RE =
   /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/u;
 const NUMBER_SCAN_RE =
   /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/gu;
-const QUOTE_RE =
-  /(?:курс|rate|отда[её]те|получ(?:а(?:ете|ешь)|ите|у|ится|ить)|итог(?:овая)?\s+сумм|thb|бат|bhat)/iu;
+const QUOTE_RE = new RegExp(
+  `(?:курс|rate|отда[её]те|получ(?:а(?:ете|ешь)|ите|у|ится|ить)|итог(?:овая)?\\s+сумм|${ANY_QUOTE_CURRENCY_MENTION_RE.source})`,
+  "iu",
+);
 const SOURCE_ASSET_RE =
 	/(?:usdt|btc|eth|usd|eur|rub|юсдт|битк|эфир|доллар|евро|руб|₽)/iu;
 const REQUISITES_RE =
@@ -195,7 +198,7 @@ export function guardExchangeReply(
 			text: EXCHANGE_SAFE_FALLBACK,
 			originalText: text,
 			requiredFixes: [
-				"Call compute_exchange_quote or create_exchange_order before sending a concrete rate or THB amount.",
+				"Call compute_exchange_quote or create_exchange_order before sending a concrete rate or payout amount.",
 			],
 		});
   }
