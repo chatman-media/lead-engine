@@ -61,6 +61,11 @@ HEALTH_URL="${HEALTH_URL:-${PLATFORM_PUBLIC_URL:-}/healthz}"
 log()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+stash_dirty_worktree() {
+  if [ -n "$(git status --porcelain)" ]; then
+    git stash push -u -m "pre-deploy dirty worktree $(date -u +%Y%m%dT%H%M%SZ)"
+  fi
+}
 
 cd "$APP_DIR" || die "нет каталога $APP_DIR"
 
@@ -77,6 +82,7 @@ ok "DATABASE_URL и PLATFORM_MASTER_KEY заданы"
 # ── 2. обновить код и зависимости ────────────────────────────────────────────
 log "Git pull ($GIT_BRANCH)"
 git fetch origin
+stash_dirty_worktree
 git checkout "$GIT_BRANCH"
 git pull --ff-only origin "$GIT_BRANCH"
 ok "Код на $(git rev-parse --short HEAD)"
