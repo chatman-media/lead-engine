@@ -182,8 +182,23 @@ const EXCHANGE_QUOTE_INTENT_RE =
 // в разных валютах (per-tenant настройка), guard ловит все.
 const EXCHANGE_OUTPUT_CURRENCY_RE = ANY_QUOTE_CURRENCY_MENTION_RE;
 const EXCHANGE_CONFIRMATION_RE = /точно|верно|правильно/i;
-const EXCHANGE_ORDER_CONFIRMATION_RE =
-	/^(?=.{1,80}$)(?:\s*(?:да|давай|ок|okay|окей|супер|подходит|годится|готов|готовы|оформляй|оформляем|делаем|поехали|подтверждаю)[!.,\s]*)+$/i;
+const EXCHANGE_ORDER_CONFIRMATION_WORDS = new Set([
+	"да",
+	"давай",
+	"ок",
+	"okay",
+	"окей",
+	"супер",
+	"подходит",
+	"годится",
+	"готов",
+	"готовы",
+	"оформляй",
+	"оформляем",
+	"делаем",
+	"поехали",
+	"подтверждаю",
+]);
 const EXCHANGE_KYC_TOPIC_RE = /верификац|kyc|документ|паспорт|видео|кружок/i;
 const EXCHANGE_KYC_MATERIAL_SENT_RE =
   /(?:отправил|отправила|прислал|прислала|загрузил|загрузила|вот|держи|лови)[^.!\n]{0,80}(?:видео|кружок|документ|паспорт)|(?:видео|кружок|документ|паспорт)[^.!\n]{0,80}(?:отправил|отправила|прислал|прислала|загрузил|загрузила)/i;
@@ -224,6 +239,43 @@ function exchangeReplyOutput(input: {
     autoTakeover: true,
     customerNoticeSent: envelopes.length > 0,
   };
+}
+
+function isExchangeOrderConfirmationSeparator(ch: string): boolean {
+	return (
+		ch === " " ||
+		ch === "\t" ||
+		ch === "\n" ||
+		ch === "\r" ||
+		ch === "\f" ||
+		ch === "\v" ||
+		ch === "!" ||
+		ch === "." ||
+		ch === ","
+	);
+}
+
+function isExchangeOrderConfirmation(text: string): boolean {
+	const trimmed = text.trim().toLowerCase();
+	if (!trimmed || trimmed.length > 80) return false;
+
+	let token = "";
+	let seen = false;
+	for (const ch of trimmed) {
+		if (isExchangeOrderConfirmationSeparator(ch)) {
+			if (!token) continue;
+			if (!EXCHANGE_ORDER_CONFIRMATION_WORDS.has(token)) return false;
+			seen = true;
+			token = "";
+			continue;
+		}
+		token += ch;
+	}
+	if (token) {
+		if (!EXCHANGE_ORDER_CONFIRMATION_WORDS.has(token)) return false;
+		seen = true;
+	}
+	return seen;
 }
 
 function assetMentionRe(asset: string): RegExp {
@@ -430,7 +482,7 @@ async function maybeForceExchangeOrderReply(
 	state: ExchangePolicyState | null,
 ): Promise<ExchangeForcedReply | null> {
 	if (state?.stageSlug !== "quote_calculated") return null;
-	if (!EXCHANGE_ORDER_CONFIRMATION_RE.test(userMessageText.trim())) return null;
+	if (!isExchangeOrderConfirmation(userMessageText)) return null;
 	const orderTool = tools.find((tool) => tool.name === "create_exchange_order");
 	if (!orderTool) return null;
 	const args = recentExchangeOrderArgs(userMessageText, history);

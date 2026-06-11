@@ -596,7 +596,44 @@ describe("LlmReplyStrategy", () => {
 		});
 	});
 
-	  it("exchange: стартовый интент с длинным пробельным разрывом проверяется линейно", async () => {
+	it("exchange: long repeated confirmation-like text does not hit order regex path", async () => {
+		const chat = new CapturingChat("Уточню детали.");
+		const repo = fakeMessagesRepo([
+			row(1, "user", "отдаю 10к рублей нужны песо в банкомате"),
+			row(2, "assistant", "Получите 8126 PHP."),
+		]);
+		const recorded: Array<
+			Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveTools: () => [exchangeQuoteTool(), exchangeCreateOrderTool()],
+				resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+			() => repo,
+		);
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: Array.from({ length: 200 }, () => "\tда").join(""),
+		});
+
+		expect(result).not.toBeNull();
+		expect(firstReplyText(result)).toBe("Уточню детали.");
+		expect(recorded).toHaveLength(0);
+		expect(chat.lastCall).not.toBeNull();
+	});
+
+  it("exchange: стартовый интент с длинным пробельным разрывом проверяется линейно", async () => {
     const userText = `хочу${" ".repeat(25_000)}поменять 500 USDT`;
     const chat = new CapturingChat("Сейчас уточню у оператора.");
     const repo = fakeMessagesRepo([row(1, "user", userText)]);
