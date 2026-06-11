@@ -25,6 +25,22 @@ export interface NotificationEvent {
 	data: Record<string, unknown>;
 }
 
+type NotificationMediaKind = "photo" | "video" | "video_note" | "document" | "voice";
+
+export interface NotificationMediaRef {
+	kind: NotificationMediaKind;
+	channelId: string;
+	externalRef: string;
+	caption?: string;
+	mimeType?: string;
+	fileName?: string;
+	durationSec?: number;
+}
+
+export type NotificationMediaDownloader = (
+	ref: NotificationMediaRef,
+) => Promise<Response | null | undefined>;
+
 type TelegramButtonRows = TgInlineKeyboardButton[][];
 
 function numericId(value: unknown): number | null {
@@ -34,6 +50,75 @@ function numericId(value: unknown): number | null {
 	if (typeof value !== "string" || !value.trim()) return null;
 	const parsed = Number.parseInt(value, 10);
 	return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseMediaRefsJson(value: unknown): NotificationMediaRef[] {
+	if (typeof value !== "string" || !value.trim()) return [];
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(value);
+	} catch {
+		return [];
+	}
+	if (!Array.isArray(parsed)) return [];
+	const refs: NotificationMediaRef[] = [];
+	for (const item of parsed) {
+		if (!item || typeof item !== "object") continue;
+		const record = item as Record<string, unknown>;
+		const kind = record.kind;
+		if (
+			kind !== "photo" &&
+			kind !== "video" &&
+			kind !== "video_note" &&
+			kind !== "document" &&
+			kind !== "voice"
+		) {
+			continue;
+		}
+		if (
+			typeof record.channelId !== "string" ||
+			!record.channelId ||
+			typeof record.externalRef !== "string" ||
+			!record.externalRef
+		) {
+			continue;
+		}
+		refs.push({
+			kind,
+			channelId: record.channelId,
+			externalRef: record.externalRef,
+			...(typeof record.caption === "string" && record.caption
+				? { caption: record.caption }
+				: {}),
+			...(typeof record.mimeType === "string" && record.mimeType
+				? { mimeType: record.mimeType }
+				: {}),
+			...(typeof record.fileName === "string" && record.fileName
+				? { fileName: record.fileName }
+				: {}),
+			...(typeof record.durationSec === "number"
+				? { durationSec: record.durationSec }
+				: {}),
+		});
+	}
+	return refs;
+}
+
+function defaultContentType(kind: NotificationMediaKind): string {
+	if (kind === "photo") return "image/jpeg";
+	if (kind === "video" || kind === "video_note") return "video/mp4";
+	return "application/octet-stream";
+}
+
+function defaultFileName(ref: NotificationMediaRef, index: number): string {
+	if (ref.fileName) return ref.fileName;
+	const extension =
+		ref.kind === "photo"
+			? "jpg"
+			: ref.kind === "video" || ref.kind === "video_note"
+				? "mp4"
+				: "bin";
+	return `operator-handoff-${index + 1}.${extension}`;
 }
 
 export class NotificationService {
@@ -49,6 +134,7 @@ export class NotificationService {
 		 * было дублей. Операторские правила/группы — без изменений.
 		 */
 		private readonly informer?: AdminInformer,
+		private readonly mediaDownloader?: NotificationMediaDownloader,
 	) {
 		if (botToken) {
 			this.client = new TelegramClient({ token: botToken });
@@ -64,7 +150,8 @@ export class NotificationService {
 			await this.informer.emitNotificationEvent(event);
 		}
 
-		if (!this.client) return;
+		const client = this.client;
+		if (!client) return;
 
 		const [rules, operatorSettingsList] = await Promise.all([
 			this.repo.findRulesByEvent(event.tenantId, event.eventType),
@@ -86,7 +173,7 @@ export class NotificationService {
 		);
 		for (const rule of matchedRules) {
 			try {
-				await this.sendMessage(rule.targetId, text, buttons);
+				await this.sendNotificationTarget(client, rule.targetId, event, text, buttons);
 			} catch (err) {
 				console.error(
 					`[NotificationService] rule ${rule.id} send failed:`,
@@ -109,7 +196,13 @@ export class NotificationService {
 				continue;
 			}
 			try {
-				await this.sendMessage(settings.telegramChatId, text, buttons);
+				await this.sendNotificationTarget(
+					client,
+					settings.telegramChatId,
+					event,
+					text,
+					buttons,
+				);
 			} catch (err) {
 				console.error(
 					`[NotificationService] personal send to admin ${settings.adminId} failed:`,
@@ -122,10 +215,11 @@ export class NotificationService {
 	async sendTestMessage(
 		chatId: string,
 	): Promise<{ ok: boolean; error?: string }> {
-		if (!this.client)
+		const client = this.client;
+		if (!client)
 			return { ok: false, error: "Бот не настроен (нет токена)" };
 		try {
-			await this.client.sendMessage({
+			await client.sendMessage({
 				chatId,
 				text: "🧪 <b>Тестовое уведомление</b>\n\nПравило активно — сообщения доходят корректно.",
 				parseMode: "HTML",
@@ -143,10 +237,11 @@ export class NotificationService {
 		chatId: string,
 		htmlText: string,
 	): Promise<{ ok: boolean; error?: string }> {
-		if (!this.client)
+		const client = this.client;
+		if (!client)
 			return { ok: false, error: "Бот не настроен (нет токена)" };
 		try {
-			await this.sendMessage(chatId, htmlText, null);
+			await this.sendMessage(client, chatId, htmlText, null);
 			return { ok: true };
 		} catch (err) {
 			return {
@@ -157,16 +252,187 @@ export class NotificationService {
 	}
 
 	private async sendMessage(
+		client: TelegramClient,
 		chatId: string,
 		text: string,
 		buttons: TelegramButtonRows | null,
 	): Promise<void> {
-		await this.client!.sendMessage({
+		await client.sendMessage({
 			chatId,
 			text,
 			parseMode: "HTML",
 			replyMarkup: buttons ? { inline_keyboard: buttons } : undefined,
 		});
+	}
+
+	private async sendNotificationTarget(
+		client: TelegramClient,
+		chatId: string,
+		event: NotificationEvent,
+		text: string,
+		buttons: TelegramButtonRows | null,
+	): Promise<void> {
+		await this.sendMediaPreviews(client, chatId, event);
+		await this.sendMessage(client, chatId, text, buttons);
+	}
+
+	private async sendMediaPreviews(
+		client: TelegramClient,
+		chatId: string,
+		event: NotificationEvent,
+	): Promise<void> {
+		if (!isOperatorHandoffEvent(event)) return;
+		const refs = parseMediaRefsJson(event.data.mediaRefsJson);
+		for (const [i, ref] of refs.entries()) {
+			try {
+				await this.sendMediaPreview(client, chatId, event, ref, i, refs.length);
+			} catch (err) {
+				console.error("[NotificationService] media preview send failed:", err);
+			}
+		}
+	}
+
+	private async sendMediaPreview(
+		client: TelegramClient,
+		chatId: string,
+		event: NotificationEvent,
+		ref: NotificationMediaRef,
+		index: number,
+		total: number,
+	): Promise<void> {
+		const caption =
+			ref.kind === "video_note"
+				? undefined
+				: this.mediaPreviewCaption(event, ref, index, total);
+		const upload = await this.downloadPreviewMedia(ref).catch((err) => {
+			console.error("[NotificationService] media preview download failed:", err);
+			return null;
+		});
+		if (upload) {
+			await this.sendUploadedMedia(client, chatId, ref, index, upload, caption);
+			return;
+		}
+		await this.sendReferencedMedia(client, chatId, ref, caption);
+	}
+
+	private async downloadPreviewMedia(
+		ref: NotificationMediaRef,
+	): Promise<{
+		bytes: ArrayBuffer;
+		contentType: string;
+		filename: string;
+	} | null> {
+		if (!this.mediaDownloader) return null;
+		const response = await this.mediaDownloader(ref);
+		if (!response) return null;
+		if (!response.ok) {
+			throw new Error(`media download failed (${response.status})`);
+		}
+		return {
+			bytes: await response.arrayBuffer(),
+			contentType:
+				response.headers.get("content-type") ??
+				ref.mimeType ??
+				defaultContentType(ref.kind),
+			filename: defaultFileName(ref, 0),
+		};
+	}
+
+	private async sendUploadedMedia(
+		client: TelegramClient,
+		chatId: string,
+		ref: NotificationMediaRef,
+		index: number,
+		upload: { bytes: ArrayBuffer; contentType: string; filename: string },
+		caption: string | undefined,
+	): Promise<void> {
+		if (ref.kind === "photo") {
+			await client.sendPhotoUpload({
+				chatId,
+				bytes: upload.bytes,
+				filename: defaultFileName(ref, index),
+				contentType: upload.contentType,
+				...(caption ? { caption } : {}),
+			});
+			return;
+		}
+		if (ref.kind === "video") {
+			await client.sendVideoUpload({
+				chatId,
+				bytes: upload.bytes,
+				filename: defaultFileName(ref, index),
+				contentType: upload.contentType,
+				...(caption ? { caption } : {}),
+			});
+			return;
+		}
+		if (ref.kind === "video_note") {
+			await client.sendVideoNoteUpload({
+				chatId,
+				bytes: upload.bytes,
+				filename: defaultFileName(ref, index),
+				contentType: upload.contentType,
+			});
+			return;
+		}
+		await client.sendDocumentUpload({
+			chatId,
+			bytes: upload.bytes,
+			filename: defaultFileName(ref, index),
+			contentType: upload.contentType,
+			...(caption ? { caption } : {}),
+		});
+	}
+
+	private async sendReferencedMedia(
+		client: TelegramClient,
+		chatId: string,
+		ref: NotificationMediaRef,
+		caption: string | undefined,
+	): Promise<void> {
+		if (ref.kind === "photo") {
+			await client.sendPhoto({
+				chatId,
+				photoFileId: ref.externalRef,
+				...(caption ? { caption } : {}),
+			});
+			return;
+		}
+		if (ref.kind === "video") {
+			await client.sendVideo({
+				chatId,
+				videoFileId: ref.externalRef,
+				...(caption ? { caption } : {}),
+			});
+			return;
+		}
+		if (ref.kind === "video_note") {
+			await client.sendVideoNote({
+				chatId,
+				videoNoteFileId: ref.externalRef,
+			});
+			return;
+		}
+		await client.sendDocument({
+			chatId,
+			documentFileId: ref.externalRef,
+			...(caption ? { caption } : {}),
+		});
+	}
+
+	private mediaPreviewCaption(
+		event: NotificationEvent,
+		ref: NotificationMediaRef,
+		index: number,
+		total: number,
+	): string {
+		const lines = [
+			`Материал ${index + 1}/${total} · ${ref.kind}`,
+			event.data.displayName ? `Клиент: ${event.data.displayName}` : null,
+			event.data.title ? String(event.data.title) : null,
+			ref.caption ? `Подпись: ${ref.caption}` : null,
+		].filter((line): line is string => Boolean(line));
+		return lines.join("\n").slice(0, 1000);
 	}
 
 	matchesCondition(rule: NotificationRule, event: NotificationEvent): boolean {

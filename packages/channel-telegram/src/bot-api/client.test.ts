@@ -50,11 +50,60 @@ describe("TelegramClient методы", () => {
     const c = client(fn);
     await c.sendPhoto({ chatId: 1, photoFileId: "p", caption: "c" });
     await c.sendVideo({ chatId: 1, videoFileId: "v" });
+    await c.sendVideoNote({ chatId: 1, videoNoteFileId: "vn" });
     await c.sendDocument({ chatId: 1, documentFileId: "d", caption: "cap" });
     expect(calls[0]!.url).toContain("/sendPhoto");
     expect(bodyOf(calls[0]!.init).photo).toBe("p");
     expect(calls[1]!.url).toContain("/sendVideo");
-    expect(bodyOf(calls[2]!.init).document).toBe("d");
+    expect(calls[2]!.url).toContain("/sendVideoNote");
+    expect(bodyOf(calls[2]!.init).video_note).toBe("vn");
+    expect(bodyOf(calls[3]!.init).document).toBe("d");
+  });
+
+  it("send media upload methods use multipart form data", async () => {
+    const { fn, calls } = mock(() => envelope({ message_id: 1 }));
+    const c = client(fn);
+    await c.sendPhotoUpload({
+      chatId: "ops",
+      bytes: new TextEncoder().encode("IMG"),
+      filename: "kyc.jpg",
+      contentType: "image/jpeg",
+      caption: "passport",
+    });
+    await c.sendVideoUpload({
+      chatId: "ops",
+      bytes: new TextEncoder().encode("VID"),
+      filename: "kyc.mp4",
+      contentType: "video/mp4",
+    });
+    await c.sendVideoNoteUpload({
+      chatId: "ops",
+      bytes: new TextEncoder().encode("CIRCLE"),
+      filename: "circle.mp4",
+      contentType: "video/mp4",
+    });
+    await c.sendDocumentUpload({
+      chatId: "ops",
+      bytes: new TextEncoder().encode("DOC"),
+      filename: "statement.pdf",
+      contentType: "application/pdf",
+    });
+
+    const photoForm = calls[0]!.init!.body as FormData;
+    expect(calls[0]!.url).toContain("/sendPhoto");
+    expect(photoForm.get("chat_id")).toBe("ops");
+    expect(photoForm.get("caption")).toBe("passport");
+    const photo = photoForm.get("photo") as File;
+    expect(photo.name).toBe("kyc.jpg");
+    expect(photo.type).toBe("image/jpeg");
+    expect(await photo.text()).toBe("IMG");
+
+    expect(calls[1]!.url).toContain("/sendVideo");
+    expect((calls[1]!.init!.body as FormData).get("video")).toBeInstanceOf(File);
+    expect(calls[2]!.url).toContain("/sendVideoNote");
+    expect((calls[2]!.init!.body as FormData).get("video_note")).toBeInstanceOf(File);
+    expect(calls[3]!.url).toContain("/sendDocument");
+    expect((calls[3]!.init!.body as FormData).get("document")).toBeInstanceOf(File);
   });
 
   it("sendLocalVideo — не поддержано (throws)", () => {

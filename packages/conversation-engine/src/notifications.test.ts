@@ -104,6 +104,25 @@ const BASE_EVENT: NotificationEvent = {
 };
 
 type SendMessageInput = Parameters<TelegramClient["sendMessage"]>[0];
+type SendPhotoInput = Parameters<TelegramClient["sendPhoto"]>[0];
+type SendVideoInput = Parameters<TelegramClient["sendVideo"]>[0];
+type SendDocumentInput = Parameters<TelegramClient["sendDocument"]>[0];
+type SendVideoNoteInput = Parameters<TelegramClient["sendVideoNote"]>[0];
+type SendPhotoUploadInput = Parameters<TelegramClient["sendPhotoUpload"]>[0];
+type SendVideoUploadInput = Parameters<TelegramClient["sendVideoUpload"]>[0];
+type SendDocumentUploadInput = Parameters<TelegramClient["sendDocumentUpload"]>[0];
+type SendVideoNoteUploadInput = Parameters<TelegramClient["sendVideoNoteUpload"]>[0];
+
+type TelegramCall =
+	| { method: "sendMessage"; input: SendMessageInput }
+	| { method: "sendPhoto"; input: SendPhotoInput }
+	| { method: "sendVideo"; input: SendVideoInput }
+	| { method: "sendDocument"; input: SendDocumentInput }
+	| { method: "sendVideoNote"; input: SendVideoNoteInput }
+	| { method: "sendPhotoUpload"; input: SendPhotoUploadInput }
+	| { method: "sendVideoUpload"; input: SendVideoUploadInput }
+	| { method: "sendDocumentUpload"; input: SendDocumentUploadInput }
+	| { method: "sendVideoNoteUpload"; input: SendVideoNoteUploadInput };
 
 function telegramResult(input: SendMessageInput): TgSendMessageResult {
 	return {
@@ -124,6 +143,54 @@ function fakeTelegramClient(
 		sendMessage: async (input: SendMessageInput) => {
 			await onSend(input);
 			return telegramResult(input);
+		},
+	} as unknown as TelegramClient;
+}
+
+function fakeTelegramMediaClient(
+	onCall: (call: TelegramCall) => void | Promise<void>,
+): TelegramClient {
+	const result = (chatId: number | string): TgSendMessageResult => ({
+		message_id: 1,
+		chat: { id: typeof chatId === "number" ? chatId : 1, type: "private" },
+		date: 0,
+	});
+	return {
+		sendMessage: async (input: SendMessageInput) => {
+			await onCall({ method: "sendMessage", input });
+			return { ...result(input.chatId), text: input.text };
+		},
+		sendPhoto: async (input: SendPhotoInput) => {
+			await onCall({ method: "sendPhoto", input });
+			return result(input.chatId);
+		},
+		sendVideo: async (input: SendVideoInput) => {
+			await onCall({ method: "sendVideo", input });
+			return result(input.chatId);
+		},
+		sendDocument: async (input: SendDocumentInput) => {
+			await onCall({ method: "sendDocument", input });
+			return result(input.chatId);
+		},
+		sendVideoNote: async (input: SendVideoNoteInput) => {
+			await onCall({ method: "sendVideoNote", input });
+			return result(input.chatId);
+		},
+		sendPhotoUpload: async (input: SendPhotoUploadInput) => {
+			await onCall({ method: "sendPhotoUpload", input });
+			return result(input.chatId);
+		},
+		sendVideoUpload: async (input: SendVideoUploadInput) => {
+			await onCall({ method: "sendVideoUpload", input });
+			return result(input.chatId);
+		},
+		sendDocumentUpload: async (input: SendDocumentUploadInput) => {
+			await onCall({ method: "sendDocumentUpload", input });
+			return result(input.chatId);
+		},
+		sendVideoNoteUpload: async (input: SendVideoNoteUploadInput) => {
+			await onCall({ method: "sendVideoNoteUpload", input });
+			return result(input.chatId);
 		},
 	} as unknown as TelegramClient;
 }
@@ -392,6 +459,106 @@ describe("NotificationService.notify", () => {
 		expect(JSON.stringify(markup)).toContain("opx:kycok:109");
 		expect(JSON.stringify(markup)).toContain("opx:kycmore:109");
 		expect(JSON.stringify(markup)).toContain("opx:kycno:109");
+	});
+
+	it("operator handoff sends media previews before the decision card", async () => {
+		const calls: TelegramCall[] = [];
+		const downloaded: string[] = [];
+		const svc = new NotificationService(
+			makeRepo([], [makeOperatorSettings({ telegramChatId: "operator-chat" })]),
+			"fake-token",
+			"https://app.example",
+			undefined,
+			async (ref) => {
+				downloaded.push(ref.externalRef);
+				return new Response(`bytes:${ref.externalRef}`, {
+					headers: { "content-type": ref.kind === "photo" ? "image/jpeg" : "video/mp4" },
+				});
+			},
+		);
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramMediaClient((call) => calls.push(call));
+
+		await svc.notify({
+			tenantId: 1,
+			eventType: "operator_handoff_required",
+			conversationId: 109,
+			contactId: 7,
+			data: {
+				displayName: "Сергей",
+				reason: "kyc_review",
+				title: "Проверить KYC клиента",
+				action: "Проверить документы и видео.",
+				mediaRefsJson: JSON.stringify([
+					{
+						kind: "photo",
+						channelId: "7",
+						externalRef: "photo-file",
+						caption: "passport",
+					},
+					{ kind: "video", channelId: "7", externalRef: "video-file" },
+					{ kind: "video_note", channelId: "7", externalRef: "circle-file" },
+				]),
+			},
+		});
+
+		expect(downloaded).toEqual(["photo-file", "video-file", "circle-file"]);
+		expect(calls.map((call) => call.method)).toEqual([
+			"sendPhotoUpload",
+			"sendVideoUpload",
+			"sendVideoNoteUpload",
+			"sendMessage",
+		]);
+		expect(calls[0]?.input.chatId).toBe("operator-chat");
+		expect(calls[0]?.method === "sendPhotoUpload" && calls[0].input.caption).toContain(
+			"Клиент: Сергей",
+		);
+		const cardCall = calls[3];
+		expect(cardCall?.method).toBe("sendMessage");
+		if (cardCall?.method !== "sendMessage") throw new Error("expected sendMessage");
+		expect(cardCall.input.replyMarkup).toBeDefined();
+		expect(JSON.stringify(cardCall.input.replyMarkup)).toContain("opx:kycok:109");
+	});
+
+	it("operator handoff still sends the decision card when media preview fails", async () => {
+		const calls: TelegramCall[] = [];
+		const svc = new NotificationService(
+			makeRepo([], [makeOperatorSettings({ telegramChatId: "operator-chat" })]),
+			"fake-token",
+			"https://app.example",
+			undefined,
+			async () => new Response("photo", { headers: { "content-type": "image/jpeg" } }),
+		);
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramMediaClient((call) => {
+			calls.push(call);
+			if (call.method === "sendPhotoUpload") throw new Error("telegram media down");
+		});
+
+		const originalError = console.error;
+		console.error = () => {};
+		try {
+			await svc.notify({
+				tenantId: 1,
+				eventType: "operator_handoff_required",
+				conversationId: 109,
+				contactId: 7,
+				data: {
+					displayName: "Сергей",
+					reason: "kyc_review",
+					title: "Проверить KYC клиента",
+					action: "Проверить документы и видео.",
+					mediaRefsJson: JSON.stringify([
+						{ kind: "photo", channelId: "7", externalRef: "photo-file" },
+					]),
+				},
+			});
+		} finally {
+			console.error = originalError;
+		}
+
+		expect(calls.map((call) => call.method)).toEqual(["sendPhotoUpload", "sendMessage"]);
+		expect(calls[1]?.method === "sendMessage" && calls[1].input.replyMarkup).toBeDefined();
 	});
 
 	it("payment handoff notification includes payment quick actions", async () => {
