@@ -505,6 +505,240 @@ describe("service catalog runtime", () => {
 		]);
 	});
 
+	it("dedupes explicit funnel routes against an existing untyped lead in the same target funnel", async () => {
+		if (!sql) return;
+		const now = 1_800_000_250;
+		const suffix = Math.random().toString(36).slice(2, 8);
+		const setup = await withTenant(db as Db, tenantId, async (tx) => {
+			const [contact] = await tx
+				.insert(contacts)
+				.values({
+					tenantId,
+					displayName: "Existing Exchange",
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: contacts.id });
+			const [funnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: `exchange_${suffix}`,
+					verticalTemplateId: "exchange_v1",
+					stagesJson: "[]",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const [stage] = await tx
+				.insert(stageDefinitions)
+				.values({
+					tenantId,
+					funnelId: expectInserted(funnel, "exchange funnel").id,
+					slug: "exchange_request",
+					displayName: "Exchange request",
+					position: 1,
+					kind: "active",
+					phase: "qualify",
+					nextStages: [],
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: stageDefinitions.id });
+			const stageRow = expectInserted(stage, "exchange stage");
+			const contactRow = expectInserted(contact, "exchange contact");
+			await tx.insert(leads).values({
+				tenantId,
+				userId: contactRow.id,
+				state: "exchange_request",
+				stageDefinitionId: stageRow.id,
+				requestType: null,
+				createdAt: now,
+				updatedAt: now,
+			});
+			await tx.insert(serviceCatalogItems).values({
+				tenantId,
+				slug: `exchange_service_${suffix}`,
+				name: "Обмен валют",
+				category: "exchange",
+				routeType: "funnel",
+				funnelId: expectInserted(funnel, "exchange funnel").id,
+				metadataJson: "{}",
+				isActive: true,
+				sortOrder: 1,
+				createdAt: now,
+				updatedAt: now,
+			});
+			return { contactId: contactRow.id };
+		});
+
+		const runtime = makeServiceCatalogRuntime({ now: () => now + 1 });
+		const result = await runtime.extract({
+			db: db as Db,
+			tenantId,
+			contactId: setup.contactId,
+			conversationId: 32,
+			text: "хочу обменять 500 USDT на баты",
+		});
+		expect(result.created).toHaveLength(0);
+		expect(result.skipped).toEqual([
+			expect.objectContaining({ reason: "open_request_exists" }),
+		]);
+
+		const rows = await withTenant(db as Db, tenantId, (tx) =>
+			tx
+				.select({ id: leads.id, requestType: leads.requestType })
+				.from(leads)
+				.where(
+					and(eq(leads.tenantId, tenantId), eq(leads.userId, setup.contactId)),
+				),
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.requestType).toBe("exchange");
+	});
+
+	it("does not create an LLM-only parallel service while another request is active", async () => {
+		if (!sql) return;
+		const now = 1_800_000_300;
+		const suffix = Math.random().toString(36).slice(2, 8);
+		const setup = await withTenant(db as Db, tenantId, async (tx) => {
+			const [contact] = await tx
+				.insert(contacts)
+				.values({
+					tenantId,
+					displayName: "Active Exchange",
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: contacts.id });
+			const contactRow = expectInserted(contact, "active contact");
+			const [exchangeFunnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: `exchange_active_${suffix}`,
+					verticalTemplateId: "exchange_v1",
+					stagesJson: "[]",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const [transferFunnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: `transfer_active_${suffix}`,
+					stagesJson: "[]",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const exchangeFunnelRow = expectInserted(
+				exchangeFunnel,
+				"active exchange funnel",
+			);
+			const transferFunnelRow = expectInserted(
+				transferFunnel,
+				"active transfer funnel",
+			);
+			const [exchangeStage] = await tx
+				.insert(stageDefinitions)
+				.values({
+					tenantId,
+					funnelId: exchangeFunnelRow.id,
+					slug: "exchange_request",
+					displayName: "Exchange request",
+					position: 1,
+					kind: "active",
+					phase: "qualify",
+					nextStages: [],
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: stageDefinitions.id });
+			await tx.insert(stageDefinitions).values({
+				tenantId,
+				funnelId: transferFunnelRow.id,
+				slug: "transfer_request",
+				displayName: "Transfer request",
+				position: 1,
+				kind: "active",
+				phase: "qualify",
+				nextStages: [],
+				createdAt: now,
+				updatedAt: now,
+			});
+			await tx.insert(leads).values({
+				tenantId,
+				userId: contactRow.id,
+				state: "exchange_request",
+				stageDefinitionId: expectInserted(
+					exchangeStage,
+					"active exchange stage",
+				).id,
+				requestType: "exchange",
+				createdAt: now,
+				updatedAt: now,
+			});
+			const transferSlug = `transfer_service_${suffix}`;
+			await tx.insert(serviceCatalogItems).values({
+				tenantId,
+				slug: transferSlug,
+				name: "Трансфер",
+				category: "transfer",
+				routeType: "funnel",
+				funnelId: transferFunnelRow.id,
+				metadataJson: "{}",
+				isActive: true,
+				sortOrder: 1,
+				createdAt: now,
+				updatedAt: now,
+			});
+			return { contactId: contactRow.id, transferSlug };
+		});
+
+		const runtime = makeServiceCatalogRuntime({
+			now: () => now + 1,
+			resolveChat: () =>
+				({
+					complete: async () =>
+						JSON.stringify({
+							requests: [
+								{ slug: setup.transferSlug, confidence: 0.99, fields: {} },
+							],
+						}),
+				}) as never,
+		});
+		const result = await runtime.extract({
+			db: db as Db,
+			tenantId,
+			contactId: setup.contactId,
+			conversationId: 32,
+			text: "так че там происходит?",
+		});
+		expect(result.created).toHaveLength(0);
+		expect(result.skipped).toEqual([
+			{
+				serviceSlug: setup.transferSlug,
+				reason: "llm_uncorroborated_active_request",
+			},
+		]);
+
+		const rows = await withTenant(db as Db, tenantId, (tx) =>
+			tx
+				.select({ id: leads.id, requestType: leads.requestType })
+				.from(leads)
+				.where(
+					and(eq(leads.tenantId, tenantId), eq(leads.userId, setup.contactId)),
+				),
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.requestType).toBe("exchange");
+	});
+
 	it("uses LLM JSON embedded in text, display-name field mapping, and webhook handoff", async () => {
 		if (!sql) return;
 		const fixture = await seedFixture();
@@ -1046,30 +1280,34 @@ describe("service catalog runtime", () => {
 		});
 		const body = (await res.json()) as { admin: { tenantId: number } };
 		const garbageTenantId = body.admin.tenantId;
-		const [contact] = await withTenant(db as Db, garbageTenantId, async (tx) => {
-			const [insertedContact] = await tx
-				.insert(contacts)
-				.values({
+		const [contact] = await withTenant(
+			db as Db,
+			garbageTenantId,
+			async (tx) => {
+				const [insertedContact] = await tx
+					.insert(contacts)
+					.values({
+						tenantId: garbageTenantId,
+						displayName: "Garbage LLM",
+						createdAt: 1_800_000_600,
+						updatedAt: 1_800_000_600,
+					})
+					.returning({ id: contacts.id });
+				await tx.insert(serviceCatalogItems).values({
 					tenantId: garbageTenantId,
-					displayName: "Garbage LLM",
+					slug: "garbage_transfer",
+					name: "Трансфер из аэропорта",
+					category: "Трансфер",
+					routeType: "manual",
+					metadataJson: "{}",
+					isActive: true,
+					sortOrder: 1,
 					createdAt: 1_800_000_600,
 					updatedAt: 1_800_000_600,
-				})
-				.returning({ id: contacts.id });
-			await tx.insert(serviceCatalogItems).values({
-				tenantId: garbageTenantId,
-				slug: "garbage_transfer",
-				name: "Трансфер из аэропорта",
-				category: "Трансфер",
-				routeType: "manual",
-				metadataJson: "{}",
-				isActive: true,
-				sortOrder: 1,
-				createdAt: 1_800_000_600,
-				updatedAt: 1_800_000_600,
-			});
-			return [expectInserted(insertedContact, "garbage llm contact")];
-		});
+				});
+				return [expectInserted(insertedContact, "garbage llm contact")];
+			},
+		);
 		const runtime = makeServiceCatalogRuntime({
 			now: () => 1_800_000_601,
 			resolveChat: () =>
@@ -1110,30 +1348,34 @@ describe("service catalog runtime", () => {
 		// legacy/будущее значение route_type, которое рантайм должен игнорировать.
 		if (!sql) return;
 		await sql`ALTER TABLE service_catalog_items DROP CONSTRAINT IF EXISTS service_catalog_route_type_check`;
-		const [contact] = await withTenant(db as Db, badRouteTenantId, async (tx) => {
-			const [insertedContact] = await tx
-				.insert(contacts)
-				.values({
+		const [contact] = await withTenant(
+			db as Db,
+			badRouteTenantId,
+			async (tx) => {
+				const [insertedContact] = await tx
+					.insert(contacts)
+					.values({
+						tenantId: badRouteTenantId,
+						displayName: "Bad Route",
+						createdAt: 1_800_000_700,
+						updatedAt: 1_800_000_700,
+					})
+					.returning({ id: contacts.id });
+				await tx.insert(serviceCatalogItems).values({
 					tenantId: badRouteTenantId,
-					displayName: "Bad Route",
+					slug: "mystery_transfer",
+					name: "Трансфер призрак",
+					category: "Трансфер",
+					routeType: "mystery",
+					metadataJson: "{}",
+					isActive: true,
+					sortOrder: 1,
 					createdAt: 1_800_000_700,
 					updatedAt: 1_800_000_700,
-				})
-				.returning({ id: contacts.id });
-			await tx.insert(serviceCatalogItems).values({
-				tenantId: badRouteTenantId,
-				slug: "mystery_transfer",
-				name: "Трансфер призрак",
-				category: "Трансфер",
-				routeType: "mystery",
-				metadataJson: "{}",
-				isActive: true,
-				sortOrder: 1,
-				createdAt: 1_800_000_700,
-				updatedAt: 1_800_000_700,
-			});
-			return [expectInserted(insertedContact, "bad route contact")];
-		});
+				});
+				return [expectInserted(insertedContact, "bad route contact")];
+			},
+		);
 
 		const runtime = makeServiceCatalogRuntime({ now: () => 1_800_000_701 });
 		// Единственный item отфильтрован по route_type → каталог пуст → no-op.
