@@ -48,6 +48,9 @@ export interface InformerEvent {
   detail: string;
   /** Уникален для конкретного условия — основа persisted-дедупа. */
   dedupKey: string;
+  /** Durable UI deep-link targets for in-app notification feed. */
+  conversationId?: number;
+  leadId?: number;
   /** Глубокая ссылка (например <appUrl>/leads/123) — добавляется ссылкой в сообщение. */
   url?: string;
 }
@@ -60,6 +63,9 @@ export interface AdminInformerRealtimeEvent {
   kind: string;
   title: string;
   body: string;
+  dedupKey: string;
+  conversationId: number | null;
+  leadId: number | null;
   deliveredAt: number | null;
   readAt: number | null;
   createdAt: number;
@@ -226,6 +232,8 @@ export function notificationEventToInformer(
     title: meta.title,
     detail: parts.join(" · "),
     dedupKey: `${event.eventType}:${ref}`,
+    ...(event.conversationId ? { conversationId: event.conversationId } : {}),
+    ...(event.leadId ? { leadId: event.leadId } : {}),
     url,
   };
 }
@@ -357,6 +365,8 @@ export class AdminInformer {
         title: event.title,
         body: event.detail,
         dedupKey: event.dedupKey,
+        conversationId: event.conversationId ?? null,
+        leadId: event.leadId ?? null,
         targetChatId: chatId,
         // delivered_at проставим ПОСЛЕ успешной реалтайм-доставки.
       });
@@ -373,6 +383,9 @@ export class AdminInformer {
           kind: event.kind,
           title: event.title,
           body: event.detail,
+          dedupKey: event.dedupKey,
+          conversationId: event.conversationId ?? null,
+          leadId: event.leadId ?? null,
           deliveredAt: null,
           readAt: null,
           createdAt: now,
