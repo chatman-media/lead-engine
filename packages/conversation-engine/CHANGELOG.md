@@ -1,3 +1,17 @@
+# [@chatman-media/conversation-engine-v3.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.3.0...@chatman-media/conversation-engine-v3.4.0) (2026-06-11)
+
+
+### Bug Fixes
+
+* **conversation-engine:** advance exchange lead after KYC approval ([#582](https://github.com/chatman-media/lead-engine/issues/582)) ([3c36c40](https://github.com/chatman-media/lead-engine/commit/3c36c40646ea022d0757eb7a6924bbdd9d60723f))
+* **conversation-engine:** open operator chat via direct URL ([#580](https://github.com/chatman-media/lead-engine/issues/580)) ([ccf1b02](https://github.com/chatman-media/lead-engine/commit/ccf1b0237ac2cc097118a776b83b3939051c3ec4))
+
+
+### Features
+
+* **exchange:** add silent auto handoff setting ([#571](https://github.com/chatman-media/lead-engine/issues/571)) ([7a961b5](https://github.com/chatman-media/lead-engine/commit/7a961b53306fb6b0b25d0141e04a42ca234cf430))
+* **exchange:** ship handoff fixes and rolling context summary ([#579](https://github.com/chatman-media/lead-engine/issues/579)) ([317a29b](https://github.com/chatman-media/lead-engine/commit/317a29bbca5924ab6f12fdd450062c179c735c7a)), closes [#576](https://github.com/chatman-media/lead-engine/issues/576) [#578](https://github.com/chatman-media/lead-engine/issues/578)
+
 # [@chatman-media/conversation-engine-v3.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.2.0...@chatman-media/conversation-engine-v3.3.0) (2026-06-11)
 
 
