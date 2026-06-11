@@ -259,6 +259,7 @@ export function makeTelegramWebhookRoutes(opts: {
         stageClassifier: opts.stageClassifier,
         memoryExtractor: opts.memoryExtractor,
         advanceLead: true,
+        preferredVerticalTemplateId: template?.slug ?? null,
         ...(opts.sink ? { sink: opts.sink } : {}),
       });
     }

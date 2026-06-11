@@ -222,6 +222,7 @@ export function makeFacebookWebhookRoutes(opts: {
           result,
           stageClassifier: opts.stageClassifier,
           memoryExtractor: opts.memoryExtractor,
+          preferredVerticalTemplateId: template?.slug ?? null,
           ...(opts.sink ? { sink: opts.sink } : {}),
         });
       }
