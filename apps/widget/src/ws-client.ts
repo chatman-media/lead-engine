@@ -4,6 +4,7 @@
  * WS protocol (см. apps/api/src/routes/ws-web.ts):
  *   In  (client → server): { type: "user_text", id, text }
  *   Out (server → client):
+ *     - { type: "session", userId, token }  // только новой сессии, до ready
  *     - { type: "ready", channelId, userId }
  *     - { type: "bot_text", text }
  *     - { type: "error", code, message }
@@ -17,6 +18,11 @@ export interface WsClientOpts {
   onError?: (code: string, message: string) => void;
   onClose?: () => void;
   onConnecting?: () => void;
+  /**
+   * Сервер выдал новой анонимной сессии её id + подписанный token. Клиент
+   * должен сохранить их и переподключаться уже привязанным (см. setUrl).
+   */
+  onSession?: (userId: string, token: string) => void;
 }
 
 const MIN_RETRY_MS = 1000;
@@ -29,6 +35,15 @@ export class WsClient {
   private reconnectTimer: number | null = null;
 
   constructor(private readonly opts: WsClientOpts) {}
+
+  /**
+   * Обновить URL для будущих (re)connect'ов. Вызывается после получения
+   * session-фрейма, чтобы reconnect нёс уже привязанные user+token и сервер
+   * не заводил каждый раз новую анонимную сессию.
+   */
+  setUrl(url: string): void {
+    this.opts.url = url;
+  }
 
   connect(): void {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
@@ -66,7 +81,9 @@ export class WsClient {
     } catch {
       return;
     }
-    if (frame.type === "ready") {
+    if (frame.type === "session") {
+      this.opts.onSession?.(String(frame.userId ?? ""), String(frame.token ?? ""));
+    } else if (frame.type === "ready") {
       this.opts.onReady?.(String(frame.channelId ?? ""), String(frame.userId ?? ""));
     } else if (frame.type === "bot_text") {
       this.opts.onBotText?.(String(frame.text ?? ""));

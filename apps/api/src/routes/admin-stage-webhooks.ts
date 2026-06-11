@@ -3,6 +3,7 @@ import { stageWebhooks } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { isBlockedIpLiteral, safeFetch, SsrfError } from "../lib/safe-fetch.ts";
 import { signWebhookPayload } from "../lib/webhook-sign.ts";
 
 /**
@@ -207,7 +208,15 @@ async function fireWebhook(
     headers["X-Signature"] = `sha256=${await signWebhookPayload(body, secret)}`;
   }
 
-  const res = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
+  let res: Response;
+  try {
+    res = await safeFetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
+  } catch (err) {
+    if (err instanceof SsrfError) {
+      return { ok: false, status: 0, body: `blocked: ${err.message}` };
+    }
+    throw err;
+  }
   const text = await res.text().catch(() => "");
   return { ok: res.ok, status: res.status, body: text.slice(0, 500) };
 }
@@ -220,7 +229,13 @@ function maskSecret<T extends { secret?: string | null }>(row: T): Omit<T, "secr
 function isValidHttpUrl(s: string): boolean {
   try {
     const u = new URL(s);
-    return u.protocol === "http:" || u.protocol === "https:";
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    // Reject obvious internal targets early (literal private/loopback/link-local
+    // IPs). DNS-based hosts are still re-checked at fire time by safeFetch.
+    const host = u.hostname.replace(/^\[|\]$/g, "");
+    if (host === "localhost" || host.endsWith(".localhost")) return false;
+    if (isBlockedIpLiteral(host)) return false;
+    return true;
   } catch {
     return false;
   }

@@ -18,6 +18,10 @@ import {
 	verifyAuthToken,
 	verifyPassword,
 } from "../lib/auth.ts";
+import {
+	type AuthRateLimiter,
+	clientIpFromHeaders,
+} from "../lib/auth-rate-limiter.ts";
 import { isUniqueViolation } from "../lib/db-errors.ts";
 import {
 	forgotPasswordEmailHtml,
@@ -59,6 +63,29 @@ export interface AuthRoutesOpts {
 	 * передано (undefined) — signup открыт (дефолт для тестов/локалки).
 	 */
 	allowSignup?: boolean;
+	/**
+	 * Опциональный rate limiter для публичных auth-эндпойнтов (login / signup /
+	 * forgot / reset / accept-invite). Если задан — попытки лимитируются по
+	 * IP (+email для login) против brute-force / credential stuffing /
+	 * email-bombing. Если не задан — лимитирование отключено (дефолт для тестов).
+	 */
+	rateLimiter?: AuthRateLimiter;
+}
+
+/**
+ * Стабильный argon2id-хеш для constant-time login: когда email не найден, мы
+ * всё равно прогоняем `verifyPassword` против этого фиктивного хеша, чтобы
+ * время ответа не выдавало существование аккаунта (anti-enumeration).
+ * Считается лениво один раз (argon2 дорогой), потом кэшируется.
+ */
+let dummyPasswordHashPromise: Promise<string> | null = null;
+function getDummyPasswordHash(): Promise<string> {
+	if (!dummyPasswordHashPromise) {
+		dummyPasswordHashPromise = hashPassword(
+			"unused-constant-time-placeholder",
+		);
+	}
+	return dummyPasswordHashPromise;
 }
 
 interface SignupBody {
@@ -79,6 +106,30 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 	const app = new Hono();
 
 	/**
+	 * Возвращает 429 JSON-ответ если key превысил лимит, иначе null.
+	 * Вызывать в начале sensitive-хендлеров: `const limited = rateLimit(c, key)`.
+	 */
+	function rateLimit(
+		// biome-ignore lint/suspicious/noExplicitAny: Hono Context generic
+		c: any,
+		keySuffix: string,
+	): Response | null {
+		if (!opts.rateLimiter) return null;
+		const ip = clientIpFromHeaders({
+			get: (n: string) => c.req.header(n) ?? null,
+		});
+		const decision = opts.rateLimiter.check(`${ip}:${keySuffix}`);
+		if (!decision.allowed) {
+			c.header("Retry-After", String(decision.retryAfterSec ?? 60));
+			return c.json(
+				{ error: "rate_limit_exceeded", retryAfterSec: decision.retryAfterSec },
+				429,
+			);
+		}
+		return null;
+	}
+
+	/**
 	 * POST /api/auth/signup
 	 * Body: { email, password, tenantSlug? }
 	 * Returns: { token, admin: { id, email, role, tenantId }, tenant: { id, slug } }
@@ -93,6 +144,8 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 		if (opts.allowSignup === false) {
 			return c.json({ error: "signup_disabled" }, 403);
 		}
+		const limited = rateLimit(c, "signup");
+		if (limited) return limited;
 		let body: SignupBody;
 		try {
 			body = (await c.req.json()) as SignupBody;
@@ -276,13 +329,17 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 		if (!email || !password) {
 			return c.json({ error: "email and password required" }, 400);
 		}
+		const limited = rateLimit(c, `login:${email}`);
+		if (limited) return limited;
 
 		const [adminRow] = await opts.db
 			.select()
 			.from(admins)
 			.where(eq(admins.email, email));
 		if (!adminRow) {
-			// Generic 401 — не выдаём что email не существует (user enum prevention).
+			// Constant-time: прогоняем argon2 против фиктивного хеша, чтобы время
+			// ответа не выдавало существование email (anti-enumeration). Generic 401.
+			await verifyPassword(password, await getDummyPasswordHash());
 			return c.json({ error: "invalid credentials" }, 401);
 		}
 		const ok = await verifyPassword(password, adminRow.passwordHash);
@@ -326,6 +383,8 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 	 * Password rules: ≥ 8 chars (same as signup).
 	 */
 	app.post("/api/auth/accept-invite", async (c) => {
+		const limited = rateLimit(c, "accept-invite");
+		if (limited) return limited;
 		let body: { token?: unknown; password?: unknown };
 		try {
 			body = (await c.req.json()) as { token?: unknown; password?: unknown };
@@ -503,6 +562,8 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 	 * этого admin'а инвалидируются (ставится usedAt=now) при создании нового.
 	 */
 	app.post("/api/auth/forgot-password", async (c) => {
+		const limited = rateLimit(c, "forgot-password");
+		if (limited) return limited;
 		let body: { email?: unknown };
 		try {
 			body = (await c.req.json()) as typeof body;
@@ -580,6 +641,8 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 	 * помечает токен usedAt=now.
 	 */
 	app.post("/api/auth/reset-password", async (c) => {
+		const limited = rateLimit(c, "reset-password");
+		if (limited) return limited;
 		let body: { token?: unknown; password?: unknown };
 		try {
 			body = (await c.req.json()) as typeof body;

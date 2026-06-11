@@ -18,6 +18,7 @@
  * Token format: base64url(JSON{tenantId,leadId,stageId,ts}).HMAC-SHA256-hex
  */
 
+import { safeFetch } from "./safe-fetch.ts";
 import { signWebhookPayload } from "./webhook-sign.ts";
 
 // ─── Token ─────────────────────────────────────────────────────────────────
@@ -109,6 +110,11 @@ export interface PartnerPingOpts {
   operatorBotToken: string;
   /** Secret for HMAC token signing. */
   callbackSecret: string;
+  /**
+   * Optional fetch override (tests inject a mock). Defaults to `safeFetch`,
+   * which blocks SSRF since `webhookUrl` is tenant-controlled.
+   */
+  fetchImpl?: typeof fetch;
 }
 
 export interface PartnerPingResult {
@@ -169,7 +175,10 @@ export async function firePartnerPing(
     "Content-Type": "application/json",
     "User-Agent": "LeadEngine-PartnerPing/1.0",
   };
-  const res = await fetch(opts.webhookUrl, {
+  // SSRF guard: partner_webhook_url is tenant-controlled — resolve + block
+  // private/loopback/link-local targets before connecting.
+  const doFetch = opts.fetchImpl ?? safeFetch;
+  const res = await doFetch(opts.webhookUrl, {
     method: "POST",
     headers,
     body,

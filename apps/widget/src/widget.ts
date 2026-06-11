@@ -21,20 +21,35 @@ interface Message {
 }
 
 const USER_ID_KEY = "lead_engine_widget_user_id";
+const TOKEN_KEY = "lead_engine_widget_token";
 const MESSAGES_KEY_PREFIX = "lead_engine_widget_msgs_";
 const OPEN_STATE_KEY = "lead_engine_widget_open";
 
-function getOrMakeUserId(): string {
-  let id = localStorage.getItem(USER_ID_KEY);
-  if (!id) {
-    // Простой uuid-like (8-4-4-12 hex from crypto)
-    const arr = new Uint8Array(16);
-    crypto.getRandomValues(arr);
-    const hex = Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
-    id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 28)}`;
-    localStorage.setItem(USER_ID_KEY, id);
+interface WebSession {
+  userId: string;
+  token: string;
+}
+
+/**
+ * Загружает сохранённую (привязанную) сессию: id + подписанный сервером token.
+ * Если её нет — возвращает null, и сервер выдаст новую при первом connect'е
+ * (см. apps/api/src/lib/web-session-token.ts). Клиент НЕ генерирует id сам —
+ * иначе можно было бы выдать себя за чужого пользователя.
+ */
+function loadSession(): WebSession | null {
+  const userId = localStorage.getItem(USER_ID_KEY);
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (userId && token) return { userId, token };
+  return null;
+}
+
+function saveSession(sess: WebSession): void {
+  try {
+    localStorage.setItem(USER_ID_KEY, sess.userId);
+    localStorage.setItem(TOKEN_KEY, sess.token);
+  } catch {
+    // ignore quota
   }
-  return id;
 }
 
 function loadMessages(slug: string): Message[] {
@@ -58,7 +73,7 @@ function saveMessages(slug: string, msgs: Message[]): void {
 }
 
 export function mountWidget(cfg: WidgetConfig): void {
-  const userId = getOrMakeUserId();
+  let session: WebSession | null = loadSession();
   const color = cfg.color ?? "#6aa6ff";
   const brand = cfg.brand ?? "Чат-бот";
 
@@ -142,16 +157,28 @@ export function mountWidget(cfg: WidgetConfig): void {
     }
   }
 
-  // WS client.
+  // WS client. URL несёт привязанные user+token только если сессия уже есть;
+  // новой сессии сервер выдаст их session-фреймом, мы сохраним и обновим URL,
+  // чтобы reconnect был привязан.
   const wsBase = cfg.host.replace(/^http/, "ws");
-  const wsUrl = new URL(`${wsBase}/ws/${cfg.slug}`);
-  wsUrl.searchParams.set("user", userId);
-  if (cfg.auth) wsUrl.searchParams.set("auth", cfg.auth);
+  function buildWsUrl(sess: WebSession | null): string {
+    const u = new URL(`${wsBase}/ws/${cfg.slug}`);
+    if (sess) {
+      u.searchParams.set("user", sess.userId);
+      u.searchParams.set("token", sess.token);
+    }
+    return u.toString();
+  }
 
   const ws = new WsClient({
-    url: wsUrl.toString(),
+    url: buildWsUrl(session),
     onOpen: () => setStatus(null),
     onReady: () => setStatus(null),
+    onSession: (userId, token) => {
+      session = { userId, token };
+      saveSession(session);
+      ws.setUrl(buildWsUrl(session));
+    },
     onBotText: (text) => pushMessage("bot", text),
     onError: (code, message) => setStatus(`Ошибка: ${code} — ${message}`),
     onClose: () => setStatus("Соединение разорвано. Переподключаемся…"),

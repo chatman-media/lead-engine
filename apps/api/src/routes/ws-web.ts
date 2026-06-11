@@ -2,6 +2,11 @@ import type { IWebSocket } from "@chatman-media/channel-web";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { WebChannelRegistry } from "../lib/web-channel-registry.ts";
+import {
+  newWebUserId,
+  signWebSession,
+  verifyWebSession,
+} from "../lib/web-session-token.ts";
 
 /**
  * Per-connection context, прикреплённый Bun'ом к каждому ServerWebSocket.
@@ -12,6 +17,13 @@ interface WsContext {
   tenantSlug: string;
   channelDbId: number;
   externalUserId: string;
+  /**
+   * Если соединение завело НОВУЮ сессию (клиент не прислал валидный
+   * user+token), здесь лежит свежевыданный token — `open` handler отдаст
+   * его клиенту фреймом `{ type: "session" }`, чтобы тот сохранил и
+   * переподключался уже привязанным. null для уже привязанных сессий.
+   */
+  issuedToken: string | null;
 }
 
 /**
@@ -38,16 +50,12 @@ function bunWsToIWebSocket(ws: ServerWebSocket<WsContext>): IWebSocket {
 
 export interface WsAuthOpts {
   /**
-   * Опциональный shared-secret для pilot-stage. Клиент шлёт `?auth=X`
-   * в query, мы сравниваем с этим значением. Пусто = auth выключен
-   * (любой может подключиться от имени любого externalUserId — годится
-   * для dev/staging, НЕ для prod).
-   *
-   * Production-grade auth — JWT с tenant_id + contact_id в claim'ах —
-   * следующая итерация, после того как apps/admin-ui начнёт issu'ить
-   * tokens для embedded-widget'а.
+   * HMAC-секрет для подписи/проверки per-visitor session-token'ов
+   * (см. lib/web-session-token.ts). Обязателен — привязка identity
+   * включена всегда, без "auth выключен" dev-режима. На практике сюда
+   * передаётся `cfg.authSecret`.
    */
-  sharedSecret?: string;
+  signingSecret: string;
 }
 
 export interface MakeWebSocketRoutesOpts extends WsAuthOpts {
@@ -96,18 +104,28 @@ export function makeWebSocketRoutes(opts: MakeWebSocketRoutesOpts): WebSocketRou
       return new Response("missing tenant slug", { status: 400 });
     }
 
-    const externalUserId = url.searchParams.get("user")?.trim() ?? "";
-    if (externalUserId.length === 0 || externalUserId.length > 128) {
-      opts.metrics?.webhookRequests.inc(1, { channel: "web", status: "400" });
-      return new Response("invalid user param", { status: 400 });
-    }
-
-    if (opts.sharedSecret && opts.sharedSecret.length > 0) {
-      const got = url.searchParams.get("auth") ?? "";
-      if (got !== opts.sharedSecret) {
-        opts.metrics?.webhookRequests.inc(1, { channel: "web", status: "401" });
-        return new Response("invalid auth", { status: 401 });
+    // Identity binding (см. lib/web-session-token.ts):
+    //   - клиент с сохранённой сессией шлёт `?user=<id>&token=<hmac>` →
+    //     проверяем HMAC, на mismatch — 401 (нельзя выдать себя за чужой id).
+    //   - новый посетитель шлёт без user → сервер сам выдаёт случайный id и
+    //     token, отдаёт их `open`-фреймом `{ type: "session" }`.
+    const requestedUserId = url.searchParams.get("user")?.trim() ?? "";
+    let externalUserId: string;
+    let issuedToken: string | null = null;
+    if (requestedUserId.length > 0) {
+      if (requestedUserId.length > 128) {
+        opts.metrics?.webhookRequests.inc(1, { channel: "web", status: "400" });
+        return new Response("invalid user param", { status: 400 });
       }
+      const token = url.searchParams.get("token") ?? "";
+      if (!verifyWebSession(tenantSlug, requestedUserId, token, opts.signingSecret)) {
+        opts.metrics?.webhookRequests.inc(1, { channel: "web", status: "401" });
+        return new Response("invalid session token", { status: 401 });
+      }
+      externalUserId = requestedUserId;
+    } else {
+      externalUserId = newWebUserId();
+      issuedToken = signWebSession(tenantSlug, externalUserId, opts.signingSecret);
     }
 
     const entry = opts.registry.byTenant(tenantSlug);
@@ -120,6 +138,7 @@ export function makeWebSocketRoutes(opts: MakeWebSocketRoutesOpts): WebSocketRou
       tenantSlug,
       channelDbId: entry.channelDbId,
       externalUserId,
+      issuedToken,
     };
     const upgraded = server.upgrade(req, { data });
     if (!upgraded) {
@@ -136,6 +155,17 @@ export function makeWebSocketRoutes(opts: MakeWebSocketRoutesOpts): WebSocketRou
         // Канал был удалён между upgrade'ом и open'ом — exceedingly rare.
         ws.close(1011, "channel disappeared");
         return;
+      }
+      // Новой сессии отдаём выданные id+token, чтобы клиент сохранил их и
+      // переподключался уже привязанным. Шлём ДО acceptConnection (до ready).
+      if (ws.data.issuedToken) {
+        ws.send(
+          JSON.stringify({
+            type: "session",
+            userId: ws.data.externalUserId,
+            token: ws.data.issuedToken,
+          }),
+        );
       }
       entry.adapter.acceptConnection(bunWsToIWebSocket(ws), ws.data.externalUserId);
       opts.metrics?.webhookRequests.inc(1, { channel: "web", status: "200" });
