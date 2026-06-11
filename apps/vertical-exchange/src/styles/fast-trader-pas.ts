@@ -1,4 +1,5 @@
 import { type Style, StyleSchema } from "@chatman-media/kb";
+import { QUOTE_CURRENCY } from "@chatman-media/verticals";
 
 /**
  * Быстрый крипто-обменник: деловой, без воды, ведёт клиента к сделке.
@@ -38,7 +39,7 @@ export const fastTraderPas: Style = StyleSchema.parse({
     qualify: {
       goal: "собрать актив, сумму, сеть и способ получения",
       guidance:
-        "Уточни недостающее: сеть для крипты (для USDT — TRC20), сумму и как удобно получить THB (офис по коду или банкомат). По одному вопросу.",
+        `Уточни недостающее: сеть для крипты (для USDT — TRC20), сумму и как удобно получить ${QUOTE_CURRENCY.code} (офис по коду или банкомат). По одному вопросу.`,
     },
     pitch: {
       goal: "назвать рассчитанный курс и сумму к выдаче, подвести к подтверждению",
@@ -67,7 +68,7 @@ export const fastTraderPas: Style = StyleSchema.parse({
       stage: "pitch",
       user: "хочу обменять 500 USDT",
       assistant:
-        "По текущему курсу за 500 USDT (TRC20) к выдаче 18 250 THB. Как удобнее получить — наличными в офисе по коду или через банкомат? Оформляем?",
+        `По текущему курсу за 500 USDT (TRC20) к выдаче ${QUOTE_CURRENCY.code === "PHP" ? "30 700 PHP" : "18 250 THB"}. Как удобнее получить — наличными в офисе по коду или через банкомат? Оформляем?`,
     },
   ],
   guardrails: {

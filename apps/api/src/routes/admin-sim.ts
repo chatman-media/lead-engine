@@ -21,6 +21,8 @@
  *     без outbound_queue → воркер не задействован).
  */
 
+import { randomBytes, randomInt } from "node:crypto";
+import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
 import {
   ChannelIdentitiesRepo,
   ContactsRepo,
@@ -35,11 +37,6 @@ import {
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
-import type { FieldExtractor } from "../lib/field-extractor.ts";
-import { scoreExchangeDialog } from "../lib/exchange/eval.ts";
-import { buildSimPersonaSystemPrompt } from "../prompts/admin-sim.ts";
-import type { VerticalTemplate } from "@chatman-media/verticals";
-import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
 import {
   channels,
   contacts,
@@ -53,9 +50,12 @@ import {
   stageFields,
   tenants,
 } from "@chatman-media/storage";
-import { randomBytes, randomInt } from "node:crypto";
+import { QUOTE_CURRENCY, type VerticalTemplate } from "@chatman-media/verticals";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { scoreExchangeDialog } from "../lib/exchange/eval.ts";
+import type { FieldExtractor } from "../lib/field-extractor.ts";
+import { buildSimPersonaSystemPrompt } from "../prompts/admin-sim.ts";
 
 /**
  * Криптостойкий короткий токен для sim-идентификаторов (sim-user, message-id,
@@ -67,6 +67,11 @@ function simToken(bytes = 5): string {
 }
 
 // ── Predefined personas ─────────────────────────────────────────────────────
+
+// Котируемая валюта в текстах персон: «баты»/«песо», «бат»/«песо», THB/PHP.
+const QW_PL = QUOTE_CURRENCY.tabloWord.toLowerCase();
+const QW_GEN = QUOTE_CURRENCY.wordGen;
+const QC = QUOTE_CURRENCY.code;
 
 export interface SimPersona {
   id: string;
@@ -83,35 +88,35 @@ const PERSONAS: SimPersona[] = [
     name: "Обменник — обмен USDT",
     displayName: "Сергей Котов",
     brief:
-      "Ты — клиент криптообменника. Хочешь обменять 500 USDT (сеть TRC20) на тайские баты. " +
-      "Сразу называешь сумму и сеть и ТРЕБУЕШЬ конкретный курс и сколько бат получишь на руки — " +
+      `Ты — клиент криптообменника. Хочешь обменять 500 USDT (сеть TRC20) на ${QW_PL}. ` +
+      `Сразу называешь сумму и сеть и ТРЕБУЕШЬ конкретный курс и сколько ${QW_GEN} получишь на руки — ` +
       "не соглашаешься на «уточню у оператора», переспрашиваешь точную цифру. Получив курс, " +
       "уточняешь детали и готов подтвердить и отправить перевод. Веди себя естественно.",
   },
   {
     id: "exchange_rub",
-    name: "Обменник — рубли в баты",
+    name: `Обменник — рубли в ${QW_PL}`,
     displayName: "Марина Лебедева",
     brief:
-      "Ты — клиент обменника. Хочешь перевести 40 000 рублей в тайские баты, оплата со Сбера. " +
-      "Сразу просишь назвать курс и сколько бат получишь за 40 000 ₽, требуешь конкретную цифру, " +
+      `Ты — клиент обменника. Хочешь перевести 40 000 рублей в ${QW_PL}, оплата со Сбера. ` +
+      `Сразу просишь назвать курс и сколько ${QW_GEN} получишь за 40 000 ₽, требуешь конкретную цифру, ` +
       "немного торгуешься по курсу, но в итоге соглашаешься и подтверждаешь перевод.",
   },
   {
     id: "exchange_btc",
-    name: "Обменник — BTC в баты",
+    name: `Обменник — BTC в ${QW_PL}`,
     displayName: "Артём Гусев",
     brief:
-      "Ты — клиент обменника. Хочешь обменять 0.05 BTC на тайские баты. Спрашиваешь курс BTC→THB и " +
+      `Ты — клиент обменника. Хочешь обменять 0.05 BTC на ${QW_PL}. Спрашиваешь курс BTC→${QC} и ` +
       "сколько получишь на руки, уточняешь, как и куда переводить биткоин. Получив реквизиты — " +
       "готов отправить и подтвердить.",
   },
   {
     id: "exchange_eth",
-    name: "Обменник — ETH в баты",
+    name: `Обменник — ETH в ${QW_PL}`,
     displayName: "Кирилл Орлов",
     brief:
-      "Ты — клиент обменника. Хочешь обменять 1.2 ETH (сеть ERC20) на баты. Просишь точный курс и сумму, " +
+      `Ты — клиент обменника. Хочешь обменять 1.2 ETH (сеть ERC20) на ${QW_PL}. Просишь точный курс и сумму, ` +
       "уточняешь сеть и адрес для перевода, затем подтверждаешь сделку.",
   },
   {
@@ -146,14 +151,14 @@ const PERSONAS: SimPersona[] = [
     displayName: "Сергей Котов",
     brief:
       "Ты — постоянный клиент обменника, уже менял раньше. Пишешь по-деловому: «привет, как обычно, " +
-      "поменяй 1500 USDT на баты, выдача в офисе по коду». Ждёшь быстрый курс и реквизиты без лишних вопросов.",
+      `поменяй 1500 USDT на ${QW_PL}, выдача в офисе по коду». Ждёшь быстрый курс и реквизиты без лишних вопросов.`,
   },
   {
     id: "exchange_rub_card",
     name: "Обменник — рубли картой",
     displayName: "Наталья Попова",
     brief:
-      "Ты — клиент обменника. Меняешь 25 000 рублей на баты, оплата переводом на карту (не СБП). " +
+      `Ты — клиент обменника. Меняешь 25 000 рублей на ${QW_PL}, оплата переводом на карту (не СБП). ` +
       "Уточняешь курс и сумму, спрашиваешь реквизиты карты для перевода, затем подтверждаешь оплату.",
   },
   {
@@ -174,11 +179,11 @@ const PERSONAS: SimPersona[] = [
   },
   {
     id: "exchange_thai_bank",
-    name: "Обменник — перевод на тайский банк",
+    name: `Обменник — перевод на ${QUOTE_CURRENCY.bankLabel}`,
     displayName: "Игорь Лапин",
     brief:
-      "Ты — клиент, меняешь 60 000 рублей и хочешь получить переводом на тайский банк (Bangkok Bank). " +
-      "Называешь сумму, просишь курс и итог, даёшь реквизиты тайского счёта, подтверждаешь.",
+      `Ты — клиент, меняешь 60 000 рублей и хочешь получить переводом на ${QUOTE_CURRENCY.bankLabel}${QC === "PHP" ? " (BDO)" : " (Bangkok Bank)"}. ` +
+      "Называешь сумму, просишь курс и итог, даёшь реквизиты местного счёта, подтверждаешь.",
   },
   {
     id: "exchange_large_vip",
@@ -193,16 +198,41 @@ const PERSONAS: SimPersona[] = [
     name: "Обменник — прилёт и офис",
     displayName: "Юлия Краснова",
     brief:
-      "Ты — турист, прилетаешь на Пхукет завтра в 14:30. Пишешь, что хочешь поменять 1000 USDT по прилёту " +
-      "и уточняешь курс, часы работы офиса, адрес и можно ли забрать баты по коду сразу после приезда.",
+      `Ты — турист, прилетаешь ${QC === "PHP" ? "в Манилу" : "на Пхукет"} завтра в 14:30. Пишешь, что хочешь поменять 1000 USDT по прилёту ` +
+      `и уточняешь курс, часы работы офиса, адрес и можно ли забрать ${QW_PL} по коду сразу после приезда.`,
   },
   {
     id: "exchange_rate_only",
     name: "Обменник — только узнаёт курс",
     displayName: "Михаил Денисов",
     brief:
-      "Ты — потенциальный клиент, пока только спрашиваешь актуальный курс USDT→THB и RUB→THB на сегодня. " +
+      `Ты — потенциальный клиент, пока только спрашиваешь актуальный курс USDT→${QC} и RUB→${QC} на сегодня. ` +
       "Не готов менять прямо сейчас, но просишь конкретные цифры и сохраняешь контакт «на подумать».",
+  },
+  {
+    // НЕ exchange_-префикс: эти персоны не должны попадать в exchange-eval.
+    id: "transfer_naia",
+    name: "Трансфер — прилёт в NAIA",
+    displayName: "Виктор Алексеев",
+    brief:
+      "Ты — клиент, прилетаешь завтра рейсом SQ916 в NAIA Terminal 3. Нужен минивэн до отеля в Makati, " +
+      "вас двое и два чемодана. Требуешь цену и время подачи, уточняешь, как найдёшь водителя, и подтверждаешь бронь.",
+  },
+  {
+    id: "transfer_night_bgc",
+    name: "Трансфер — ночной рейс в BGC",
+    displayName: "Мария Light",
+    brief:
+      "Ты — клиентка, прилетаешь ночным рейсом в 02:30 в NAIA Terminal 1, ехать в BGC. " +
+      "Спрашиваешь, есть ли ночная надбавка, встретят ли с табличкой, и сколько ждать, если рейс задержится. Подтверждаешь седан.",
+  },
+  {
+    id: "green_corridor_family",
+    name: "Зелёный коридор — семья из 4",
+    displayName: "Андрей Семейный",
+    brief:
+      "Ты — клиент: прилетаете семьёй из 4 человек рейсом EK332 в NAIA Terminal 1. Спрашиваешь, что входит " +
+      "в «зелёный коридор», сколько стоит на семью и как проходит встреча. Просишь fast-track и подтверждаешь Family-пакет.",
   },
   {
     id: "recruitment",
@@ -232,12 +262,40 @@ const PERSONAS: SimPersona[] = [
 
 // Пул имён для потоковых клиентов — чтобы в инбоксе они выглядели как разные люди.
 const FIRST_NAMES = [
-  "Александр", "Дмитрий", "Максим", "Андрей", "Сергей", "Иван", "Никита", "Егор",
-  "Анна", "Мария", "Елена", "Ольга", "Наталья", "Юлия", "Дарья", "Виктория",
+  "Александр",
+  "Дмитрий",
+  "Максим",
+  "Андрей",
+  "Сергей",
+  "Иван",
+  "Никита",
+  "Егор",
+  "Анна",
+  "Мария",
+  "Елена",
+  "Ольга",
+  "Наталья",
+  "Юлия",
+  "Дарья",
+  "Виктория",
 ];
 const LAST_NAMES = [
-  "Иванов", "Смирнов", "Кузнецов", "Попов", "Соколов", "Лебедев", "Новиков", "Морозов",
-  "Волков", "Козлов", "Петров", "Орлов", "Макаров", "Зайцев", "Павлов", "Семёнов",
+  "Иванов",
+  "Смирнов",
+  "Кузнецов",
+  "Попов",
+  "Соколов",
+  "Лебедев",
+  "Новиков",
+  "Морозов",
+  "Волков",
+  "Козлов",
+  "Петров",
+  "Орлов",
+  "Макаров",
+  "Зайцев",
+  "Павлов",
+  "Семёнов",
 ];
 
 function pick<T>(arr: T[]): T {
@@ -362,8 +420,15 @@ function isMedia(f: WalkField): boolean {
 }
 
 // Реплика-нарратор для стадии: клиент (ответ/медиа) или оператор (подтверждение).
-function narrate(stage: WalkStage, fields: WalkField[]): { role: "user" | "assistant"; text: string } {
-  if (stage.kind === "terminal_won") return { role: "assistant", text: "🎉 Сделка завершена — выдача выполнена." };
+function narrate(
+  stage: WalkStage,
+  fields: WalkField[],
+): { role: "user" | "assistant"; text: string } {
+  if (stage.kind === "terminal_won")
+    return {
+      role: "assistant",
+      text: "🎉 Сделка завершена — выдача выполнена.",
+    };
   if (stage.kind === "terminal_lost") return { role: "assistant", text: "Заявка отменена." };
   const media = fields.find(isMedia);
   if (media) {
@@ -375,11 +440,21 @@ function narrate(stage: WalkStage, fields: WalkField[]): { role: "user" | "assis
         : "🧾 Прислал подтверждение (документ/скрин оплаты).",
     };
   }
-  const operatorish = ["assessment", "external_approval", "milestone", "rate_confirmation"].includes(
-    stage.stageType,
-  );
-  if (operatorish) return { role: "assistant", text: `✅ ${stage.displayName} — подтверждено оператором.` };
-  return { role: "user", text: `Ответил на вопросы этапа «${stage.displayName}».` };
+  const operatorish = [
+    "assessment",
+    "external_approval",
+    "milestone",
+    "rate_confirmation",
+  ].includes(stage.stageType);
+  if (operatorish)
+    return {
+      role: "assistant",
+      text: `✅ ${stage.displayName} — подтверждено оператором.`,
+    };
+  return {
+    role: "user",
+    text: `Ответил на вопросы этапа «${stage.displayName}».`,
+  };
 }
 
 /**
@@ -391,7 +466,12 @@ async function walkLeads(
   db: Db,
   tenantId: number,
   adminId: number,
-  opts: { count?: number; displayName?: string; spread?: boolean; funnelId?: number },
+  opts: {
+    count?: number;
+    displayName?: string;
+    spread?: boolean;
+    funnelId?: number;
+  },
 ): Promise<{ kind: "ok"; leadIds: number[]; finalStage: string } | { kind: "no_funnel" }> {
   const count = Math.min(Math.max(1, opts.count ?? 1), 30);
   const displayName = opts.displayName;
@@ -579,7 +659,11 @@ export function makeAdminSimRoutes(opts: {
 
     const rows = await withTenant(opts.db, tenantId, async (tx) =>
       tx
-        .select({ id: channels.id, kind: channels.kind, externalId: channels.externalId })
+        .select({
+          id: channels.id,
+          kind: channels.kind,
+          externalId: channels.externalId,
+        })
         .from(channels)
         .where(and(eq(channels.tenantId, tenantId), eq(channels.status, "active")))
         .limit(3),
@@ -629,7 +713,11 @@ export function makeAdminSimRoutes(opts: {
     const startEpoch = CANCEL_EPOCH.get(tenantId) ?? 0;
     const aborted = () =>
       (CANCEL_EPOCH.get(tenantId) ?? 0) !== startEpoch || params.isCancelled?.() === true;
-    const tenant = { tenantId, slug: ctx.tenantSlug, llmBillingMode: "byok" as const };
+    const tenant = {
+      tenantId,
+      slug: ctx.tenantSlug,
+      llmBillingMode: "byok" as const,
+    };
     // kind='self_play' → conversation.source='self_play' (см. channelKindToSource).
     // ChannelContext.kind не содержит 'self_play' в типе — cast локально для sim.
     const channel = {
@@ -643,7 +731,11 @@ export function makeAdminSimRoutes(opts: {
 
     const runExchange = async (
       userText: string,
-    ): Promise<{ conversationId: number; contactId: number; botReply: string } | null> => {
+    ): Promise<{
+      conversationId: number;
+      contactId: number;
+      botReply: string;
+    } | null> => {
       const now = Math.floor(Date.now() / 1000);
       const inbound: Inbound = {
         channelId: channelIdStr,
@@ -656,7 +748,9 @@ export function makeAdminSimRoutes(opts: {
           _sim: true,
           adminId,
           ...(params.targetFunnelId ? { targetFunnelId: params.targetFunnelId } : {}),
-          ...(params.targetCatalogItemId ? { targetCatalogItemId: params.targetCatalogItemId } : {}),
+          ...(params.targetCatalogItemId
+            ? { targetCatalogItemId: params.targetCatalogItemId }
+            : {}),
         },
       };
 
@@ -698,7 +792,9 @@ export function makeAdminSimRoutes(opts: {
             text: userText,
             db: opts.db,
             ...(params.targetFunnelId ? { targetFunnelId: params.targetFunnelId } : {}),
-            ...(params.targetCatalogItemId ? { targetCatalogItemId: params.targetCatalogItemId } : {}),
+            ...(params.targetCatalogItemId
+              ? { targetCatalogItemId: params.targetCatalogItemId }
+              : {}),
           });
         } catch {
           /* извлечение полей не критично для диалога */
@@ -736,7 +832,11 @@ export function makeAdminSimRoutes(opts: {
           });
         });
       }
-      return { conversationId: pi.conversationId, contactId: pi.contactId, botReply };
+      return {
+        conversationId: pi.conversationId,
+        contactId: pi.contactId,
+        botReply,
+      };
     };
 
     const exchanges: Array<{ user: string; bot: string }> = [];
@@ -746,7 +846,10 @@ export function makeAdminSimRoutes(opts: {
         msgs.push({ role: "assistant", content: ex.user }); // реплика клиента
         msgs.push({ role: "user", content: ex.bot }); // ответ бота (собеседник)
       }
-      const out = await ctx.personaClient.complete(msgs, { temperature: 0.8, numPredict: 200 });
+      const out = await ctx.personaClient.complete(msgs, {
+        temperature: 0.8,
+        numPredict: 200,
+      });
       const text = out?.trim() ?? "";
       if (!text || text.includes(DONE_TOKEN)) return null;
       return text;
@@ -897,7 +1000,11 @@ export function makeAdminSimRoutes(opts: {
     const persona = body.personaId ? PERSONAS.find((p) => p.id === body.personaId) : undefined;
     const brief = (body.brief?.trim() || persona?.brief || "").trim();
     if (!brief) return c.json({ error: "personaId or brief required" }, 400);
-    const displayName = (body.displayName?.trim() || persona?.displayName || "Симулятор клиента").trim();
+    const displayName = (
+      body.displayName?.trim() ||
+      persona?.displayName ||
+      "Симулятор клиента"
+    ).trim();
     const maxTurns = Math.min(Math.max(1, body.maxTurns ?? DEFAULT_MAX_TURNS), MAX_TURNS_CAP);
     const targetFunnelId = positiveInt(body.targetFunnelId);
     const targetCatalogItemId = positiveInt(body.targetCatalogItemId);
@@ -913,7 +1020,14 @@ export function makeAdminSimRoutes(opts: {
         ...(targetFunnelId ? { targetFunnelId } : {}),
         ...(targetCatalogItemId ? { targetCatalogItemId } : {}),
       });
-      return c.json({ ok: true, conversationId, displayName, maxTurns, targetFunnelId, targetCatalogItemId });
+      return c.json({
+        ok: true,
+        conversationId,
+        displayName,
+        maxTurns,
+        targetFunnelId,
+        targetCatalogItemId,
+      });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
@@ -940,7 +1054,10 @@ export function makeAdminSimRoutes(opts: {
     }
 
     const count = Math.min(Math.max(1, body.count ?? 5), MAX_STREAM_CLIENTS);
-    const intervalSec = Math.max(MIN_STREAM_INTERVAL_SEC, body.intervalSec ?? DEFAULT_STREAM_INTERVAL_SEC);
+    const intervalSec = Math.max(
+      MIN_STREAM_INTERVAL_SEC,
+      body.intervalSec ?? DEFAULT_STREAM_INTERVAL_SEC,
+    );
     const maxTurns = Math.min(Math.max(1, body.maxTurns ?? DEFAULT_MAX_TURNS), MAX_TURNS_CAP);
     const targetFunnelId = positiveInt(body.targetFunnelId);
     const targetCatalogItemId = positiveInt(body.targetCatalogItemId);
@@ -988,7 +1105,15 @@ export function makeAdminSimRoutes(opts: {
       state.timers.push(t);
     }
 
-    return c.json({ ok: true, streamId, count, intervalSec, maxTurns, targetFunnelId, targetCatalogItemId });
+    return c.json({
+      ok: true,
+      streamId,
+      count,
+      intervalSec,
+      maxTurns,
+      targetFunnelId,
+      targetCatalogItemId,
+    });
   });
 
   // ── POST /api/admin/sim/walk ───────────────────────────────────────────
@@ -999,7 +1124,12 @@ export function makeAdminSimRoutes(opts: {
   app.post("/api/admin/sim/walk", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = (c.var.adminId as number | null) ?? 0;
-    let body: { count?: number; displayName?: string; spread?: boolean; funnelId?: number };
+    let body: {
+      count?: number;
+      displayName?: string;
+      spread?: boolean;
+      funnelId?: number;
+    };
     try {
       body = (await c.req.json()) as typeof body;
     } catch {
@@ -1013,7 +1143,11 @@ export function makeAdminSimRoutes(opts: {
       funnelId: positiveInt(body.funnelId),
     });
     if (created.kind === "no_funnel") return c.json({ error: "no active funnel with stages" }, 400);
-    return c.json({ ok: true, leads: created.leadIds, finalStage: created.finalStage });
+    return c.json({
+      ok: true,
+      leads: created.leadIds,
+      finalStage: created.finalStage,
+    });
   });
 
   // ── DELETE /api/admin/sim/:id ──────────────────────────────────────────

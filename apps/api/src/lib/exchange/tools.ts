@@ -11,7 +11,7 @@
  * результат verbatim.
  */
 
-import { type Db, getDecryptedSecret, withTenant } from "@chatman-media/conversation-engine";
+import { type Db, getDecryptedSecret, QUOTE_CURRENCY, withTenant } from "@chatman-media/conversation-engine";
 import type { AnyRagTool } from "@chatman-media/kb";
 import { exchangeRates } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
@@ -97,7 +97,7 @@ const AssetEnum = z
 const AmountModeEnum = z
   .enum(["source_amount", "target_thb"])
   .optional()
-  .describe("source_amount — клиент назвал сумму, которую отдаёт; target_thb — клиент назвал сумму, которую хочет получить в батах");
+  .describe(`source_amount — клиент назвал сумму, которую отдаёт; target_thb — клиент назвал сумму, которую хочет получить в котируемой валюте (${QUOTE_CURRENCY.code})`);
 const PaymentMethodEnum = z
   .enum(["crypto_transfer", "sbp_qr", "card_transfer", "bank_transfer", "cash"])
   .optional()
@@ -105,7 +105,7 @@ const PaymentMethodEnum = z
 const PayoutMethodEnum = z
   .enum(["office_cash", "cardless_atm", "courier_cash", "thai_bank_transfer", "atm"])
   .optional()
-  .describe("Как клиент получает THB: courier_cash, cardless_atm, thai_bank_transfer, office_cash");
+  .describe(`Как клиент получает ${QUOTE_CURRENCY.code}: courier_cash, cardless_atm, thai_bank_transfer (перевод на местный банк), office_cash`);
 
 const KNOWN_EXCHANGE_STAGES = new Set([
   "exchange_request",
@@ -213,13 +213,13 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
   const computeQuoteTool: AnyRagTool = {
     name: "compute_exchange_quote",
     description: [
-      "Посчитать актуальный курс и сумму к получению в THB для обмена.",
+      `Посчитать актуальный курс и сумму к получению в ${QUOTE_CURRENCY.code} для обмена.`,
       "Вызывай ВСЕГДА, когда нужно назвать курс или итог — НИКОГДА не считай курс сам.",
       "Возвращает direction, rate, amountToThb. Покажи клиенту эти значения как есть.",
     ].join(" "),
     parameters: z.object({
       asset: AssetEnum,
-      amount: z.number().positive().describe("Сумма. По умолчанию в активе-источнике; если клиент сказал 'нужно 10000 бат', передай amountMode=target_thb и amount=10000."),
+      amount: z.number().positive().describe(`Сумма. По умолчанию в активе-источнике; если клиент сказал 'нужно 10000 ${QUOTE_CURRENCY.word}', передай amountMode=target_thb и amount=10000.`),
       amountMode: AmountModeEnum,
       network: z
         .string()
@@ -240,12 +240,13 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       return {
         direction: q.direction,
         asset: q.asset,
+        quoteAsset: q.quoteAsset,
         network: q.network || undefined,
         amountMode: q.amountMode,
         amountFrom: q.amountFrom,
         rate: q.rate,
         amountToThb: q.amountToThb,
-        display: `Обмен ${q.asset} — THB\nКурс: ${q.rate}\n\nОтдаёте: ${q.amountFrom} ${q.asset}\nПолучаете: ${q.amountToThb} THB`,
+        display: `Обмен ${q.asset} — ${q.quoteAsset}\nКурс: ${q.rate}\n\nОтдаёте: ${q.amountFrom} ${q.asset}\nПолучаете: ${q.amountToThb} ${q.quoteAsset}`,
       };
     },
   };
@@ -269,7 +270,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ].join(" "),
     parameters: z.object({
       asset: AssetEnum,
-      amount: z.number().positive().describe("Сумма: source asset или целевые THB, если amountMode=target_thb."),
+      amount: z.number().positive().describe(`Сумма: source asset или целевые ${QUOTE_CURRENCY.code}, если amountMode=target_thb.`),
       amountMode: AmountModeEnum,
       network: z.string().optional(),
       paymentMethod: PaymentMethodEnum,
@@ -648,7 +649,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
   const issuePayoutTool: AnyRagTool = {
     name: "issue_exchange_payout",
     description: [
-      "Выдать получение THB по оплаченной заявке. payoutMethod: office (код в офисе)",
+      `Выдать получение ${QUOTE_CURRENCY.code} по оплаченной заявке. payoutMethod: office (код в офисе)`,
       "или atm (cardless в банкомате). location: офис (напр. Бангтао) или банк (Kbank/Bangkok Bank/SCB).",
       "Код снятия приходит от провайдера/оператора — НЕ выдумывай его. Если кода ещё нет —",
       "вернётся needsOperator: попроси оператора подготовить код.",

@@ -193,7 +193,7 @@ export const kbDocuments = pgTable("kb_documents", {
     )`,
   ),
   check("kb_documents_file_size_check", sql`${t.fileSizeBytes} IS NULL OR ${t.fileSizeBytes} >= 0`),
-  uniqueIndex("uniq_kb_source_hash").on(t.source, t.contentHash),
+  uniqueIndex("uniq_kb_source_hash").on(t.tenantId, t.source, t.contentHash),
   uniqueIndex("uniq_kb_docs_file_storage_key").on(t.fileStorageKey).where(sql`file_storage_key IS NOT NULL`),
   index("idx_kb_docs_topic").on(t.topic).where(sql`topic IS NOT NULL`),
   index("idx_kb_docs_scope").on(t.tenantId, t.scopeType, t.funnelId, t.stageSlug),
@@ -1617,11 +1617,14 @@ export const exchangeSettings = pgTable("exchange_settings", {
   rateRefreshSec: integer("rate_refresh_sec").notNull().default(180),
   // порог «курсы устарели» для ops-watch (сек). NULL → авто: max(env, 3 × refresh).
   feedStaleSec: integer("feed_stale_sec"),
+  // котируемая (локальная) валюта обменника: PHP (дефолт платформы), THB, VND…
+  quoteAsset: text("quote_asset").notNull().default("PHP"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   check("exchange_settings_refresh_check", sql`${t.rateRefreshSec} >= 60 AND ${t.rateRefreshSec} <= 86400`),
   check("exchange_settings_stale_check", sql`${t.feedStaleSec} IS NULL OR ${t.feedStaleSec} >= 60`),
+  check("exchange_settings_quote_asset_check", sql`${t.quoteAsset} ~ '^[A-Z]{3}$'`),
 ]);
 
 // Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.
@@ -1757,6 +1760,7 @@ export const partnerDeals = pgTable("partner_deals", {
   commissionAmount: doublePrecision("commission_amount"),
   proofJson: text("proof_json"),
   notes: text("notes"),
+  settlementId: integer("settlement_id").references(() => partnerSettlements.id, { onDelete: "set null" }),
   sentAt: integer("sent_at"),
   acceptedAt: integer("accepted_at"),
   completedAt: integer("completed_at"),
@@ -1770,6 +1774,7 @@ export const partnerDeals = pgTable("partner_deals", {
   index("idx_partner_deals_tenant_status").on(t.tenantId, t.status),
   index("idx_partner_deals_partner").on(t.tenantId, t.partnerId),
   index("idx_partner_deals_lead").on(t.tenantId, t.leadId),
+  index("idx_partner_deals_settlement").on(t.tenantId, t.settlementId),
 ]);
 
 export const partnerSettlements = pgTable("partner_settlements", {

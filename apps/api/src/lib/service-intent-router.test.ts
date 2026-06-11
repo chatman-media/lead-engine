@@ -21,10 +21,70 @@ describe("service-intent-router", () => {
     expect(classifyServiceIntent("можете подключить партнёрский сервис?")).toBe("partner_service");
   });
 
+  it("classifies transfer and green corridor intents", () => {
+    expect(classifyServiceIntent("нужен трансфер из аэропорта в Макати")).toBe("transfer");
+    expect(classifyServiceIntent("такси встретить в аэропорту завтра")).toBe("transfer");
+    expect(classifyServiceIntent("сможете довезти до отеля?")).toBe("transfer");
+    expect(classifyServiceIntent("зелёный коридор на прилёте, 2 человека")).toBe("green_corridor");
+    expect(classifyServiceIntent("зеленый коридор сколько стоит")).toBe("green_corridor");
+    expect(classifyServiceIntent("нужен fast track в аэропорту")).toBe("green_corridor");
+    expect(classifyServiceIntent("vip встреча по прилёту")).toBe("green_corridor");
+    expect(classifyServiceIntent("встретьте нас в аэропорту с сопровождением")).toBe(
+      "green_corridor",
+    );
+    // обмен приоритетнее: фразы с валютой уходят в exchange
+    expect(classifyServiceIntent("поменять доллары и нужен трансфер")).toBe("exchange");
+  });
+
   it("chooses matching funnel and falls back on unclear text", () => {
     expect(chooseFunnelForIntent(funnels, "курс USDT")?.slug).toBe("exchange");
     expect(chooseFunnelForIntent(funnels, "ищу condo")?.slug).toBe("real_estate");
     expect(chooseFunnelForIntent(funnels, "что у вас есть?")?.slug).toBe("exchange");
+  });
+
+  it("routes transfer/green corridor intents to their funnels (incl. hyphenated slug)", () => {
+    const threeFunnels = [
+      { id: 1, slug: "exchange", verticalTemplateId: "exchange_v1" },
+      { id: 2, slug: "transfer", verticalTemplateId: null },
+      { id: 3, slug: "green-corridor", verticalTemplateId: null },
+    ];
+    expect(chooseFunnelForIntent(threeFunnels, "нужен трансфер из NAIA")?.slug).toBe("transfer");
+    expect(chooseFunnelForIntent(threeFunnels, "зелёный коридор на прилёт")?.slug).toBe(
+      "green-corridor",
+    );
+    // бес-ключевая фраза → fallback на первую воронку
+    expect(chooseFunnelForIntent(threeFunnels, "едем завтра в 10")?.slug).toBe("exchange");
+  });
+
+  it("reports matched=false on fallback and matched=true on direct intent", () => {
+    const threeFunnels = [
+      { id: 1, slug: "exchange", verticalTemplateId: "exchange_v1" },
+      { id: 2, slug: "transfer", verticalTemplateId: null },
+    ];
+    const direct = chooseServiceRoute({
+      funnels: threeFunnels,
+      catalogItems: [],
+      text: "нужен трансфер до Макати",
+    });
+    expect(direct.matched).toBe(true);
+    expect(direct.funnel?.slug).toBe("transfer");
+
+    const fallback = chooseServiceRoute({
+      funnels: threeFunnels,
+      catalogItems: [],
+      text: "едем завтра в 10",
+    });
+    expect(fallback.matched).toBe(false);
+    expect(fallback.funnel?.slug).toBe("exchange");
+
+    // интент распознан, но воронки под него нет → fallback, matched=false
+    const noFunnel = chooseServiceRoute({
+      funnels: [{ id: 1, slug: "exchange", verticalTemplateId: "exchange_v1" }],
+      catalogItems: [],
+      text: "нужен трансфер до Макати",
+    });
+    expect(noFunnel.matched).toBe(false);
+    expect(noFunnel.funnel?.slug).toBe("exchange");
   });
 
   it("prefers matching service catalog item before deterministic intent fallback", () => {

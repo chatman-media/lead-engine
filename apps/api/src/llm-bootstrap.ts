@@ -52,6 +52,7 @@ import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import {
 	directorHooks,
+	funnels,
 	leads,
 	llmProviderConfigs,
 	skills,
@@ -260,39 +261,12 @@ function makeSupportModeResolver(db: Db) {
 		tenantId: number;
 		contactId: number;
 	}): Promise<boolean> => {
-		const rows = await db
-			.select({ supportMode: stageDefinitions.supportMode })
-			.from(leads)
-			.leftJoin(
-				stageDefinitions,
-				eq(leads.stageDefinitionId, stageDefinitions.id),
-			)
-			.where(
-				and(
-					eq(leads.tenantId, input.tenantId),
-					eq(leads.userId, input.contactId),
-					isNotNull(leads.stageDefinitionId),
-				),
-			)
-			.limit(1);
-		return rows[0]?.supportMode === true;
-	};
-}
-
-/**
- * Resolves the lead's current funnel-stage goal/guidance (Phase 2 C-2) so the
- * reply prompt can carry per-stage instructions. Mirrors the support-mode query
- * (leads → stage_definitions by leads.stageDefinitionId). null = no instructions.
- */
-function makeStageGuidanceResolver(db: Db) {
-	return async (input: {
-		tenantId: number;
-		contactId: number;
-	}): Promise<{ goal: string; guidance?: string } | null> => {
+		// Самый свежий ОТКРЫТЫЙ лид: с несколькими лидами на контакта (мульти-
+		// воронка) limit(1) без сортировки брал произвольный, в т.ч. закрытый.
 		const rows = await db
 			.select({
-				goal: stageDefinitions.goal,
-				guidance: stageDefinitions.guidance,
+				supportMode: stageDefinitions.supportMode,
+				kind: stageDefinitions.kind,
 			})
 			.from(leads)
 			.leftJoin(
@@ -306,10 +280,51 @@ function makeStageGuidanceResolver(db: Db) {
 					isNotNull(leads.stageDefinitionId),
 				),
 			)
-			.limit(1);
-		const goal = rows[0]?.goal;
+			.orderBy(desc(leads.updatedAt));
+		const open = rows.filter(
+			(r) => r.kind !== "terminal_won" && r.kind !== "terminal_lost",
+		);
+		return open[0]?.supportMode === true;
+	};
+}
+
+/**
+ * Resolves the lead's current funnel-stage goal/guidance (Phase 2 C-2) so the
+ * reply prompt can carry per-stage instructions. Mirrors the support-mode query
+ * (leads → stage_definitions by leads.stageDefinitionId). null = no instructions.
+ */
+export function makeStageGuidanceResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<{ goal: string; guidance?: string } | null> => {
+		// Самый свежий ОТКРЫТЫЙ лид (см. makeRequestContextResolver) — иначе при
+		// нескольких лидах guidance мог браться из произвольного/закрытого.
+		const rows = await db
+			.select({
+				goal: stageDefinitions.goal,
+				guidance: stageDefinitions.guidance,
+				kind: stageDefinitions.kind,
+			})
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(
+				and(
+					eq(leads.tenantId, input.tenantId),
+					eq(leads.userId, input.contactId),
+					isNotNull(leads.stageDefinitionId),
+				),
+			)
+			.orderBy(desc(leads.updatedAt));
+		const open = rows.filter(
+			(r) => r.kind !== "terminal_won" && r.kind !== "terminal_lost",
+		);
+		const goal = open[0]?.goal;
 		if (!goal) return null;
-		const guidance = rows[0]?.guidance;
+		const guidance = open[0]?.guidance;
 		return guidance ? { goal, guidance } : { goal };
 	};
 }
@@ -387,6 +402,50 @@ export function makeAwaitingOperatorResolver(db: Db) {
 			(r) => r.kind !== "terminal_won" && r.kind !== "terminal_lost",
 		);
 		return open[0]?.stageType === "awaiting_operator";
+	};
+}
+
+/**
+ * Воронка самого свежего ОТКРЫТОГО лида контакта (slug + verticalTemplateId).
+ * null — открытых лидов нет (первый контакт). Нужна для скоупинга exchange-
+ * guard'ов: у мульти-сервисного тенанта (обмен + трансфер + зелёный коридор)
+ * guard'ы не должны переписывать ответы не-обменных воронок.
+ */
+export function makeLeadFunnelResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<{ slug: string; verticalTemplateId: string | null } | null> => {
+		const rows = await db
+			.select({
+				slug: funnels.slug,
+				verticalTemplateId: funnels.verticalTemplateId,
+				kind: stageDefinitions.kind,
+			})
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.leftJoin(funnels, eq(stageDefinitions.funnelId, funnels.id))
+			.where(
+				and(
+					eq(leads.tenantId, input.tenantId),
+					eq(leads.userId, input.contactId),
+					isNotNull(leads.stageDefinitionId),
+				),
+			)
+			.orderBy(desc(leads.updatedAt))
+			.limit(5);
+		const open = rows.find(
+			(r) =>
+				r.kind !== "terminal_won" &&
+				r.kind !== "terminal_lost" &&
+				r.slug !== null,
+		);
+		return open?.slug
+			? { slug: open.slug, verticalTemplateId: open.verticalTemplateId ?? null }
+			: null;
 	};
 }
 
@@ -481,6 +540,7 @@ export function exchangeOrderPolicyStateFromOrder(
 	return {
 		id: order.id,
 		status: order.status,
+		direction: order.direction,
 		assetFrom: order.assetFrom,
 		network: order.network,
 		amountMode: order.amountMode,
@@ -1102,6 +1162,7 @@ export function makeReplyStrategy(
 	const resolveReranker = makeRerankerResolver(db, cfg.masterKeyHex);
 	const resolveIsSupport = makeSupportModeResolver(db);
 	const resolveKbScope = makeKbScopeResolver(db);
+	const resolveLeadFunnel = makeLeadFunnelResolver(db);
 	const resolveStageGuidance = makeStageGuidanceResolver(db);
 	const resolveRequestContext = makeRequestContextResolver(db);
 	const resolveAwaitingOperator = makeAwaitingOperatorResolver(db);
@@ -1171,6 +1232,7 @@ export function makeReplyStrategy(
 			awaitingOperator,
 			exchangePolicyState,
 			exchangeResponseGuardEnabled,
+			leadFunnel,
 		] = await Promise.all([
 			resolveKbScope({ tenantId, contactId }),
 			resolveStyle({ tenantId, contactId }),
@@ -1187,17 +1249,33 @@ export function makeReplyStrategy(
 						conversationId,
 						contactId,
 					}).catch((err) => {
-							console.warn(
-								"[llm-bootstrap] failed to resolve exchange policy state:",
-								err,
-							);
-							return null;
+						console.warn(
+							"[llm-bootstrap] failed to resolve exchange policy state:",
+							err,
+						);
+						return null;
 					})
 				: Promise.resolve(null),
 			isExchange
 				? resolveExchangeResponseGuardEnabled({ tenantId })
 				: Promise.resolve(true),
+			isExchange
+				? resolveLeadFunnel({ tenantId, contactId }).catch((err) => {
+						console.warn("[llm-bootstrap] failed to resolve lead funnel:", err);
+						return null;
+					})
+				: Promise.resolve(null),
 		]);
+		// Скоупинг exchange-guard'ов по воронке открытого лида: у мульти-
+		// сервисного тенанта transfer/green_corridor-диалоги не должны
+		// переписываться обменным guard'ом («цена без computeQuote»). Нет
+		// открытого лида (первый контакт) — guard остаётся включён.
+		const leadFunnelIsExchange =
+			leadFunnel === null ||
+			`${leadFunnel.slug} ${leadFunnel.verticalTemplateId ?? ""}`
+				.toLowerCase()
+				.replaceAll("-", "_")
+				.includes("exchange");
 		return {
 			...base,
 			kbScope,
@@ -1210,7 +1288,8 @@ export function makeReplyStrategy(
 			requestContext,
 			awaitingOperator,
 			exchangePolicyState,
-			exchangeResponseGuardEnabled,
+			exchangeResponseGuardEnabled:
+				exchangeResponseGuardEnabled && leadFunnelIsExchange,
 		};
 	};
 

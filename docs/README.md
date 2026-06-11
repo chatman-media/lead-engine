@@ -25,8 +25,8 @@
 
 | Док | О чём |
 |---|---|
-| [operations/SERVER_RUNBOOK.md](operations/SERVER_RUNBOOK.md) | Ручной апдейт прод-сервера: env → migrate → build → restart → health → re-seed |
-| [operations/CD_SETUP.md](operations/CD_SETUP.md) | CD: push в `main` → CI → SSH-деплой `./deploy.sh` → health-check |
+| [operations/SERVER_RUNBOOK.md](operations/SERVER_RUNBOOK.md) | Ручной апдейт prod/dev сервера: env → migrate → build → restart → health; текущие URL `exchanges.agency`, `client.exchanges.agency`, `dev.exchanges.agency` |
+| [operations/CD_SETUP.md](operations/CD_SETUP.md) | CD: push в `main` → prod, push в `dev` → dev; SSH-деплой `./deploy.sh` → health-check |
 
 ## 📈 Product & Strategy
 

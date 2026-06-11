@@ -1,31 +1,32 @@
 import { describe, expect, it } from "bun:test";
 import {
   EXCHANGE_SAFE_FALLBACK,
-	exchangeGuardFindingFromResult,
+  exchangeGuardFindingFromResult,
   guardExchangeReply,
+  rewriteUnbackedQuoteReply,
 } from "./exchange-reply-guard.ts";
 
 describe("guardExchangeReply", () => {
   it("blocks concrete quote claims without quote tool trace", () => {
     const r = guardExchangeReply({ text: "Курс 31.5, получите 10553 THB." });
     expect(r.ok).toBe(false);
-		expect(r.action).toBe("rewrite");
+    expect(r.action).toBe("rewrite");
     expect(r.reason).toBe("unbacked_quote");
-		expect(r.reasons).toEqual(["unbacked_quote"]);
-		expect(r.requiredFixes[0]).toContain("compute_exchange_quote");
-		expect(r.originalText).toBe("Курс 31.5, получите 10553 THB.");
+    expect(r.reasons).toEqual(["unbacked_quote"]);
+    expect(r.requiredFixes[0]).toContain("compute_exchange_quote");
+    expect(r.originalText).toBe("Курс 31.5, получите 10553 THB.");
     expect(r.text).toBe(EXCHANGE_SAFE_FALLBACK);
 
-		expect(exchangeGuardFindingFromResult(r)).toEqual({
-			action: "rewrite",
-			reasons: ["unbacked_quote"],
-			requiredFixes: [
-				"Call compute_exchange_quote or create_exchange_order before sending a concrete rate or THB amount.",
-			],
-			originalText: "Курс 31.5, получите 10553 THB.",
-			finalText: EXCHANGE_SAFE_FALLBACK,
-			blocked: false,
-		});
+    expect(exchangeGuardFindingFromResult(r)).toEqual({
+      action: "rewrite",
+      reasons: ["unbacked_quote"],
+      requiredFixes: [
+        "Call compute_exchange_quote or create_exchange_order before sending a concrete rate or payout amount.",
+      ],
+      originalText: "Курс 31.5, получите 10553 THB.",
+      finalText: EXCHANGE_SAFE_FALLBACK,
+      blocked: false,
+    });
   });
 
   it("allows concrete quote claims backed by compute_exchange_quote", () => {
@@ -102,10 +103,10 @@ describe("guardExchangeReply", () => {
           {
             name: "fetch_exchange_requisites",
             args: {},
-						result: {
-							address: "TQ7abc1234567890123456789012",
-							network: "TRC20",
-						},
+            result: {
+              address: "TQ7abc1234567890123456789012",
+              network: "TRC20",
+            },
             cycle: 0,
           },
         ],
@@ -140,19 +141,57 @@ describe("guardExchangeReply", () => {
   });
 
   it("blocks payout code without issue_exchange_payout", () => {
-		const r = guardExchangeReply({
-			text: "Код выдачи 482913, можно снимать в банкомате.",
-		});
+    const r = guardExchangeReply({
+      text: "Код выдачи 482913, можно снимать в банкомате.",
+    });
     expect(r.ok).toBe(false);
-		expect(r.action).toBe("escalate");
+    expect(r.action).toBe("escalate");
     expect(r.reason).toBe("unbacked_payout_code");
   });
 
   it("blocks manual rate negotiation", () => {
-		const r = guardExchangeReply({
-			text: "Для вас сделаем курс лучше, договоримся.",
-		});
+    const r = guardExchangeReply({
+      text: "Для вас сделаем курс лучше, договоримся.",
+    });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe("rate_negotiation");
+  });
+});
+
+describe("rewriteUnbackedQuoteReply", () => {
+  it("просит модель переписать без чисел и отдаёт результат", async () => {
+    let captured: Array<{ role: string; content: string }> = [];
+    const chat = {
+      complete: async (msgs: Array<{ role: "system" | "user" | "assistant"; content: string }>) => {
+        captured = msgs;
+        return "Подскажите направление и сумму — посчитаю точный курс.";
+      },
+    };
+    const out = await rewriteUnbackedQuoteReply({
+      chat,
+      userMessage: "так че",
+      draftReply: "Курс сегодня 61 PHP за USDT.",
+    });
+    expect(out).toBe("Подскажите направление и сумму — посчитаю точный курс.");
+    // черновик и сообщение клиента уходят модели в перезапросе
+    expect(captured.some((m) => m.content.includes("так че"))).toBe(true);
+    expect(captured.some((m) => m.content.includes("Курс сегодня 61"))).toBe(true);
+    // и сам результат проходит guard (чисел нет)
+    expect(guardExchangeReply({ text: out! }).ok).toBe(true);
+  });
+
+  it("null при ошибке chat или пустом ответе", async () => {
+    const boom = {
+      complete: async () => {
+        throw new Error("llm down");
+      },
+    };
+    expect(
+      await rewriteUnbackedQuoteReply({ chat: boom, userMessage: "x", draftReply: "y" }),
+    ).toBeNull();
+    const empty = { complete: async () => "   " };
+    expect(
+      await rewriteUnbackedQuoteReply({ chat: empty, userMessage: "x", draftReply: "y" }),
+    ).toBeNull();
   });
 });

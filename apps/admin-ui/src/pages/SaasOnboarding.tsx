@@ -12,6 +12,7 @@ import {
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { RateCardEditor } from "@/components/exchange/RateCardEditor";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -270,41 +271,95 @@ const REQUISITE_TYPES: { key: string; label: string; placeholder: string; secret
   { key: "exchange_wallet_usdt_erc20", label: "USDT ERC20 — адрес", placeholder: "0x..." },
   { key: "exchange_wallet_usdt_bep20", label: "USDT BEP20 / BSC — адрес", placeholder: "0x..." },
   { key: "exchange_wallet_usdt_ton", label: "USDT TON — адрес", placeholder: "UQ..." },
-  { key: "exchange_wallet_usdt_ton_memo", label: "USDT TON — memo/comment", placeholder: "12345 или comment" },
-  { key: "exchange_wallet_usdt_solana", label: "USDT Solana — адрес", placeholder: "solana address" },
+  {
+    key: "exchange_wallet_usdt_ton_memo",
+    label: "USDT TON — memo/comment",
+    placeholder: "12345 или comment",
+  },
+  {
+    key: "exchange_wallet_usdt_solana",
+    label: "USDT Solana — адрес",
+    placeholder: "solana address",
+  },
   { key: "exchange_wallet_usdc_erc20", label: "USDC ERC20 — адрес", placeholder: "0x..." },
-  { key: "exchange_wallet_usdc_solana", label: "USDC Solana — адрес", placeholder: "solana address" },
+  {
+    key: "exchange_wallet_usdc_solana",
+    label: "USDC Solana — адрес",
+    placeholder: "solana address",
+  },
   { key: "exchange_wallet_btc_default", label: "BTC — адрес", placeholder: "bc1..." },
   { key: "exchange_wallet_eth_erc20", label: "ETH ERC20 — адрес", placeholder: "0x..." },
   { key: "exchange_wallet_ltc_default", label: "LTC — адрес", placeholder: "ltc1..." },
   { key: "exchange_wallet_trx_tron", label: "TRX Tron — адрес", placeholder: "T..." },
   { key: "exchange_wallet_ton_ton", label: "TON — адрес", placeholder: "UQ..." },
-  { key: "exchange_wallet_ton_ton_memo", label: "TON — memo/comment", placeholder: "12345 или comment" },
+  {
+    key: "exchange_wallet_ton_ton_memo",
+    label: "TON — memo/comment",
+    placeholder: "12345 или comment",
+  },
   { key: "exchange_binance_id", label: "Binance ID / Pay ID", placeholder: "123456789" },
   { key: "exchange_bybit_uid", label: "Bybit UID", placeholder: "123456789" },
   { key: "exchange_htx_uid", label: "HTX UID", placeholder: "123456789" },
-  { key: "exchange_fiat_payment_url", label: "СБП / платёжная ссылка RUB", placeholder: "https://..." },
+  {
+    key: "exchange_fiat_payment_url",
+    label: "СБП / платёжная ссылка RUB",
+    placeholder: "https://...",
+  },
   { key: "exchange_rub_card_number", label: "RUB карта — номер", placeholder: "2200..." },
   { key: "exchange_rub_card_phone", label: "RUB карта — телефон", placeholder: "+7..." },
   { key: "exchange_rub_card_bank", label: "RUB карта — банк", placeholder: "Сбер / T-Bank..." },
   { key: "exchange_rub_card_recipient", label: "RUB карта — получатель", placeholder: "Иван И." },
-  { key: "exchange_payout_bank_methods", label: "Выдача THB — банки", placeholder: "Bangkok Bank, Kasikorn, SCB..." },
-  { key: "exchange_payout_cash_methods", label: "Выдача THB — наличные", placeholder: "office cash, courier cash, cardless ATM..." },
-  { key: "exchange_aml_policy", label: "AML правила", placeholder: "AML до 60%, high-risk — оператор..." },
+  {
+    key: "exchange_payout_bank_methods",
+    label: "Выдача THB — банки",
+    placeholder: "Bangkok Bank, Kasikorn, SCB...",
+  },
+  {
+    key: "exchange_payout_cash_methods",
+    label: "Выдача THB — наличные",
+    placeholder: "office cash, courier cash, cardless ATM...",
+  },
+  {
+    key: "exchange_aml_policy",
+    label: "AML правила",
+    placeholder: "AML до 60%, high-risk — оператор...",
+  },
   { key: "exchange_kyc_policy", label: "KYC правила", placeholder: "Паспорт / селфи / видео..." },
-  { key: "exchange_operator_telegram", label: "Контакт оператора — Telegram", placeholder: "@operator" },
-  { key: "exchange_operator_whatsapp", label: "Контакт оператора — WhatsApp", placeholder: "+66..." },
+  {
+    key: "exchange_operator_telegram",
+    label: "Контакт оператора — Telegram",
+    placeholder: "@operator",
+  },
+  {
+    key: "exchange_operator_whatsapp",
+    label: "Контакт оператора — WhatsApp",
+    placeholder: "+66...",
+  },
   { key: "exchange_operator_line", label: "Контакт оператора — Line", placeholder: "line id" },
   { key: "exchange_office_address", label: "Адрес офиса", placeholder: "Phuket, ..." },
   { key: "exchange_working_hours", label: "Часы работы", placeholder: "10:00-22:00 Bangkok" },
-  { key: "exchange_westwallet_api_key", label: "WestWallet public API key", placeholder: "public key", secret: true },
-  { key: "exchange_westwallet_secret_key", label: "WestWallet private API key", placeholder: "private key", secret: true },
+  {
+    key: "exchange_westwallet_api_key",
+    label: "WestWallet public API key",
+    placeholder: "public key",
+    secret: true,
+  },
+  {
+    key: "exchange_westwallet_secret_key",
+    label: "WestWallet private API key",
+    placeholder: "private key",
+    secret: true,
+  },
   {
     key: "exchange_westwallet_ipn_url",
     label: "WestWallet IPN URL",
     placeholder: "https://your-domain/webhook/westwallet/tenantId",
   },
-  { key: "exchange_westwallet_success_url", label: "WestWallet success URL", placeholder: "https://..." },
+  {
+    key: "exchange_westwallet_success_url",
+    label: "WestWallet success URL",
+    placeholder: "https://...",
+  },
 ];
 
 const LEGACY_REQUISITE_LABELS: Record<string, string> = {
@@ -390,9 +445,7 @@ export function SaasOnboarding() {
   const [verticals, setVerticals] = useState<VerticalInfo[]>([]);
   const [installingVertical, setInstallingVertical] = useState<string | null>(null);
   const [installedVertical, setInstalledVertical] = useState<string | null>(null);
-  const [aiPath, setAiPath] = useState<boolean>(
-    () => localStorage.getItem(AI_PATH_LS_KEY) === "1",
-  );
+  const [aiPath, setAiPath] = useState<boolean>(() => localStorage.getItem(AI_PATH_LS_KEY) === "1");
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
   // Exchange — курсы (тир-карта от рыночного фида: RUB + USDT)
@@ -855,7 +908,7 @@ export function SaasOnboarding() {
   }
 
   // Курсы = тир-карта от рыночного фида (Binance + ЦБ). Превью тянет актуальный
-  // рынок и строит дефолтные тиры RUB+USDT; пользователь правит курсы; сохранение
+  // рынок и строит дефолтные тиры RUB+USDT; пользователь правит отклонения; сохранение
   // (approve) создаёт активные базовые курсы + тиры. Авто-обновление рынка — да.
   async function loadRateCard() {
     setCardError("");
@@ -870,60 +923,6 @@ export function SaasOnboarding() {
     } finally {
       setCardLoading(false);
     }
-  }
-
-  /** Патч одного тира (курс/мин/макс). При смене курса пересчитывает отклонение. */
-  function patchTier(
-    pIdx: number,
-    tIdx: number,
-    patch: Partial<{ minThb: number; maxThb: number | null; displayRate: number }>,
-  ) {
-    setCardProposals((prev) =>
-      prev.map((p, i) => {
-        if (i !== pIdx) return p;
-        const tiers = p.tiers.map((t, j) => {
-          if (j !== tIdx) return t;
-          const next = { ...t, ...patch };
-          if (patch.displayRate !== undefined) {
-            next.deviationPct =
-              p.marketRate > 0 && Number.isFinite(next.displayRate)
-                ? Math.round(((next.displayRate - p.marketRate) / p.marketRate) * 10000) / 100
-                : t.deviationPct;
-          }
-          return next;
-        });
-        return { ...p, tiers };
-      }),
-    );
-  }
-
-  /** Добавить строку диапазона снизу (своя шкала). */
-  function addTier(pIdx: number) {
-    setCardProposals((prev) =>
-      prev.map((p, i) => {
-        if (i !== pIdx) return p;
-        const last = p.tiers[p.tiers.length - 1];
-        const minThb = last ? (last.maxThb ?? last.minThb + 1000) : 0;
-        const displayRate = last ? last.displayRate : p.marketRate;
-        const dev =
-          p.marketRate > 0 && Number.isFinite(displayRate)
-            ? Math.round(((displayRate - p.marketRate) / p.marketRate) * 10000) / 100
-            : 0;
-        return {
-          ...p,
-          tiers: [
-            ...p.tiers,
-            { minThb, maxThb: null, displayRate, deviationPct: dev, formula: "" },
-          ],
-        };
-      }),
-    );
-  }
-
-  function removeTier(pIdx: number, tIdx: number) {
-    setCardProposals((prev) =>
-      prev.map((p, i) => (i === pIdx ? { ...p, tiers: p.tiers.filter((_, j) => j !== tIdx) } : p)),
-    );
   }
 
   async function saveRateCard() {
@@ -1067,1063 +1066,1011 @@ export function SaasOnboarding() {
       </header>
 
       <div className="flex">
-      <div className="min-w-0 flex-1">
-      <div className="mx-auto w-full max-w-2xl px-4 py-10">
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">Настройка кабинета</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Заполните настройки — и бот начнёт отвечать вашим клиентам. Необязательные шаги можно
-            пропустить.
-          </p>
-        </div>
-
-        {/* Stepper */}
-        <ol className="mb-8 flex flex-wrap items-center gap-2">
-          {steps.map((s, i) => {
-            const active = i === step;
-            const canGo = reachable(i);
-            return (
-              <li key={s.id} className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={!canGo}
-                  onClick={() => canGo && setStep(i)}
-                  className={cn(
-                    "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
-                    active && "border-primary/50 bg-accent text-foreground",
-                    !active && canGo && "text-muted-foreground hover:bg-muted/60",
-                    !canGo && "cursor-not-allowed opacity-50",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold",
-                      s.done
-                        ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
-                        : active
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground",
-                    )}
-                  >
-                    {s.done ? <CheckIcon className="size-3" /> : i + 1}
-                  </span>
-                  <span className="hidden items-center gap-1.5 font-medium sm:inline-flex">
-                    {s.label}
-                    {!s.required && (
-                      <span className="rounded-full bg-muted px-1.5 py-px text-[10px] font-medium leading-normal text-muted-foreground">
-                        опц
-                      </span>
-                    )}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-
-        {error && (
-          <p className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </p>
-        )}
-
-        {currentId === "vertical" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Ваш бизнес</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Lead Engine работает с любым бизнесом, где есть лиды. Соберите воронку с AI под
-                себя — или начните с готового примера. Всё можно изменить позже.
+        <div className="min-w-0 flex-1">
+          <div className="mx-auto w-full max-w-2xl px-4 py-10">
+            <div className="mb-8 text-center">
+              <h1 className="text-2xl font-semibold tracking-tight">Настройка кабинета</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Заполните настройки — и бот начнёт отвечать вашим клиентам. Необязательные шаги
+                можно пропустить.
               </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <button
-                type="button"
-                aria-pressed={aiPath && !installedVertical}
-                disabled={installingVertical !== null}
-                onClick={() => {
-                  setAiPath(true);
-                  localStorage.setItem(AI_PATH_LS_KEY, "1");
-                  setError("");
-                }}
-                className={cn(
-                  "flex w-full flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors disabled:opacity-60",
-                  aiPath && !installedVertical
-                    ? "border-primary bg-primary/5 ring-1 ring-primary"
-                    : "border-border hover:border-primary/50 hover:bg-muted/50",
-                )}
-              >
-                <div className="flex w-full items-center justify-between gap-2">
-                  <span className="flex items-center gap-2 font-medium">
-                    <SparklesIcon className="size-4 text-primary" />
-                    Собрать воронку с AI
-                  </span>
-                  {aiPath && !installedVertical && (
-                    <CheckIcon className="size-4 shrink-0 text-primary" />
-                  )}
-                </div>
-                <span className="text-sm text-muted-foreground">
-                  Опишите бизнес своими словами — AI спроектирует этапы воронки, вопросы для
-                  квалификации и поля анкеты. Конструктор откроется после подключения канала и
-                  LLM-ключа.
-                </span>
-              </button>
+            </div>
 
-              <div className="flex items-center gap-3">
-                <div className="h-px flex-1 bg-border" />
-                <span className="text-xs text-muted-foreground">
-                  или начните с готового примера
-                </span>
-                <div className="h-px flex-1 bg-border" />
-              </div>
-
-              {verticals.length === 0 && (
-                <p className="text-sm text-muted-foreground">Список примеров недоступен.</p>
-              )}
-              <div className="grid gap-2 sm:grid-cols-2">
-                {verticals.map((v) => {
-                  const selected = installedVertical === v.slug;
-                  const installing = installingVertical === v.slug;
-                  const includes = [
-                    v.hasFunnel && "Воронка",
-                    v.hasStyles && "Стиль продаж",
-                    v.hasKbDocuments && "База знаний",
-                  ].filter(Boolean) as string[];
-                  return (
-                    <button
-                      key={v.slug}
-                      type="button"
-                      disabled={installingVertical !== null}
-                      aria-pressed={selected}
-                      onClick={async () => {
-                        setInstallingVertical(v.slug);
-                        setError("");
-                        try {
-                          await saas.installVertical(v.slug);
-                          setInstalledVertical(v.slug);
-                          setAiPath(false);
-                          localStorage.removeItem(AI_PATH_LS_KEY);
-                          await loadState();
-                        } catch (err) {
-                          if (!handleAuthError(err)) {
-                            setError(err instanceof Error ? err.message : String(err));
-                          }
-                        } finally {
-                          setInstallingVertical(null);
-                        }
-                      }}
-                      className={`flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors disabled:opacity-60 ${
-                        selected
-                          ? "border-primary bg-primary/5 ring-1 ring-primary"
-                          : "border-border hover:border-primary/50 hover:bg-muted/50"
-                      }`}
-                    >
-                      <div className="flex w-full items-center justify-between gap-2">
-                        <span className="font-medium">{v.displayName}</span>
-                        {selected && <CheckIcon className="size-4 shrink-0 text-primary" />}
-                      </div>
-                      {installing ? (
-                        <span className="text-xs text-muted-foreground">Устанавливаем…</span>
-                      ) : includes.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {includes.map((label) => (
-                            <Badge key={label} variant="secondary" className="text-[10px]">
-                              {label}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Пустой костяк воронки</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              {verticalDone && (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  Шаблон установлен <Badge variant="success">готово</Badge>
-                </p>
-              )}
-              {businessChosen && <NextButton label="Далее: канал" />}
-            </CardContent>
-          </Card>
-        )}
-
-        {currentId === "channel" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Подключите канал</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Откуда приходят лиды? Достаточно одного мессенджера — личный Telegram или отдельный
-                бот.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {channelDone && (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  Подключено каналов: <code className="font-mono">{channels.length}</code>
-                  <Badge variant="success">готово</Badge>
-                </p>
-              )}
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setChannelMode("userbot")}
-                  className={cn(
-                    "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                    channelMode === "userbot"
-                      ? "border-primary/50 bg-accent"
-                      : "text-muted-foreground hover:bg-muted/60",
-                  )}
-                >
-                  <UserIcon className="mt-0.5 size-4 shrink-0" />
-                  <span>
-                    <span className="block text-sm font-medium text-foreground">
-                      Личный аккаунт
-                    </span>
-                    <span className="block text-xs">Лиды пишут вам в личку</span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setChannelMode("bot")}
-                  className={cn(
-                    "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                    channelMode === "bot"
-                      ? "border-primary/50 bg-accent"
-                      : "text-muted-foreground hover:bg-muted/60",
-                  )}
-                >
-                  <SendIcon className="mt-0.5 size-4 shrink-0" />
-                  <span>
-                    <span className="block text-sm font-medium text-foreground">Telegram-бот</span>
-                    <span className="block text-xs">Отдельный бот из @BotFather</span>
-                  </span>
-                </button>
-              </div>
-
-              {channelMode === "userbot" ? (
-                <div className="space-y-3">
-                  <p className="flex items-start gap-2 rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
-                    <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
-                    Подключайте только свой аккаунт и для ответов своим лидам — массовая рассылка
-                    нарушает правила Telegram.
-                  </p>
-                  {ubError && (
-                    <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                      {ubError}
-                    </p>
-                  )}
-
-                  {ubStep === "phone" && (
-                    <form onSubmit={handleUbPhone} className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>API ID</Label>
-                          <Input
-                            inputMode="numeric"
-                            autoComplete="off"
-                            value={ubApiId}
-                            onChange={(e) => setUbApiId(e.target.value)}
-                            placeholder="1234567"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>API Hash</Label>
-                          <Input
-                            autoComplete="off"
-                            value={ubApiHash}
-                            onChange={(e) => setUbApiHash(e.target.value)}
-                            placeholder="abcd1234ef…"
-                          />
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Получите на{" "}
-                        <a
-                          href="https://my.telegram.org/apps"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline"
-                        >
-                          my.telegram.org → API development tools
-                        </a>
-                        . Можно оставить пустым, если платформа предоставляет общие ключи.
-                      </p>
-                      <div className="space-y-1.5">
-                        <Label>Номер телефона аккаунта</Label>
-                        <Input
-                          type="tel"
-                          autoComplete="off"
-                          value={ubPhone}
-                          onChange={(e) => setUbPhone(e.target.value)}
-                          placeholder="+79991234567"
-                        />
-                      </div>
-                      <Button type="submit" disabled={ubSubmitting || !ubPhone.trim()}>
-                        {ubSubmitting ? "Отправляем код…" : "Получить код"}
-                      </Button>
-                    </form>
-                  )}
-
-                  {ubStep === "code" && (
-                    <form onSubmit={handleUbCode} className="space-y-3">
-                      <p className="text-sm text-muted-foreground">
-                        Telegram отправил код на {ubPhone}. Введите его.
-                      </p>
-                      <div className="space-y-1.5">
-                        <Label>Код подтверждения</Label>
-                        <Input
-                          inputMode="numeric"
-                          autoComplete="one-time-code"
-                          value={ubCode}
-                          onChange={(e) => setUbCode(e.target.value)}
-                          placeholder="12345"
-                        />
-                      </div>
-                      <div className="flex gap-2">
-                        <Button type="submit" disabled={ubSubmitting || !ubCode.trim()}>
-                          {ubSubmitting ? "Проверяем…" : "Подтвердить"}
-                        </Button>
-                        <Button type="button" variant="ghost" onClick={resetUserbot}>
-                          Изменить номер
-                        </Button>
-                      </div>
-                    </form>
-                  )}
-
-                  {ubStep === "2fa" && (
-                    <form onSubmit={handleUb2fa} className="space-y-3">
-                      <p className="text-sm text-muted-foreground">
-                        У аккаунта включён облачный пароль (2FA). Введите его.
-                      </p>
-                      <div className="space-y-1.5">
-                        <Label>Пароль 2FA</Label>
-                        <Input
-                          type="password"
-                          autoComplete="off"
-                          value={ubPassword}
-                          onChange={(e) => setUbPassword(e.target.value)}
-                          placeholder="••••••••"
-                        />
-                      </div>
-                      <div className="flex gap-2">
-                        <Button type="submit" disabled={ubSubmitting || !ubPassword}>
-                          {ubSubmitting ? "Проверяем…" : "Войти"}
-                        </Button>
-                        <Button type="button" variant="ghost" onClick={resetUserbot}>
-                          Начать заново
-                        </Button>
-                      </div>
-                    </form>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Создайте бота в{" "}
-                    <a
-                      href="https://t.me/BotFather"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      @BotFather
-                    </a>{" "}
-                    и вставьте токен. Webhook настроится автоматически.
-                  </p>
-                  <form onSubmit={handleTelegram} className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label>Telegram bot token</Label>
-                      <Input
-                        type="text"
-                        autoComplete="off"
-                        value={botToken}
-                        onChange={(e) => setBotToken(e.target.value)}
-                        placeholder="123456789:AAEhBP…"
-                      />
-                    </div>
-                    <Button type="submit" disabled={tgSubmitting || !botToken.trim()}>
-                      {tgSubmitting ? "Проверяем…" : "Подключить"}
-                    </Button>
-                  </form>
-                </div>
-              )}
-
-              <p className="text-sm text-muted-foreground">
-                Нужен WhatsApp или web-виджет?{" "}
-                <Link to="/channels" className="text-primary hover:underline">
-                  Все типы каналов →
-                </Link>
-              </p>
-              {channelDone && <NextButton label="Далее: LLM-провайдер" />}
-            </CardContent>
-          </Card>
-        )}
-
-        {currentId === "llm" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>LLM-провайдеры</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Chat обязателен — ответы бота. Остальное по желанию: embeddings (база знаний),
-                vision (фото/документы), judge (оценка/сравнение), reranker (точность поиска). Для
-                Ollama API-ключ не нужен.
-              </p>
-              <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                Для alpha быстрее всего OpenRouter: создайте key в openrouter.ai, поставьте лимит
-                бюджета и вставьте его в Chat. Ключ хранится зашифрованным; не отправляйте его в
-                Telegram или WhatsApp.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {ALL_PURPOSES.map((purpose) => {
-                const meta = PURPOSE_META[purpose];
-                const cfg = configs.find((c) => c.purpose === purpose);
-                const f = keyForms[purpose];
-                const open = expandedPurpose.has(purpose);
-                const ready = configReady(cfg);
-                const hasOllama = meta.providers.includes("ollama");
-                // Ключ этого провайдера уже сохранён в другом назначении → можно не вводить.
-                const reuseKey =
-                  !cfg?.hasSecret && f.provider !== "ollama" && providerHasKey(f.provider);
+            {/* Stepper */}
+            <ol className="mb-8 flex flex-wrap items-center gap-2">
+              {steps.map((s, i) => {
+                const active = i === step;
+                const canGo = reachable(i);
                 return (
-                  <div key={purpose} className="rounded-lg border">
+                  <li key={s.id} className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => togglePurpose(purpose)}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
-                    >
-                      <span className="min-w-0">
-                        <span className="text-sm font-medium">
-                          {meta.label}
-                          {meta.required && <span className="text-destructive"> *</span>}
-                        </span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {meta.desc}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        {ready ? (
-                          <Badge variant="success">настроено</Badge>
-                        ) : meta.required ? (
-                          <Badge variant="warning">нужно</Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">опц.</span>
-                        )}
-                        <ChevronDownIcon
-                          className={cn(
-                            "size-4 text-muted-foreground transition-transform",
-                            open && "rotate-180",
-                          )}
-                        />
-                      </span>
-                    </button>
-                    {open && (
-                      <form
-                        onSubmit={(e) => handleSaveKey(e, purpose)}
-                        className="grid gap-3 border-t px-3 py-3 sm:grid-cols-2"
-                      >
-                        <div className="space-y-1.5">
-                          <Label>Провайдер</Label>
-                          <Select
-                            value={f.provider}
-                            onValueChange={(v) =>
-                              updateKeyForm(purpose, { provider: v as LlmProvider })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {meta.providers.map((pv) => (
-                                <SelectItem key={pv} value={pv}>
-                                  {PROVIDER_LABEL[pv]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Модель</Label>
-                          <Input
-                            value={f.model}
-                            onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
-                            placeholder={modelPlaceholder(f.provider, purpose)}
-                          />
-                        </div>
-                        {f.provider !== "ollama" && (
-                          <div className="space-y-1.5">
-                            <Label>
-                              API-ключ{" "}
-                              {cfg?.hasSecret
-                                ? "(пусто — не менять)"
-                                : reuseKey
-                                  ? "(можно не вводить)"
-                                  : ""}
-                            </Label>
-                            <Input
-                              type="password"
-                              autoComplete="new-password"
-                              value={f.apiKey}
-                              onChange={(e) => updateKeyForm(purpose, { apiKey: e.target.value })}
-                              placeholder={
-                                cfg?.hasSecret
-                                  ? "•••••••• (сохранён)"
-                                  : reuseKey
-                                    ? `ключ ${PROVIDER_LABEL[f.provider]} уже сохранён — переиспользуем`
-                                    : "sk-…"
-                              }
-                            />
-                          </div>
-                        )}
-                        {f.provider === "ollama" && (
-                          <div className="space-y-1.5">
-                            <Label>URL Ollama</Label>
-                            <Input
-                              value={f.baseUrl}
-                              onChange={(e) => updateKeyForm(purpose, { baseUrl: e.target.value })}
-                              placeholder="http://localhost:11434"
-                            />
-                          </div>
-                        )}
-                        {purpose === "embed" && (
-                          <div className="space-y-1.5">
-                            <Label>Размерность</Label>
-                            <Input
-                              type="number"
-                              value={f.embedDim}
-                              onChange={(e) => updateKeyForm(purpose, { embedDim: e.target.value })}
-                              placeholder="1536"
-                            />
-                          </div>
-                        )}
-                        {purpose === "embed" && (
-                          <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                            Оставьте <code className="font-mono">1536</code> — под базу знаний.
-                            Вектор любой современной модели приводится к 1536 автоматически (нужна
-                            модель с размерностью ≥ 1536).
-                          </p>
-                        )}
-                        {f.provider === "ollama" && OLLAMA_PRESETS[purpose] && (
-                          <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                            Ollama локальный — ключ не нужен. Запустите{" "}
-                            <code className="font-mono">ollama serve</code> и{" "}
-                            <code className="font-mono">
-                              ollama pull {OLLAMA_PRESETS[purpose]?.model}
-                            </code>
-                          </p>
-                        )}
-                        <div className="flex items-center gap-2 sm:col-span-2">
-                          <Button type="submit" disabled={savingPurpose !== null}>
-                            {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
-                          </Button>
-                          {hasOllama && f.provider !== "ollama" && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                updateKeyForm(purpose, {
-                                  provider: "ollama",
-                                  model: OLLAMA_PRESETS[purpose]?.model ?? "",
-                                  baseUrl: "http://localhost:11434",
-                                  apiKey: "",
-                                })
-                              }
-                            >
-                              Использовать Ollama
-                            </Button>
-                          )}
-                        </div>
-                      </form>
-                    )}
-                  </div>
-                );
-              })}
-              <p className="text-sm text-muted-foreground">
-                Расширенные параметры (timeout и т.д.) —{" "}
-                <Link to="/settings" className="text-primary hover:underline">
-                  настройки →
-                </Link>
-              </p>
-              {chatDone && <NextButton label="Далее" />}
-            </CardContent>
-          </Card>
-        )}
-
-        {currentId === "ai_funnel" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Соберите воронку с AI</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Опишите бизнес своими словами: чем занимаетесь, как приходят клиенты и что нужно от
-                них узнать. AI спроектирует этапы воронки и поля анкеты — вы увидите предпросмотр и
-                подтвердите перед применением.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {status?.funnelInstalled ? (
-                <>
-                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                    Воронка собрана <Badge variant="success">готово</Badge>
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="outline" onClick={() => setAiPanelOpen(true)}>
-                      <SparklesIcon className="size-4" /> Уточнить воронку
-                    </Button>
-                    <NextButton label="Далее: база знаний" />
-                  </div>
-                </>
-              ) : (
-                <Button onClick={() => setAiPanelOpen(true)}>
-                  <SparklesIcon className="size-4" /> Открыть AI-конструктор
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {currentId === "ex_rates" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Курсы обмена</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои курсы
-                по диапазонам сумм — отдельно для рублей и USDT (как на табло). Бот выдаёт клиенту
-                ровно эти значения.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {cardError && (
-                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {cardError}
-                </p>
-              )}
-
-              {cardProposals.length === 0 ? (
-                <Button type="button" onClick={loadRateCard} disabled={cardLoading}>
-                  {cardLoading ? "Получаем курс…" : "Получить актуальный курс с рынка"}
-                </Button>
-              ) : (
-                <>
-                  {cardProposals.map((p, pIdx) => (
-                    <div key={p.asset} className="rounded-lg border">
-                      <div className="flex items-center justify-between border-b px-3 py-2">
-                        <span className="text-sm font-medium">
-                          {p.asset === "RUB"
-                            ? "🇷🇺 RUB → THB"
-                            : p.asset === "USDT"
-                              ? "💲 USDT → THB"
-                              : `${p.asset} → THB`}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          рынок: {p.marketRate}{" "}
-                          {p.quoteMode === "divide" ? `${p.asset}/THB` : `THB/${p.asset}`}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-[1fr_1fr_5rem_3rem_1.5rem] gap-2 px-3 py-1.5 text-xs text-muted-foreground">
-                        <span>от (THB)</span>
-                        <span>до (THB)</span>
-                        <span>курс</span>
-                        <span className="text-right">откл.</span>
-                        <span />
-                      </div>
-                      {p.tiers.map((t, tIdx) => (
-                        <div
-                          // biome-ignore lint/suspicious/noArrayIndexKey: строки переупорядочиваемы пользователем
-                          key={`${p.asset}-${tIdx}`}
-                          className="grid grid-cols-[1fr_1fr_5rem_3rem_1.5rem] items-center gap-2 border-t px-3 py-1.5"
-                        >
-                          <Input
-                            className="h-8"
-                            type="number"
-                            step="any"
-                            value={Number.isFinite(t.minThb) ? t.minThb : ""}
-                            onChange={(e) =>
-                              patchTier(pIdx, tIdx, { minThb: Number.parseFloat(e.target.value) })
-                            }
-                          />
-                          <Input
-                            className="h-8"
-                            type="number"
-                            step="any"
-                            placeholder="∞"
-                            value={t.maxThb ?? ""}
-                            onChange={(e) =>
-                              patchTier(pIdx, tIdx, {
-                                maxThb:
-                                  e.target.value.trim() === ""
-                                    ? null
-                                    : Number.parseFloat(e.target.value),
-                              })
-                            }
-                          />
-                          <Input
-                            className="h-8"
-                            type="number"
-                            step="any"
-                            value={Number.isFinite(t.displayRate) ? t.displayRate : ""}
-                            onChange={(e) =>
-                              patchTier(pIdx, tIdx, {
-                                displayRate: Number.parseFloat(e.target.value),
-                              })
-                            }
-                          />
-                          <span className="text-right text-xs text-muted-foreground">
-                            {t.deviationPct > 0 ? "+" : ""}
-                            {t.deviationPct}%
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removeTier(pIdx, tIdx)}
-                            aria-label="Удалить строку"
-                            className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                      <div className="border-t px-3 py-1.5">
-                        <button
-                          type="button"
-                          onClick={() => addTier(pIdx)}
-                          className="text-sm text-primary hover:underline"
-                        >
-                          + Добавить диапазон
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" onClick={saveRateCard} disabled={cardSaving}>
-                      {cardSaving ? "Сохраняем…" : ratesDone ? "Обновить курсы" : "Сохранить курсы"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={loadRateCard}
-                      disabled={cardLoading}
-                    >
-                      {cardLoading ? "Обновляем…" : "Сбросить к рынку"}
-                    </Button>
-                  </div>
-                </>
-              )}
-
-              {ratesDone && (
-                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
-                  ✓ Курсы сохранены и активны. Авто-обновление рынка включено.
-                </p>
-              )}
-              {ratesDone && <NextButton label="Далее: реквизиты" />}
-            </CardContent>
-          </Card>
-        )}
-
-        {currentId === "ex_requisites" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Реквизиты приёма</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Куда клиент отправляет средства. Добавьте минимум один реквизит — бот выдаёт их
-                клиенту автоматически (иначе — передача оператору). Значения шифруются.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Сохранено реквизитов:{" "}
-                <code className="font-mono">{status?.requisiteCount ?? 0}</code>
-                {requisitesDone && (
-                  <Badge variant="success" className="ml-2">
-                    готово
-                  </Badge>
-                )}
-              </p>
-
-              {savedRequisites.filter((r) => isRequisiteKey(r.key)).length > 0 && (
-                <ul className="space-y-1.5">
-                  {savedRequisites
-                    .filter((r) => isRequisiteKey(r.key))
-                    .map((r) => (
-                      <li
-                        key={r.key}
-                        className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
-                      >
-                        <CheckIcon className="size-4 shrink-0 text-[var(--success)]" />
-                        <span className="shrink-0 font-medium">{requisiteLabel(r.key)}:</span>
-                        <span
-                          className="truncate font-mono text-xs text-muted-foreground"
-                          title={r.sensitive ? undefined : r.value}
-                        >
-                          {r.sensitive && r.hasValue ? "сохранено" : r.value}
-                        </span>
-                      </li>
-                    ))}
-                </ul>
-              )}
-
-              <form onSubmit={handleSaveRequisite} className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label>Тип реквизита</Label>
-                  <Select value={reqType} onValueChange={setReqType}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REQUISITE_TYPES.map((t) => (
-                        <SelectItem key={t.key} value={t.key}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Значение</Label>
-                  <Input
-                    autoComplete="off"
-                    type={REQUISITE_TYPES.find((t) => t.key === reqType)?.secret ? "password" : "text"}
-                    value={reqValue}
-                    onChange={(e) => setReqValue(e.target.value)}
-                    placeholder={
-                      REQUISITE_TYPES.find((t) => t.key === reqType)?.placeholder ?? "значение"
-                    }
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <Button type="submit" disabled={savingReq || !reqValue.trim()}>
-                    {savingReq ? "Сохраняем…" : "Добавить реквизит"}
-                  </Button>
-                </div>
-              </form>
-              {requisitesDone && <NextButton label="Далее" />}
-            </CardContent>
-          </Card>
-        )}
-
-        {currentId === "kb" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>База знаний (опционально)</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Загрузите документы — бот будет отвечать по вашей базе (RAG). Шаг можно пропустить.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {lastIndexed !== null && (
-                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
-                  ✓ Документ проиндексирован — {lastIndexed} фрагментов.
-                </p>
-              )}
-
-              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-7 text-center transition-colors hover:border-primary/50 hover:bg-muted/50">
-                <span className="grid size-9 place-items-center rounded-full bg-primary/15 text-primary">
-                  <UploadIcon className="size-4" />
-                </span>
-                <span className="text-sm font-medium">Загрузить файл</span>
-                <span className="text-xs text-muted-foreground">.txt, .md, .json, .pdf</span>
-                <input
-                  type="file"
-                  accept=".txt,.md,.json,.pdf"
-                  onChange={handleFileUpload}
-                  disabled={uploading}
-                  className="sr-only"
-                />
-              </label>
-
-              {isExchange && (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">
-                    Заготовки для обменника — нажмите, заполнится форма ниже, останется вписать свои
-                    адреса и условия:
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {EXCHANGE_KB_TEMPLATES.map((t) => (
-                      <Button
-                        key={t.title}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setPasteTitle(t.title);
-                          setPasteTopic(t.topic);
-                          setPasteBody(t.body);
-                        }}
-                      >
-                        {t.label}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <form onSubmit={handlePaste} className="space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Input
-                    placeholder="Заголовок"
-                    value={pasteTitle}
-                    onChange={(e) => setPasteTitle(e.target.value)}
-                  />
-                  <Input
-                    placeholder="Тема (опционально)"
-                    value={pasteTopic}
-                    onChange={(e) => setPasteTopic(e.target.value)}
-                  />
-                </div>
-                <Textarea
-                  placeholder="Текст документа…"
-                  rows={5}
-                  className="font-mono text-xs"
-                  value={pasteBody}
-                  onChange={(e) => setPasteBody(e.target.value)}
-                />
-                <Button type="submit" variant="outline" disabled={uploading || !pasteBody.trim()}>
-                  {uploading ? "Загружаем…" : "Добавить текст"}
-                </Button>
-              </form>
-
-              {docs.length > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Документов в базе: <code className="font-mono">{docs.length}</code>
-                </p>
-              )}
-
-              <NextButton label={kbDone ? "Далее" : "Пропустить"} />
-            </CardContent>
-          </Card>
-        )}
-
-        {currentId === "ex_business" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Данные обменника (опционально)</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Эти данные сохраняются для оператора. Автоматизация (подстановка в ответы бота,
-                расписание, KYC-гейтинг) — в следующем релизе.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {bizSaved && (
-                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
-                  ✓ Данные сохранены.
-                </p>
-              )}
-              <form onSubmit={handleSaveBusiness} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label>Контакт оператора (для эскалаций)</Label>
-                  <Input
-                    value={bizForm.operatorContact}
-                    onChange={(e) => setBizForm((p) => ({ ...p, operatorContact: e.target.value }))}
-                    placeholder="@operator / +66…"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Методы выдачи</Label>
-                  <Input
-                    value={bizForm.payoutMethods}
-                    onChange={(e) => setBizForm((p) => ({ ...p, payoutMethods: e.target.value }))}
-                    placeholder="офис, безкарточный ATM, курьер, тайский банк"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Политика KYC</Label>
-                  <Input
-                    value={bizForm.kycPolicy}
-                    onChange={(e) => setBizForm((p) => ({ ...p, kycPolicy: e.target.value }))}
-                    placeholder="напр. обязательна свыше 50 000 THB"
-                  />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>Часы работы</Label>
-                    <Input
-                      value={bizForm.workingHours}
-                      onChange={(e) => setBizForm((p) => ({ ...p, workingHours: e.target.value }))}
-                      placeholder="10:00–20:00, Пхукет"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Адрес офиса</Label>
-                    <Input
-                      value={bizForm.officeAddress}
-                      onChange={(e) => setBizForm((p) => ({ ...p, officeAddress: e.target.value }))}
-                      placeholder="—"
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button type="submit" disabled={savingBiz}>
-                    {savingBiz ? "Сохраняем…" : "Сохранить"}
-                  </Button>
-                  <NextButton label="Далее" />
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        )}
-
-        {currentId === "done" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>{allRequiredDone ? "Готово!" : "Почти готово"}</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                {allRequiredDone
-                  ? "Всё настроено — можно переходить к работе."
-                  : "Завершите обязательные шаги (без пометки «опц»), чтобы открыть кабинет."}
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <ul className="space-y-2">
-                {steps
-                  .filter((s) => s.id !== "done")
-                  .map((s) => (
-                    <li
-                      key={s.id}
-                      className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
+                      disabled={!canGo}
+                      onClick={() => canGo && setStep(i)}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+                        active && "border-primary/50 bg-accent text-foreground",
+                        !active && canGo && "text-muted-foreground hover:bg-muted/60",
+                        !canGo && "cursor-not-allowed opacity-50",
+                      )}
                     >
                       <span
                         className={cn(
-                          "grid size-6 shrink-0 place-items-center rounded-full text-xs",
+                          "grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold",
                           s.done
                             ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
-                            : "border text-muted-foreground",
+                            : active
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground",
                         )}
                       >
-                        {s.done ? <CheckIcon className="size-3.5" /> : "○"}
+                        {s.done ? <CheckIcon className="size-3" /> : i + 1}
                       </span>
-                      <div>
-                        <p className="text-sm font-medium leading-tight">
-                          {s.label}
-                          {!s.required && (
-                            <span className="text-muted-foreground"> (опционально)</span>
+                      <span className="hidden items-center gap-1.5 font-medium sm:inline-flex">
+                        {s.label}
+                        {!s.required && (
+                          <span className="rounded-full bg-muted px-1.5 py-px text-[10px] font-medium leading-normal text-muted-foreground">
+                            опц
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+
+            {error && (
+              <p className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            )}
+
+            {currentId === "vertical" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Ваш бизнес</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Lead Engine работает с любым бизнесом, где есть лиды. Соберите воронку с AI под
+                    себя — или начните с готового примера. Всё можно изменить позже.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <button
+                    type="button"
+                    aria-pressed={aiPath && !installedVertical}
+                    disabled={installingVertical !== null}
+                    onClick={() => {
+                      setAiPath(true);
+                      localStorage.setItem(AI_PATH_LS_KEY, "1");
+                      setError("");
+                    }}
+                    className={cn(
+                      "flex w-full flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors disabled:opacity-60",
+                      aiPath && !installedVertical
+                        ? "border-primary bg-primary/5 ring-1 ring-primary"
+                        : "border-border hover:border-primary/50 hover:bg-muted/50",
+                    )}
+                  >
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 font-medium">
+                        <SparklesIcon className="size-4 text-primary" />
+                        Собрать воронку с AI
+                      </span>
+                      {aiPath && !installedVertical && (
+                        <CheckIcon className="size-4 shrink-0 text-primary" />
+                      )}
+                    </div>
+                    <span className="text-sm text-muted-foreground">
+                      Опишите бизнес своими словами — AI спроектирует этапы воронки, вопросы для
+                      квалификации и поля анкеты. Конструктор откроется после подключения канала и
+                      LLM-ключа.
+                    </span>
+                  </button>
+
+                  <div className="flex items-center gap-3">
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="text-xs text-muted-foreground">
+                      или начните с готового примера
+                    </span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+
+                  {verticals.length === 0 && (
+                    <p className="text-sm text-muted-foreground">Список примеров недоступен.</p>
+                  )}
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {verticals.map((v) => {
+                      const selected = installedVertical === v.slug;
+                      const installing = installingVertical === v.slug;
+                      const includes = [
+                        v.hasFunnel && "Воронка",
+                        v.hasStyles && "Стиль продаж",
+                        v.hasKbDocuments && "База знаний",
+                      ].filter(Boolean) as string[];
+                      return (
+                        <button
+                          key={v.slug}
+                          type="button"
+                          disabled={installingVertical !== null}
+                          aria-pressed={selected}
+                          onClick={async () => {
+                            setInstallingVertical(v.slug);
+                            setError("");
+                            try {
+                              await saas.installVertical(v.slug);
+                              setInstalledVertical(v.slug);
+                              setAiPath(false);
+                              localStorage.removeItem(AI_PATH_LS_KEY);
+                              await loadState();
+                            } catch (err) {
+                              if (!handleAuthError(err)) {
+                                setError(err instanceof Error ? err.message : String(err));
+                              }
+                            } finally {
+                              setInstallingVertical(null);
+                            }
+                          }}
+                          className={`flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors disabled:opacity-60 ${
+                            selected
+                              ? "border-primary bg-primary/5 ring-1 ring-primary"
+                              : "border-border hover:border-primary/50 hover:bg-muted/50"
+                          }`}
+                        >
+                          <div className="flex w-full items-center justify-between gap-2">
+                            <span className="font-medium">{v.displayName}</span>
+                            {selected && <CheckIcon className="size-4 shrink-0 text-primary" />}
+                          </div>
+                          {installing ? (
+                            <span className="text-xs text-muted-foreground">Устанавливаем…</span>
+                          ) : includes.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {includes.map((label) => (
+                                <Badge key={label} variant="secondary" className="text-[10px]">
+                                  {label}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              Пустой костяк воронки
+                            </span>
                           )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {verticalDone && (
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                      Шаблон установлен <Badge variant="success">готово</Badge>
+                    </p>
+                  )}
+                  {businessChosen && <NextButton label="Далее: канал" />}
+                </CardContent>
+              </Card>
+            )}
+
+            {currentId === "channel" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Подключите канал</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Откуда приходят лиды? Достаточно одного мессенджера — личный Telegram или
+                    отдельный бот.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {channelDone && (
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                      Подключено каналов: <code className="font-mono">{channels.length}</code>
+                      <Badge variant="success">готово</Badge>
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setChannelMode("userbot")}
+                      className={cn(
+                        "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                        channelMode === "userbot"
+                          ? "border-primary/50 bg-accent"
+                          : "text-muted-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      <UserIcon className="mt-0.5 size-4 shrink-0" />
+                      <span>
+                        <span className="block text-sm font-medium text-foreground">
+                          Личный аккаунт
+                        </span>
+                        <span className="block text-xs">Лиды пишут вам в личку</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChannelMode("bot")}
+                      className={cn(
+                        "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                        channelMode === "bot"
+                          ? "border-primary/50 bg-accent"
+                          : "text-muted-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      <SendIcon className="mt-0.5 size-4 shrink-0" />
+                      <span>
+                        <span className="block text-sm font-medium text-foreground">
+                          Telegram-бот
+                        </span>
+                        <span className="block text-xs">Отдельный бот из @BotFather</span>
+                      </span>
+                    </button>
+                  </div>
+
+                  {channelMode === "userbot" ? (
+                    <div className="space-y-3">
+                      <p className="flex items-start gap-2 rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+                        <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                        Подключайте только свой аккаунт и для ответов своим лидам — массовая
+                        рассылка нарушает правила Telegram.
+                      </p>
+                      {ubError && (
+                        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                          {ubError}
                         </p>
+                      )}
+
+                      {ubStep === "phone" && (
+                        <form onSubmit={handleUbPhone} className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                              <Label>API ID</Label>
+                              <Input
+                                inputMode="numeric"
+                                autoComplete="off"
+                                value={ubApiId}
+                                onChange={(e) => setUbApiId(e.target.value)}
+                                placeholder="1234567"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label>API Hash</Label>
+                              <Input
+                                autoComplete="off"
+                                value={ubApiHash}
+                                onChange={(e) => setUbApiHash(e.target.value)}
+                                placeholder="abcd1234ef…"
+                              />
+                            </div>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Получите на{" "}
+                            <a
+                              href="https://my.telegram.org/apps"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="underline"
+                            >
+                              my.telegram.org → API development tools
+                            </a>
+                            . Можно оставить пустым, если платформа предоставляет общие ключи.
+                          </p>
+                          <div className="space-y-1.5">
+                            <Label>Номер телефона аккаунта</Label>
+                            <Input
+                              type="tel"
+                              autoComplete="off"
+                              value={ubPhone}
+                              onChange={(e) => setUbPhone(e.target.value)}
+                              placeholder="+79991234567"
+                            />
+                          </div>
+                          <Button type="submit" disabled={ubSubmitting || !ubPhone.trim()}>
+                            {ubSubmitting ? "Отправляем код…" : "Получить код"}
+                          </Button>
+                        </form>
+                      )}
+
+                      {ubStep === "code" && (
+                        <form onSubmit={handleUbCode} className="space-y-3">
+                          <p className="text-sm text-muted-foreground">
+                            Telegram отправил код на {ubPhone}. Введите его.
+                          </p>
+                          <div className="space-y-1.5">
+                            <Label>Код подтверждения</Label>
+                            <Input
+                              inputMode="numeric"
+                              autoComplete="one-time-code"
+                              value={ubCode}
+                              onChange={(e) => setUbCode(e.target.value)}
+                              placeholder="12345"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <Button type="submit" disabled={ubSubmitting || !ubCode.trim()}>
+                              {ubSubmitting ? "Проверяем…" : "Подтвердить"}
+                            </Button>
+                            <Button type="button" variant="ghost" onClick={resetUserbot}>
+                              Изменить номер
+                            </Button>
+                          </div>
+                        </form>
+                      )}
+
+                      {ubStep === "2fa" && (
+                        <form onSubmit={handleUb2fa} className="space-y-3">
+                          <p className="text-sm text-muted-foreground">
+                            У аккаунта включён облачный пароль (2FA). Введите его.
+                          </p>
+                          <div className="space-y-1.5">
+                            <Label>Пароль 2FA</Label>
+                            <Input
+                              type="password"
+                              autoComplete="off"
+                              value={ubPassword}
+                              onChange={(e) => setUbPassword(e.target.value)}
+                              placeholder="••••••••"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <Button type="submit" disabled={ubSubmitting || !ubPassword}>
+                              {ubSubmitting ? "Проверяем…" : "Войти"}
+                            </Button>
+                            <Button type="button" variant="ghost" onClick={resetUserbot}>
+                              Начать заново
+                            </Button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Создайте бота в{" "}
+                        <a
+                          href="https://t.me/BotFather"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                        >
+                          @BotFather
+                        </a>{" "}
+                        и вставьте токен. Webhook настроится автоматически.
+                      </p>
+                      <form onSubmit={handleTelegram} className="space-y-3">
+                        <div className="space-y-1.5">
+                          <Label>Telegram bot token</Label>
+                          <Input
+                            type="text"
+                            autoComplete="off"
+                            value={botToken}
+                            onChange={(e) => setBotToken(e.target.value)}
+                            placeholder="123456789:AAEhBP…"
+                          />
+                        </div>
+                        <Button type="submit" disabled={tgSubmitting || !botToken.trim()}>
+                          {tgSubmitting ? "Проверяем…" : "Подключить"}
+                        </Button>
+                      </form>
+                    </div>
+                  )}
+
+                  <p className="text-sm text-muted-foreground">
+                    Нужен WhatsApp или web-виджет?{" "}
+                    <Link to="/channels" className="text-primary hover:underline">
+                      Все типы каналов →
+                    </Link>
+                  </p>
+                  {channelDone && <NextButton label="Далее: LLM-провайдер" />}
+                </CardContent>
+              </Card>
+            )}
+
+            {currentId === "llm" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>LLM-провайдеры</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Chat обязателен — ответы бота. Остальное по желанию: embeddings (база знаний),
+                    vision (фото/документы), judge (оценка/сравнение), reranker (точность поиска).
+                    Для Ollama API-ключ не нужен.
+                  </p>
+                  <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                    Для alpha быстрее всего OpenRouter: создайте key в openrouter.ai, поставьте
+                    лимит бюджета и вставьте его в Chat. Ключ хранится зашифрованным; не отправляйте
+                    его в Telegram или WhatsApp.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {ALL_PURPOSES.map((purpose) => {
+                    const meta = PURPOSE_META[purpose];
+                    const cfg = configs.find((c) => c.purpose === purpose);
+                    const f = keyForms[purpose];
+                    const open = expandedPurpose.has(purpose);
+                    const ready = configReady(cfg);
+                    const hasOllama = meta.providers.includes("ollama");
+                    // Ключ этого провайдера уже сохранён в другом назначении → можно не вводить.
+                    const reuseKey =
+                      !cfg?.hasSecret && f.provider !== "ollama" && providerHasKey(f.provider);
+                    return (
+                      <div key={purpose} className="rounded-lg border">
+                        <button
+                          type="button"
+                          onClick={() => togglePurpose(purpose)}
+                          className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                        >
+                          <span className="min-w-0">
+                            <span className="text-sm font-medium">
+                              {meta.label}
+                              {meta.required && <span className="text-destructive"> *</span>}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {meta.desc}
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            {ready ? (
+                              <Badge variant="success">настроено</Badge>
+                            ) : meta.required ? (
+                              <Badge variant="warning">нужно</Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">опц.</span>
+                            )}
+                            <ChevronDownIcon
+                              className={cn(
+                                "size-4 text-muted-foreground transition-transform",
+                                open && "rotate-180",
+                              )}
+                            />
+                          </span>
+                        </button>
+                        {open && (
+                          <form
+                            onSubmit={(e) => handleSaveKey(e, purpose)}
+                            className="grid gap-3 border-t px-3 py-3 sm:grid-cols-2"
+                          >
+                            <div className="space-y-1.5">
+                              <Label>Провайдер</Label>
+                              <Select
+                                value={f.provider}
+                                onValueChange={(v) =>
+                                  updateKeyForm(purpose, { provider: v as LlmProvider })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {meta.providers.map((pv) => (
+                                    <SelectItem key={pv} value={pv}>
+                                      {PROVIDER_LABEL[pv]}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label>Модель</Label>
+                              <Input
+                                value={f.model}
+                                onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
+                                placeholder={modelPlaceholder(f.provider, purpose)}
+                              />
+                            </div>
+                            {f.provider !== "ollama" && (
+                              <div className="space-y-1.5">
+                                <Label>
+                                  API-ключ{" "}
+                                  {cfg?.hasSecret
+                                    ? "(пусто — не менять)"
+                                    : reuseKey
+                                      ? "(можно не вводить)"
+                                      : ""}
+                                </Label>
+                                <Input
+                                  type="password"
+                                  autoComplete="new-password"
+                                  value={f.apiKey}
+                                  onChange={(e) =>
+                                    updateKeyForm(purpose, { apiKey: e.target.value })
+                                  }
+                                  placeholder={
+                                    cfg?.hasSecret
+                                      ? "•••••••• (сохранён)"
+                                      : reuseKey
+                                        ? `ключ ${PROVIDER_LABEL[f.provider]} уже сохранён — переиспользуем`
+                                        : "sk-…"
+                                  }
+                                />
+                              </div>
+                            )}
+                            {f.provider === "ollama" && (
+                              <div className="space-y-1.5">
+                                <Label>URL Ollama</Label>
+                                <Input
+                                  value={f.baseUrl}
+                                  onChange={(e) =>
+                                    updateKeyForm(purpose, { baseUrl: e.target.value })
+                                  }
+                                  placeholder="http://localhost:11434"
+                                />
+                              </div>
+                            )}
+                            {purpose === "embed" && (
+                              <div className="space-y-1.5">
+                                <Label>Размерность</Label>
+                                <Input
+                                  type="number"
+                                  value={f.embedDim}
+                                  onChange={(e) =>
+                                    updateKeyForm(purpose, { embedDim: e.target.value })
+                                  }
+                                  placeholder="1536"
+                                />
+                              </div>
+                            )}
+                            {purpose === "embed" && (
+                              <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                                Оставьте <code className="font-mono">1536</code> — под базу знаний.
+                                Вектор любой современной модели приводится к 1536 автоматически
+                                (нужна модель с размерностью ≥ 1536).
+                              </p>
+                            )}
+                            {f.provider === "ollama" && OLLAMA_PRESETS[purpose] && (
+                              <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                                Ollama локальный — ключ не нужен. Запустите{" "}
+                                <code className="font-mono">ollama serve</code> и{" "}
+                                <code className="font-mono">
+                                  ollama pull {OLLAMA_PRESETS[purpose]?.model}
+                                </code>
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 sm:col-span-2">
+                              <Button type="submit" disabled={savingPurpose !== null}>
+                                {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
+                              </Button>
+                              {hasOllama && f.provider !== "ollama" && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    updateKeyForm(purpose, {
+                                      provider: "ollama",
+                                      model: OLLAMA_PRESETS[purpose]?.model ?? "",
+                                      baseUrl: "http://localhost:11434",
+                                      apiKey: "",
+                                    })
+                                  }
+                                >
+                                  Использовать Ollama
+                                </Button>
+                              )}
+                            </div>
+                          </form>
+                        )}
                       </div>
-                    </li>
-                  ))}
-              </ul>
-              <Button
-                className="w-full"
-                disabled={!allRequiredDone}
-                onClick={() => navigate("/dashboard", { replace: true })}
-              >
-                Перейти в кабинет <ArrowRightIcon />
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-      </div>
-      <CopilotDock underHeader />
-      <AiWorkflowPanel
-        open={aiPanelOpen}
-        onOpenChange={setAiPanelOpen}
-        onApplied={() => {
-          loadState().catch(() => {});
-        }}
-      />
+                    );
+                  })}
+                  <p className="text-sm text-muted-foreground">
+                    Расширенные параметры (timeout и т.д.) —{" "}
+                    <Link to="/settings" className="text-primary hover:underline">
+                      настройки →
+                    </Link>
+                  </p>
+                  {chatDone && <NextButton label="Далее" />}
+                </CardContent>
+              </Card>
+            )}
+
+            {currentId === "ai_funnel" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Соберите воронку с AI</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Опишите бизнес своими словами: чем занимаетесь, как приходят клиенты и что нужно
+                    от них узнать. AI спроектирует этапы воронки и поля анкеты — вы увидите
+                    предпросмотр и подтвердите перед применением.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {status?.funnelInstalled ? (
+                    <>
+                      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                        Воронка собрана <Badge variant="success">готово</Badge>
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button variant="outline" onClick={() => setAiPanelOpen(true)}>
+                          <SparklesIcon className="size-4" /> Уточнить воронку
+                        </Button>
+                        <NextButton label="Далее: база знаний" />
+                      </div>
+                    </>
+                  ) : (
+                    <Button onClick={() => setAiPanelOpen(true)}>
+                      <SparklesIcon className="size-4" /> Открыть AI-конструктор
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {currentId === "ex_rates" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Курсы обмена</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои
+                    курсы по диапазонам сумм — отдельно для рублей и USDT (как на табло). Система
+                    сохраняет отклонение от рынка и обновляет значения вместе с рынком.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {cardError && (
+                    <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                      {cardError}
+                    </p>
+                  )}
+
+                  {cardProposals.length === 0 ? (
+                    <Button type="button" onClick={loadRateCard} disabled={cardLoading}>
+                      {cardLoading ? "Получаем курс…" : "Получить актуальный курс с рынка"}
+                    </Button>
+                  ) : (
+                    <>
+                      <RateCardEditor
+                        proposals={cardProposals}
+                        quoteCode="THB"
+                        onChange={setCardProposals}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" onClick={saveRateCard} disabled={cardSaving}>
+                          {cardSaving
+                            ? "Сохраняем…"
+                            : ratesDone
+                              ? "Обновить курсы"
+                              : "Сохранить курсы"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={loadRateCard}
+                          disabled={cardLoading}
+                        >
+                          {cardLoading ? "Обновляем…" : "Сбросить к рынку"}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+
+                  {ratesDone && (
+                    <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                      ✓ Курсы сохранены и активны. Авто-обновление рынка включено.
+                    </p>
+                  )}
+                  {ratesDone && <NextButton label="Далее: реквизиты" />}
+                </CardContent>
+              </Card>
+            )}
+
+            {currentId === "ex_requisites" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Реквизиты приёма</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Куда клиент отправляет средства. Добавьте минимум один реквизит — бот выдаёт их
+                    клиенту автоматически (иначе — передача оператору). Значения шифруются.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Сохранено реквизитов:{" "}
+                    <code className="font-mono">{status?.requisiteCount ?? 0}</code>
+                    {requisitesDone && (
+                      <Badge variant="success" className="ml-2">
+                        готово
+                      </Badge>
+                    )}
+                  </p>
+
+                  {savedRequisites.filter((r) => isRequisiteKey(r.key)).length > 0 && (
+                    <ul className="space-y-1.5">
+                      {savedRequisites
+                        .filter((r) => isRequisiteKey(r.key))
+                        .map((r) => (
+                          <li
+                            key={r.key}
+                            className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                          >
+                            <CheckIcon className="size-4 shrink-0 text-[var(--success)]" />
+                            <span className="shrink-0 font-medium">{requisiteLabel(r.key)}:</span>
+                            <span
+                              className="truncate font-mono text-xs text-muted-foreground"
+                              title={r.sensitive ? undefined : r.value}
+                            >
+                              {r.sensitive && r.hasValue ? "сохранено" : r.value}
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+
+                  <form onSubmit={handleSaveRequisite} className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Тип реквизита</Label>
+                      <Select value={reqType} onValueChange={setReqType}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {REQUISITE_TYPES.map((t) => (
+                            <SelectItem key={t.key} value={t.key}>
+                              {t.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Значение</Label>
+                      <Input
+                        autoComplete="off"
+                        type={
+                          REQUISITE_TYPES.find((t) => t.key === reqType)?.secret
+                            ? "password"
+                            : "text"
+                        }
+                        value={reqValue}
+                        onChange={(e) => setReqValue(e.target.value)}
+                        placeholder={
+                          REQUISITE_TYPES.find((t) => t.key === reqType)?.placeholder ?? "значение"
+                        }
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Button type="submit" disabled={savingReq || !reqValue.trim()}>
+                        {savingReq ? "Сохраняем…" : "Добавить реквизит"}
+                      </Button>
+                    </div>
+                  </form>
+                  {requisitesDone && <NextButton label="Далее" />}
+                </CardContent>
+              </Card>
+            )}
+
+            {currentId === "kb" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>База знаний (опционально)</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Загрузите документы — бот будет отвечать по вашей базе (RAG). Шаг можно
+                    пропустить.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {lastIndexed !== null && (
+                    <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                      ✓ Документ проиндексирован — {lastIndexed} фрагментов.
+                    </p>
+                  )}
+
+                  <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-7 text-center transition-colors hover:border-primary/50 hover:bg-muted/50">
+                    <span className="grid size-9 place-items-center rounded-full bg-primary/15 text-primary">
+                      <UploadIcon className="size-4" />
+                    </span>
+                    <span className="text-sm font-medium">Загрузить файл</span>
+                    <span className="text-xs text-muted-foreground">.txt, .md, .json, .pdf</span>
+                    <input
+                      type="file"
+                      accept=".txt,.md,.json,.pdf"
+                      onChange={handleFileUpload}
+                      disabled={uploading}
+                      className="sr-only"
+                    />
+                  </label>
+
+                  {isExchange && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Заготовки для обменника — нажмите, заполнится форма ниже, останется вписать
+                        свои адреса и условия:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {EXCHANGE_KB_TEMPLATES.map((t) => (
+                          <Button
+                            key={t.title}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setPasteTitle(t.title);
+                              setPasteTopic(t.topic);
+                              setPasteBody(t.body);
+                            }}
+                          >
+                            {t.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <form onSubmit={handlePaste} className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input
+                        placeholder="Заголовок"
+                        value={pasteTitle}
+                        onChange={(e) => setPasteTitle(e.target.value)}
+                      />
+                      <Input
+                        placeholder="Тема (опционально)"
+                        value={pasteTopic}
+                        onChange={(e) => setPasteTopic(e.target.value)}
+                      />
+                    </div>
+                    <Textarea
+                      placeholder="Текст документа…"
+                      rows={5}
+                      className="font-mono text-xs"
+                      value={pasteBody}
+                      onChange={(e) => setPasteBody(e.target.value)}
+                    />
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      disabled={uploading || !pasteBody.trim()}
+                    >
+                      {uploading ? "Загружаем…" : "Добавить текст"}
+                    </Button>
+                  </form>
+
+                  {docs.length > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      Документов в базе: <code className="font-mono">{docs.length}</code>
+                    </p>
+                  )}
+
+                  <NextButton label={kbDone ? "Далее" : "Пропустить"} />
+                </CardContent>
+              </Card>
+            )}
+
+            {currentId === "ex_business" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Данные обменника (опционально)</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Эти данные сохраняются для оператора. Автоматизация (подстановка в ответы бота,
+                    расписание, KYC-гейтинг) — в следующем релизе.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {bizSaved && (
+                    <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                      ✓ Данные сохранены.
+                    </p>
+                  )}
+                  <form onSubmit={handleSaveBusiness} className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label>Контакт оператора (для эскалаций)</Label>
+                      <Input
+                        value={bizForm.operatorContact}
+                        onChange={(e) =>
+                          setBizForm((p) => ({ ...p, operatorContact: e.target.value }))
+                        }
+                        placeholder="@operator / +66…"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Методы выдачи</Label>
+                      <Input
+                        value={bizForm.payoutMethods}
+                        onChange={(e) =>
+                          setBizForm((p) => ({ ...p, payoutMethods: e.target.value }))
+                        }
+                        placeholder="офис, безкарточный ATM, курьер, тайский банк"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Политика KYC</Label>
+                      <Input
+                        value={bizForm.kycPolicy}
+                        onChange={(e) => setBizForm((p) => ({ ...p, kycPolicy: e.target.value }))}
+                        placeholder="напр. обязательна свыше 50 000 THB"
+                      />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label>Часы работы</Label>
+                        <Input
+                          value={bizForm.workingHours}
+                          onChange={(e) =>
+                            setBizForm((p) => ({ ...p, workingHours: e.target.value }))
+                          }
+                          placeholder="10:00–20:00, Пхукет"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Адрес офиса</Label>
+                        <Input
+                          value={bizForm.officeAddress}
+                          onChange={(e) =>
+                            setBizForm((p) => ({ ...p, officeAddress: e.target.value }))
+                          }
+                          placeholder="—"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="submit" disabled={savingBiz}>
+                        {savingBiz ? "Сохраняем…" : "Сохранить"}
+                      </Button>
+                      <NextButton label="Далее" />
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+            )}
+
+            {currentId === "done" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{allRequiredDone ? "Готово!" : "Почти готово"}</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    {allRequiredDone
+                      ? "Всё настроено — можно переходить к работе."
+                      : "Завершите обязательные шаги (без пометки «опц»), чтобы открыть кабинет."}
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <ul className="space-y-2">
+                    {steps
+                      .filter((s) => s.id !== "done")
+                      .map((s) => (
+                        <li
+                          key={s.id}
+                          className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
+                        >
+                          <span
+                            className={cn(
+                              "grid size-6 shrink-0 place-items-center rounded-full text-xs",
+                              s.done
+                                ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
+                                : "border text-muted-foreground",
+                            )}
+                          >
+                            {s.done ? <CheckIcon className="size-3.5" /> : "○"}
+                          </span>
+                          <div>
+                            <p className="text-sm font-medium leading-tight">
+                              {s.label}
+                              {!s.required && (
+                                <span className="text-muted-foreground"> (опционально)</span>
+                              )}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                  </ul>
+                  <Button
+                    className="w-full"
+                    disabled={!allRequiredDone}
+                    onClick={() => navigate("/dashboard", { replace: true })}
+                  >
+                    Перейти в кабинет <ArrowRightIcon />
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+        <CopilotDock underHeader />
+        <AiWorkflowPanel
+          open={aiPanelOpen}
+          onOpenChange={setAiPanelOpen}
+          onApplied={() => {
+            loadState().catch(() => {});
+          }}
+        />
       </div>
     </div>
   );

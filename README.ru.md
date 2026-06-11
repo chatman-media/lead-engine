@@ -23,6 +23,8 @@
 
 Telegram Bot + Userbot · WhatsApp · Facebook Messenger · VK · MAX · Web Widget · BYOK LLM · RAG · операторский handoff · marketplace провайдеров
 
+**🟢 Live: [exchanges.agency](https://exchanges.agency)** &nbsp;·&nbsp; [админка](https://client.exchanges.agency) &nbsp;·&nbsp; [dev](https://dev.exchanges.agency)
+
 🌐 [🇬🇧 English](README.md) &nbsp;·&nbsp; 🇷🇺 **Русский** &nbsp;·&nbsp; [🇨🇳 中文](README.zh.md)
 
 </div>
@@ -181,6 +183,7 @@ bun run dev:landing
 | `apps/worker` | Outbound queue dispatcher, channel reload polling, cron |
 | `apps/admin-ui` | React 19 + Vite cabinet: onboarding, channels, settings, catalog, leads, conversations, quality lab |
 | `apps/landing` | Public demo/marketing site |
+| `apps/widget` | Встраиваемый web-чат-виджет для сайтов клиентов: vanilla TS, собирается в единый IIFE `/widget.js` |
 | `apps/vertical-*` | Vertical template packages, загружаются через `packages/verticals` |
 | `packages/storage` | Drizzle schema, migrations, RLS helpers |
 | `packages/channel-*` | Channel adapters за `ChannelAdapter` |
@@ -290,6 +293,14 @@ quality lab и split-transaction pipeline. Подробнее:
 ---
 
 ## Деплой
+
+Текущие hosted-окружения:
+
+| Окружение | URL | Примечания |
+|---|---|---|
+| Production | `https://exchanges.agency` | лендинг, API/webhooks, `/healthz`, `/widget.js` |
+| Production admin | `https://client.exchanges.agency` | admin-ui на корне поддомена; `https://exchanges.agency/admin` редиректит сюда |
+| Development | `https://dev.exchanges.agency` | отдельный dev-инстанс; admin-ui остаётся под `/admin/` |
 
 Ключевые env vars:
 

@@ -9,6 +9,8 @@
 import {
 	type Db,
 	getDecryptedSecret,
+	QUOTE_CURRENCY,
+	QUOTE_CURRENCY_CODES,
 	setEncryptedSecret,
 	withTenant,
 } from "@chatman-media/conversation-engine";
@@ -27,17 +29,22 @@ import {
 } from "@chatman-media/storage";
 import { and, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { recordAudit } from "../lib/audit.ts";
 import {
 	buildDefaultRateCardProposal,
 	type RateCardProposal,
+	rateDeviationPct,
 	refreshTenantRates,
 	renderRateCardMessage,
 } from "../lib/exchange/rate-feed.ts";
 import {
+	applyRateDeviation,
+	getTenantQuoteCurrency,
+} from "../lib/exchange/rates.ts";
+import {
 	isAllowedExchangeSecretKey,
 	isSensitiveExchangeSecretKey,
 } from "../lib/exchange/requisite-keys.ts";
-import { recordAudit } from "../lib/audit.ts";
 
 export interface AdminExchangeRoutesOpts {
 	db: Db;
@@ -47,6 +54,11 @@ export interface AdminExchangeRoutesOpts {
 }
 
 const QUOTE_MODES = ["multiply", "divide"] as const;
+
+function roundRate(n: number, dp = 6): number {
+	const f = 10 ** dp;
+	return Math.round(n * f) / f;
+}
 
 function resolveExchangeWorkflowStage(
 	order: typeof exchangeOrders.$inferSelect,
@@ -62,7 +74,10 @@ function resolveExchangeWorkflowStage(
 		return { slug: "payout_or_completion", label: "Выдача / Завершено" };
 	}
 	if (order.status === "payout") {
-		return { slug: "payout_or_completion", label: "Выдача THB" };
+		return {
+			slug: "payout_or_completion",
+			label: `Выдача ${QUOTE_CURRENCY.code}`,
+		};
 	}
 	if (order.status === "paid") {
 		return { slug: "payment_verified", label: "Оплата подтверждена" };
@@ -99,7 +114,11 @@ function maskPassportNumber(raw: unknown): string | null {
  * оператор-бот при confirm) + паспортные поля из vision-OCR (photo-processor).
  */
 function serializeKycContact(
-	row: { id: number; displayName: string | null; attributesJson: string | null },
+	row: {
+		id: number;
+		displayName: string | null;
+		attributesJson: string | null;
+	},
 	agg: { ordersCount: number; turnoverThb: number } | null,
 ) {
 	let attrs: Record<string, unknown> = {};
@@ -188,10 +207,18 @@ async function deliverExchangeMessage(
 			.limit(1);
 		if (conv && conv.source !== "self_play" && row.contactId) {
 			const [identity] = await tx
-				.select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
+				.select({
+					channelDbId: channels.id,
+					externalUserId: channelIdentities.externalUserId,
+				})
 				.from(channelIdentities)
 				.innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-				.where(and(eq(channelIdentities.contactId, row.contactId), eq(channels.status, "active")))
+				.where(
+					and(
+						eq(channelIdentities.contactId, row.contactId),
+						eq(channels.status, "active"),
+					),
+				)
 				.limit(1);
 			if (identity) {
 				await tx.insert(outboundQueue).values({
@@ -242,7 +269,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		const quoteAsset =
 			typeof body?.quoteAsset === "string" && body.quoteAsset.trim()
 				? body.quoteAsset.trim().toUpperCase()
-				: "THB";
+				: (await getTenantQuoteCurrency(opts.db, tenantId)).code;
 		const network =
 			typeof body?.network === "string"
 				? body.network.trim().toLowerCase().replace(/-/g, "")
@@ -272,7 +299,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		// Save-time guardrails: не даём сохранить заведомо убыточную/абсурдную формулу.
 		// Плавающую проверку «спред vs рынок» делает computeQuote (guardrails.ts) на лету.
 		if (feeFixedThb < 0) {
-			return c.json({ error: "fee_fixed_thb не может быть отрицательной" }, 400);
+			return c.json(
+				{ error: "fee_fixed_thb не может быть отрицательной" },
+				400,
+			);
 		}
 		if (marginPct < 0) {
 			return c.json(
@@ -355,7 +385,8 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		}
 	});
 
-	// Per-tenant настройки обновления курсов (нет строки → дефолты 180с / авто-порог).
+	// Per-tenant настройки обновления курсов (нет строки → дефолты 180с / авто-порог)
+	// + котируемая валюта выдачи (quoteAsset; дефолт платформы — PHP).
 	app.get("/api/admin/exchange/settings", async (c) => {
 		const tenantId = c.var.tenantId;
 		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
@@ -363,6 +394,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				.select({
 					rateRefreshSec: exchangeSettings.rateRefreshSec,
 					feedStaleSec: exchangeSettings.feedStaleSec,
+					quoteAsset: exchangeSettings.quoteAsset,
 				})
 				.from(exchangeSettings)
 				.where(eq(exchangeSettings.tenantId, tenantId))
@@ -371,28 +403,47 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		return c.json({
 			rateRefreshSec: row?.rateRefreshSec ?? 180,
 			feedStaleSec: row?.feedStaleSec ?? null,
+			quoteAsset: row?.quoteAsset ?? QUOTE_CURRENCY.code,
+			quoteAssetOptions: QUOTE_CURRENCY_CODES,
 		});
 	});
 
 	// Сохранить: rateRefreshSec (сек, 60..86400) + feedStaleSec (сек, ≥ refresh или
-	// пусто = авто). Планировщик (api) и ops-watch (worker) читают это per-tenant.
+	// пусто = авто) + quoteAsset (ISO-код котируемой валюты). Планировщик (api),
+	// ops-watch (worker) и расчёт котировок читают это per-tenant.
 	app.put("/api/admin/exchange/settings", async (c) => {
 		const tenantId = c.var.tenantId;
 		const body = await c.req.json().catch(() => ({}));
 
 		const refresh = Math.floor(Number(body?.rateRefreshSec));
 		if (!Number.isFinite(refresh) || refresh < 60 || refresh > 86400) {
-			return c.json({ error: "rateRefreshSec должен быть 60..86400 секунд" }, 400);
+			return c.json(
+				{ error: "rateRefreshSec должен быть 60..86400 секунд" },
+				400,
+			);
 		}
 		let stale: number | null = null;
 		if (body?.feedStaleSec != null && body.feedStaleSec !== "") {
 			stale = Math.floor(Number(body.feedStaleSec));
 			if (!Number.isFinite(stale) || stale < refresh) {
 				return c.json(
-					{ error: "feedStaleSec должен быть ≥ rateRefreshSec (или пусто = авто)" },
+					{
+						error:
+							"feedStaleSec должен быть ≥ rateRefreshSec (или пусто = авто)",
+					},
 					400,
 				);
 			}
+		}
+		const quoteAssetRaw =
+			typeof body?.quoteAsset === "string" && body.quoteAsset.trim()
+				? body.quoteAsset.trim().toUpperCase()
+				: QUOTE_CURRENCY.code;
+		if (!/^[A-Z]{3}$/.test(quoteAssetRaw)) {
+			return c.json(
+				{ error: "quoteAsset должен быть ISO-кодом валюты (PHP, THB…)" },
+				400,
+			);
 		}
 		const now = Math.floor(Date.now() / 1000);
 		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
@@ -402,16 +453,23 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 					tenantId,
 					rateRefreshSec: refresh,
 					feedStaleSec: stale,
+					quoteAsset: quoteAssetRaw,
 					createdAt: now,
 					updatedAt: now,
 				})
 				.onConflictDoUpdate({
 					target: exchangeSettings.tenantId,
-					set: { rateRefreshSec: refresh, feedStaleSec: stale, updatedAt: now },
+					set: {
+						rateRefreshSec: refresh,
+						feedStaleSec: stale,
+						quoteAsset: quoteAssetRaw,
+						updatedAt: now,
+					},
 				})
 				.returning({
 					rateRefreshSec: exchangeSettings.rateRefreshSec,
 					feedStaleSec: exchangeSettings.feedStaleSec,
+					quoteAsset: exchangeSettings.quoteAsset,
 				}),
 		);
 		return c.json({ ok: true, settings: row });
@@ -419,11 +477,12 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 
 	app.post("/api/admin/exchange/rate-card/preview", async (c) => {
 		try {
-			const proposals = await buildDefaultRateCardProposal();
+			const currency = await getTenantQuoteCurrency(opts.db, c.var.tenantId);
+			const proposals = await buildDefaultRateCardProposal(currency);
 			return c.json({
 				ok: true,
 				proposals,
-				message: renderRateCardMessage(proposals),
+				message: renderRateCardMessage(proposals, currency),
 			});
 		} catch (err) {
 			return c.json(
@@ -440,10 +499,12 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		const tenantId = c.var.tenantId;
 		const adminId = c.var.adminId as number | undefined;
 		const body = await c.req.json().catch(() => ({}));
+		const currency = await getTenantQuoteCurrency(opts.db, tenantId);
 		const proposals = Array.isArray(body?.proposals)
 			? (body.proposals as RateCardProposal[])
-			: await buildDefaultRateCardProposal();
+			: await buildDefaultRateCardProposal(currency);
 		const now = Math.floor(Date.now() / 1000);
+		const normalizedProposals: RateCardProposal[] = [];
 
 		await withTenant(opts.db, tenantId, async (tx) => {
 			for (const proposal of proposals) {
@@ -457,13 +518,14 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				const marketRate = Number(proposal.marketRate);
 				if (!asset || !(marketRate > 0) || !Array.isArray(proposal.tiers))
 					continue;
+				const normalizedTiers: RateCardProposal["tiers"] = [];
 
 				await tx
 					.insert(exchangeRates)
 					.values({
 						tenantId,
 						asset,
-						quoteAsset: "THB",
+						quoteAsset: currency.code,
 						network,
 						baseRate: marketRate,
 						quoteMode,
@@ -497,20 +559,38 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				for (const tier of proposal.tiers) {
 					const minAmount = Number(tier.minThb);
 					const maxAmount = tier.maxThb === null ? null : Number(tier.maxThb);
-					const displayRate = Number(tier.displayRate);
-					const deviationPct = Number(tier.deviationPct);
-					if (
-						!(minAmount >= 0) ||
-						!(displayRate > 0) ||
-						!Number.isFinite(deviationPct)
-					)
-						continue;
+					const rawDeviationPct = Number(
+						(tier as { deviationPct?: unknown }).deviationPct,
+					);
+					const rawDisplayRate = Number(
+						(tier as { displayRate?: unknown }).displayRate,
+					);
+					const deviationPct = Number.isFinite(rawDeviationPct)
+						? roundRate(rawDeviationPct, 8)
+						: rateDeviationPct(marketRate, rawDisplayRate, 8);
+					const displayRate = Number.isFinite(rawDeviationPct)
+						? roundRate(applyRateDeviation(marketRate, deviationPct))
+						: rawDisplayRate;
+					if (!(minAmount >= 0) || !(displayRate > 0)) continue;
+					const formula =
+						typeof tier.formula === "string" && tier.formula.trim()
+							? tier.formula
+							: `${marketRate} ${deviationPct >= 0 ? "+" : "-"} ${Math.abs(
+									deviationPct,
+								)}% = ${displayRate}`;
+					normalizedTiers.push({
+						minThb: minAmount,
+						maxThb: maxAmount,
+						displayRate,
+						deviationPct,
+						formula,
+					});
 					await tx
 						.insert(exchangeRateTiers)
 						.values({
 							tenantId,
 							asset,
-							quoteAsset: "THB",
+							quoteAsset: currency.code,
 							network,
 							rangeBasis: "target_thb",
 							minAmount,
@@ -524,7 +604,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 								marketRate,
 								displayRate,
 								deviationPct,
-								formula: tier.formula,
+								formula,
 							}),
 							isActive: true,
 							approvedByAdminId: adminId ?? null,
@@ -552,7 +632,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 									marketRate,
 									displayRate,
 									deviationPct,
-									formula: tier.formula,
+									formula,
 								}),
 								isActive: true,
 								approvedByAdminId: adminId ?? null,
@@ -561,11 +641,24 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 							},
 						});
 				}
+				if (normalizedTiers.length > 0) {
+					normalizedProposals.push({
+						asset,
+						network,
+						quoteMode,
+						marketRate,
+						tiers: normalizedTiers,
+						message: "",
+					});
+				}
 			}
 		});
 
 		opts.onReload?.(tenantId);
-		return c.json({ ok: true, message: renderRateCardMessage(proposals) });
+		return c.json({
+			ok: true,
+			message: renderRateCardMessage(normalizedProposals, currency),
+		});
 	});
 
 	app.delete("/api/admin/exchange/rates/:id", async (c) => {
@@ -593,8 +686,18 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			const rows = await tx
 				.select({ key: tenantSecrets.key })
 				.from(tenantSecrets)
-				.where(and(eq(tenantSecrets.tenantId, tenantId), like(tenantSecrets.key, "exchange_%")));
-			const out: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }> = [];
+				.where(
+					and(
+						eq(tenantSecrets.tenantId, tenantId),
+						like(tenantSecrets.key, "exchange_%"),
+					),
+				);
+			const out: Array<{
+				key: string;
+				value: string;
+				hasValue?: boolean;
+				sensitive?: boolean;
+			}> = [];
 			for (const row of rows) {
 				if (!isAllowedExchangeSecretKey(row.key)) continue;
 				let value = "";
@@ -610,7 +713,12 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 					value = "";
 				}
 				if (isSensitiveExchangeSecretKey(row.key)) {
-					out.push({ key: row.key, value: "", hasValue: value.length > 0, sensitive: true });
+					out.push({
+						key: row.key,
+						value: "",
+						hasValue: value.length > 0,
+						sensitive: true,
+					});
 					continue;
 				}
 				out.push({ key: row.key, value });
@@ -820,13 +928,15 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		// «висит» — бот сам про операторское решение не узнаёт.
 		if (typeof body?.status === "string" && row.conversationId) {
 			const thb = row.amountToThb ? Math.round(Number(row.amountToThb)) : null;
+			// Валюта — из направления заявки ("USDT->PHP"), не из платформенного дефолта.
+			const orderQuote = row.direction?.split("->")[1] || QUOTE_CURRENCY.code;
 			const note =
 				row.status === "paid"
 					? "✅ Оплата получена и подтверждена. Готовим выдачу."
 					: row.status === "payout"
 						? "💸 Выдача в работе — скоро пришлём детали получения."
 						: row.status === "completed"
-							? `🎉 Обмен завершён!${thb ? ` Вы получаете ${thb} THB.` : ""}` +
+							? `🎉 Обмен завершён!${thb ? ` Вы получаете ${thb} ${orderQuote}.` : ""}` +
 								`${row.payoutCode ? ` Код выдачи: ${row.payoutCode}.` : ""}` +
 								`${row.payoutLocation ? ` Место: ${row.payoutLocation}.` : ""}`
 							: row.status === "cancelled"
@@ -841,7 +951,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 							conversationId: row.conversationId!,
 							role: "assistant",
 							text: note,
-							metaJson: JSON.stringify({ sentVia: "exchange-status", status: row.status }),
+							metaJson: JSON.stringify({
+								sentVia: "exchange-status",
+								status: row.status,
+							}),
 							createdAt: now,
 						})
 						.returning({ id: messages.id });
@@ -857,10 +970,18 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						.limit(1);
 					if (conv && conv.source !== "self_play" && row.contactId) {
 						const [identity] = await tx
-							.select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
+							.select({
+								channelDbId: channels.id,
+								externalUserId: channelIdentities.externalUserId,
+							})
 							.from(channelIdentities)
 							.innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-							.where(and(eq(channelIdentities.contactId, row.contactId), eq(channels.status, "active")))
+							.where(
+								and(
+									eq(channelIdentities.contactId, row.contactId),
+									eq(channels.status, "active"),
+								),
+							)
 							.limit(1);
 						if (identity) {
 							await tx.insert(outboundQueue).values({
@@ -910,7 +1031,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				? `CODE-${id}-${crypto.randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`
 				: null);
 		if (!code)
-			return c.json({ error: "payoutCode required (or pass generate:true)" }, 400);
+			return c.json(
+				{ error: "payoutCode required (or pass generate:true)" },
+				400,
+			);
 
 		const ttlMinutes =
 			typeof body?.ttlMinutes === "number" && body.ttlMinutes > 0
@@ -932,7 +1056,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			tx
 				.update(exchangeOrders)
 				.set(patch)
-				.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)))
+				.where(
+					and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)),
+				)
 				.returning(),
 		);
 		if (!row) return c.json({ error: "not found" }, 404);
@@ -943,7 +1069,12 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				tx
 					.update(exchangeOrders)
 					.set({ status: "payout", updatedAt: now })
-					.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id))),
+					.where(
+						and(
+							eq(exchangeOrders.tenantId, tenantId),
+							eq(exchangeOrders.id, id),
+						),
+					),
 			);
 			row.status = "payout";
 		}
@@ -997,12 +1128,17 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			tx
 				.update(exchangeOrders)
 				.set({ status: "paid", updatedAt: now })
-				.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)))
+				.where(
+					and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)),
+				)
 				.returning(),
 		);
 		if (!row) return c.json({ error: "not found" }, 404);
 
-		const custom = typeof body?.text === "string" && body.text.trim() ? body.text.trim() : null;
+		const custom =
+			typeof body?.text === "string" && body.text.trim()
+				? body.text.trim()
+				: null;
 		const note = custom ?? "✅ Оплата получена и подтверждена. Готовим выдачу.";
 		const delivered = await deliverExchangeMessage(
 			opts.db,

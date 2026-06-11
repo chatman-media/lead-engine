@@ -1,3 +1,24 @@
+# [@chatman-media/storage-v1.30.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.29.1...@chatman-media/storage-v1.30.0) (2026-06-11)
+
+
+### Features
+
+* **exchange:** per-tenant quote currency (PHP default) + three-funnel client setup ([#552](https://github.com/chatman-media/lead-engine/issues/552)) ([a0afbe4](https://github.com/chatman-media/lead-engine/commit/a0afbe420791ef11e8bd90ccfba9c03065a67c45)), closes [#workflow](https://github.com/chatman-media/lead-engine/issues/workflow) [#services](https://github.com/chatman-media/lead-engine/issues/services)
+
+# [@chatman-media/storage-v1.29.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.29.0...@chatman-media/storage-v1.29.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **storage:** scope uniq_kb_source_hash per tenant ([#548](https://github.com/chatman-media/lead-engine/issues/548)) ([286f33e](https://github.com/chatman-media/lead-engine/commit/286f33ea9bc05de0e5a7fbf81781eb17ce6827a5))
+
+# [@chatman-media/storage-v1.29.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.28.0...@chatman-media/storage-v1.29.0) (2026-06-10)
+
+
+### Features
+
+* **partners:** partner settlement flow over partner_deals ([#545](https://github.com/chatman-media/lead-engine/issues/545)) ([d4e40a6](https://github.com/chatman-media/lead-engine/commit/d4e40a6e9454581fe32d82399b43eb3736dea8cc))
+
 # [@chatman-media/storage-v1.28.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.27.0...@chatman-media/storage-v1.28.0) (2026-06-10)
 
 

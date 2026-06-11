@@ -9,6 +9,17 @@
 
 > Полный список env-переменных — [../engineering/CONFIGURATION.md](../engineering/CONFIGURATION.md).
 
+Текущая серверная разметка:
+
+| Среда | Каталог | API port | Public URL | Admin UI |
+|---|---|---:|---|---|
+| Prod | `/opt/lead-engine` | 3000 | `https://exchanges.agency` | `https://client.exchanges.agency/` |
+| Dev | `/opt/lead-engine-dev` | 3001 | `https://dev.exchanges.agency` | `https://dev.exchanges.agency/admin/` |
+
+`https://exchanges.agency/admin` на prod должен отдавать 301 на
+`https://client.exchanges.agency/`. `www.exchanges.agency` обслуживает тот же
+лендинг, что и apex.
+
 ## 1. Перед обновлением
 
 Проверить, что на сервере заданы обязательные env vars:
@@ -25,6 +36,11 @@ printenv PLATFORM_PUBLIC_URL
 - `PLATFORM_MASTER_KEY` — тот же ключ, которым шифровались tenant secrets.
 - `PLATFORM_PUBLIC_URL` — публичный URL API для webhook/snippet.
 - `TELEGRAM_WEBHOOK_SECRET` — если используются Telegram webhooks.
+
+Для prod ожидается `PLATFORM_PUBLIC_URL=https://exchanges.agency` и
+`ADMIN_UI_BASE=/`. Для dev ожидается
+`PLATFORM_PUBLIC_URL=https://dev.exchanges.agency`; `ADMIN_UI_BASE` там не
+задаём, потому что админка живёт под `/admin/`.
 
 Нельзя менять `PLATFORM_MASTER_KEY` на живом сервере: старые зашифрованные
 секреты перестанут расшифровываться.
@@ -89,10 +105,10 @@ sudo systemctl status lead-engine-worker --no-pager
 curl -fsS "$PLATFORM_PUBLIC_URL/healthz"
 ```
 
-## 6. Provider relay rollout и инциденты
+## 6. Provider relay: feature flag и SQL-диагностика
 
 Provider relay fail-closed: tenant не создаёт provider outreach, пока флаг
-`provider_relay` явно не включён.
+`provider_relay` явно не включён. (Диагностика через ops-эндпоинт — раздел 9.)
 
 Включить/выключить для tenant:
 
@@ -249,11 +265,12 @@ curl -fsS "$PLATFORM_PUBLIC_URL/api/admin/funnel" \
 
 Если `workflowStage` не виден, проверить, что UI был пересобран и задеплоен.
 
-## 8. Provider relay: rollout и инциденты
+## 9. Provider relay: ops-эндпоинт и инциденты
 
 Provider relay управляет заказами, где клиент пишет в один канал, оператор
 матчит провайдера, а провайдер получает запрос в своём канале. На alpha это
-включается tenant-by-tenant через feature flag.
+включается tenant-by-tenant через feature flag (см. раздел 6 — включение флага
+и SQL-диагностика).
 
 Проверить флаг и операционные метрики:
 

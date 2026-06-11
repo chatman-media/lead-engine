@@ -106,10 +106,7 @@ export function makeFieldExtractor(
             ),
           )
           .where(
-            and(
-              eq(serviceCatalogItems.tenantId, tenantId),
-              eq(serviceCatalogItems.isActive, true),
-            ),
+            and(eq(serviceCatalogItems.tenantId, tenantId), eq(serviceCatalogItems.isActive, true)),
           )
           .orderBy(asc(serviceCatalogItems.sortOrder), asc(serviceCatalogItems.id));
         let routeSelection = chooseServiceRoute({
@@ -129,7 +126,8 @@ export function makeFieldExtractor(
         const forcedFunnelId =
           targetFunnelId && Number.isFinite(targetFunnelId)
             ? targetFunnelId
-            : forcedCatalogItem?.routeType === "partner_service" && forcedCatalogItem.partnerServiceFunnelId
+            : forcedCatalogItem?.routeType === "partner_service" &&
+                forcedCatalogItem.partnerServiceFunnelId
               ? forcedCatalogItem.partnerServiceFunnelId
               : forcedCatalogItem?.funnelId;
         if (forcedFunnelId) {
@@ -150,10 +148,44 @@ export function makeFieldExtractor(
             funnel: activeFunnel,
             catalogItem: {
               ...forcedCatalogItem,
-              routeType: forcedCatalogItem.routeType as "manual" | "funnel" | "partner_service" | "webhook",
+              routeType: forcedCatalogItem.routeType as
+                | "manual"
+                | "funnel"
+                | "partner_service"
+                | "webhook",
             },
             intent: routeSelection.intent,
+            matched: true,
           };
+        }
+
+        // Sticky-роутинг: интент НЕ указал на воронку (fallback на первую
+        // активную), а у контакта уже есть открытый лид — остаёмся в воронке
+        // этого лида. Иначе любое бес-ключевое сообщение («едем завтра в 10»)
+        // мульти-воронкового тенанта рождало бы паразитный лид в первой воронке.
+        if (
+          !routeSelection.matched &&
+          !forcedFunnelId &&
+          !forcedCatalogItem &&
+          activeFunnels.length > 1
+        ) {
+          const [openLead] = await tx
+            .select({ funnelId: stageDefinitions.funnelId })
+            .from(leads)
+            .innerJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
+            .where(
+              and(
+                eq(leads.tenantId, tenantId),
+                eq(leads.userId, contactId),
+                notInArray(stageDefinitions.kind, ["terminal_won", "terminal_lost"]),
+              ),
+            )
+            .orderBy(desc(leads.updatedAt))
+            .limit(1);
+          const sticky = openLead?.funnelId
+            ? activeFunnels.find((f) => f.id === openLead.funnelId)
+            : null;
+          if (sticky) activeFunnel = sticky;
         }
         const [firstStage] = activeFunnel
           ? await tx
@@ -175,10 +207,7 @@ export function makeFieldExtractor(
             .select({ id: stageFields.id })
             .from(stageFields)
             .where(
-              and(
-                eq(stageFields.stageId, firstStage.id),
-                eq(stageFields.slug, "request_type"),
-              ),
+              and(eq(stageFields.stageId, firstStage.id), eq(stageFields.slug, "request_type")),
             )
             .limit(1);
           multiRequest = !!rtField;
@@ -186,7 +215,12 @@ export function makeFieldExtractor(
 
         // Находим лид для извлечения.
         let lead:
-          | { id: number; state: string; stageDefinitionId: number | null; requestType: string | null }
+          | {
+              id: number;
+              state: string;
+              stageDefinitionId: number | null;
+              requestType: string | null;
+            }
           | undefined;
         if (multiRequest) {
           // Самый свежий НЕ-терминальный лид контакта в выбранной воронке
@@ -318,7 +352,10 @@ export function makeFieldExtractor(
             if (f.hint) desc += `, подсказка: ${f.hint}`;
             if (f.optionsJson && f.optionsJson !== "[]") {
               try {
-                const opts = JSON.parse(f.optionsJson) as Array<{ value: string; label: string }>;
+                const opts = JSON.parse(f.optionsJson) as Array<{
+                  value: string;
+                  label: string;
+                }>;
                 desc += `, варианты: ${opts.map((o) => o.value).join("|")}`;
               } catch {
                 // ignore
@@ -332,8 +369,7 @@ export function makeFieldExtractor(
         // Concierge: если лид уже в ветке (не на intake) — даём LLM возможность
         // в ТОМ ЖЕ вызове сигнализировать о НОВОМ параллельном запросе другого
         // типа (поле `_new_request`). Без доп. LLM-вызова.
-        const inBranch =
-          multiRequest && !!firstStage && lead.state !== firstStage.slug;
+        const inBranch = multiRequest && !!firstStage && lead.state !== firstStage.slug;
         const newRequestHint = inBranch ? FIELD_EXTRACTOR_NEW_REQUEST_HINT : "";
 
         const systemPrompt = buildFieldExtractorSystemPrompt({
@@ -367,20 +403,18 @@ export function makeFieldExtractor(
         // смешивая с текущим. Сигнал `_new_request` пришёл в том же LLM-ответе.
         if (inBranch) {
           const nr =
-            typeof extracted._new_request === "string"
-              ? extracted._new_request.trim()
-              : null;
+            typeof extracted._new_request === "string" ? extracted._new_request.trim() : null;
           if (nr && nr !== lead.requestType) {
             const [branchStage] = await tx
               .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
               .from(stageDefinitions)
               .where(
                 and(
-              eq(stageDefinitions.tenantId, tenantId),
-              eq(stageDefinitions.slug, `${nr}_request`),
-              eq(stageDefinitions.funnelId, stage.funnelId),
-            ),
-          );
+                  eq(stageDefinitions.tenantId, tenantId),
+                  eq(stageDefinitions.slug, `${nr}_request`),
+                  eq(stageDefinitions.funnelId, stage.funnelId),
+                ),
+              );
             if (branchStage) {
               const [created] = await tx
                 .insert(leads)
@@ -447,7 +481,11 @@ export function makeFieldExtractor(
 
 function buildRouteAuditNote(
   route: ServiceRouteSelection,
-  funnel: { id: number; slug: string; verticalTemplateId: string | null } | null,
+  funnel: {
+    id: number;
+    slug: string;
+    verticalTemplateId: string | null;
+  } | null,
 ): string | null {
   if (route.source !== "catalog" || !route.catalogItem) return null;
   const item = route.catalogItem;

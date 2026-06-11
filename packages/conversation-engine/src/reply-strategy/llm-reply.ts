@@ -9,6 +9,11 @@ import {
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
+import {
+	ANY_QUOTE_CURRENCY_MENTION_RE,
+	QUOTE_CURRENCY,
+	resolveQuoteCurrency,
+} from "../exchange-quote-currency.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
 import {
   LLM_REPLY_BASE_SYSTEM_PROMPT,
@@ -22,6 +27,7 @@ import {
 import {
 	type ExchangeResponseGuardFinding,
 	exchangeGuardFindingFromResult,
+	rewriteUnbackedQuoteReply,
 } from "./exchange-reply-guard.ts";
 
 /**
@@ -154,7 +160,9 @@ type ExchangeForcedReply = {
 
 const EXCHANGE_QUOTE_INTENT_RE =
   /курс|rate|сколько|получ(?:у|ится|ить)|итого|посчитай|рассчитай/i;
-const EXCHANGE_OUTPUT_CURRENCY_RE = /thb|бат|฿/i;
+// Любая известная котируемая валюта: тенанты на одном деплое могут работать
+// в разных валютах (per-tenant настройка), guard ловит все.
+const EXCHANGE_OUTPUT_CURRENCY_RE = ANY_QUOTE_CURRENCY_MENTION_RE;
 const EXCHANGE_CONFIRMATION_RE = /точно|верно|правильно/i;
 const EXCHANGE_KYC_TOPIC_RE = /верификац|kyc|документ|паспорт|видео|кружок/i;
 const EXCHANGE_KYC_MATERIAL_SENT_RE =
@@ -162,7 +170,7 @@ const EXCHANGE_KYC_MATERIAL_SENT_RE =
 const EXCHANGE_KYC_HANDOFF_TEXT = [
   "Да. Перед реквизитами нужна верификация клиента.",
   "Пришлите короткое видео: лицо и документ в кадре. Оператор или внешний сервис проведёт проверку личности.",
-  "После проверки продолжим заявку: способ получения батов, реквизиты и финальное подтверждение.",
+  `После проверки продолжим заявку: способ получения ${QUOTE_CURRENCY.wordGen}, реквизиты и финальное подтверждение.`,
 ].join("\n");
 
 function assetMentionRe(asset: string): RegExp {
@@ -205,7 +213,7 @@ function amountCandidates(text: string, asset: string): AmountCandidate[] {
     const window = `${before}${raw}${after}`;
     if (assetRe.test(window)) score += 5;
     if (/(?:^|\s)за\s*$/iu.test(before) || /\bза\b/iu.test(before)) score += 2;
-    if (/(?:thb|бат|฿)/iu.test(after) && asset !== "THB") score -= 4;
+    if (EXCHANGE_OUTPUT_CURRENCY_RE.test(after) && asset !== QUOTE_CURRENCY.code) score -= 4;
     candidates.push({ amount: n * multiplier, start, score });
   }
   return candidates;
@@ -285,11 +293,17 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 		typeof row.network === "string" && row.network ? row.network : null;
 	if (!asset || rate === null || amountFrom === null || amountToThb === null)
 		return null;
+	// Валюта тенанта — из результата инструмента (quoteAsset или хвост direction).
+	const directionQuote =
+		typeof row.direction === "string" ? row.direction.split("->")[1] : null;
+	const currency = resolveQuoteCurrency(
+		typeof row.quoteAsset === "string" ? row.quoteAsset : directionQuote,
+	);
   const networkLabel = network ? ` (${network})` : "";
   return [
     `Курс: ${rate}.`,
-    `За ${amountFrom} ${asset}${networkLabel} получите ${amountToThb} THB.`,
-    "Если подходит, напишите, как хотите получить баты: офис, банкомат, курьер или тайский банк.",
+    `За ${amountFrom} ${asset}${networkLabel} получите ${amountToThb} ${currency.code}.`,
+    `Если подходит, напишите, как хотите получить ${currency.wordGen}: офис, банкомат, курьер или ${currency.bankLabel}.`,
   ].join("\n");
 }
 
@@ -512,7 +526,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
     }
 
     if (reply.trim().length === 0) return null;
-		const guarded =
+		let guarded =
 			isExchange && exchangeGuardEnabled
       ? guardExchangePolicy({
           text: reply,
@@ -527,6 +541,25 @@ export class LlmReplyStrategy implements ReplyStrategy {
 						reasons: [],
 						requiredFixes: [],
 					};
+		// unbacked_quote: вместо жёсткой заглушки — один перезапрос, переписываем
+		// ответ без выдуманных чисел (нет суммы → просто спросить направление+сумму).
+		// Заглушку оставляем только если и перезапрос снова не прошёл.
+		if (!guarded.ok && guarded.reason === "unbacked_quote") {
+			const rewritten = await rewriteUnbackedQuoteReply({
+				chat,
+				userMessage: input.userMessageText,
+				draftReply: reply,
+			});
+			if (rewritten) {
+				const reguard = guardExchangePolicy({
+					text: rewritten,
+					telemetry: buildToolTelemetry(toolCalls),
+					history,
+					state: exchangePolicyState,
+				});
+				if (reguard.ok) guarded = reguard;
+			}
+		}
 		const guardFinding =
 			isExchange && exchangeGuardEnabled
 				? exchangeGuardFindingFromResult(guarded)

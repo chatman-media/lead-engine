@@ -774,10 +774,26 @@ Defaults: 60 msg/min, 600 msg/hour per tenant. Configurable через env.
 0044_channels_vk_kind.sql          — channels.kind='vk'
 0044_early_access_signups.sql      — public early access waitlist
 0045_channels_max_kind.sql         — channels.kind='max'
+0045_provider_relay.sql            — provider_profiles / provider_services / service_orders / provider_requests / order_events
+0046_agent_tool_calls.sql          — agent_tool_calls (tool-loop traces)
+0047_agent_tool_call_feedback.sql  — human labels на tool calls
+0048_kb_scopes.sql                 — KB scoping по funnel/stage
+0049_kb_document_files.sql         — метаданные оригиналов KB-загрузок
+0049_provider_payment_ledger.sql   — service_order_payments + commission ledger
+0050_shadow_eval_queue.sql         — durable queue для shadow evaluations
+0051_agent_tool_call_improvement_proposals.sql — improvement proposals по tool calls
+0051_funnel_versions.sql           — funnel_versions (версионирование воронок)
+0052_operator_action_drafts.sql    — durable preview/action state operator-бота
+0052_tool_call_improvement_resolution.sql — resolution-поля у proposals
+0053_tool_call_regression_cases.sql — agent_tool_call_regression_cases
+0054_conversation_channel_id.sql   — conversations.channel_id (first-class FK)
+0055_provider_request_failed_status.sql — provider_requests status='failed'
+0056_tenant_feature_flags.sql      — tenant_feature_flags (gated rollout, напр. provider_relay)
 ```
 
-(Файл `0016` отсутствует намеренно — номер пропущен. Номер `0044` сейчас
-использован двумя независимыми файлами.) Migrations run
+(Файл `0016` отсутствует намеренно — номер пропущен. Номера `0044`, `0045`,
+`0049`, `0051` и `0052` использованы двумя независимыми файлами каждый.)
+Migrations run
 раздельно от app process под superuser/owner role. Apps запускаются под
 `NOSUPERUSER NOBYPASSRLS`.
 

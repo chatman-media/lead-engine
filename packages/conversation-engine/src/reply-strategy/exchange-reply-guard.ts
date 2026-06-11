@@ -1,4 +1,5 @@
 import type { AnswerTelemetry } from "@chatman-media/kb";
+import { ANY_QUOTE_CURRENCY_MENTION_RE } from "../exchange-quote-currency.ts";
 
 export const EXCHANGE_SAFE_FALLBACK =
   "Сейчас уточню у оператора и вернусь с точной суммой/реквизитами.";
@@ -53,8 +54,10 @@ const NUMBER_RE =
   /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/u;
 const NUMBER_SCAN_RE =
   /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/gu;
-const QUOTE_RE =
-  /(?:курс|rate|отда[её]те|получ(?:а(?:ете|ешь)|ите|у|ится|ить)|итог(?:овая)?\s+сумм|thb|бат|bhat)/iu;
+const QUOTE_RE = new RegExp(
+  `(?:курс|rate|отда[её]те|получ(?:а(?:ете|ешь)|ите|у|ится|ить)|итог(?:овая)?\\s+сумм|${ANY_QUOTE_CURRENCY_MENTION_RE.source})`,
+  "iu",
+);
 const SOURCE_ASSET_RE =
 	/(?:usdt|btc|eth|usd|eur|rub|юсдт|битк|эфир|доллар|евро|руб|₽)/iu;
 const REQUISITES_RE =
@@ -195,7 +198,7 @@ export function guardExchangeReply(
 			text: EXCHANGE_SAFE_FALLBACK,
 			originalText: text,
 			requiredFixes: [
-				"Call compute_exchange_quote or create_exchange_order before sending a concrete rate or THB amount.",
+				"Call compute_exchange_quote or create_exchange_order before sending a concrete rate or payout amount.",
 			],
 		});
   }
@@ -225,4 +228,50 @@ export function guardExchangeReply(
   }
 
 	return exchangeGuardPass(text);
+}
+
+/** Минимальный chat-интерфейс для перезапроса (совместим с llm-router ChatClient). */
+export interface UnbackedQuoteRewriteChat {
+	complete(
+		messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+		opts?: { temperature?: number },
+	): Promise<string>;
+}
+
+const UNBACKED_QUOTE_REWRITE_SYSTEM = [
+	"Ты — вежливый менеджер обменного пункта.",
+	"Твой черновик ответа содержал курс или сумму, которых нет от инструмента расчёта — так нельзя.",
+	"Перепиши ответ БЕЗ каких-либо конкретных чисел курса или суммы.",
+	"Если клиент ещё не назвал сумму и направление обмена — коротко и дружелюбно попроси назвать их.",
+	"Если клиент уже всё назвал — скажи, что считаешь курс и сейчас вернёшься с точной суммой.",
+	"Отвечай на языке клиента, 1–2 предложения, без чисел.",
+].join(" ");
+
+/**
+ * Перезапрос при unbacked_quote: вместо жёсткой заглушки просим модель переписать
+ * ответ без выдуманных чисел (нет суммы → просто спросить направление и сумму).
+ * Один дешёвый chat.complete. null — перезапрос не удался (вызывающий оставит
+ * безопасный фоллбэк).
+ */
+export async function rewriteUnbackedQuoteReply(input: {
+	chat: UnbackedQuoteRewriteChat;
+	userMessage: string;
+	draftReply: string;
+}): Promise<string | null> {
+	try {
+		const out = await input.chat.complete(
+			[
+				{ role: "system", content: UNBACKED_QUOTE_REWRITE_SYSTEM },
+				{
+					role: "user",
+					content: `Сообщение клиента: ${input.userMessage}\n\nТвой черновик ответа (содержит недопустимые числа): ${input.draftReply}\n\nПерепиши ответ.`,
+				},
+			],
+			{ temperature: 0.3 },
+		);
+		const text = out?.trim();
+		return text && text.length > 0 ? text : null;
+	} catch {
+		return null;
+	}
 }

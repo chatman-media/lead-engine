@@ -44,7 +44,7 @@ Zod-схема конвертится в OpenAI function-формат (`toolToOp
 | Инструмент | Файл | Что делает |
 |---|---|---|
 | `offer_booking_link` | `packages/kb/src/built-in-tools/calendly.ts` | `makeBookingLinkTool(url)` — когда лид хочет записаться/созвониться, возвращает `{ url }` (Calendly/Cal.com/Tidycal). Без аргументов. |
-| Exchange-инструменты | `apps/api/src/lib/exchange/tools.ts` | `makeExchangeTools()` — котировка, KYC-гейт, заявка, реквизиты и т.д. (подключаются если у тенанта есть активные курсы). См. [EXCHANGE.md](EXCHANGE.md). |
+| Exchange-инструменты | `apps/api/src/lib/exchange/tools.ts` | `makeExchangeTools()` — 7 инструментов: `compute_exchange_quote`, `check_exchange_verification` (KYC-гейт), `create_exchange_order`, `fetch_exchange_requisites`, `verify_exchange_payment`, `issue_exchange_payout`, `get_exchange_business_info` (подключаются если у тенанта есть активные курсы). См. [EXCHANGE.md](EXCHANGE.md). |
 
 ## Подключение в pipeline
 

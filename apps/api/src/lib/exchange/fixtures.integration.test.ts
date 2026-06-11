@@ -24,6 +24,7 @@ import {
 	EXCHANGE_FIXTURE_RATES,
 	EXCHANGE_FIXTURE_RATE_TIERS,
 	EXCHANGE_FIXTURE_SECRETS,
+	exchangeFixtureOffices,
 	seedExchangeFixtures,
 } from "./fixtures.ts";
 import { makeExchangeTools } from "./tools.ts";
@@ -290,7 +291,8 @@ describe("exchange deterministic fixtures", () => {
 			string,
 			unknown
 		>;
-		expect(info.officeAddress).toContain("Bangkok Asok");
+		// Офисы зависят от котируемой валюты (дефолт PHP → Манила/Себу).
+		expect(info.officeAddress).toContain(exchangeFixtureOffices()[0]?.label ?? "");
 		expect(info.payoutMethods).toContain("Cardless ATM code");
 		expect(info.kycPolicy).toContain("KYC is required");
 	});

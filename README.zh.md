@@ -23,6 +23,8 @@
 
 多租户 SaaS · BYOK LLM · 按租户隔离的 RAG · 销售方法论（SPIN / NEPQ / AIDA）· 人工接管
 
+**🟢 在线版本：[exchanges.agency](https://exchanges.agency)** &nbsp;·&nbsp; [管理后台](https://client.exchanges.agency) &nbsp;·&nbsp; [dev](https://dev.exchanges.agency)
+
 🌐 [🇬🇧 English](README.md) &nbsp;·&nbsp; [🇷🇺 Русский](README.ru.md) &nbsp;·&nbsp; 🇨🇳 **中文**
 
 </div>
