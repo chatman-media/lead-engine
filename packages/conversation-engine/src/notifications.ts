@@ -246,11 +246,7 @@ export class NotificationService {
 				[
 					{
 						text: "👁 Открыть чат",
-						callback_data: buildOperatorActionCallbackData({
-							action: "open_chat",
-							tenantId: event.tenantId,
-							conversationId,
-						}),
+						url: this.conversationUrl(conversationId),
 					},
 				],
 				[
@@ -349,6 +345,10 @@ export class NotificationService {
 			];
 		}
 		return [];
+	}
+
+	private conversationUrl(conversationId: number): string {
+		return `${this.appUrl.replace(/\/+$/, "")}/conversations/${conversationId}`;
 	}
 
 	private getEventEmoji(type: string): string {

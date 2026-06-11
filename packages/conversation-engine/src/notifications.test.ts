@@ -386,7 +386,10 @@ describe("NotificationService.notify", () => {
 		});
 
 		const markup = sent[0]?.replyMarkup;
-		expect(JSON.stringify(markup)).toContain("op:v1:open_chat:1:109");
+		expect(markup?.inline_keyboard?.[0]?.[0]).toEqual({
+			text: "👁 Открыть чат",
+			url: "https://app.example/conversations/109",
+		});
 		expect(JSON.stringify(markup)).toContain("op:v1:takeover:1:109");
 		expect(JSON.stringify(markup)).toContain("op:v1:return_ai:1:109");
 		expect(JSON.stringify(markup)).toContain("opx:kycok:109");
