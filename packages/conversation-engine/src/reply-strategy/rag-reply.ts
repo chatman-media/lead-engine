@@ -1,19 +1,21 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
 import {
-  type AnswerTelemetry,
-  type AnyRagTool,
-  answerWithRag,
-  DEFAULT_PERSONA,
-  type DirectorHookForPrompt,
-  generateSoftFallback,
+	type AnswerTelemetry,
+	type AnyRagTool,
+	answerWithRag,
+	buildToolTelemetry,
+	DEFAULT_PERSONA,
+	type DirectorHookForPrompt,
+	generateSoftFallback,
   type IKbStore,
   type KbScope,
   NO_CONTEXT_MARKER,
   type Persona,
   type Reranker,
-  type SkillForPrompt,
-  type Style,
-  StyleSchema,
+	type SkillForPrompt,
+	type Style,
+	StyleSchema,
+	type ToolCallRecord,
 } from "@chatman-media/kb";
 import type {
   ChatClient,
@@ -26,8 +28,15 @@ import type { ConversationsRepo } from "../dal/conversations.ts";
 import { ScopedKbStore } from "../dal/kb-store.ts";
 import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
-import type { ReplyStrategy } from "../process-inbound.ts";
-import { buildExchangeOperatorHandoff } from "./exchange-operator-handoff.ts";
+import type {
+  ReplyStrategy,
+  ReplyStrategyOutput,
+  ReplyStrategyResult,
+} from "../process-inbound.ts";
+import {
+  buildExchangeGenericOperatorHandoff,
+  buildExchangeOperatorHandoff,
+} from "./exchange-operator-handoff.ts";
 import {
   type ExchangePolicyState,
   guardExchangePolicy,
@@ -115,6 +124,8 @@ export interface RagTurnContext {
   exchangePolicyState?: ExchangePolicyState | null;
 	/** false → exchange response guard bypassed for this tenant. Default: true. */
 	exchangeResponseGuardEnabled?: boolean;
+  /** false → hard handoff stops AI silently without sending fallback to customer. */
+  exchangeCustomerNoticeEnabled?: boolean;
   /** Repo для fire-and-forget логирования незакрытых вопросов (softFallback). */
   suggestions?: KbSuggestionsRepo | null;
   /** Repo для compaction summary + style assignment. Absent → ничего не персистится. */
@@ -220,8 +231,192 @@ export type ResolvedStyleAssignment = Style & {
   variantSlug?: string | null;
 };
 
+type ExchangeOrderArgs = {
+	asset: string;
+	amount: number;
+	amountMode: "source_amount";
+	network?: string;
+	paymentMethod?: string;
+	payoutMethod?: string;
+};
+
+type ExchangeForcedReply = {
+	text: string;
+	toolCalls: ToolCallRecord[];
+};
+
+const EXCHANGE_ORDER_CONFIRMATION_RE =
+	/(?:^|[\s,.!?])(?:да|ок|окей|супер|давай|подходит|готов|готовы|оформ|создавай|делаем|соглас(?:ен|на)?|начинаем|поехали)(?:$|[\s,.!?])/iu;
+const EXCHANGE_KYC_MATERIAL_SENT_RE =
+	/(?:отправил|отправила|прислал|прислала|загрузил|загрузила|вот|держи|лови)[^.!\n]{0,80}(?:видео|кружок|документ|паспорт)|(?:видео|кружок|документ|паспорт)[^.!\n]{0,80}(?:отправил|отправила|прислал|прислала|загрузил|загрузила)/iu;
+
+function exchangeAssetMentionRe(asset: string): RegExp {
+	switch (asset) {
+		case "USDT":
+			return /\busdt\b|юсдт/iu;
+		case "BTC":
+			return /\bbtc\b|битк/iu;
+		case "ETH":
+			return /\beth\b|эфир/iu;
+		case "RUB":
+			return /\brub\b|руб|₽/iu;
+		case "EUR":
+			return /\beur\b|евро/iu;
+		case "USD":
+			return /\busd\b|доллар/iu;
+		default:
+			return new RegExp(`\\b${asset}\\b`, "iu");
+	}
+}
+
+function parseExchangeSourceArgs(text: string): ExchangeOrderArgs | null {
+	const lower = text.toLowerCase();
+	const asset = /\busdt\b|юсдт/.test(lower)
+		? "USDT"
+		: /\bbtc\b|битк/.test(lower)
+			? "BTC"
+			: /\beth\b|эфир/.test(lower)
+				? "ETH"
+				: /\brub\b|руб|₽/.test(lower)
+					? "RUB"
+					: /\beur\b|евро/.test(lower)
+						? "EUR"
+						: /\busd\b|доллар/.test(lower)
+							? "USD"
+							: null;
+	if (!asset) return null;
+
+	const matches = [
+		...text.matchAll(/\d+(?:[ \u00a0]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g),
+	];
+	for (const match of matches) {
+		const raw = match[0];
+		const start = match.index ?? 0;
+		const end = start + raw.length;
+		const before = text.slice(Math.max(0, start - 24), start).toLowerCase();
+		const after = text.slice(end, end + 24).toLowerCase();
+		const amount = Number(raw.replace(/[ \u00a0]/g, "").replace(",", "."));
+		if (!Number.isFinite(amount) || amount <= 0) continue;
+		const multiplier = /тыс|к(?![а-яёa-z])|k\b/iu.test(after) ? 1000 : 1;
+		const window = `${before}${raw}${after}`;
+		if (!exchangeAssetMentionRe(asset).test(window)) continue;
+		const network = /trc[\s-]?20|tron/iu.test(text)
+			? "TRC20"
+			: /erc[\s-]?20/iu.test(text)
+				? "ERC20"
+				: /bep[\s-]?20|bsc/iu.test(text)
+					? "BEP20"
+					: undefined;
+		return {
+			asset,
+			amount: amount * multiplier,
+			amountMode: "source_amount",
+			...(network ? { network } : {}),
+			paymentMethod: asset === "RUB" ? "bank_transfer" : "crypto_transfer",
+			...(/банкомат|atm/iu.test(text) ? { payoutMethod: "atm" } : {}),
+		};
+	}
+	return null;
+}
+
+function latestExchangeOrderArgs(
+	history: MessageRow[],
+	userMessageText: string,
+): ExchangeOrderArgs | null {
+	const joinedText = [userMessageText, ...history.map((m) => m.text)].join("\n");
+	const fallbackPayoutMethod = /банкомат|atm/iu.test(joinedText)
+		? "atm"
+		: undefined;
+	for (const item of [...history].reverse()) {
+		const parsed = parseExchangeSourceArgs(item.text);
+		if (!parsed) continue;
+		return {
+			...parsed,
+			...(parsed.payoutMethod || !fallbackPayoutMethod
+				? {}
+				: { payoutMethod: fallbackPayoutMethod }),
+		};
+	}
+	return null;
+}
+
+function forcedExchangeOrderText(result: unknown): string | null {
+	if (!result || typeof result !== "object") return null;
+	const row = result as Record<string, unknown>;
+	if (typeof row.error === "string" && row.error.trim()) return row.error;
+	if (row.needsVerification === true) {
+		return (
+			(typeof row.instructions === "string" && row.instructions.trim()
+				? row.instructions.trim()
+				: null) ??
+			"Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена."
+		);
+	}
+	if (typeof row.orderId === "number") {
+		return "Заявка создана. Сейчас подготовлю реквизиты для оплаты.";
+	}
+	return null;
+}
+
+async function maybeForceExchangeOrderReply(input: {
+	userMessageText: string;
+	history: MessageRow[];
+	state: ExchangePolicyState | null;
+	tools: AnyRagTool[];
+}): Promise<ExchangeForcedReply | null> {
+	if (input.state?.stageSlug !== "quote_calculated") return null;
+	if (!EXCHANGE_ORDER_CONFIRMATION_RE.test(input.userMessageText)) return null;
+	if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(input.userMessageText)) return null;
+	const createOrderTool = input.tools.find(
+		(tool) => tool.name === "create_exchange_order",
+	);
+	if (!createOrderTool) return null;
+	const args = latestExchangeOrderArgs(input.history, input.userMessageText);
+	if (!args) return null;
+	const result = await createOrderTool.execute(args);
+	const text = forcedExchangeOrderText(result);
+	if (!text) return null;
+	return {
+		text,
+		toolCalls: [{ name: createOrderTool.name, args, result, cycle: 0 }],
+	};
+}
+
 function hasAssignmentMetadata(style: ResolvedStyleAssignment | null): boolean {
   return style?.styleId !== undefined || style?.experimentId !== undefined;
+}
+
+function exchangeReplyOutput(input: {
+  channelId: number;
+  externalUserId: string;
+  text: string;
+  operatorHandoff: ReturnType<typeof buildExchangeOperatorHandoff>;
+  customerNoticeEnabled: boolean;
+}): OutboundEnvelope[] | ReplyStrategyOutput {
+  if (!input.operatorHandoff) {
+    return [
+      {
+        channelId: String(input.channelId),
+        externalUserId: input.externalUserId,
+        parts: [{ kind: "text", text: input.text }],
+      },
+    ];
+  }
+  const envelopes = input.customerNoticeEnabled
+    ? [
+        {
+          channelId: String(input.channelId),
+          externalUserId: input.externalUserId,
+          parts: [{ kind: "text" as const, text: input.text }],
+        },
+      ]
+    : [];
+  return {
+    envelopes,
+    operatorHandoffs: [input.operatorHandoff],
+    autoTakeover: true,
+    customerNoticeSent: envelopes.length > 0,
+  };
 }
 
 export class RagReplyStrategy implements ReplyStrategy {
@@ -234,7 +429,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     contactId: number;
     inbound: { externalUserId: string };
     userMessageText: string;
-  }): Promise<OutboundEnvelope[] | null> {
+  }): Promise<ReplyStrategyResult> {
     if (input.userMessageText.length === 0) return null;
 
     const tenantId = input.tenant.tenantId;
@@ -342,12 +537,82 @@ export class RagReplyStrategy implements ReplyStrategy {
     const requestContext = ctx.requestContext ?? null;
     const serviceOrderContext = ctx.serviceOrderContext ?? null;
     const awaitingOperator = ctx.awaitingOperator ?? false;
-		const exchangePolicyState = isExchange
-			? (ctx.exchangePolicyState ?? null)
-			: null;
+			const exchangePolicyState = isExchange
+				? (ctx.exchangePolicyState ?? null)
+				: null;
 
-    const combinedRequestContext =
-      [requestContext, serviceOrderContext]
+			const forcedExchangeOrderReply = isExchange
+				? await maybeForceExchangeOrderReply({
+						userMessageText: input.userMessageText,
+						history: historyWithoutCurrent,
+						state: exchangePolicyState,
+						tools,
+					})
+				: null;
+			if (forcedExchangeOrderReply) {
+					const telemetry: AnswerTelemetry = {
+						path: "ok",
+						...buildToolTelemetry(forcedExchangeOrderReply.toolCalls),
+					};
+				const guarded = ctx.exchangeResponseGuardEnabled ?? true
+					? guardExchangePolicy({
+							text: forcedExchangeOrderReply.text,
+							telemetry,
+							history: historyWithoutCurrent,
+							state: exchangePolicyState,
+						})
+					: {
+							ok: true,
+							action: "pass" as const,
+							text: forcedExchangeOrderReply.text,
+							reasons: [],
+							requiredFixes: [],
+						};
+				const guardFinding =
+					ctx.exchangeResponseGuardEnabled ?? true
+						? exchangeGuardFindingFromResult(guarded)
+						: null;
+				if (this.opts.recordToolCalls) {
+					try {
+						await this.opts.recordToolCalls({
+							tenantId,
+							conversationId: input.conversationId,
+							contactId: input.contactId,
+							userMessageText: input.userMessageText,
+							assistantText: guarded.text,
+							telemetry,
+							...(guardFinding ? { guardFindings: [guardFinding] } : {}),
+						});
+					} catch (err) {
+						console.warn(
+							"[rag-reply] failed to record forced exchange order tool call:",
+							err,
+						);
+					}
+				}
+				const operatorHandoff =
+					buildExchangeOperatorHandoff({
+						text: guarded.text,
+						telemetry,
+						state: exchangePolicyState,
+					}) ??
+					(guarded.action === "escalate" || guarded.action === "block"
+						? buildExchangeGenericOperatorHandoff({
+								state: exchangePolicyState,
+								context: guarded.reason ?? null,
+							})
+						: null);
+				return exchangeReplyOutput({
+					channelId: input.channel.channelId,
+					externalUserId: input.inbound.externalUserId,
+					text: guarded.text,
+					operatorHandoff,
+					customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
+				});
+			}
+
+	    const combinedRequestContext =
+	      [requestContext, serviceOrderContext]
         .map((value) => value?.trim())
         .filter(Boolean)
         .join("\n\n") || null;
@@ -528,16 +793,28 @@ export class RagReplyStrategy implements ReplyStrategy {
           text: guarded.text,
           telemetry: result.telemetry,
           state: exchangePolicyState,
-        })
+        }) ?? (guarded.action === "escalate" || guarded.action === "block"
+          ? buildExchangeGenericOperatorHandoff({
+              state: exchangePolicyState,
+              context: guarded.reason ?? null,
+            })
+          : null)
       : null;
 
-    return [
-      {
-        channelId: String(input.channel.channelId),
-        externalUserId: input.inbound.externalUserId,
-        parts: [{ kind: "text", text: guarded.text }],
-        ...(operatorHandoff ? { operatorHandoff } : {}),
-      },
-    ];
+    return isExchange
+      ? exchangeReplyOutput({
+          channelId: input.channel.channelId,
+          externalUserId: input.inbound.externalUserId,
+          text: guarded.text,
+          operatorHandoff,
+          customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
+        })
+      : [
+          {
+            channelId: String(input.channel.channelId),
+            externalUserId: input.inbound.externalUserId,
+            parts: [{ kind: "text", text: guarded.text }],
+          },
+        ];
   }
 }

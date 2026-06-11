@@ -182,17 +182,55 @@ function buildOfficeHandoff(
 	};
 }
 
+function buildGenericHandoff(
+	state: ExchangePolicyState | null | undefined,
+	toolResult: Record<string, unknown> | null,
+): OperatorHandoffMeta {
+	const order = state?.order ?? null;
+	const issue =
+		stringValue(toolResult?.error) ??
+		stringValue(toolResult?.reason) ??
+		stringValue(toolResult?.message) ??
+		"exchange_flow_blocked";
+	return {
+		reason: "operator_request",
+		title: "Разобрать обмен вручную",
+		action:
+			"Проверить диалог, заявку и последний шаг обмена. Продолжить сценарий вручную или вернуть AI после решения.",
+		priority: "high",
+		...(order?.id ? { orderId: order.id } : {}),
+		...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
+		pending: "operator_exchange_decision",
+		reviewPath: "admin-ui: conversation takeover / exchange order patch",
+		context: [issue, amountLabel(order), routeLabel(order)]
+			.filter(Boolean)
+			.join("; "),
+	};
+}
+
+export function buildExchangeGenericOperatorHandoff(input: {
+	state?: ExchangePolicyState | null;
+	context?: string | null;
+}): OperatorHandoffMeta {
+	return buildGenericHandoff(
+		input.state,
+		input.context ? { reason: input.context } : null,
+	);
+}
+
 export function buildExchangeOperatorHandoff(
 	input: ExchangeOperatorHandoffInput,
 ): OperatorHandoffMeta | null {
 	const state = input.state ?? null;
 	const order = state?.order ?? null;
 	let fallbackPaymentResult: Record<string, unknown> | null = null;
-	let fallbackOfficeResult: Record<string, unknown> | null = null;
+	const fallbackOfficeResult: Record<string, unknown> | null = null;
+	let fallbackGenericResult: Record<string, unknown> | null = null;
 
 	for (const call of toolCalls(input.telemetry).slice().reverse()) {
 		const result = resultObject(call.result);
 		if (!resultNeedsOperator(result)) continue;
+		fallbackGenericResult ??= result;
 
 		if (
 			call.name === "check_exchange_verification" ||
@@ -231,6 +269,9 @@ export function buildExchangeOperatorHandoff(
 		/(?:верификац|kyc|документ|паспорт|видео|кружок|селфи)/iu.test(text)
 	) {
 		return buildKycHandoff(state);
+	}
+	if (fallbackGenericResult) {
+		return buildGenericHandoff(state, fallbackGenericResult);
 	}
 
 	return null;

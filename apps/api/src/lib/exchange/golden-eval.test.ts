@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
 	EXCHANGE_SAFE_FALLBACK,
+	normalizeReplyStrategyResult,
 	RagReplyStrategy,
 	type RagTurnContext,
 } from "@chatman-media/conversation-engine";
@@ -31,6 +32,12 @@ const fixturesPath = resolve(
 
 function loadCases() {
 	return parseExchangeGoldenJsonl(readFileSync(fixturesPath, "utf8"));
+}
+
+function firstReplyText(result: Awaited<ReturnType<RagReplyStrategy["generate"]>>): string {
+	const normalized = normalizeReplyStrategyResult(result);
+	const part = normalized?.envelopes[0]?.parts[0];
+	return part?.kind === "text" ? part.text : "";
 }
 
 const EXCHANGE_TEMPLATE = {
@@ -207,7 +214,7 @@ describe("exchange golden eval smoke", () => {
 			userMessageText: loadCases()[0]?.messages[0]?.text,
 		});
 		expect(result).not.toBeNull();
-		expect((result![0]!.parts[0] as { text: string }).text).toBe(reply);
+		expect(firstReplyText(result)).toBe("Получите 10553 THB.");
 	});
 
 	it("real RAG pipeline smoke: unbacked quote is replaced with safe fallback", async () => {
@@ -218,6 +225,6 @@ describe("exchange golden eval smoke", () => {
 			userMessageText: loadCases()[0]?.messages[0]?.text,
 		});
 		expect(result).not.toBeNull();
-		expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_SAFE_FALLBACK);
+		expect(firstReplyText(result)).toBe(EXCHANGE_SAFE_FALLBACK);
 	});
 });

@@ -53,6 +53,7 @@ import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import {
 	directorHooks,
 	funnels,
+	exchangeSettings,
 	leads,
 	llmProviderConfigs,
 	skills,
@@ -1095,6 +1096,27 @@ function makeExchangeResponseGuardFlagResolver(db: Db) {
 	};
 }
 
+function makeExchangeCustomerNoticeResolver(db: Db) {
+	return async (input: { tenantId: number }): Promise<boolean> => {
+		try {
+			return await withTenant(db, input.tenantId, async (tx) => {
+				const [row] = await tx
+					.select({ enabled: exchangeSettings.handoffCustomerNotice })
+					.from(exchangeSettings)
+					.where(eq(exchangeSettings.tenantId, input.tenantId))
+					.limit(1);
+				return row?.enabled ?? true;
+			});
+		} catch (err) {
+			console.warn(
+				"[llm-bootstrap] failed to resolve exchange handoff notice setting:",
+				err,
+			);
+			return true;
+		}
+	};
+}
+
 export function makeReplyStrategy(
 	ref: LoadedRef,
 	cfg: ApiConfig,
@@ -1125,6 +1147,8 @@ export function makeReplyStrategy(
 	const resolveExchangePolicyState = makeExchangePolicyStateResolver(db);
 	const resolveExchangeResponseGuardEnabled =
 		makeExchangeResponseGuardFlagResolver(db);
+	const resolveExchangeCustomerNoticeEnabled =
+		makeExchangeCustomerNoticeResolver(db);
 
 	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
 	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
@@ -1143,6 +1167,7 @@ export function makeReplyStrategy(
 					resolveTools,
 					resolveExchangePolicyState,
 					resolveExchangeResponseGuardEnabled,
+					resolveExchangeCustomerNoticeEnabled,
 					recordToolCalls: makeToolCallRecorder(db, "llm_reply"),
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
@@ -1229,11 +1254,12 @@ export function makeReplyStrategy(
 			reranker,
 			stageGuidance,
 			requestContext,
-			awaitingOperator,
-			exchangePolicyState,
-			exchangeResponseGuardEnabled,
-			leadFunnel,
-		] = await Promise.all([
+				awaitingOperator,
+				exchangePolicyState,
+				exchangeResponseGuardEnabled,
+				leadFunnel,
+				exchangeCustomerNoticeEnabled,
+			] = await Promise.all([
 			resolveKbScope({ tenantId, contactId }),
 			resolveStyle({ tenantId, contactId }),
 			resolveSkills({ tenantId }),
@@ -1259,13 +1285,16 @@ export function makeReplyStrategy(
 			isExchange
 				? resolveExchangeResponseGuardEnabled({ tenantId })
 				: Promise.resolve(true),
-			isExchange
-				? resolveLeadFunnel({ tenantId, contactId }).catch((err) => {
-						console.warn("[llm-bootstrap] failed to resolve lead funnel:", err);
-						return null;
-					})
-				: Promise.resolve(null),
-		]);
+				isExchange
+					? resolveLeadFunnel({ tenantId, contactId }).catch((err) => {
+							console.warn("[llm-bootstrap] failed to resolve lead funnel:", err);
+							return null;
+						})
+					: Promise.resolve(null),
+				isExchange
+					? resolveExchangeCustomerNoticeEnabled({ tenantId })
+					: Promise.resolve(true),
+			]);
 		// Скоупинг exchange-guard'ов по воронке открытого лида: у мульти-
 		// сервисного тенанта transfer/green_corridor-диалоги не должны
 		// переписываться обменным guard'ом («цена без computeQuote»). Нет
@@ -1286,11 +1315,12 @@ export function makeReplyStrategy(
 			reranker,
 			stageGuidance,
 			requestContext,
-			awaitingOperator,
-			exchangePolicyState,
-			exchangeResponseGuardEnabled:
-				exchangeResponseGuardEnabled && leadFunnelIsExchange,
-		};
+				awaitingOperator,
+				exchangePolicyState,
+				exchangeResponseGuardEnabled:
+					exchangeResponseGuardEnabled && leadFunnelIsExchange,
+				exchangeCustomerNoticeEnabled,
+			};
 	};
 
 	const strategy = new RagReplyStrategy({

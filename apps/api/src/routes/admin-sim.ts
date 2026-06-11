@@ -28,9 +28,10 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
-  MessagesRepo,
-  OutboundQueueRepo,
-  processInbound,
+	MessagesRepo,
+	normalizeReplyStrategyResult,
+	OutboundQueueRepo,
+	processInbound,
   type ReplyStrategy,
   runDeferredInboundPostProcessing,
   type StageClassifier,
@@ -803,16 +804,16 @@ export function makeAdminSimRoutes(opts: {
 
       let botReply = "";
       try {
-        const envelopes = await ctx.replyStrategy.generate({
-          tenant,
-          channel,
-          conversationId: pi.conversationId,
-          contactId: pi.contactId,
-          inbound,
-          userMessageText: userText,
-        });
-        botReply = firstPartText(envelopes?.flatMap((e) => e.parts) ?? []);
-      } catch (err) {
+				const result = await ctx.replyStrategy.generate({
+					tenant,
+					channel,
+					conversationId: pi.conversationId,
+					contactId: pi.contactId,
+					inbound,
+					userMessageText: userText,
+				});
+				botReply = firstPartText(normalizeReplyStrategyResult(result)?.envelopes.flatMap((e) => e.parts) ?? []);
+			} catch (err) {
         botReply = `(reply error: ${err instanceof Error ? err.message : String(err)})`;
       }
 

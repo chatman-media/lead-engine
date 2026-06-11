@@ -153,9 +153,12 @@ export {
 } from "./deferred-post-processing.ts";
 export { dispatchOutbound } from "./outbound-dispatch.ts";
 export {
+  normalizeReplyStrategyResult,
   processInbound,
   type ProcessInboundDeps,
   type ReplyStrategy,
+  type ReplyStrategyOutput,
+  type ReplyStrategyResult,
   transcribeInboundVoice,
   type TranscribeInboundVoiceDeps,
 } from "./process-inbound.ts";

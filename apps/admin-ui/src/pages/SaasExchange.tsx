@@ -510,6 +510,7 @@ const DEFAULT_SETTINGS: ExchangeSettings = {
   feedStaleSec: null,
   quoteAsset: "PHP",
   quoteAssetOptions: DEFAULT_QUOTE_ASSET_OPTIONS,
+  handoffCustomerNotice: true,
 };
 
 export function SaasExchange() {
@@ -804,7 +805,7 @@ export function SaasExchange() {
       )}
 
       <Tabs defaultValue="rates">
-        <TabsList>
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="rates">Курсы</TabsTrigger>
           <TabsTrigger value="orders">Заявки</TabsTrigger>
           <TabsTrigger value="kyc">Клиенты (KYC)</TabsTrigger>
@@ -889,6 +890,20 @@ export function SaasExchange() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="flex items-center gap-3 rounded-md border px-3 py-2 sm:max-w-xl">
+                <Switch
+                  checked={settings.handoffCustomerNotice}
+                  onCheckedChange={(checked) =>
+                    setSettings((s) => ({ ...s, handoffCustomerNotice: checked }))
+                  }
+                />
+                <div className="space-y-0.5">
+                  <Label>Писать клиенту при авто-передаче оператору</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Если выключено, бот молча остановится, а оператор всё равно получит задачу.
+                  </p>
+                </div>
               </div>
               <Button
                 type="button"

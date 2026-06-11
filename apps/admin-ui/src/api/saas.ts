@@ -2202,6 +2202,8 @@ export interface ExchangeSettings {
   quoteAsset?: string;
   /** Коды для селекта (отдаёт GET; в PUT не передаётся). */
   quoteAssetOptions?: string[];
+  /** Отправлять клиенту сообщение при автоматической передаче оператору. */
+  handoffCustomerNotice: boolean;
 }
 
 export interface ExchangeRateCardProposal {
