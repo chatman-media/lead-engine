@@ -1,3 +1,10 @@
+# [@chatman-media/llm-router-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/llm-router-v1.1.1...@chatman-media/llm-router-v1.2.0) (2026-06-11)
+
+
+### Features
+
+* **exchange:** ship handoff fixes and rolling context summary ([#579](https://github.com/chatman-media/lead-engine/issues/579)) ([317a29b](https://github.com/chatman-media/lead-engine/commit/317a29bbca5924ab6f12fdd450062c179c735c7a)), closes [#576](https://github.com/chatman-media/lead-engine/issues/576) [#578](https://github.com/chatman-media/lead-engine/issues/578)
+
 # [@chatman-media/llm-router-v1.1.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/llm-router-v1.1.0...@chatman-media/llm-router-v1.1.1) (2026-06-05)
 
 
