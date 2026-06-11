@@ -336,7 +336,12 @@ const REQUISITE_TYPES: { key: string; label: string; placeholder: string; secret
     placeholder: "+66...",
   },
   { key: "exchange_operator_line", label: "Контакт оператора — Line", placeholder: "line id" },
-  { key: "exchange_office_address", label: "Адрес офиса", placeholder: "Phuket, ..." },
+  {
+    key: "exchange_office_address",
+    label: "Адреса офисов",
+    placeholder:
+      "Bangkok Asok — Interchange 21, 10:00-20:00\nPhuket Central — bank zone, 10:00-20:00",
+  },
   { key: "exchange_working_hours", label: "Часы работы", placeholder: "10:00-22:00 Bangkok" },
   {
     key: "exchange_westwallet_api_key",
@@ -1990,14 +1995,21 @@ export function SaasOnboarding() {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label>Адрес офиса</Label>
-                        <Input
+                        <Label>Адреса офисов</Label>
+                        <Textarea
+                          rows={4}
                           value={bizForm.officeAddress}
                           onChange={(e) =>
                             setBizForm((p) => ({ ...p, officeAddress: e.target.value }))
                           }
-                          placeholder="—"
+                          placeholder={
+                            "Bangkok Asok — Interchange 21, 10:00-20:00\nPhuket Central — bank zone, 10:00-20:00"
+                          }
+                          className="min-h-[96px]"
                         />
+                        <p className="text-xs text-muted-foreground">
+                          Один офис на строку. Бот предложит клиенту доступные варианты.
+                        </p>
                       </div>
                     </div>
                     <div className="flex gap-2">

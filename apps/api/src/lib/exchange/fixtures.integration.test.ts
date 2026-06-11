@@ -293,6 +293,12 @@ describe("exchange deterministic fixtures", () => {
 		>;
 		// Офисы зависят от котируемой валюты (дефолт PHP → Манила/Себу).
 		expect(info.officeAddress).toContain(exchangeFixtureOffices()[0]?.label ?? "");
+		expect(info.officeAddresses).toEqual(
+			expect.arrayContaining([
+				expect.stringContaining(exchangeFixtureOffices()[0]?.label ?? ""),
+				expect.stringContaining(exchangeFixtureOffices()[1]?.label ?? ""),
+			]),
+		);
 		expect(info.payoutMethods).toContain("Cardless ATM code");
 		expect(info.kycPolicy).toContain("KYC is required");
 	});

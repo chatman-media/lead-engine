@@ -8,8 +8,8 @@
  * Две группы:
  *  - REQUISITE: то, что нужно боту для приёма платежа (кошельки / платёжные
  *    реквизиты). Их наличие гейтит завершение онбординга обменки.
- *  - BUSINESS: бизнес-данные для оператора (контакт, методы выплат, KYC-политика,
- *    часы, адрес). Сохраняются, но рантайм их пока НЕ читает — НЕ гейтят онбординг.
+ *  - BUSINESS: бизнес-данные для оператора и бота (контакт, методы выплат,
+ *    KYC-политика, часы, адреса офисов). Не гейтят онбординг.
  */
 
 /** Префикс для адресов кошельков: exchange_wallet_<asset>_<network>. */
@@ -42,7 +42,7 @@ export const EXCHANGE_SENSITIVE_SECRET_KEYS = [
   "exchange_westwallet_secret_key",
 ] as const;
 
-/** Бизнес-настройки (информационные; рантайм пока не использует — см. follow-up). */
+/** Бизнес-настройки, доступные runtime через get_exchange_business_info. */
 export const EXCHANGE_BUSINESS_SETTING_KEYS = [
   "exchange_operator_contact",
   "exchange_operator_telegram",
