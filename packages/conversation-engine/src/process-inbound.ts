@@ -558,6 +558,7 @@ export async function processInbound(
             tenantId: deps.tenant.tenantId,
             contactId: contact.id,
             salesStage: newStage,
+            preferredVerticalTemplateId: deps.template?.slug ?? null,
             nowEpoch: now,
           });
           if (res && (res.created || res.advanced)) {

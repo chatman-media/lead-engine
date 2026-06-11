@@ -12,6 +12,7 @@ import {
 	contacts,
 	conversations,
 	exchangeOrders,
+	funnels,
 	leadEvents,
 	leads,
 	messages,
@@ -67,6 +68,8 @@ const SEV_EMOJI: Record<string, string> = {
 
 const PREVIEW_TTL_SEC = 10 * 60;
 const PAYOUT_CODE_TTL_SEC = 60 * 60;
+const EXCHANGE_VERTICAL_TEMPLATE_ID = "exchange_v1";
+const EXCHANGE_REQUEST_TYPE = "exchange";
 
 interface PendingOperatorDraft {
 	draftId: string;
@@ -1357,6 +1360,58 @@ export class OperatorBotHandler {
 			currentSlug !== "verification_check" &&
 			currentSlug !== "kyc_collection"
 		) {
+			const [target] = await tx
+				.select({
+					id: stageDefinitions.id,
+					slug: stageDefinitions.slug,
+				})
+				.from(stageDefinitions)
+				.innerJoin(funnels, eq(stageDefinitions.funnelId, funnels.id))
+				.where(
+					and(
+						eq(stageDefinitions.tenantId, draft.tenantId),
+						eq(stageDefinitions.slug, "risk_review"),
+						eq(funnels.tenantId, draft.tenantId),
+						eq(funnels.isActive, true),
+						eq(funnels.verticalTemplateId, EXCHANGE_VERTICAL_TEMPLATE_ID),
+					),
+				)
+				.limit(1);
+			if (target) {
+				await tx
+					.update(leads)
+					.set({
+						stageDefinitionId: target.id,
+						state: target.slug,
+						requestType: EXCHANGE_REQUEST_TYPE,
+						updatedAt: now,
+					})
+					.where(
+						and(eq(leads.tenantId, draft.tenantId), eq(leads.id, lead.id)),
+					);
+				await tx.insert(leadEvents).values({
+					tenantId: draft.tenantId,
+					leadId: lead.id,
+					fromState: lead.state,
+					toState: target.slug,
+					byAdminId: draft.adminId,
+					notes: JSON.stringify({
+						type: "operator_bot_kyc_approved_recovered_exchange_stage",
+						conversationId: draft.conversationId,
+						fromStage: currentSlug,
+					}),
+					createdAt: now,
+				});
+				return {
+					leadId: lead.id,
+					advanced: true,
+					recovered: true,
+					reason: "recovered_wrong_stage",
+					fromState: lead.state,
+					toState: target.slug,
+					stageDefinitionId: target.id,
+				};
+			}
 			return {
 				leadId: lead.id,
 				advanced: false,
@@ -1420,6 +1475,7 @@ export class OperatorBotHandler {
 			.set({
 				stageDefinitionId: target.id,
 				state: target.slug,
+				requestType: EXCHANGE_REQUEST_TYPE,
 				updatedAt: now,
 			})
 			.where(and(eq(leads.tenantId, draft.tenantId), eq(leads.id, lead.id)));

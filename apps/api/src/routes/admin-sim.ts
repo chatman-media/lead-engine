@@ -779,6 +779,7 @@ export function makeAdminSimRoutes(opts: {
           result: pi,
           stageClassifier: opts.stageClassifier,
           advanceLead: true,
+          preferredVerticalTemplateId: ctx.template?.slug ?? null,
         });
       }
 

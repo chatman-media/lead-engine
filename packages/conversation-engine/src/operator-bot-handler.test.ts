@@ -7,6 +7,7 @@ import {
 	contacts,
 	conversations,
 	exchangeOrders,
+	funnels,
 	leadEvents,
 	leads,
 	messages,
@@ -220,6 +221,7 @@ function makeSendDraftDb(
 		lead?: {
 			id: number;
 			state: string;
+			requestType?: string | null;
 			stageDefinitionId: number | null;
 			stageSlug?: string | null;
 			stageFunnelId?: number | null;
@@ -262,6 +264,7 @@ function makeSendDraftDb(
 		if (table === auditLog) return "audit_log";
 		if (table === channels) return "channels";
 		if (table === stageDefinitions) return "stage_definitions";
+		if (table === funnels) return "funnels";
 		return "unknown";
 	}
 
@@ -318,6 +321,7 @@ function makeSendDraftDb(
 									{
 										id: leadRow.id,
 										state: leadRow.state,
+										requestType: leadRow.requestType ?? null,
 										stageDefinitionId: leadRow.stageDefinitionId,
 										stageSlug: leadRow.stageSlug ?? leadRow.state,
 										stageFunnelId: leadRow.stageFunnelId ?? null,
@@ -346,6 +350,11 @@ function makeSendDraftDb(
 								]
 							: [];
 					return {
+						innerJoin: () => ({
+							where: () => ({
+								limit: rows,
+							}),
+						}),
 						where: () => ({
 							limit: rows,
 						}),
@@ -2024,6 +2033,99 @@ describe("operator action callbacks", () => {
 				leadId: 88,
 				advanced: true,
 				fromState: "kyc_collection",
+				toState: "risk_review",
+				stageDefinitionId: 31,
+			},
+		});
+	});
+
+	it("confirmed KYC OK recovers exchange lead from a wrong non-exchange stage", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const { audits, db, lead, order, contactAttributes } = makeSendDraftDb({
+			contactAttributesJson: JSON.stringify({
+				exchangeKyc: { status: "pending", needsVerification: true },
+			}),
+			order: {
+				id: 77,
+				leadId: 88,
+				status: "quote",
+				verificationId: null,
+				payoutCode: null,
+				payoutCodeExpiresAt: null,
+			},
+			lead: {
+				id: 88,
+				state: "gc_request",
+				requestType: null,
+				stageDefinitionId: 44,
+				stageSlug: "gc_request",
+				stageFunnelId: 12,
+				stagePosition: 1,
+				stageNextStages: ["gc_operator_review"],
+			},
+			riskReviewStage: {
+				id: 31,
+				position: 4,
+			},
+		});
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				nowEpoch: () => 123,
+			},
+		);
+
+		// @ts-expect-error private method
+		const result = await handler.sendDraftToClient({
+			draftId: "abc123",
+			dbId: 700,
+			tenantId: 3,
+			adminId: 10,
+			chatId: "777",
+			conversationId: 109,
+			text: "✅ Верификация пройдена.",
+			metadata: {
+				source: "operator_bot_exchange_action",
+				exchangeAction: "kyc_approved",
+				orderId: 77,
+			},
+			createdAt: 123,
+			expiresAt: 723,
+		});
+
+		expect(result.kind).toBe("sent");
+		expect(contactAttributes().exchangeKyc).toMatchObject({
+			status: "verified",
+			verified: true,
+			needsVerification: false,
+		});
+		expect(order?.verificationId).toBe("operator-bot-109-123");
+		expect(lead()).toMatchObject({
+			id: 88,
+			state: "risk_review",
+			requestType: "exchange",
+			stageDefinitionId: 31,
+		});
+
+		const details = JSON.parse(String(audits[0]?.detailsJson)) as Record<
+			string,
+			unknown
+		>;
+		expect(details.exchangeSideEffects).toMatchObject({
+			action: "kyc_approved",
+			leadAdvance: {
+				leadId: 88,
+				advanced: true,
+				recovered: true,
+				reason: "recovered_wrong_stage",
+				fromState: "gc_request",
 				toState: "risk_review",
 				stageDefinitionId: 31,
 			},
