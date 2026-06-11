@@ -27,6 +27,7 @@ import {
 import {
 	type ExchangeResponseGuardFinding,
 	exchangeGuardFindingFromResult,
+	rewriteUnbackedQuoteReply,
 } from "./exchange-reply-guard.ts";
 
 /**
@@ -525,7 +526,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
     }
 
     if (reply.trim().length === 0) return null;
-		const guarded =
+		let guarded =
 			isExchange && exchangeGuardEnabled
       ? guardExchangePolicy({
           text: reply,
@@ -540,6 +541,25 @@ export class LlmReplyStrategy implements ReplyStrategy {
 						reasons: [],
 						requiredFixes: [],
 					};
+		// unbacked_quote: вместо жёсткой заглушки — один перезапрос, переписываем
+		// ответ без выдуманных чисел (нет суммы → просто спросить направление+сумму).
+		// Заглушку оставляем только если и перезапрос снова не прошёл.
+		if (!guarded.ok && guarded.reason === "unbacked_quote") {
+			const rewritten = await rewriteUnbackedQuoteReply({
+				chat,
+				userMessage: input.userMessageText,
+				draftReply: reply,
+			});
+			if (rewritten) {
+				const reguard = guardExchangePolicy({
+					text: rewritten,
+					telemetry: buildToolTelemetry(toolCalls),
+					history,
+					state: exchangePolicyState,
+				});
+				if (reguard.ok) guarded = reguard;
+			}
+		}
 		const guardFinding =
 			isExchange && exchangeGuardEnabled
 				? exchangeGuardFindingFromResult(guarded)

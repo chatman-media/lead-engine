@@ -36,6 +36,7 @@ import {
 	EXCHANGE_SAFE_FALLBACK,
 	type ExchangeResponseGuardFinding,
 	exchangeGuardFindingFromResult,
+	rewriteUnbackedQuoteReply,
 } from "./exchange-reply-guard.ts";
 
 /**
@@ -459,7 +460,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     }
 
 		const exchangeGuardEnabled = ctx.exchangeResponseGuardEnabled ?? true;
-		const guarded =
+		let guarded =
 			isExchange && exchangeGuardEnabled
       ? guardExchangePolicy({
           text: result.text,
@@ -474,6 +475,23 @@ export class RagReplyStrategy implements ReplyStrategy {
 						reasons: [],
 						requiredFixes: [],
 					};
+		// unbacked_quote: один перезапрос вместо жёсткой заглушки (см. llm-reply).
+		if (!guarded.ok && guarded.reason === "unbacked_quote") {
+			const rewritten = await rewriteUnbackedQuoteReply({
+				chat,
+				userMessage: input.userMessageText,
+				draftReply: result.text,
+			});
+			if (rewritten) {
+				const reguard = guardExchangePolicy({
+					text: rewritten,
+					telemetry: result.telemetry,
+					history: historyWithoutCurrent,
+					state: exchangePolicyState,
+				});
+				if (reguard.ok) guarded = reguard;
+			}
+		}
 		const guardFinding =
 			isExchange && exchangeGuardEnabled
 				? exchangeGuardFindingFromResult(guarded)
