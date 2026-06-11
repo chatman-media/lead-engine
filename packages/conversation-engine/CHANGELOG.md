@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.5.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.5.1...@chatman-media/conversation-engine-v3.5.2) (2026-06-11)
+
+
+### Bug Fixes
+
+* **api:** run inbound automation before replies ([9c9c7ff](https://github.com/chatman-media/lead-engine/commit/9c9c7ff0217a620003f2cd356f380feadd404630))
+
 # [@chatman-media/conversation-engine-v3.5.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.5.0...@chatman-media/conversation-engine-v3.5.1) (2026-06-11)
 
 
