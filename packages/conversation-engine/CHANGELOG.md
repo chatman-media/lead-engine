@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.1.1...@chatman-media/conversation-engine-v3.2.0) (2026-06-11)
+
+
+### Features
+
+* **exchange:** per-tenant quote currency (PHP default) + three-funnel client setup ([#552](https://github.com/chatman-media/lead-engine/issues/552)) ([a0afbe4](https://github.com/chatman-media/lead-engine/commit/a0afbe420791ef11e8bd90ccfba9c03065a67c45)), closes [#workflow](https://github.com/chatman-media/lead-engine/issues/workflow) [#services](https://github.com/chatman-media/lead-engine/issues/services)
+
 # [@chatman-media/conversation-engine-v3.1.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.1.0...@chatman-media/conversation-engine-v3.1.1) (2026-06-10)
 
 
