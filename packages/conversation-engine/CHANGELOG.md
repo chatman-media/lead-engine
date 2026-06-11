@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.4.2...@chatman-media/conversation-engine-v3.5.0) (2026-06-11)
+
+
+### Features
+
+* **api:** allow banning lead contacts ([#589](https://github.com/chatman-media/lead-engine/issues/589)) ([de96e09](https://github.com/chatman-media/lead-engine/commit/de96e09c59d18890607e274e8464fb600b447da1))
+
 # [@chatman-media/conversation-engine-v3.4.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.4.1...@chatman-media/conversation-engine-v3.4.2) (2026-06-11)
 
 
