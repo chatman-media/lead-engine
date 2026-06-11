@@ -6,6 +6,7 @@ import {
 	type TgUpdate,
 } from "@chatman-media/channel-telegram";
 import {
+	adminNotifications,
 	auditLog,
 	channelIdentities,
 	channels,
@@ -20,7 +21,7 @@ import {
 	outboundQueue,
 	stageDefinitions,
 } from "@chatman-media/storage";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { NotificationsRepo } from "./dal/notifications.ts";
 import type { Db } from "./dal/types.ts";
 import { QUOTE_CURRENCY } from "./exchange-quote-currency.ts";
@@ -1305,6 +1306,20 @@ export class OperatorBotHandler {
 					order?.leadId ?? null,
 				)
 			: null;
+
+		await tx
+			.update(adminNotifications)
+			.set({ readAt: now })
+			.where(
+				and(
+					eq(adminNotifications.tenantId, draft.tenantId),
+					inArray(adminNotifications.dedupKey, [
+						`verification_requested:${draft.conversationId}`,
+						`document_uploaded:${draft.conversationId}`,
+					]),
+					isNull(adminNotifications.readAt),
+				),
+			);
 
 		return {
 			action,
