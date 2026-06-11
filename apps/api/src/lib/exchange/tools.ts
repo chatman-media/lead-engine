@@ -60,6 +60,23 @@ function compactInfoLines(lines: Array<string | null | undefined>): string | nul
   return out.length > 0 ? out.join("\n") : null;
 }
 
+function parseOfficeAddresses(value: string | null | undefined): string[] {
+  const raw = value?.trim();
+  if (!raw) return [];
+  const blocks = raw
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  const candidates =
+    blocks.length > 1
+      ? blocks
+      : raw
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+  return candidates.map((candidate) => candidate.replace(/\s*\r?\n\s*/g, "; "));
+}
+
 function resolveTxMaxAgeSeconds(): number {
   const raw = process.env.EXCHANGE_TX_MAX_AGE_SECONDS;
   const parsed = raw ? Number(raw) : Number.NaN;
@@ -710,16 +727,17 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
   };
 
   // A3: бизнес-настройки обменника из tenant_secrets — часы работы, контакт
-  // оператора, способы выдачи, KYC-политика, адрес офиса. Раньше хранились, но
-  // рантайм их не читал; теперь бот может ответить «когда работаете / какие
-  // документы / как получить / куда подойти» из настроек, не выдумывая.
+  // оператора, способы выдачи, KYC-политика, адреса офисов. Бот отвечает
+  // «когда работаете / какие документы / как получить / куда подойти» из
+  // настроек, не выдумывая.
   const businessInfoTool: AnyRagTool = {
     name: "get_exchange_business_info",
     description: [
       "Справочные данные обменника: часы работы, контакт оператора, способы выдачи,",
-      "KYC-политика (какие документы нужны), адрес офиса. Вызывай, когда клиент",
+      "KYC-политика (какие документы нужны), адреса офисов. Вызывай, когда клиент",
       "спрашивает «во сколько работаете», «как получить», «какие документы», «где офис»,",
-      "«как связаться». Отвечай ТОЛЬКО тем, что вернул инструмент; пустые поля не выдумывай.",
+      "«как связаться». Если officeAddresses содержит несколько вариантов — предложи клиенту выбрать офис.",
+      "Отвечай ТОЛЬКО тем, что вернул инструмент; пустые поля не выдумывай.",
     ].join(" "),
     parameters: z.object({}),
     execute: async () => {
@@ -765,12 +783,14 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amlPolicy ? `AML: ${amlPolicy}` : null,
         kycPolicy ? `KYC: ${kycPolicy}` : null,
       ]);
-      const info: Record<string, string> = {};
+      const officeAddresses = parseOfficeAddresses(officeAddress);
+      const info: Record<string, string | string[]> = {};
       if (workingHours) info.workingHours = workingHours;
       if (operatorContact) info.operatorContact = operatorContact;
       if (payoutMethods) info.payoutMethods = payoutMethods;
       if (policy) info.kycPolicy = policy;
       if (officeAddress) info.officeAddress = officeAddress;
+      if (officeAddresses.length > 0) info.officeAddresses = officeAddresses;
       if (Object.keys(info).length === 0) {
         return {
           note: "Справочные данные не заданы оператором. Подскажи, что уточнишь у оператора.",

@@ -50,6 +50,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 
 // Активы и сети для произвольных направлений обмена (не только табло RUB/USDT→THB).
 const ASSETS = ["USDT", "USDC", "BTC", "ETH", "LTC", "TRX", "TON", "RUB", "EUR", "USD", "THB"];
@@ -85,6 +86,8 @@ type RequisiteField = {
   savedLabel: string;
   placeholder: string;
   secret?: boolean;
+  multiline?: boolean;
+  hint?: string;
 };
 
 const REQUISITE_GROUPS: Array<{ title: string; fields: RequisiteField[] }> = [
@@ -325,7 +328,7 @@ const REQUISITE_GROUPS: Array<{ title: string; fields: RequisiteField[] }> = [
     ],
   },
   {
-    title: "Контакты и офис",
+    title: "Контакты и офисы",
     fields: [
       {
         key: "exchange_operator_telegram",
@@ -347,9 +350,12 @@ const REQUISITE_GROUPS: Array<{ title: string; fields: RequisiteField[] }> = [
       },
       {
         key: "exchange_office_address",
-        label: "Адрес офиса",
-        savedLabel: "Адрес офиса",
-        placeholder: "Phuket, ...",
+        label: "Адреса офисов",
+        savedLabel: "Адреса офисов",
+        placeholder:
+          "Bangkok Asok — Interchange 21, 10:00-20:00\nPhuket Central — bank zone, 10:00-20:00",
+        multiline: true,
+        hint: "Один офис на строку. Бот сможет предложить клиенту несколько вариантов.",
       },
       {
         key: "exchange_working_hours",
@@ -1310,23 +1316,43 @@ export function SaasExchange() {
                           return (
                             <div key={item.key} className="space-y-1.5">
                               <Label>{item.label}</Label>
-                              <div className="flex gap-2">
-                                <Input
-                                  autoComplete="off"
-                                  type={item.secret ? "password" : "text"}
-                                  value={current}
-                                  onChange={(e) =>
-                                    setReqValues((prev) => ({
-                                      ...prev,
-                                      [item.key]: e.target.value,
-                                    }))
-                                  }
-                                  placeholder={
-                                    saved?.sensitive && saved.hasValue
-                                      ? "сохранено, введите новое для замены"
-                                      : item.placeholder
-                                  }
-                                />
+                              <div className="flex items-start gap-2">
+                                {item.multiline ? (
+                                  <Textarea
+                                    autoComplete="off"
+                                    rows={4}
+                                    value={current}
+                                    onChange={(e) =>
+                                      setReqValues((prev) => ({
+                                        ...prev,
+                                        [item.key]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={
+                                      saved?.sensitive && saved.hasValue
+                                        ? "сохранено, введите новое для замены"
+                                        : item.placeholder
+                                    }
+                                    className="min-h-[96px]"
+                                  />
+                                ) : (
+                                  <Input
+                                    autoComplete="off"
+                                    type={item.secret ? "password" : "text"}
+                                    value={current}
+                                    onChange={(e) =>
+                                      setReqValues((prev) => ({
+                                        ...prev,
+                                        [item.key]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={
+                                      saved?.sensitive && saved.hasValue
+                                        ? "сохранено, введите новое для замены"
+                                        : item.placeholder
+                                    }
+                                  />
+                                )}
                                 <Button
                                   type="button"
                                   onClick={() => handleSaveRequisite(item.key)}
@@ -1336,6 +1362,7 @@ export function SaasExchange() {
                                   OK
                                 </Button>
                               </div>
+                              {item.hint && <p className="text-xs text-muted-foreground">{item.hint}</p>}
                             </div>
                           );
                         })}
