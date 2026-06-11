@@ -1,9 +1,14 @@
 import {
   AlertTriangleIcon,
   ExternalLinkIcon,
+  FileTextIcon,
+  ImageIcon,
+  MicIcon,
   SearchIcon,
   SendHorizontalIcon,
+  ShieldCheckIcon,
   Trash2Icon,
+  VideoIcon,
 } from "lucide-react";
 import React, { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -72,11 +77,20 @@ type MessageMeta = {
   adminId?: number;
   exchangeAction?: string;
   orderId?: number | string;
-  parts?: Array<{ kind: string; durationSec?: number }>;
+  parts?: Array<{
+    kind: string;
+    durationSec?: number;
+    caption?: string;
+    mimeType?: string;
+    fileName?: string;
+    mediaRef?: { channelId?: string; externalRef?: string };
+  }>;
   payoutCode?: string;
   sentVia?: string;
   source?: string;
 };
+
+type MessageMediaPart = NonNullable<MessageMeta["parts"]>[number];
 
 const OPERATOR_BOT_ACTION_RU: Record<string, string> = {
   kyc_approved: "KYC OK",
@@ -120,6 +134,164 @@ function parseMessageMeta(metaJson: string | null): MessageMeta | null {
   } catch {
     return null;
   }
+}
+
+function parseJsonRecord(value: string | null): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function mediaParts(meta: MessageMeta | null): MessageMediaPart[] {
+  return (meta?.parts ?? []).filter((part) => part.kind !== "text" && part.kind !== "callback_query");
+}
+
+function mediaKindLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    photo: "Фото",
+    video: "Видео",
+    video_note: "Видео-кружок",
+    voice: "Голосовое",
+    document: "Документ",
+    passport: "Паспорт",
+    full_body: "Фото в полный рост",
+    portrait: "Портрет",
+    other: "Другое",
+  };
+  return labels[kind] ?? kind;
+}
+
+function mediaRefLabel(part: MessageMediaPart): string | null {
+  if (part.fileName) return part.fileName;
+  const ref = part.mediaRef;
+  if (!ref?.externalRef) return part.mimeType ?? null;
+  const shortRef =
+    ref.externalRef.length > 18
+      ? `${ref.externalRef.slice(0, 8)}...${ref.externalRef.slice(-6)}`
+      : ref.externalRef;
+  return ref.channelId ? `${ref.channelId}:${shortRef}` : shortRef;
+}
+
+function MediaPartIcon({ kind }: { kind: string }) {
+  if (kind === "photo") return <ImageIcon className="size-4 text-primary" />;
+  if (kind === "video" || kind === "video_note") return <VideoIcon className="size-4 text-primary" />;
+  if (kind === "voice") return <MicIcon className="size-4 text-primary" />;
+  return <FileTextIcon className="size-4 text-primary" />;
+}
+
+function MessageMediaList({ parts }: { parts: MessageMediaPart[] }) {
+  if (parts.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      {parts.map((part, index) => {
+        const detail = [
+          part.durationSec ? `${part.durationSec}с` : null,
+          part.mimeType,
+          mediaRefLabel(part),
+        ].filter(Boolean).join(" · ");
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: media parts have no stable ids in stored meta
+          <div key={index} className="rounded-lg border bg-background/70 px-2.5 py-2">
+            <div className="flex items-start gap-2">
+              <MediaPartIcon kind={part.kind} />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium">{mediaKindLabel(part.kind)}</p>
+                {detail && (
+                  <p className="mt-0.5 break-all font-mono text-[10px] text-muted-foreground">
+                    {detail}
+                  </p>
+                )}
+                {part.caption && (
+                  <p className="mt-1 whitespace-pre-wrap break-words text-xs">{part.caption}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function maskPassport(value: string): string {
+  const compact = value.replace(/\s+/g, "");
+  return compact.length > 4 ? `**** ${compact.slice(-4)}` : compact;
+}
+
+function ConversationVerificationPanel({ attributesJson }: { attributesJson: string | null }) {
+  const attrs = parseJsonRecord(attributesJson);
+  const kyc = attrs.exchangeKyc && typeof attrs.exchangeKyc === "object" && !Array.isArray(attrs.exchangeKyc)
+    ? (attrs.exchangeKyc as Record<string, unknown>)
+    : {};
+  const passportName = [attrs.passport_family_name, attrs.passport_given_name]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ");
+  const passportNumber = typeof attrs.passport_number === "string" ? attrs.passport_number : null;
+  const passportExpiry = typeof attrs.passport_expiry === "string" ? attrs.passport_expiry : null;
+  const lastPhotoClass = typeof attrs.last_photo_class === "string" ? attrs.last_photo_class : null;
+  const status =
+    typeof kyc.status === "string"
+      ? kyc.status
+      : attrs.isVerified === true
+        ? "verified"
+        : passportName || passportNumber
+          ? "documents_received"
+          : null;
+  if (!status && !passportName && !passportNumber && !passportExpiry && !lastPhotoClass) return null;
+  const statusLabel: Record<string, string> = {
+    verified: "KYC OK",
+    documents_received: "Документы получены",
+    materials_requested: "Ждём материалы",
+    pending_review: "На проверке",
+    rejected: "Отклонён",
+  };
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+      <div className="flex items-center gap-2">
+        <ShieldCheckIcon className="size-4 text-primary" />
+        <span className="text-xs font-semibold">KYC / OCR</span>
+        {status && <Badge variant={status === "verified" ? "success" : status === "rejected" ? "destructive" : "warning"}>{statusLabel[status] ?? status}</Badge>}
+      </div>
+      <div className="space-y-1 text-xs">
+        {lastPhotoClass && (
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Последнее фото</span>
+            <span>{mediaKindLabel(lastPhotoClass)}</span>
+          </div>
+        )}
+        {passportName && (
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Паспорт</span>
+            <span className="text-right">{passportName}</span>
+          </div>
+        )}
+        {passportNumber && (
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Номер</span>
+            <span className="font-mono">{maskPassport(passportNumber)}</span>
+          </div>
+        )}
+        {passportExpiry && (
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">До</span>
+            <span>{passportExpiry}</span>
+          </div>
+        )}
+        {typeof kyc.reviewedAt === "number" && (
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Проверен</span>
+            <span>{fmtTime(kyc.reviewedAt)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function operatorBotLabel(meta: MessageMeta): string | null {
@@ -986,18 +1158,13 @@ export function SaasConversations() {
                           )}
                         >
                           {(() => {
-                            let voiceDuration: number | undefined;
-                            const voice = meta?.parts?.find((p) => p.kind === "voice");
-                            if (voice) voiceDuration = voice.durationSec;
-
-                            if (voiceDuration !== undefined || (!m.text && m.metaJson?.includes('"voice"'))) {
+                            const attachments = mediaParts(meta);
+                            if (attachments.length > 0) {
                               return (
-                                <span className="flex flex-col gap-1">
-                                  <span className="text-xs text-muted-foreground italic">
-                                    🎤 Голосовое{voiceDuration ? ` (${voiceDuration}с)` : ""}
-                                  </span>
-                                  {m.text && <span>{m.text}</span>}
-                                </span>
+                                <div className="space-y-2">
+                                  <MessageMediaList parts={attachments} />
+                                  {m.text && <div>{m.text}</div>}
+                                </div>
                               );
                             }
                             return m.text
@@ -1115,6 +1282,8 @@ export function SaasConversations() {
                   <p className="text-sm font-medium">{detail.conversation.contactName || "Без имени"}</p>
                   <p className="text-[11px] text-muted-foreground">ID: {detail.conversation.contactId}</p>
                 </div>
+
+                <ConversationVerificationPanel attributesJson={detail.conversation.contactAttributesJson} />
 
                 {contactLead ? (
                   <>

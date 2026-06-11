@@ -165,6 +165,7 @@ export function makeAdminConversationsRoutes(
           id: conversations.id,
           contactId: conversations.userId,
           contactName: contacts.displayName,
+          contactAttributesJson: contacts.attributesJson,
           source: conversations.source,
           mode: conversations.mode,
           status: conversations.status,
