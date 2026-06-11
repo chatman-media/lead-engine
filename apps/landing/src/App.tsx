@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import DemoConcierge from "./DemoConcierge.tsx";
 import DemoExchange from "./DemoExchange.tsx";
 import DemoExchangeWorkflow from "./DemoExchangeWorkflow.tsx";
@@ -309,11 +309,11 @@ function LandingRecruit() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LandingAnyBusiness />} />
+      <Route path="/" element={<LandingExchange />} />
       <Route path="/early-access" element={<EarlyAccess />} />
       <Route path="/signup" element={<EarlyAccess />} />
       <Route path="/alpha" element={<EarlyAccess />} />
-      <Route path="/exchange" element={<LandingExchange />} />
+      <Route path="/exchange" element={<Navigate to="/" replace />} />
       <Route path="/workflow" element={<LandingWorkflow />} />
       <Route path="/demo" element={<DemoExchange />} />
       <Route path="/demo/exchange" element={<DemoExchange />} />

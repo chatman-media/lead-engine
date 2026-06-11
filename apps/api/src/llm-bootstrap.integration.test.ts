@@ -37,6 +37,8 @@ import {
   makeRerankerResolver,
   makeSimChatResolver,
   makeSkillsResolver,
+  makeLeadFunnelResolver,
+  makeStageGuidanceResolver,
   makeStyleResolver,
   makeToolsResolver,
   resolveTenantStyle,
@@ -275,6 +277,89 @@ describe("makeAwaitingOperatorResolver", () => {
     if (!enabled) return;
     const r = makeAwaitingOperatorResolver(db);
     expect(await r({ tenantId, contactId: plainContactId })).toBe(false);
+  });
+});
+
+describe("makeLeadFunnelResolver / makeStageGuidanceResolver (мульти-воронка)", () => {
+  it("берёт воронку и guidance самого свежего ОТКРЫТОГО лида (терминальные игнорируются)", async () => {
+    if (!enabled) return;
+    const [tf] = await db
+      .insert(funnels)
+      .values({ tenantId, slug: "transfer", isActive: true, createdAt: n, updatedAt: n })
+      .returning({ id: funnels.id });
+    const [openStage] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId,
+        funnelId: tf!.id,
+        slug: "transfer_request",
+        displayName: "Заявка на трансфер",
+        kind: "intake",
+        stageType: "form_fill",
+        position: 0,
+        nextStages: [],
+        goal: "Собрать маршрут",
+        guidance: "Уточняй по одному",
+        createdAt: n,
+        updatedAt: n,
+      })
+      .returning({ id: stageDefinitions.id });
+    const [termStage] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId,
+        funnelId: tf!.id,
+        slug: "transfer_lost",
+        displayName: "Отменено",
+        kind: "terminal_lost",
+        stageType: "milestone",
+        position: 1,
+        nextStages: [],
+        goal: "терминальный goal — не должен попадать в промпт",
+        createdAt: n,
+        updatedAt: n,
+      })
+      .returning({ id: stageDefinitions.id });
+
+    const [c] = await db
+      .insert(contacts)
+      .values({ tenantId, displayName: "multi-funnel", createdAt: n })
+      .returning({ id: contacts.id });
+    // Старый ОТКРЫТЫЙ лид в transfer + более свежий ЗАКРЫТЫЙ — резолверы
+    // должны выбрать открытый, несмотря на updatedAt.
+    await db.insert(leads).values({
+      tenantId,
+      userId: c!.id,
+      state: "x",
+      stageDefinitionId: openStage!.id,
+      createdAt: n - 100,
+      updatedAt: n - 100,
+    });
+    await db.insert(leads).values({
+      tenantId,
+      userId: c!.id,
+      state: "x",
+      stageDefinitionId: termStage!.id,
+      createdAt: n + 50,
+      updatedAt: n + 50,
+    });
+
+    const funnelR = makeLeadFunnelResolver(db);
+    expect((await funnelR({ tenantId, contactId: c!.id }))?.slug).toBe("transfer");
+    const guidanceR = makeStageGuidanceResolver(db);
+    const guidance = await guidanceR({ tenantId, contactId: c!.id });
+    expect(guidance?.goal).toBe("Собрать маршрут");
+    expect(guidance?.guidance).toBe("Уточняй по одному");
+  });
+
+  it("контакт без лидов → null (guard остаётся включённым)", async () => {
+    if (!enabled) return;
+    const [c] = await db
+      .insert(contacts)
+      .values({ tenantId, displayName: "no-leads", createdAt: n })
+      .returning({ id: contacts.id });
+    const funnelR = makeLeadFunnelResolver(db);
+    expect(await funnelR({ tenantId, contactId: c!.id })).toBeNull();
   });
 });
 

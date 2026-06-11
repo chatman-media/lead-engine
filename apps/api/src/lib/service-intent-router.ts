@@ -1,4 +1,11 @@
-export type ServiceIntent = "exchange" | "real_estate" | "product" | "partner_service" | "unclear";
+export type ServiceIntent =
+  | "exchange"
+  | "transfer"
+  | "green_corridor"
+  | "real_estate"
+  | "product"
+  | "partner_service"
+  | "unclear";
 
 export interface RoutableFunnel {
   id: number;
@@ -27,15 +34,47 @@ export interface ServiceRouteSelection {
   funnel: RoutableFunnel | null;
   catalogItem: RoutableCatalogItem | null;
   intent: ServiceIntent;
+  /**
+   * true — каталог совпал или интент прямо указал на воронку;
+   * false — fallback на первую активную воронку (sticky-роутинг в
+   * field-extractor вправе остаться в воронке открытого лида).
+   */
+  matched: boolean;
 }
 
-const INTENT_PATTERNS: Array<{ intent: Exclude<ServiceIntent, "unclear">; words: RegExp[] }> = [
+const INTENT_PATTERNS: Array<{
+  intent: Exclude<ServiceIntent, "unclear">;
+  words: RegExp[];
+}> = [
   {
     intent: "exchange",
     words: [
       /\b(usdt|btc|eth|ton|rub|thb|usd|eur|trx|trc20|erc20)\b/i,
       /\b(exchange|swap|crypto|coin|rate|wallet|aml|kyc)\b/i,
       /(обмен|обменять|крипт|кошелек|кошелёк|курс|рубл|бат|доллар|тезер|юсдт|тон)/i,
+    ],
+  },
+  {
+    // ПЕРЕД transfer: vip/сопровождение/fast-track — коридор, а не такси.
+    intent: "green_corridor",
+    words: [
+      /зел[её]н(ый|ого|ому|ым)\s+коридор/i,
+      /\b(green\s*corridor|fast[\s-]?track)\b/i,
+      /\bvip\s*meet/i,
+      /(вип|vip)[\s-]?(встреч|сопровожд)/i,
+      /сопровожден[^.!?\n]{0,40}(аэропорт|термина|рейс)/i,
+      /(аэропорт|термина|рейс)[^.!?\n]{0,40}сопровожд/i,
+    ],
+  },
+  {
+    intent: "transfer",
+    words: [
+      /(трансфер|transfer)/i,
+      /\bairport\s*(pickup|taxi|shuttle)\b/i,
+      /(такси|машин[ау]|водител)[^.!?\n]{0,40}(аэропорт|встретить|подать)/i,
+      // «встретьте в аэропорту» без vip/сопровождения — подача машины.
+      /(встрет(ить|ьте|ите)|встреча)[^.!?\n]{0,40}(аэропорт|термина|рейс)/i,
+      /(довез(ти|ите)|отвез(ти|ите)|подвез)/i,
     ],
   },
   {
@@ -70,12 +109,14 @@ export function classifyServiceIntent(text: string): ServiceIntent {
   return "unclear";
 }
 
-export function chooseFunnelForIntent(
-  rows: RoutableFunnel[],
-  text: string,
-): RoutableFunnel | null {
+/**
+ * Прямое совпадение интента с воронкой (по slug/verticalTemplateId).
+ * null — интент не указал на конкретную воронку (unclear или нет такой воронки).
+ */
+export function matchFunnelForIntent(rows: RoutableFunnel[], text: string): RoutableFunnel | null {
   if (rows.length === 0) return null;
   const intent = classifyServiceIntent(text);
+  if (intent === "unclear") return null;
   const normalized = intent === "product" ? "saas" : intent;
   const direct = rows.find((f) => funnelMatches(f, normalized));
   if (direct) return direct;
@@ -83,7 +124,12 @@ export function chooseFunnelForIntent(
     const partner = rows.find((f) => funnelMatches(f, "partner"));
     if (partner) return partner;
   }
-  return rows[0] ?? null;
+  return null;
+}
+
+export function chooseFunnelForIntent(rows: RoutableFunnel[], text: string): RoutableFunnel | null {
+  if (rows.length === 0) return null;
+  return matchFunnelForIntent(rows, text) ?? rows[0] ?? null;
 }
 
 export function chooseServiceRoute(opts: {
@@ -99,19 +145,26 @@ export function chooseServiceRoute(opts: {
       funnel: resolveCatalogFunnel(opts.funnels, catalogItem),
       catalogItem,
       intent,
+      matched: true,
     };
   }
 
+  const matchedFunnel = matchFunnelForIntent(opts.funnels, opts.text);
   return {
     source: "intent",
-    funnel: chooseFunnelForIntent(opts.funnels, opts.text),
+    funnel: matchedFunnel ?? opts.funnels[0] ?? null,
     catalogItem: null,
     intent,
+    matched: matchedFunnel !== null,
   };
 }
 
 function funnelMatches(funnel: RoutableFunnel, token: string): boolean {
-  const haystack = `${funnel.slug} ${funnel.verticalTemplateId ?? ""}`.toLowerCase();
+  // Дефисы → подчёркивания: слаг "green-corridor" должен матчить токен
+  // интента "green_corridor".
+  const haystack = `${funnel.slug} ${funnel.verticalTemplateId ?? ""}`
+    .toLowerCase()
+    .replaceAll("-", "_");
   return haystack.includes(token);
 }
 
@@ -162,7 +215,9 @@ function tokenMatches(token: string, requestTokens: string[], normalizedText: st
   if (normalizedText.includes(token)) return true;
   if (token.length < 5) return false;
   const stem = token.slice(0, 5);
-  return requestTokens.some((requestToken) => requestToken.length >= 5 && requestToken.startsWith(stem));
+  return requestTokens.some(
+    (requestToken) => requestToken.length >= 5 && requestToken.startsWith(stem),
+  );
 }
 
 function normalizeForSearch(value: string): string {

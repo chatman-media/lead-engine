@@ -248,3 +248,11 @@ export {
 } from "./types.ts";
 export { withTenant } from "./with-tenant.ts";
 export { checkRlsEnforcement, type RlsRoleCheck } from "./rls-guard.ts";
+export {
+  ANY_QUOTE_CURRENCY_MENTION_RE,
+  KNOWN_QUOTE_CURRENCIES,
+  QUOTE_CURRENCY,
+  QUOTE_CURRENCY_CODES,
+  type QuoteCurrency,
+  resolveQuoteCurrency,
+} from "./exchange-quote-currency.ts";

@@ -2197,6 +2197,10 @@ export interface ExchangeSettings {
   rateRefreshSec: number;
   /** Порог «курсы устарели» (сек). null = авто (max(env, 3 × refresh)). */
   feedStaleSec: number | null;
+  /** Котируемая (локальная) валюта выдачи: PHP, THB, VND, IDR… */
+  quoteAsset?: string;
+  /** Коды для селекта (отдаёт GET; в PUT не передаётся). */
+  quoteAssetOptions?: string[];
 }
 
 export interface ExchangeRateCardProposal {

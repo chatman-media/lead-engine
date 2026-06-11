@@ -12,10 +12,11 @@ import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
+import { resolveQuoteCurrency } from "@chatman-media/conversation-engine";
 import {
   buildDefaultRateCardProposal,
   fetchMarketBaseRate,
-  fetchMarketThbPerUnit,
+  fetchMarketQuotePerUnit,
   isRateSane,
   isRefreshDue,
   refreshAllActiveTenants,
@@ -23,6 +24,10 @@ import {
   refreshTenantRates,
   renderRateCardMessage,
 } from "./rate-feed.ts";
+
+// Тесты исторически написаны под THB; валюта теперь per-tenant (дефолт PHP),
+// поэтому передаём THB явно.
+const THB = resolveQuoteCurrency("THB");
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -53,10 +58,10 @@ function mockFetch(opts: { fx?: Record<string, number> | "bad"; binance?: Record
   }) as unknown as typeof fetch;
 }
 
-describe("fetchMarketThbPerUnit — FX error (кэш пуст, идёт первым)", () => {
+describe("fetchMarketQuotePerUnit — FX error (кэш пуст, идёт первым)", () => {
   it("плохой ответ FX → throw", async () => {
     mockFetch({ fx: "bad" });
-    await expect(fetchMarketThbPerUnit("USDT")).rejects.toThrow(/FX feed: bad response/);
+    await expect(fetchMarketQuotePerUnit("USDT", "THB")).rejects.toThrow(/FX feed: bad response/);
   });
 });
 
@@ -82,31 +87,31 @@ describe("isRefreshDue", () => {
   });
 });
 
-describe("fetchMarketThbPerUnit / fetchMarketBaseRate", () => {
+describe("fetchMarketQuotePerUnit / fetchMarketBaseRate", () => {
   it("USDT/USD → THB per USD", async () => {
     mockFetch({ fx: { THB: 35, RUB: 90, EUR: 0.9 } });
-    expect(await fetchMarketThbPerUnit("usdt")).toBe(35);
-    expect(await fetchMarketThbPerUnit("USD")).toBe(35);
+    expect(await fetchMarketQuotePerUnit("usdt", "THB")).toBe(35);
+    expect(await fetchMarketQuotePerUnit("USD", "THB")).toBe(35);
   });
   it("EUR/RUB → конвертация через USD", async () => {
     mockFetch({ fx: { THB: 35, RUB: 90, EUR: 0.9 } });
-    expect(await fetchMarketThbPerUnit("EUR")).toBeCloseTo(35 / 0.9, 4);
-    expect(await fetchMarketThbPerUnit("RUB")).toBeCloseTo(35 / 90, 6);
+    expect(await fetchMarketQuotePerUnit("EUR", "THB")).toBeCloseTo(35 / 0.9, 4);
+    expect(await fetchMarketQuotePerUnit("RUB", "THB")).toBeCloseTo(35 / 90, 6);
   });
   it("BTC/ETH → Binance × THB", async () => {
     mockFetch({ fx: { THB: 35 }, binance: { BTC: "60000", ETH: "3000" } });
-    expect(await fetchMarketThbPerUnit("BTC")).toBe(60000 * 35);
-    expect(await fetchMarketThbPerUnit("ETH")).toBe(3000 * 35);
+    expect(await fetchMarketQuotePerUnit("BTC", "THB")).toBe(60000 * 35);
+    expect(await fetchMarketQuotePerUnit("ETH", "THB")).toBe(3000 * 35);
   });
   it("неподдержанный актив → null", async () => {
     mockFetch({ fx: { THB: 35, RUB: 90, EUR: 0.9 } });
-    expect(await fetchMarketThbPerUnit("DOGE")).toBeNull();
+    expect(await fetchMarketQuotePerUnit("DOGE", "THB")).toBeNull();
   });
-  it("fetchMarketBaseRate divide → 1/thbPerUnit", async () => {
+  it("fetchMarketBaseRate divide → 1/quotePerUnit", async () => {
     mockFetch({ fx: { THB: 35, RUB: 90 } });
-    const div = await fetchMarketBaseRate("RUB", "divide");
+    const div = await fetchMarketBaseRate("RUB", "divide", "THB");
     expect(div).toBeCloseTo(90 / 35, 4); // 1 / (35/90)
-    const mul = await fetchMarketBaseRate("USDT", "multiply");
+    const mul = await fetchMarketBaseRate("USDT", "multiply", "THB");
     expect(mul).toBe(35);
   });
 });
@@ -130,18 +135,20 @@ describe("renderRateCardMessage", () => {
         tiers: [{ minThb: 2000, maxThb: null, displayRate: 31.4, deviationPct: 1, formula: "" }],
         message: "",
       },
-    ]);
+    ], THB);
     expect(msg).toContain("АКТУАЛЬНЫЙ КУРС");
     expect(msg).toContain("RUB // Баты");
     expect(msg).toContain("USDT // Баты");
     expect(msg).toContain("2.6");
+    // Валюта-параметр меняет слово на табло (per-tenant, дефолт PHP).
+    expect(renderRateCardMessage([], resolveQuoteCurrency("PHP"))).toContain("АКТУАЛЬНЫЙ КУРС");
   });
 });
 
 describe("buildDefaultRateCardProposal", () => {
   it("строит RUB(divide) + USDT(multiply) предложения с message", async () => {
     mockFetch({ fx: { THB: 35, RUB: 90 } });
-    const proposals = await buildDefaultRateCardProposal();
+    const proposals = await buildDefaultRateCardProposal(THB);
     expect(proposals.map((p) => p.asset).sort()).toEqual(["RUB", "USDT"]);
     expect(proposals[0]!.tiers.length).toBeGreaterThan(0);
     expect(proposals[0]!.message).toContain("АКТУАЛЬНЫЙ КУРС");

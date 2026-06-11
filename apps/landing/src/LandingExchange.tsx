@@ -13,7 +13,7 @@ const CONTENT = {
   ru: {
     nav: { cta: "Попробовать бесплатно" },
     hero: {
-      badge: "Пхукет · крипто / рубли / наличные → THB",
+      badge: "Telegram · крипто / рубли / наличные → PHP / THB",
       headline: ["AI-ассистент для ", "обменного пункта", ", который не теряет клиентов"],
       sub: "Отвечает на запросы в Telegram за 30 секунд. Уточняет актив, сеть и сумму. Подтверждает курс — и ведёт клиента до выдачи наличных THB через банкомат.",
       ctaPrimary: "Попробовать бесплатно",
@@ -46,6 +46,75 @@ const CONTENT = {
       {
         title: "Оператор подтверждает и выдаёт QR",
         desc: "Клиент присылает пруф (tx hash или скрин перевода). Оператор генерирует cardless-withdrawal QR и отправляет клиенту через admin-панель — без перехвата чата.",
+      },
+    ],
+    workflowLabel: "Воркфлоу",
+    workflowTitle: "Как бот ведёт сделку — от «привет» до выдачи",
+    workflowSub:
+      "Полный регламент обменника, зашитый в воронки. Каждый шаг виден оператору в CRM, рискованные точки — только через человека.",
+    workflowPhases: [
+      {
+        title: "Понимание",
+        accent: "#6366f1",
+        steps: [
+          { title: "Telegram с менеджер-аккаунта", desc: "Бот отвечает клиентам от лица менеджера — мгновенно, 24/7." },
+          { title: "Распознаёт запрос", desc: "Обмен, вопрос про курс, трансфер или зелёный коридор — каждый интент уходит в свою воронку." },
+          { title: "Направление и сумма", desc: "Уточняет актив, сеть (TRC20/ERC20) и сумму обмена по одному вопросу." },
+        ],
+      },
+      {
+        title: "Курс и проверка",
+        accent: "#f59e0b",
+        steps: [
+          { title: "Курс по вашей формуле", desc: "Считает от базового рыночного курса с вашими девиациями по диапазонам сумм — и показывает итог к получению." },
+          { title: "Верификация", desc: "Проверяет KYC-статус; новых клиентов отправляет на быструю верификацию и возвращает к обмену." },
+          { title: "Риск-чек", desc: "Перед созданием заявки оценивает риск; сомнительное — оператору." },
+        ],
+      },
+      {
+        title: "Сделка",
+        accent: "#10b981",
+        steps: [
+          { title: "Заявка с фиксацией курса", desc: "Создаёт заявку, фиксирует котировку с ограниченным сроком действия." },
+          { title: "Реквизиты по API", desc: "Получает реквизиты от партнёров по API и отправляет клиенту с TTL." },
+          { title: "Квитанция и банк", desc: "Просит чек, проверяет его и автоопределяет банк-отправитель." },
+          { title: "Выдача", desc: "После подтверждения оплаты — наличные в офисе, банкомат без карты или перевод на местный банк." },
+        ],
+      },
+      {
+        title: "Контроль и рост",
+        accent: "#06b6d4",
+        steps: [
+          { title: "CRM оборотов", desc: "Сколько всего поменяно — по дням, направлениям и клиентам." },
+          { title: "CRM каждого обмена", desc: "Кто менял, Telegram ID, ID верификации, время, сумма, направление, данные квитанции." },
+          { title: "Напоминания", desc: "Начал обмен и пропал — бот напомнит сам, до автозакрытия заявки." },
+          { title: "Кросс-сейл по прилёту", desc: "«Прилетаю 15-го» — бот предложит трансфер и зелёный коридор." },
+        ],
+      },
+    ],
+    servicesLabel: "Три сервиса",
+    servicesTitle: "Обмен, трансфер и зелёный коридор — в одном боте",
+    services: [
+      {
+        icon: "💱",
+        title: "Обмен валют",
+        desc: "Крипта и рубли → наличные песо или баты: курс по формуле, KYC, риск-чек, реквизиты и выдача.",
+        ctaLabel: "Живое демо обмена →",
+        ctaHref: "/demo/workflows/exchange",
+      },
+      {
+        icon: "🚐",
+        title: "Трансфер из аэропорта",
+        desc: "Рейс, терминал, машина: бот собирает заявку, оператор подтверждает цену, водитель встречает с табличкой.",
+        ctaLabel: "Живое демо трансфера →",
+        ctaHref: "/demo/workflows/transfer",
+      },
+      {
+        icon: "🛂",
+        title: "Зелёный коридор",
+        desc: "VIP-встреча у выхода с рейса, fast-track паспортного контроля и сопровождение — бот ведёт заявку от рейса до встречи.",
+        ctaLabel: "Записаться на демо →",
+        ctaHref: DEMO_URL,
       },
     ],
     whyLabel: "Почему exchanges·agency",
@@ -115,7 +184,7 @@ const CONTENT = {
   en: {
     nav: { cta: "Try Free" },
     hero: {
-      badge: "Phuket · crypto / rubles / cash → THB",
+      badge: "Telegram · crypto / rubles / cash → PHP / THB",
       headline: ["AI Assistant for ", "Currency Exchange", " That Never Misses a Client"],
       sub: "Responds to Telegram inquiries in 30 seconds. Confirms asset, network, and amount. Locks in the rate — and guides the client to THB cash via ATM cardless withdrawal.",
       ctaPrimary: "Try Free",
@@ -148,6 +217,75 @@ const CONTENT = {
       {
         title: "Operator confirms and sends QR",
         desc: "Client sends proof (tx hash or transfer screenshot). Operator generates cardless-withdrawal QR and sends it via the admin panel — without taking over the chat.",
+      },
+    ],
+    workflowLabel: "Workflow",
+    workflowTitle: "How the bot runs a deal — from “hi” to payout",
+    workflowSub:
+      "Your full exchange playbook, encoded into funnels. Every step is visible to the operator in the CRM; risky moments always go through a human.",
+    workflowPhases: [
+      {
+        title: "Understanding",
+        accent: "#6366f1",
+        steps: [
+          { title: "Telegram manager account", desc: "The bot replies on behalf of your manager — instantly, 24/7." },
+          { title: "Detects the intent", desc: "Exchange, rate question, airport transfer or green corridor — each intent lands in its own funnel." },
+          { title: "Direction & amount", desc: "Clarifies asset, network (TRC20/ERC20) and amount, one question at a time." },
+        ],
+      },
+      {
+        title: "Quote & checks",
+        accent: "#f59e0b",
+        steps: [
+          { title: "Rate by your formula", desc: "Computed from the live market base rate with your tiered deviations — final payout shown to the client." },
+          { title: "Verification", desc: "Checks KYC status; first-timers are routed through quick verification and back to the exchange." },
+          { title: "Risk screening", desc: "Every order is risk-checked before creation; anything suspicious goes to the operator." },
+        ],
+      },
+      {
+        title: "The deal",
+        accent: "#10b981",
+        steps: [
+          { title: "Order with locked rate", desc: "Creates the order and locks the quote with a TTL." },
+          { title: "Requisites via API", desc: "Fetches payment details from partners via API and sends them with an expiry." },
+          { title: "Receipt & bank", desc: "Asks for the receipt, verifies it and auto-detects the sending bank." },
+          { title: "Payout", desc: "After payment confirmation — office cash, cardless ATM or local bank transfer." },
+        ],
+      },
+      {
+        title: "Control & growth",
+        accent: "#06b6d4",
+        steps: [
+          { title: "Turnover CRM", desc: "Total exchanged — by day, direction and client." },
+          { title: "Per-deal CRM", desc: "Who exchanged, Telegram ID, verification ID, time, amount, direction, receipt data." },
+          { title: "Reminders", desc: "Started an exchange and went quiet? The bot follows up before the order auto-closes." },
+          { title: "Arrival cross-sell", desc: "“Landing on the 15th” — the bot offers a transfer and the green corridor." },
+        ],
+      },
+    ],
+    servicesLabel: "Three services",
+    servicesTitle: "Exchange, transfer and green corridor — one bot",
+    services: [
+      {
+        icon: "💱",
+        title: "Currency exchange",
+        desc: "Crypto and rubles → pesos or baht in cash: formula-based rate, KYC, risk check, requisites and payout.",
+        ctaLabel: "Live exchange demo →",
+        ctaHref: "/demo/workflows/exchange",
+      },
+      {
+        icon: "🚐",
+        title: "Airport transfer",
+        desc: "Flight, terminal, vehicle: the bot collects the request, the operator confirms the price, the driver meets with a name sign.",
+        ctaLabel: "Live transfer demo →",
+        ctaHref: "/demo/workflows/transfer",
+      },
+      {
+        icon: "🛂",
+        title: "Green corridor",
+        desc: "VIP meet at the gate, fast-track passport control and escort — the bot runs the request from flight number to the meeting.",
+        ctaLabel: "Book a demo →",
+        ctaHref: DEMO_URL,
       },
     ],
     whyLabel: "Why exchanges·agency",
@@ -261,6 +399,65 @@ export default function LandingExchange() {
                 <div className="step-num">{i + 1}</div>
                 <div className="step-title">{step.title}</div>
                 <p className="step-desc">{step.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section" id="workflow">
+        <div className="container">
+          <div className="section-label">{c.workflowLabel}</div>
+          <h2 className="section-title">{c.workflowTitle}</h2>
+          <p className="section-sub" style={{ margin: "0 auto 28px", textAlign: "center" }}>
+            {c.workflowSub}
+          </p>
+          <div className="demo-board">
+            {c.workflowPhases.map((phase, pIdx) => (
+              <div key={phase.title} className="demo-col">
+                <div className="demo-col-head">
+                  <span className="demo-col-dot" style={{ background: phase.accent }} />
+                  {phase.title}
+                  <span className="demo-col-count">{phase.steps.length}</span>
+                </div>
+                {phase.steps.map((step, sIdx) => (
+                  <div
+                    key={step.title}
+                    className="demo-card"
+                    style={{ borderLeftColor: phase.accent }}
+                  >
+                    <div className="demo-card-top">
+                      <span className="demo-card-who">
+                        {c.workflowPhases
+                          .slice(0, pIdx)
+                          .reduce((n, p) => n + p.steps.length, 0) +
+                          sIdx +
+                          1}
+                        . {step.title}
+                      </span>
+                    </div>
+                    <div className="demo-card-meta">{step.desc}</div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section section-alt" id="services">
+        <div className="container">
+          <div className="section-label">{c.servicesLabel}</div>
+          <h2 className="section-title">{c.servicesTitle}</h2>
+          <div className="moats">
+            {c.services.map((s) => (
+              <div key={s.title} className="moat">
+                <div className="moat-icon">{s.icon}</div>
+                <div className="moat-title">{s.title}</div>
+                <p className="moat-desc">{s.desc}</p>
+                <a href={s.ctaHref} className="btn btn-secondary" style={{ marginTop: 12 }}>
+                  {s.ctaLabel}
+                </a>
               </div>
             ))}
           </div>

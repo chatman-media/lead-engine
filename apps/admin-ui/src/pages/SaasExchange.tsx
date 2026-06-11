@@ -200,18 +200,18 @@ const REQUISITE_GROUPS: Array<{ title: string; fields: RequisiteField[] }> = [
     ],
   },
   {
-    title: "Выдача THB",
+    title: "Выдача средств",
     fields: [
       {
         key: "exchange_payout_bank_methods",
         label: "Банки",
-        savedLabel: "Выдача THB — банки",
-        placeholder: "Bangkok Bank, Kasikorn, SCB...",
+        savedLabel: "Выдача — банки",
+        placeholder: "BDO, BPI, GCash / Bangkok Bank, Kasikorn...",
       },
       {
         key: "exchange_payout_cash_methods",
         label: "Наличные / офис / курьер",
-        savedLabel: "Выдача THB — наличные",
+        savedLabel: "Выдача — наличные",
         placeholder: "office cash, courier cash, cardless ATM...",
       },
     ],
@@ -270,7 +270,7 @@ const REQUISITE_TYPES = REQUISITE_GROUPS.flatMap((group) => group.fields);
 
 const LEGACY_REQUISITE_LABELS: Record<string, string> = {
   exchange_operator_contact: "Контакт оператора",
-  exchange_payout_methods: "Выдача THB: банки / наличные",
+  exchange_payout_methods: "Выдача: банки / наличные",
   exchange_rub_card_requisites: "RUB карта / телефон",
 };
 
@@ -297,13 +297,29 @@ function formatRate(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-function renderRange(min: number, max: number | null): string {
-  const fmt = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
-  if (max === null) return `от${fmt(min)} бат`;
-  return `от${fmt(min)} до${fmt(max)} бат`;
+interface QuoteMeta {
+  word: string;
+  tablo: string;
+  flag: string;
+}
+const QUOTE_META: Record<string, QuoteMeta> = {
+  PHP: { word: "песо", tablo: "Песо", flag: "🇵🇭" },
+  THB: { word: "бат", tablo: "Баты", flag: "🇹🇭" },
+  VND: { word: "донг", tablo: "Донги", flag: "🇻🇳" },
+  IDR: { word: "рупий", tablo: "Рупии", flag: "🇮🇩" },
+};
+function quoteMeta(code: string): QuoteMeta {
+  return QUOTE_META[code] ?? { word: code, tablo: code, flag: "" };
 }
 
-function renderRateCardMessage(proposals: ExchangeRateCardProposal[]): string {
+function renderRange(min: number, max: number | null, word: string): string {
+  const fmt = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+  if (max === null) return `от${fmt(min)} ${word}`;
+  return `от${fmt(min)} до${fmt(max)} ${word}`;
+}
+
+function renderRateCardMessage(proposals: ExchangeRateCardProposal[], quote: string): string {
+  const q = quoteMeta(quote);
   const rub = proposals.find((p) => p.asset === "RUB");
   const usdt = proposals.find((p) => p.asset === "USDT");
   const lines = ["🙏 АКТУАЛЬНЫЙ КУРС НА СЕГОДНЯ 🙏", ""];
@@ -311,7 +327,7 @@ function renderRateCardMessage(proposals: ExchangeRateCardProposal[]): string {
     rub.tiers.forEach((tier, idx) => {
       const marker = idx === 0 ? ">" : idx === 1 ? "-" : "<";
       lines.push(
-        `🇷🇺RUB // Баты - ${formatRate(tier.displayRate)} ${marker} (${renderRange(tier.minThb, tier.maxThb)}🇹🇭`,
+        `🇷🇺RUB // ${q.tablo} - ${formatRate(tier.displayRate)} ${marker} (${renderRange(tier.minThb, tier.maxThb, q.word)}${q.flag}`,
       );
     });
     lines.push("***", "", "🏪💲———💳💳 💰 💳💳———💲🏪", "");
@@ -319,7 +335,7 @@ function renderRateCardMessage(proposals: ExchangeRateCardProposal[]): string {
   if (usdt) {
     usdt.tiers.forEach((tier) => {
       lines.push(
-        `💲USDT // Баты < ${formatRate(tier.displayRate)} - (${renderRange(tier.minThb, tier.maxThb)})🇹🇭`,
+        `💲USDT // ${q.tablo} < ${formatRate(tier.displayRate)} - (${renderRange(tier.minThb, tier.maxThb, q.word)})${q.flag}`,
       );
     });
     lines.push(
@@ -357,7 +373,19 @@ const STALE_PRESETS = [
   { sec: 1800, label: "30 мин" },
   { sec: 3600, label: "1 час" },
 ];
-const DEFAULT_SETTINGS: ExchangeSettings = { rateRefreshSec: 180, feedStaleSec: null };
+const QUOTE_ASSET_LABELS: Record<string, string> = {
+  PHP: "🇵🇭 PHP — песо (Филиппины)",
+  THB: "🇹🇭 THB — бат (Таиланд)",
+  VND: "🇻🇳 VND — донг (Вьетнам)",
+  IDR: "🇮🇩 IDR — рупия (Индонезия)",
+};
+const DEFAULT_QUOTE_ASSET_OPTIONS = Object.keys(QUOTE_ASSET_LABELS);
+const DEFAULT_SETTINGS: ExchangeSettings = {
+  rateRefreshSec: 180,
+  feedStaleSec: null,
+  quoteAsset: "PHP",
+  quoteAssetOptions: DEFAULT_QUOTE_ASSET_OPTIONS,
+};
 
 export function SaasExchange() {
   const navigate = useNavigate();
@@ -376,6 +404,8 @@ export function SaasExchange() {
   const [refreshing, setRefreshing] = useState(false);
   const [settings, setSettings] = useState<ExchangeSettings>(DEFAULT_SETTINGS);
   const [savingSettings, setSavingSettings] = useState(false);
+  // Котируемая валюта тенанта — для подписи оборота, табло и дефолтов направлений.
+  const quoteCode = settings.quoteAsset ?? "PHP";
 
   // Произвольное направление обмена (помимо табло RUB/USDT→THB)
   const [addingRate, setAddingRate] = useState(false);
@@ -473,7 +503,10 @@ export function SaasExchange() {
     setSavingSettings(true);
     try {
       const r = await saas.saveExchangeSettings(settings);
-      setSettings(r.settings);
+      setSettings((s) => ({
+        ...r.settings,
+        quoteAssetOptions: s.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS,
+      }));
       toast.success("Настройки обновления сохранены");
     } catch (err) {
       if (!handle401(err)) {
@@ -521,7 +554,7 @@ export function SaasExchange() {
         });
         return { ...p, tiers };
       });
-      setRateCardMessage(renderRateCardMessage(next));
+      setRateCardMessage(renderRateCardMessage(next, quoteCode));
       return next;
     });
   }
@@ -548,7 +581,7 @@ export function SaasExchange() {
           ],
         };
       });
-      setRateCardMessage(renderRateCardMessage(next));
+      setRateCardMessage(renderRateCardMessage(next, quoteCode));
       return next;
     });
   }
@@ -558,7 +591,7 @@ export function SaasExchange() {
       const next = prev.map((p, i) =>
         i === pIdx ? { ...p, tiers: p.tiers.filter((_, j) => j !== tIdx) } : p,
       );
-      setRateCardMessage(renderRateCardMessage(next));
+      setRateCardMessage(renderRateCardMessage(next, quoteCode));
       return next;
     });
   }
@@ -675,7 +708,7 @@ export function SaasExchange() {
         <div className="grid grid-cols-3 gap-3">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Оборот (THB)</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">Оборот ({quoteCode})</CardTitle>
             </CardHeader>
             <CardContent className="text-2xl font-semibold">
               {Math.round(turnover.totals.totalThb || 0).toLocaleString("ru-RU")}
@@ -714,12 +747,32 @@ export function SaasExchange() {
             <CardHeader>
               <CardTitle className="text-base">Обновление курсов с рынка</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Как часто авто-курсы подтягиваются с рынка. Реальная цена меняется раз в
-                ~10–15 мин, поэтому чаще обычно не нужно — настройка полезнее, чтобы обновлять
-                реже (стабильнее котировки) под вашу пару.
+                Валюта выдачи — локальная валюта, в которой бот считает и выдаёт котировки
+                (песо, баты…). После смены валюты пересоздайте курсы ниже через «Курсы обмена
+                по диапазонам». Частота — как часто авто-курсы подтягиваются с рынка. Реальная
+                цена меняется раз в ~10–15 мин, поэтому чаще обычно не нужно — настройка
+                полезнее, чтобы обновлять реже (стабильнее котировки) под вашу пару.
               </p>
             </CardHeader>
             <CardContent className="flex flex-wrap items-end gap-4">
+              <div className="space-y-1.5">
+                <Label>Валюта выдачи</Label>
+                <Select
+                  value={settings.quoteAsset ?? "PHP"}
+                  onValueChange={(v) => setSettings((s) => ({ ...s, quoteAsset: v }))}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS).map((code) => (
+                      <SelectItem key={code} value={code}>
+                        {QUOTE_ASSET_LABELS[code] ?? code}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label>Частота обновления</Label>
                 <Select
@@ -803,19 +856,21 @@ export function SaasExchange() {
                         <div className="flex items-center justify-between border-b px-3 py-2">
                           <span className="text-sm font-medium">
                             {p.asset === "RUB"
-                              ? "🇷🇺 RUB → THB"
+                              ? `🇷🇺 RUB → ${quoteCode}`
                               : p.asset === "USDT"
-                                ? "💲 USDT → THB"
-                                : `${p.asset} → THB`}
+                                ? `💲 USDT → ${quoteCode}`
+                                : `${p.asset} → ${quoteCode}`}
                           </span>
                           <span className="text-xs text-muted-foreground">
                             рынок: {p.marketRate}{" "}
-                            {p.quoteMode === "divide" ? `${p.asset}/THB` : `THB/${p.asset}`}
+                            {p.quoteMode === "divide"
+                              ? `${p.asset}/${quoteCode}`
+                              : `${quoteCode}/${p.asset}`}
                           </span>
                         </div>
                         <div className="grid grid-cols-[1fr_1fr_5rem_3rem_1.5rem] gap-2 px-3 py-1.5 text-xs text-muted-foreground">
-                          <span>от (THB)</span>
-                          <span>до (THB)</span>
+                          <span>от ({quoteCode})</span>
+                          <span>до ({quoteCode})</span>
                           <span>курс</span>
                           <span className="text-right">откл.</span>
                           <span />
@@ -916,7 +971,7 @@ export function SaasExchange() {
               <div>
                 <CardTitle className="text-base">Другие направления обмена</CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  Любая пара помимо табло: USDT→RUB, BTC→THB, EUR→THB и т.д.
+                  Любая пара помимо табло: USDT→RUB, BTC→{quoteCode}, EUR→{quoteCode} и т.д.
                 </p>
               </div>
               {!addingRate && (
@@ -949,7 +1004,7 @@ export function SaasExchange() {
                   <div className="space-y-1">
                     <Label className="text-xs">Получает клиент</Label>
                     <Select
-                      value={rateForm.quoteAsset || "THB"}
+                      value={rateForm.quoteAsset || quoteCode}
                       onValueChange={(v) => setRateForm({ ...rateForm, quoteAsset: v })}
                     >
                       <SelectTrigger>
@@ -1181,7 +1236,7 @@ export function SaasExchange() {
                     <TableHead>#</TableHead>
                     <TableHead>Направление</TableHead>
                     <TableHead>Сумма</TableHead>
-                    <TableHead>THB</TableHead>
+                    <TableHead>{quoteCode}</TableHead>
                     <TableHead>Статус</TableHead>
                     <TableHead>Шаг</TableHead>
                     <TableHead>TG / Верификация</TableHead>
@@ -1502,7 +1557,7 @@ function OrderRow({
         </div>
         {order.amountMode === "target_thb" && (
           <div className="text-[10px] text-muted-foreground">
-            запрошено {order.requestedAmount} THB
+            запрошено {order.requestedAmount} {order.direction?.split("->")[1] ?? ""}
           </div>
         )}
       </TableCell>
@@ -1707,7 +1762,7 @@ function KycContactsCard() {
               <TableHead>ID верификации</TableHead>
               <TableHead>Проверен</TableHead>
               <TableHead className="text-right">Заявок</TableHead>
-              <TableHead className="text-right">Оборот THB</TableHead>
+              <TableHead className="text-right">Оборот</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

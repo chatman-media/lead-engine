@@ -13,6 +13,7 @@ const STATE: ExchangePolicyState = {
 	order: {
 		id: 77,
 		status: "awaiting_payment",
+		direction: "RUB->THB",
 		assetFrom: "RUB",
 		network: "",
 		amountMode: "source_amount",

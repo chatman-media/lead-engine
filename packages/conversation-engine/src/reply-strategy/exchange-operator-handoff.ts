@@ -1,5 +1,6 @@
 import type { OperatorHandoffMeta } from "@chatman-media/channel-core";
 import type { AnswerTelemetry } from "@chatman-media/kb";
+import { QUOTE_CURRENCY } from "../exchange-quote-currency.ts";
 import type { ExchangeOrderPolicyState, ExchangePolicyState } from "./exchange-policy-guard.ts";
 
 type ToolTelemetry = Pick<AnswerTelemetry, "toolCall" | "toolCalls"> | null | undefined;
@@ -50,9 +51,11 @@ function resultNeedsOperator(result: Record<string, unknown> | null): boolean {
 
 function amountLabel(order: ExchangeOrderPolicyState | null | undefined): string {
 	if (!order) return "";
+	// Валюта — из направления заявки ("RUB->PHP"); фоллбэк — платформенный дефолт.
+	const quoteCode = order.direction?.split("->")[1] || QUOTE_CURRENCY.code;
 	const parts = [
 		order.amountFrom ? `${order.amountFrom} ${order.assetFrom ?? ""}`.trim() : "",
-		order.amountToThb ? `${order.amountToThb} THB` : "",
+		order.amountToThb ? `${order.amountToThb} ${quoteCode}` : "",
 	].filter(Boolean);
 	return parts.join(" → ");
 }
@@ -161,7 +164,7 @@ function buildOfficeHandoff(
 		reason: "office_payout",
 		title: "Подтвердить выдачу в офисе",
 		action:
-			"Подтвердить выбранный офис, окно получения, наличие THB/код выдачи и отправить клиенту финальные инструкции.",
+			`Подтвердить выбранный офис, окно получения, наличие ${QUOTE_CURRENCY.code}/код выдачи и отправить клиенту финальные инструкции.`,
 		priority: "high",
 		...(order?.id ? { orderId: order.id } : {}),
 		...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
