@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.31.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.30.0...@chatman-media/storage-v1.31.0) (2026-06-11)
+
+
+### Features
+
+* **exchange:** add silent auto handoff setting ([#571](https://github.com/chatman-media/lead-engine/issues/571)) ([7a961b5](https://github.com/chatman-media/lead-engine/commit/7a961b53306fb6b0b25d0141e04a42ca234cf430))
+
 # [@chatman-media/storage-v1.30.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.29.1...@chatman-media/storage-v1.30.0) (2026-06-11)
 
 
