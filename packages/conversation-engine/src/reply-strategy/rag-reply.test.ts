@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test";
 import { makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
+import type { MessageRow } from "../dal/messages.ts";
 import { normalizeReplyStrategyResult } from "../process-inbound.ts";
 import { EXCHANGE_PAYMENT_FALLBACK } from "./exchange-policy-guard.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
@@ -117,9 +118,43 @@ const STYLE: ResolvedStyleAssignment = {
 function fakeMessages(
 	opts: { recent?: unknown[]; count?: number } = {},
 ): RagTurnContext["messages"] {
+  const rows = () =>
+    (opts.recent ?? []).map((item, index) => {
+      const row = item as Partial<MessageRow>;
+      return {
+        id: row.id ?? index + 1,
+        tenantId: row.tenantId ?? 1,
+        conversationId: row.conversationId ?? 100,
+        role: row.role ?? "user",
+        text: row.text ?? "",
+        tgMessageId: row.tgMessageId ?? null,
+        metaJson: row.metaJson ?? null,
+        createdAt: row.createdAt ?? 1700000000 + index,
+        stage: row.stage ?? null,
+        deletedAt: row.deletedAt ?? null,
+      } as MessageRow;
+    });
   return {
-    recent: async () => opts.recent ?? [],
-    countByConversation: async () => opts.count ?? 0,
+    recent: async (_conversationId: number, limit: number) => rows().slice(-limit),
+    countByConversation: async () => opts.count ?? rows().length,
+    forConversationSummary: async (
+      _conversationId: number,
+      summaryOpts: {
+        afterMessageId?: number | null;
+        beforeMessageId: number;
+        limit: number;
+      },
+    ) =>
+      rows()
+        .filter(
+          (item) =>
+            item.id < summaryOpts.beforeMessageId &&
+            (summaryOpts.afterMessageId == null ||
+              item.id > summaryOpts.afterMessageId) &&
+            item.deletedAt == null &&
+            item.role !== "system",
+        )
+        .slice(0, summaryOpts.limit),
     insert: async () => ({ id: 1 }),
   } as never;
 }
@@ -198,6 +233,53 @@ describe("RagReplyStrategy.generate", () => {
     expect(system).toContain("BROKERED ORDER CONTEXT");
     expect(system).toContain("order #12");
     expect(system).toContain("status=offer_ready");
+  });
+
+  it("injects rolling summary into RAG prompt and excludes current message by id", async () => {
+    const chat = new CapturingRagChat("Курс 36.5 бат за USDT, без комиссии");
+    let savedJson = "";
+    const s = mk(
+      ctxWith({
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { id: 1, role: "user", text: "старый вопрос" },
+            { id: 2, role: "assistant", text: "старый ответ" },
+            { id: 3, role: "user", text: "старое уточнение" },
+            { id: 4, role: "assistant", text: "сырой ответ" },
+            { id: 5, role: "user", text: "сырой вопрос" },
+            { id: 6, role: "user", text: QUESTION },
+          ],
+          count: 6,
+        }),
+        conversations: {
+          findById: async () => ({ summaryJson: null }),
+          setSummaryJson: async (_id: number, json: string) => {
+            savedJson = json;
+          },
+        } as never,
+      }),
+      { historyLimit: 2, compactAfterMessages: 3, reflect: false },
+    );
+
+    const r = await s.generate({ ...baseInput(), userMessageId: 6 });
+
+    expect(r).not.toBeNull();
+    const finalMessages = chat.lastCall?.messages ?? [];
+    const system = finalMessages[0]?.content ?? "";
+    expect(system).toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
+    expect(system).toContain("Курс 36.5 бат за USDT, без комиссии");
+    expect(finalMessages).toContainEqual({
+      role: "assistant",
+      content: "сырой ответ",
+    });
+    expect(finalMessages).toContainEqual({
+      role: "user",
+      content: "сырой вопрос",
+    });
+    expect(finalMessages).toContainEqual({ role: "user", content: QUESTION });
+    expect(JSON.parse(savedJson)).toMatchObject({ throughMessageId: 3 });
   });
 
   it("uses resolved KB scope for RAG retrieval", async () => {
@@ -500,6 +582,63 @@ describe("RagReplyStrategy.generate", () => {
     });
 	    expect(normalized?.autoTakeover).toBe(true);
 	  });
+
+	it("exchange: amount request computes quote without exposing rate", async () => {
+		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
+		let seenArgs: unknown = null;
+		const recorded: Array<
+			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				tools: [
+					{
+						name: "compute_exchange_quote",
+						description: "compute quote",
+						parameters: {},
+						execute: async (args: unknown) => {
+							seenArgs = args;
+							return {
+								direction: "RUB->PHP",
+								asset: "RUB",
+								quoteAsset: "PHP",
+								amountMode: "source_amount",
+								amountFrom: 10000,
+								rate: 1.230575,
+								amountToThb: 8126,
+							};
+						},
+					},
+				] as never,
+			}),
+			{
+				reflect: false,
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+		);
+
+		const r = await s.generate({
+			...baseInput(),
+			userMessageText: "10к рублей",
+		});
+
+		expect(firstReplyText(r)).toBe("Получите 8126 PHP.");
+		expect(firstReplyText(r).toLowerCase()).not.toContain("курс");
+		expect(chat.lastCall).toBeNull();
+		expect(seenArgs).toMatchObject({
+			asset: "RUB",
+			amount: 10000,
+			amountMode: "source_amount",
+		});
+		expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe(
+			"compute_exchange_quote",
+		);
+	});
 
 	it("exchange: confirmation after quote creates order preflight and asks for KYC", async () => {
 		const chat = new CapturingRagChat("Сейчас снова посчитаю.");

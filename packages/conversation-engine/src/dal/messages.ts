@@ -1,5 +1,5 @@
 import { messages as messagesTable } from "@chatman-media/storage";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface MessageRow {
@@ -114,5 +114,38 @@ export class MessagesRepo {
         ),
       );
     return row?.count ?? 0;
+  }
+
+  /**
+   * Старое окно сообщений для rolling-summary: все non-deleted, non-system
+   * сообщения afterMessageId < id < beforeMessageId, oldest → newest.
+   */
+  async forConversationSummary(
+    conversationId: number,
+    opts: {
+      afterMessageId?: number | null;
+      beforeMessageId: number;
+      limit: number;
+    },
+  ): Promise<MessageRow[]> {
+    if (opts.limit <= 0) return [];
+    const filters = [
+      eq(messagesTable.tenantId, this.ctx.tenantId),
+      eq(messagesTable.conversationId, conversationId),
+      isNull(messagesTable.deletedAt),
+      sql`role <> 'system'`,
+      lt(messagesTable.id, opts.beforeMessageId),
+    ];
+    if (opts.afterMessageId !== undefined && opts.afterMessageId !== null) {
+      filters.push(gt(messagesTable.id, opts.afterMessageId));
+    }
+
+    const rows = await this.ctx.db
+      .select()
+      .from(messagesTable)
+      .where(and(...filters))
+      .orderBy(asc(messagesTable.id))
+      .limit(opts.limit);
+    return rows as MessageRow[];
   }
 }

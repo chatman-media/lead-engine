@@ -17,6 +17,10 @@ describe("exchange tool stage policy", () => {
 		expect(guardExchangeToolForStage("compute_exchange_quote", "exchange_request")).toBeNull();
 	});
 
+	it("allows quote recalculation while KYC is pending", () => {
+		expect(guardExchangeToolForStage("compute_exchange_quote", "kyc_collection")).toBeNull();
+	});
+
 	it("blocks requisites before order_created/requisites_sent", () => {
 		const denied = guardExchangeToolForStage("fetch_exchange_requisites", "quote_calculated");
 		expect(denied).toMatchObject({

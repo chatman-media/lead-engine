@@ -8,6 +8,12 @@ import {
 } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
+import {
+  loadRollingConversationContext,
+  messageRowsToChatHistory,
+  renderConversationSummaryBlock,
+} from "../conversation-summary.ts";
+import type { ConversationsRepo } from "../dal/conversations.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import {
 	ANY_QUOTE_CURRENCY_MENTION_RE,
@@ -48,7 +54,6 @@ import {
  *   - KB search + chunks в контекст
  *   - sales-style selection и A/B routing
  *   - memory extraction в contacts.attributes_json
- *   - conversation summarization для длинных history
  *   - extractFields hook на user message
  *   - photo/voice handling (сейчас игнорируем, нет multimodal через chat)
  *
@@ -65,8 +70,8 @@ export interface LlmReplyStrategyOpts {
    */
   resolveTemplate?: (tenantId: number) => VerticalTemplate | null | undefined;
   /**
-   * Лимит сообщений в history-prompt'е. Default 20.
-   * При больших значениях нужен conversation summary (следующая итерация).
+   * Лимит сырых сообщений в history-prompt'е. Default 20. Старые сообщения
+   * при наличии conversationsRepoFor сворачиваются в rolling summary.
    */
   historyLimit?: number;
   /** Per-call temperature, default 0.7. */
@@ -140,17 +145,12 @@ export interface LlmReplyStrategyOpts {
     toolCalls: readonly ToolCallRecord[];
 		guardFindings?: readonly ExchangeResponseGuardFinding[];
   }) => Promise<void> | void;
-}
-
-function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
-  const out: ChatMessage[] = [];
-  for (const m of history) {
-    if (m.role === "user") out.push({ role: "user", content: m.text });
-    else if (m.role === "assistant" || m.role === "human")
-      out.push({ role: "assistant", content: m.text });
-    // 'system' уже отфильтрован в MessagesRepo.recent.
-  }
-  return out;
+  /**
+   * Conversation compaction threshold. Default 20. Отключить: 0 или Infinity.
+   */
+  compactAfterMessages?: number;
+  /** Hard cap for injected conversation summary. Default 600 chars. */
+  summaryMaxChars?: number;
 }
 
 type ExchangeQuoteArgs = {
@@ -380,26 +380,15 @@ function forcedExchangeQuoteText(result: unknown): string | null {
   if (!result || typeof result !== "object") return null;
   const row = result as Record<string, unknown>;
   if (typeof row.error === "string") return row.error;
-  const asset = typeof row.asset === "string" ? row.asset : null;
-  const rate = numberLike(row.rate);
-  const amountFrom = numberLike(row.amountFrom);
   const amountToThb = numberLike(row.amountToThb);
-	const network =
-		typeof row.network === "string" && row.network ? row.network : null;
-	if (!asset || rate === null || amountFrom === null || amountToThb === null)
-		return null;
+	if (amountToThb === null) return null;
 	// Валюта тенанта — из результата инструмента (quoteAsset или хвост direction).
 	const directionQuote =
 		typeof row.direction === "string" ? row.direction.split("->")[1] : null;
 	const currency = resolveQuoteCurrency(
 		typeof row.quoteAsset === "string" ? row.quoteAsset : directionQuote,
 	);
-  const networkLabel = network ? ` (${network})` : "";
-  return [
-    `Курс: ${rate}.`,
-    `За ${amountFrom} ${asset}${networkLabel} получите ${amountToThb} ${currency.code}.`,
-    `Если подходит, напишите, как хотите получить ${currency.wordGen}: офис, банкомат, курьер или ${currency.bankLabel}.`,
-  ].join("\n");
+	return `Получите ${amountToThb} ${currency.code}.`;
 }
 
 async function maybeForceExchangeQuoteReply(
@@ -467,6 +456,9 @@ export class LlmReplyStrategy implements ReplyStrategy {
   constructor(
     private readonly opts: LlmReplyStrategyOpts,
     private readonly messagesRepoFor: (tenantId: number) => MessagesRepo,
+    private readonly conversationsRepoFor?: (
+      tenantId: number,
+    ) => ConversationsRepo,
   ) {}
 
   async generate(input: {
@@ -476,6 +468,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
     contactId: number;
     inbound: { externalUserId: string };
     userMessageText: string;
+    userMessageId?: number;
   }): Promise<ReplyStrategyResult> {
     if (input.userMessageText.length === 0) return null;
     const tenantId = input.tenant.tenantId;
@@ -490,14 +483,24 @@ export class LlmReplyStrategy implements ReplyStrategy {
       if (isSupport) return null;
     }
 
-    const messages = this.messagesRepoFor(tenantId);
-		const history = await messages.recent(
-			input.conversationId,
-			this.opts.historyLimit ?? 20,
-		);
-    const historyMessages = messagesToChatHistory(history);
-
     const chat = this.opts.resolveChat(tenantId);
+    const messages = this.messagesRepoFor(tenantId);
+    const { history, conversationSummary } =
+      await loadRollingConversationContext({
+        conversationId: input.conversationId,
+        messages,
+        conversations: this.conversationsRepoFor?.(tenantId) ?? null,
+        chat,
+        options: {
+          recentWindow: this.opts.historyLimit ?? 20,
+          summarizeAfterMessages: this.opts.compactAfterMessages ?? 20,
+          summaryMaxChars: this.opts.summaryMaxChars ?? 600,
+        },
+        onWarn: (_message, err) => {
+          console.warn("[llm-reply] conversation summary failed:", err);
+        },
+      });
+    const historyMessages = messageRowsToChatHistory(history);
     const llmOpts = {
       temperature: this.opts.temperature ?? 0.7,
       numPredict: this.opts.maxOutputTokens ?? 600,
@@ -652,6 +655,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
       LLM_REPLY_BASE_SYSTEM_PROMPT,
       toolsActive ? LLM_REPLY_TOOLS_SYSTEM_FRAGMENT : "",
       serviceOrderContext?.trim(),
+      renderConversationSummaryBlock(conversationSummary),
       template.systemPromptFragment,
     ]
       .filter(Boolean)

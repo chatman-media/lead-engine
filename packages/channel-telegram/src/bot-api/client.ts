@@ -27,6 +27,13 @@ interface TgResponse<T> {
   description?: string;
 }
 
+function toArrayBuffer(bytes: ArrayBuffer | Uint8Array): ArrayBuffer {
+  if (bytes instanceof ArrayBuffer) return bytes;
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 export class TelegramClient {
   private readonly token: string;
   private readonly baseUrl: string;
@@ -39,13 +46,7 @@ export class TelegramClient {
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
-  private async call<T>(method: string, params: Record<string, unknown>): Promise<T> {
-    const url = `${this.baseUrl}/bot${this.token}/${method}`;
-    const res = await this.fetchImpl(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(params),
-    });
+  private async parseResponse<T>(method: string, res: Response): Promise<T> {
     let body: TgResponse<T>;
     try {
       body = (await res.json()) as TgResponse<T>;
@@ -66,6 +67,46 @@ export class TelegramClient {
       );
     }
     return body.result;
+  }
+
+  private async call<T>(method: string, params: Record<string, unknown>): Promise<T> {
+    const url = `${this.baseUrl}/bot${this.token}/${method}`;
+    const res = await this.fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    return this.parseResponse<T>(method, res);
+  }
+
+  private async callMultipart<T>(
+    method: string,
+    params: Record<string, unknown>,
+    file: {
+      field: string;
+      bytes: ArrayBuffer | Uint8Array;
+      filename: string;
+      contentType?: string;
+    },
+  ): Promise<T> {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined) continue;
+      form.append(key, String(value));
+    }
+    form.append(
+      file.field,
+      new Blob([toArrayBuffer(file.bytes)], {
+        type: file.contentType ?? "application/octet-stream",
+      }),
+      file.filename,
+    );
+    const url = `${this.baseUrl}/bot${this.token}/${method}`;
+    const res = await this.fetchImpl(url, {
+      method: "POST",
+      body: form,
+    });
+    return this.parseResponse<T>(method, res);
   }
 
   getMe(): Promise<TgUser> {
@@ -157,6 +198,72 @@ export class TelegramClient {
     return this.call<TgSendMessageResult>("sendVideo", params);
   }
 
+  sendVideoNote(input: {
+    chatId: number | string;
+    videoNoteFileId: string;
+  }): Promise<TgSendMessageResult> {
+    return this.call<TgSendMessageResult>("sendVideoNote", {
+      chat_id: input.chatId,
+      video_note: input.videoNoteFileId,
+    });
+  }
+
+  sendPhotoUpload(input: {
+    chatId: number | string;
+    bytes: ArrayBuffer | Uint8Array;
+    filename: string;
+    contentType?: string;
+    caption?: string;
+  }): Promise<TgSendMessageResult> {
+    return this.callMultipart<TgSendMessageResult>(
+      "sendPhoto",
+      { chat_id: input.chatId, caption: input.caption },
+      {
+        field: "photo",
+        bytes: input.bytes,
+        filename: input.filename,
+        contentType: input.contentType,
+      },
+    );
+  }
+
+  sendVideoUpload(input: {
+    chatId: number | string;
+    bytes: ArrayBuffer | Uint8Array;
+    filename: string;
+    contentType?: string;
+    caption?: string;
+  }): Promise<TgSendMessageResult> {
+    return this.callMultipart<TgSendMessageResult>(
+      "sendVideo",
+      { chat_id: input.chatId, caption: input.caption },
+      {
+        field: "video",
+        bytes: input.bytes,
+        filename: input.filename,
+        contentType: input.contentType,
+      },
+    );
+  }
+
+  sendVideoNoteUpload(input: {
+    chatId: number | string;
+    bytes: ArrayBuffer | Uint8Array;
+    filename: string;
+    contentType?: string;
+  }): Promise<TgSendMessageResult> {
+    return this.callMultipart<TgSendMessageResult>(
+      "sendVideoNote",
+      { chat_id: input.chatId },
+      {
+        field: "video_note",
+        bytes: input.bytes,
+        filename: input.filename,
+        contentType: input.contentType,
+      },
+    );
+  }
+
   /**
    * Send a video from a local file on disk (not a Telegram `file_id`).
    * Bot API supports this via multipart upload, but our funnel goes through
@@ -183,6 +290,25 @@ export class TelegramClient {
     };
     if (input.caption) params.caption = input.caption;
     return this.call<TgSendMessageResult>("sendDocument", params);
+  }
+
+  sendDocumentUpload(input: {
+    chatId: number | string;
+    bytes: ArrayBuffer | Uint8Array;
+    filename: string;
+    contentType?: string;
+    caption?: string;
+  }): Promise<TgSendMessageResult> {
+    return this.callMultipart<TgSendMessageResult>(
+      "sendDocument",
+      { chat_id: input.chatId, caption: input.caption },
+      {
+        field: "document",
+        bytes: input.bytes,
+        filename: input.filename,
+        contentType: input.contentType,
+      },
+    );
   }
 
   /**

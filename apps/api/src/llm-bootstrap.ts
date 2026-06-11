@@ -1171,6 +1171,7 @@ export function makeReplyStrategy(
 					recordToolCalls: makeToolCallRecorder(db, "llm_reply"),
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
+				(tenantId: number) => new ConversationsRepo({ db, tenantId }),
 			),
 			invalidateToolsFor: invalidateTools, // exchange/booking tools без RAG
 			invalidateStyleFor: () => {}, // LlmReplyStrategy resolves no styles
