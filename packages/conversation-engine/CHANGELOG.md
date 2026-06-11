@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.4.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.4.1...@chatman-media/conversation-engine-v3.4.2) (2026-06-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** open conversation notifications by target ([#586](https://github.com/chatman-media/lead-engine/issues/586)) ([c07f87e](https://github.com/chatman-media/lead-engine/commit/c07f87e97f88be116fdc23b76cf4f3bbc97c0ad5))
+
 # [@chatman-media/conversation-engine-v3.4.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.4.0...@chatman-media/conversation-engine-v3.4.1) (2026-06-11)
 
 
