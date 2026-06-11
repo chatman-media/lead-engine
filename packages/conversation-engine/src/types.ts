@@ -47,6 +47,8 @@ export interface ProcessInboundResult {
    * Когда deferReply=false (default) — поле не выставляется.
    */
   userMessageText?: string;
+  /** ID persisted user message. Used by reply strategies to exclude current turn from history by cursor. */
+  userMessageId?: number;
   /** True если только media без caption (бот не должен отвечать). */
   mediaOnly?: boolean;
   /**

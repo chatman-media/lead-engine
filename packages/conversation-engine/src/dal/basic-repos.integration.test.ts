@@ -221,6 +221,15 @@ describe("MessagesRepo", () => {
 		const recent = await messagesRepo().recent(conversationId, 10);
 		expect(recent.map((m) => m.text)).toEqual(["hello", "reply"]);
 		expect(await messagesRepo().countByConversation(conversationId)).toBe(2);
+		const summaryWindow = await messagesRepo().forConversationSummary(
+			conversationId,
+			{
+				afterMessageId: user.id - 1,
+				beforeMessageId: user.id + 10,
+				limit: 10,
+			},
+		);
+		expect(summaryWindow.map((m) => m.text)).toEqual(["hello", "reply"]);
 	});
 });
 

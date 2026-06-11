@@ -69,9 +69,37 @@ class ToolLoopChat implements ChatClient {
   }
 }
 
+class SequencedChat implements ChatClient {
+  calls: ChatMessage[][] = [];
+  constructor(private readonly replies: string[]) {}
+
+  async complete(messages: ChatMessage[]): Promise<string> {
+    this.calls.push(messages);
+    return this.replies.shift() ?? "";
+  }
+}
+
 function fakeMessagesRepo(history: MessageRow[]) {
   return {
-    recent: async () => history,
+    recent: async (_conversationId: number, limit: number) => history.slice(-limit),
+    countByConversation: async () => history.length,
+    forConversationSummary: async (
+      _conversationId: number,
+      opts: {
+        afterMessageId?: number | null;
+        beforeMessageId: number;
+        limit: number;
+      },
+    ) =>
+      history
+        .filter(
+          (item) =>
+            item.id < opts.beforeMessageId &&
+            (opts.afterMessageId == null || item.id > opts.afterMessageId) &&
+            item.deletedAt == null &&
+            item.role !== "system",
+        )
+        .slice(0, opts.limit),
   } as unknown as MessagesRepo;
 }
 
@@ -166,6 +194,59 @@ describe("LlmReplyStrategy", () => {
       { role: "assistant", content: "Добрый день!" },
       { role: "user", content: "Расскажите про условия" },
     ]);
+  });
+
+  it("injects rolling conversation summary and keeps only recent raw history", async () => {
+    const chat = new SequencedChat(["обсудили старые условия", "Продолжим."]);
+    const repo = fakeMessagesRepo([
+      row(1, "user", "старый вопрос про условия"),
+      row(2, "assistant", "старый ответ"),
+      row(3, "user", "ещё старый факт"),
+      row(4, "assistant", "сырой контекст"),
+      row(5, "user", "текущий вопрос"),
+    ]);
+    let savedJson = "";
+    const strategy = new LlmReplyStrategy(
+      {
+        template: TEMPLATE,
+        resolveChat: () => chat,
+        historyLimit: 2,
+        compactAfterMessages: 3,
+      },
+      () => repo,
+      () =>
+        ({
+          findById: async () => ({ summaryJson: null }),
+          setSummaryJson: async (_id: number, json: string) => {
+            savedJson = json;
+          },
+        }) as never,
+    );
+
+    const envelopes = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 7,
+      inbound: { externalUserId: "u1" },
+      userMessageText: "текущий вопрос",
+      userMessageId: 5,
+    });
+
+    expect(firstReplyText(envelopes)).toBe("Продолжим.");
+    expect(chat.calls).toHaveLength(2);
+    const finalMessages = chat.calls[1] ?? [];
+    const system = finalMessages[0]?.content ?? "";
+    expect(system).toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
+    expect(system).toContain("обсудили старые условия");
+    expect(finalMessages.slice(1)).toEqual([
+      { role: "assistant", content: "сырой контекст" },
+      { role: "user", content: "текущий вопрос" },
+    ]);
+    expect(JSON.parse(savedJson)).toMatchObject({
+      summary: "обсудили старые условия",
+      throughMessageId: 3,
+    });
   });
 
   it("конвертит role='human' (operator) в 'assistant' для LLM", async () => {
@@ -461,11 +542,10 @@ describe("LlmReplyStrategy", () => {
       userMessageText: "500 USDT TRC20 на баты, какой курс?",
     });
 
-	    expect(result).not.toBeNull();
-	    const text = firstReplyText(result);
-	    expect(text).toContain("Курс: 31.5.");
-	    expect(text).toContain("За 500 USDT (TRC20) получите 15750 THB.");
-    expect(chat.lastCall).toBeNull();
+		    expect(result).not.toBeNull();
+		    const text = firstReplyText(result);
+		    expect(text).toBe("Получите 15750 THB.");
+	    expect(chat.lastCall).toBeNull();
     expect(recorded[0]?.toolCalls[0]).toMatchObject({
       name: "compute_exchange_quote",
       args: { asset: "USDT", amount: 500, network: "TRC20" },
@@ -542,13 +622,11 @@ describe("LlmReplyStrategy", () => {
       contactId: 1,
       inbound: { externalUserId: "u" },
       userMessageText: userText,
-    });
+	    });
 
-	    expect(result).not.toBeNull();
-	    expect(firstReplyText(result)).toContain(
-	      "За 500 USDT (TRC20) получите 15750 THB.",
-	    );
-    expect(chat.lastCall).toBeNull();
+		    expect(result).not.toBeNull();
+		    expect(firstReplyText(result)).toBe("Получите 15750 THB.");
+	    expect(chat.lastCall).toBeNull();
 		expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
 			asset: "USDT",
 			amount: 500,
@@ -587,13 +665,11 @@ describe("LlmReplyStrategy", () => {
       contactId: 1,
       inbound: { externalUserId: "u" },
       userMessageText: "15750 бат за 500 USDT? Точно?",
-    });
+	    });
 
-	    expect(result).not.toBeNull();
-	    expect(firstReplyText(result)).toContain(
-	      "За 500 USDT (TRC20) получите 15750 THB.",
-	    );
-		expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
+		    expect(result).not.toBeNull();
+		    expect(firstReplyText(result)).toBe("Получите 15750 THB.");
+			expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
 			asset: "USDT",
 			amount: 500,
 		});

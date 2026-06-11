@@ -127,6 +127,15 @@ export {
 export { loadExperimentVariants } from "./experiment-router.ts";
 export { compactConversation } from "./compact-conversation.ts";
 export {
+  loadRollingConversationContext,
+  messageRowsToChatHistory,
+  parseConversationSummaryPayload,
+  renderConversationSummaryBlock,
+  type ConversationSummaryPayload,
+  type RollingConversationContext,
+  type RollingConversationSummaryOptions,
+} from "./conversation-summary.ts";
+export {
   LlmMemoryExtractor,
   type MemoryExtractor,
   runMemoryExtraction,

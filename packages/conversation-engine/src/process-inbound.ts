@@ -56,6 +56,7 @@ export interface ReplyStrategy {
     contactId: number;
     inbound: Inbound;
     userMessageText: string;
+    userMessageId?: number;
   }): Promise<ReplyStrategyResult>;
 }
 
@@ -629,6 +630,7 @@ export async function processInbound(
       persisted: !existingMsg,
       outboundEnqueued: 0,
       userMessageText: text,
+      userMessageId: messageId,
       mediaOnly,
       postProcessingDeferred,
       previousStage: conversation.currentStage,
@@ -648,6 +650,7 @@ export async function processInbound(
         contactId: contact.id,
         inbound,
         userMessageText: text,
+        userMessageId: messageId,
       }),
     );
     if (
@@ -741,6 +744,7 @@ export async function processInbound(
     ...(deps.deferPostProcessing
       ? {
           userMessageText: text,
+          userMessageId: messageId,
           mediaOnly,
           postProcessingDeferred,
           previousStage: conversation.currentStage,

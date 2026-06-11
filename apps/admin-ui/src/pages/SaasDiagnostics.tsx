@@ -13,6 +13,7 @@ const CHECK_LABELS: Record<string, string> = {
   "llm.chat": "LLM (chat)",
   "llm.ping": "LLM live ping",
   "llm.embed": "LLM (embed)",
+  "llm.embed_ping": "LLM embed live ping",
   tenant_secrets: "Шифрование секретов",
 };
 
