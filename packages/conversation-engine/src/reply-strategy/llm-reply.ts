@@ -14,12 +14,19 @@ import {
 	QUOTE_CURRENCY,
 	resolveQuoteCurrency,
 } from "../exchange-quote-currency.ts";
-import type { ReplyStrategy } from "../process-inbound.ts";
+import type {
+  ReplyStrategy,
+  ReplyStrategyOutput,
+  ReplyStrategyResult,
+} from "../process-inbound.ts";
 import {
   LLM_REPLY_BASE_SYSTEM_PROMPT,
   LLM_REPLY_TOOLS_SYSTEM_FRAGMENT,
 } from "../prompts/llm-reply.ts";
-import { buildExchangeOperatorHandoff } from "./exchange-operator-handoff.ts";
+import {
+  buildExchangeGenericOperatorHandoff,
+  buildExchangeOperatorHandoff,
+} from "./exchange-operator-handoff.ts";
 import {
   type ExchangePolicyState,
   guardExchangePolicy,
@@ -104,6 +111,11 @@ export interface LlmReplyStrategyOpts {
 		conversationId: number;
 		contactId: number;
 	}) => Promise<boolean> | boolean;
+	resolveExchangeCustomerNoticeEnabled?: (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+	}) => Promise<boolean> | boolean;
   /**
    * Опциональный резолвер agentic-инструментов (напр. расчёт курса обмена).
    * Если задан и вернул непустой список, а ChatClient умеет completeWithTools —
@@ -142,9 +154,15 @@ function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
 }
 
 type ExchangeQuoteArgs = {
-  asset: string;
-  amount: number;
-  network?: string;
+	asset: string;
+	amount: number;
+	network?: string;
+};
+
+type ExchangeOrderArgs = ExchangeQuoteArgs & {
+	amountMode?: "source_amount" | "target_thb";
+	paymentMethod?: string;
+	payoutMethod?: string;
 };
 
 type AmountCandidate = {
@@ -164,6 +182,8 @@ const EXCHANGE_QUOTE_INTENT_RE =
 // в разных валютах (per-tenant настройка), guard ловит все.
 const EXCHANGE_OUTPUT_CURRENCY_RE = ANY_QUOTE_CURRENCY_MENTION_RE;
 const EXCHANGE_CONFIRMATION_RE = /точно|верно|правильно/i;
+const EXCHANGE_ORDER_CONFIRMATION_RE =
+	/^(?=.{1,80}$)(?:\s*(?:да|давай|ок|okay|окей|супер|подходит|годится|готов|готовы|оформляй|оформляем|делаем|поехали|подтверждаю)[!.,\s]*)+$/i;
 const EXCHANGE_KYC_TOPIC_RE = /верификац|kyc|документ|паспорт|видео|кружок/i;
 const EXCHANGE_KYC_MATERIAL_SENT_RE =
   /(?:отправил|отправила|прислал|прислала|загрузил|загрузила|вот|держи|лови)[^.!\n]{0,80}(?:видео|кружок|документ|паспорт)|(?:видео|кружок|документ|паспорт)[^.!\n]{0,80}(?:отправил|отправила|прислал|прислала|загрузил|загрузила)/i;
@@ -172,6 +192,39 @@ const EXCHANGE_KYC_HANDOFF_TEXT = [
   "Пришлите короткое видео: лицо и документ в кадре. Оператор или внешний сервис проведёт проверку личности.",
   `После проверки продолжим заявку: способ получения ${QUOTE_CURRENCY.wordGen}, реквизиты и финальное подтверждение.`,
 ].join("\n");
+
+function exchangeReplyOutput(input: {
+  channelId: number;
+  externalUserId: string;
+  text: string;
+  operatorHandoff: ReturnType<typeof buildExchangeOperatorHandoff>;
+  customerNoticeEnabled: boolean;
+}): OutboundEnvelope[] | ReplyStrategyOutput {
+  if (!input.operatorHandoff) {
+    return [
+      {
+        channelId: String(input.channelId),
+        externalUserId: input.externalUserId,
+        parts: [{ kind: "text", text: input.text }],
+      },
+    ];
+  }
+  const envelopes = input.customerNoticeEnabled
+    ? [
+        {
+          channelId: String(input.channelId),
+          externalUserId: input.externalUserId,
+          parts: [{ kind: "text" as const, text: input.text }],
+        },
+      ]
+    : [];
+  return {
+    envelopes,
+    operatorHandoffs: [input.operatorHandoff],
+    autoTakeover: true,
+    customerNoticeSent: envelopes.length > 0,
+  };
+}
 
 function assetMentionRe(asset: string): RegExp {
   switch (asset) {
@@ -209,7 +262,8 @@ function amountCandidates(text: string, asset: string): AmountCandidate[] {
     if (!Number.isFinite(n) || n <= 0) continue;
 
     let score = 0;
-    const multiplier = /тыс|к\b|k\b/.test(after) ? 1000 : 1;
+    const afterTrimmed = after.trimStart();
+    const multiplier = /тыс/i.test(afterTrimmed) || /^[кk](?:\b|\s|$)/iu.test(afterTrimmed) ? 1000 : 1;
     const window = `${before}${raw}${after}`;
     if (assetRe.test(window)) score += 5;
     if (/(?:^|\s)за\s*$/iu.test(before) || /\bза\b/iu.test(before)) score += 2;
@@ -221,7 +275,13 @@ function amountCandidates(text: string, asset: string): AmountCandidate[] {
 
 function hasExchangeStartIntent(text: string): boolean {
   const lower = text.toLowerCase();
-  return lower.includes("обмен") || lower.includes("помен");
+  return (
+    lower.includes("обмен") ||
+    lower.includes("помен") ||
+    lower.includes("меняю") ||
+    lower.includes("отдаю") ||
+    lower.includes("нужн")
+  );
 }
 
 function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
@@ -268,7 +328,42 @@ function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
         : /bep[\s-]?20|bsc/i.test(text)
         ? "BEP20"
         : undefined;
-  return { asset, amount: best.amount, ...(network ? { network } : {}) };
+	  return { asset, amount: best.amount, ...(network ? { network } : {}) };
+	}
+
+function parsePayoutMethod(text: string): string | undefined {
+	if (/банкомат|atm/i.test(text)) return "atm";
+	if (/офис/i.test(text)) return "office_cash";
+	if (/курьер/i.test(text)) return "courier_cash";
+	if (/тайск(?:ий|ого)?\s+банк|thai\s+bank|банк(?:овск)?(?:ий)?\s+сч[её]т/i.test(text))
+		return "thai_bank_transfer";
+	return undefined;
+}
+
+function recentExchangeOrderArgs(
+	userMessageText: string,
+	history: MessageRow[],
+): ExchangeOrderArgs | null {
+	const texts = [
+		userMessageText,
+		...history
+			.filter((message) => message.role === "user")
+			.map((message) => message.text)
+			.reverse(),
+	];
+	let payoutMethod: string | undefined;
+	for (const text of texts) {
+		payoutMethod ??= parsePayoutMethod(text);
+		const quoteArgs = parseExchangeQuoteArgs(text);
+		if (quoteArgs) {
+			return {
+				...quoteArgs,
+				amountMode: "source_amount",
+				...(payoutMethod ? { payoutMethod } : {}),
+			};
+		}
+	}
+	return null;
 }
 
 function numberLike(value: unknown): number | null {
@@ -324,6 +419,40 @@ async function maybeForceExchangeQuoteReply(
     text,
     toolCalls: [{ name: quoteTool.name, args, result, cycle: 0 }],
   };
+	}
+
+function forcedExchangeOrderText(result: unknown): string | null {
+	if (!result || typeof result !== "object") return null;
+	const row = result as Record<string, unknown>;
+	if (typeof row.instructions === "string" && row.instructions.trim()) {
+		return row.instructions.trim();
+	}
+	if (typeof row.error === "string" && row.error.trim()) return row.error.trim();
+	if (row.orderId !== undefined) {
+		return "Заявка создана. Сейчас подготовлю следующий шаг.";
+	}
+	return null;
+}
+
+async function maybeForceExchangeOrderReply(
+	userMessageText: string,
+	history: MessageRow[],
+	tools: AnyRagTool[],
+	state: ExchangePolicyState | null,
+): Promise<ExchangeForcedReply | null> {
+	if (state?.stageSlug !== "quote_calculated") return null;
+	if (!EXCHANGE_ORDER_CONFIRMATION_RE.test(userMessageText.trim())) return null;
+	const orderTool = tools.find((tool) => tool.name === "create_exchange_order");
+	if (!orderTool) return null;
+	const args = recentExchangeOrderArgs(userMessageText, history);
+	if (!args) return null;
+	const result = await orderTool.execute(args);
+	const text = forcedExchangeOrderText(result);
+	if (!text) return null;
+	return {
+		text,
+		toolCalls: [{ name: orderTool.name, args, result, cycle: 0 }],
+	};
 }
 
 function maybeForceExchangeKycReply(
@@ -347,7 +476,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
     contactId: number;
     inbound: { externalUserId: string };
     userMessageText: string;
-  }): Promise<OutboundEnvelope[] | null> {
+  }): Promise<ReplyStrategyResult> {
     if (input.userMessageText.length === 0) return null;
     const tenantId = input.tenant.tenantId;
 		const template =
@@ -400,14 +529,10 @@ export class LlmReplyStrategy implements ReplyStrategy {
         )
       : null;
 
-    const isExchange = template.slug === "exchange_v1";
-    const forcedExchangeReply = isExchange
-      ? ((await maybeForceExchangeQuoteReply(input.userMessageText, tools)) ??
-        maybeForceExchangeKycReply(input.userMessageText))
-      : null;
-    const exchangePolicyState =
-      isExchange && this.opts.resolveExchangePolicyState
-        ? await Promise.resolve(
+	    const isExchange = template.slug === "exchange_v1";
+	    const exchangePolicyState =
+	      isExchange && this.opts.resolveExchangePolicyState
+	        ? await Promise.resolve(
             this.opts.resolveExchangePolicyState({
               tenantId,
               conversationId: input.conversationId,
@@ -419,8 +544,18 @@ export class LlmReplyStrategy implements ReplyStrategy {
 							err,
 						);
             return null;
-          })
-      : null;
+	          })
+	      : null;
+	    const forcedExchangeReply = isExchange
+	      ? ((await maybeForceExchangeOrderReply(
+					input.userMessageText,
+					history,
+					tools,
+					exchangePolicyState,
+				)) ??
+	        (await maybeForceExchangeQuoteReply(input.userMessageText, tools)) ??
+	        maybeForceExchangeKycReply(input.userMessageText))
+	      : null;
 		const exchangeGuardEnabled =
 			isExchange && this.opts.resolveExchangeResponseGuardEnabled
 				? await Promise.resolve(
@@ -432,6 +567,22 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					).catch((err) => {
 						console.warn(
 							"[llm-reply] failed to resolve exchange response guard flag:",
+							err,
+						);
+						return true;
+					})
+				: true;
+		const exchangeCustomerNoticeEnabled =
+			isExchange && this.opts.resolveExchangeCustomerNoticeEnabled
+				? await Promise.resolve(
+						this.opts.resolveExchangeCustomerNoticeEnabled({
+							tenantId,
+							conversationId: input.conversationId,
+							contactId: input.contactId,
+						}),
+					).catch((err) => {
+						console.warn(
+							"[llm-reply] failed to resolve exchange handoff notice setting:",
 							err,
 						);
 						return true;
@@ -482,15 +633,19 @@ export class LlmReplyStrategy implements ReplyStrategy {
         text: guarded.text,
         telemetry,
         state: exchangePolicyState,
+      }) ?? (guarded.action === "escalate" || guarded.action === "block"
+        ? buildExchangeGenericOperatorHandoff({
+            state: exchangePolicyState,
+            context: guarded.reason ?? null,
+          })
+        : null);
+      return exchangeReplyOutput({
+        channelId: input.channel.channelId,
+        externalUserId: input.inbound.externalUserId,
+        text: guarded.text,
+        operatorHandoff,
+        customerNoticeEnabled: exchangeCustomerNoticeEnabled,
       });
-      return [
-        {
-          channelId: String(input.channel.channelId),
-          externalUserId: input.inbound.externalUserId,
-          parts: [{ kind: "text", text: guarded.text }],
-          ...(operatorHandoff ? { operatorHandoff } : {}),
-        },
-      ];
     }
 
     const systemPrompt = [
@@ -589,15 +744,27 @@ export class LlmReplyStrategy implements ReplyStrategy {
           text: guarded.text,
           telemetry: buildToolTelemetry(toolCalls),
           state: exchangePolicyState,
-        })
+        }) ?? (guarded.action === "escalate" || guarded.action === "block"
+          ? buildExchangeGenericOperatorHandoff({
+              state: exchangePolicyState,
+              context: guarded.reason ?? null,
+            })
+          : null)
       : null;
-    return [
-      {
-        channelId: String(input.channel.channelId),
-        externalUserId: input.inbound.externalUserId,
-        parts: [{ kind: "text", text: guarded.text }],
-        ...(operatorHandoff ? { operatorHandoff } : {}),
-      },
-    ];
+    return isExchange
+      ? exchangeReplyOutput({
+          channelId: input.channel.channelId,
+          externalUserId: input.inbound.externalUserId,
+          text: guarded.text,
+          operatorHandoff,
+          customerNoticeEnabled: exchangeCustomerNoticeEnabled,
+        })
+      : [
+          {
+            channelId: String(input.channel.channelId),
+            externalUserId: input.inbound.externalUserId,
+            parts: [{ kind: "text", text: guarded.text }],
+          },
+        ];
   }
 }

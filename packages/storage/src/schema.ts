@@ -1619,6 +1619,8 @@ export const exchangeSettings = pgTable("exchange_settings", {
   feedStaleSec: integer("feed_stale_sec"),
   // котируемая (локальная) валюта обменника: PHP (дефолт платформы), THB, VND…
   quoteAsset: text("quote_asset").notNull().default("PHP"),
+  // отправлять ли клиенту сообщение при автоматической передаче exchange-диалога оператору.
+  handoffCustomerNotice: boolean("handoff_customer_notice").notNull().default(true),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [

@@ -809,9 +809,11 @@ describe("admin-exchange settings (per-tenant частота/порог)", () =>
 		const body = (await res.json()) as {
 			rateRefreshSec: number;
 			feedStaleSec: number | null;
+			handoffCustomerNotice: boolean;
 		};
 		expect(body.rateRefreshSec).toBe(180);
 		expect(body.feedStaleSec).toBe(null);
+		expect(body.handoffCustomerNotice).toBe(true);
 	});
 
 	it("PUT валидные → сохраняет; GET и планировщик видят", async () => {
@@ -819,14 +821,23 @@ describe("admin-exchange settings (per-tenant частота/порог)", () =>
 		const put = await authReq(tokenA, "/api/admin/exchange/settings", {
 			method: "PUT",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ rateRefreshSec: 600, feedStaleSec: 1800 }),
+			body: JSON.stringify({
+				rateRefreshSec: 600,
+				feedStaleSec: 1800,
+				handoffCustomerNotice: false,
+			}),
 		});
 		expect(put.status).toBe(200);
 		const got = (await (
 			await authReq(tokenA, "/api/admin/exchange/settings")
-		).json()) as { rateRefreshSec: number; feedStaleSec: number | null };
+		).json()) as {
+			rateRefreshSec: number;
+			feedStaleSec: number | null;
+			handoffCustomerNotice: boolean;
+		};
 		expect(got.rateRefreshSec).toBe(600);
 		expect(got.feedStaleSec).toBe(1800);
+		expect(got.handoffCustomerNotice).toBe(false);
 		// планировщик читает то же значение
 		expect(await getTenantRefreshSec(db as never, tenantA, 180)).toBe(600);
 	});

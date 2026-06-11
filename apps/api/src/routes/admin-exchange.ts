@@ -391,21 +391,23 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		const tenantId = c.var.tenantId;
 		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
 			tx
-				.select({
-					rateRefreshSec: exchangeSettings.rateRefreshSec,
-					feedStaleSec: exchangeSettings.feedStaleSec,
-					quoteAsset: exchangeSettings.quoteAsset,
-				})
+					.select({
+						rateRefreshSec: exchangeSettings.rateRefreshSec,
+						feedStaleSec: exchangeSettings.feedStaleSec,
+						quoteAsset: exchangeSettings.quoteAsset,
+						handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
+					})
 				.from(exchangeSettings)
 				.where(eq(exchangeSettings.tenantId, tenantId))
 				.limit(1),
 		);
-		return c.json({
-			rateRefreshSec: row?.rateRefreshSec ?? 180,
-			feedStaleSec: row?.feedStaleSec ?? null,
-			quoteAsset: row?.quoteAsset ?? QUOTE_CURRENCY.code,
-			quoteAssetOptions: QUOTE_CURRENCY_CODES,
-		});
+			return c.json({
+				rateRefreshSec: row?.rateRefreshSec ?? 180,
+				feedStaleSec: row?.feedStaleSec ?? null,
+				quoteAsset: row?.quoteAsset ?? QUOTE_CURRENCY.code,
+				quoteAssetOptions: QUOTE_CURRENCY_CODES,
+				handoffCustomerNotice: row?.handoffCustomerNotice ?? true,
+			});
 	});
 
 	// Сохранить: rateRefreshSec (сек, 60..86400) + feedStaleSec (сек, ≥ refresh или
@@ -435,42 +437,46 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				);
 			}
 		}
-		const quoteAssetRaw =
-			typeof body?.quoteAsset === "string" && body.quoteAsset.trim()
-				? body.quoteAsset.trim().toUpperCase()
-				: QUOTE_CURRENCY.code;
+			const quoteAssetRaw =
+				typeof body?.quoteAsset === "string" && body.quoteAsset.trim()
+					? body.quoteAsset.trim().toUpperCase()
+					: QUOTE_CURRENCY.code;
 		if (!/^[A-Z]{3}$/.test(quoteAssetRaw)) {
 			return c.json(
 				{ error: "quoteAsset должен быть ISO-кодом валюты (PHP, THB…)" },
-				400,
-			);
-		}
-		const now = Math.floor(Date.now() / 1000);
+					400,
+				);
+			}
+			const handoffCustomerNotice = body?.handoffCustomerNotice !== false;
+			const now = Math.floor(Date.now() / 1000);
 		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
 			tx
 				.insert(exchangeSettings)
 				.values({
-					tenantId,
-					rateRefreshSec: refresh,
-					feedStaleSec: stale,
-					quoteAsset: quoteAssetRaw,
-					createdAt: now,
+						tenantId,
+						rateRefreshSec: refresh,
+						feedStaleSec: stale,
+						quoteAsset: quoteAssetRaw,
+						handoffCustomerNotice,
+						createdAt: now,
 					updatedAt: now,
 				})
 				.onConflictDoUpdate({
 					target: exchangeSettings.tenantId,
 					set: {
-						rateRefreshSec: refresh,
-						feedStaleSec: stale,
-						quoteAsset: quoteAssetRaw,
-						updatedAt: now,
+							rateRefreshSec: refresh,
+							feedStaleSec: stale,
+							quoteAsset: quoteAssetRaw,
+							handoffCustomerNotice,
+							updatedAt: now,
 					},
 				})
 				.returning({
-					rateRefreshSec: exchangeSettings.rateRefreshSec,
-					feedStaleSec: exchangeSettings.feedStaleSec,
-					quoteAsset: exchangeSettings.quoteAsset,
-				}),
+						rateRefreshSec: exchangeSettings.rateRefreshSec,
+						feedStaleSec: exchangeSettings.feedStaleSec,
+						quoteAsset: exchangeSettings.quoteAsset,
+						handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
+					}),
 		);
 		return c.json({ ok: true, settings: row });
 	});
@@ -556,12 +562,12 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						},
 					});
 
-				for (const tier of proposal.tiers) {
-					const minAmount = Number(tier.minThb);
-					const maxAmount = tier.maxThb === null ? null : Number(tier.maxThb);
-					const rawDeviationPct = Number(
-						(tier as { deviationPct?: unknown }).deviationPct,
-					);
+					for (const tier of proposal.tiers) {
+						const minAmount = Number(tier.minThb);
+						const maxAmount = tier.maxThb === null ? null : Number(tier.maxThb);
+						const rawDeviationPct = Number(
+							(tier as { deviationPct?: unknown }).deviationPct,
+						);
 					const rawDisplayRate = Number(
 						(tier as { displayRate?: unknown }).displayRate,
 					);
@@ -582,10 +588,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						minThb: minAmount,
 						maxThb: maxAmount,
 						displayRate,
-						deviationPct,
-						formula,
-					});
-					await tx
+							deviationPct,
+							formula,
+						});
+						await tx
 						.insert(exchangeRateTiers)
 						.values({
 							tenantId,

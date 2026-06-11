@@ -188,6 +188,31 @@ describe("buildExchangeOperatorHandoff", () => {
 		expect(handoff?.amount).toBe("100000 RUB → 38000 THB");
 	});
 
+	it("tool error без специальной ветки → generic operator request", async () => {
+		const handoff = buildExchangeOperatorHandoff({
+			text: "Сейчас уточню у оператора и вернусь.",
+			state: STATE,
+			telemetry: {
+				toolCalls: [
+					{
+						name: "compute_exchange_quote",
+						args: { asset: "USDT", amount: 500 },
+						result: { error: "Курс не настроен" },
+						cycle: 1,
+					},
+				],
+			},
+		});
+
+		expect(handoff).toMatchObject({
+			reason: "operator_request",
+			orderId: 77,
+			stageSlug: "payment_review",
+			pending: "operator_exchange_decision",
+		});
+		expect(handoff?.context).toContain("Курс не настроен");
+	});
+
 	it("текст про офис/выдачу без tool-результата → office handoff", async () => {
 		if (!STATE.order) throw new Error("test STATE must include order");
 		const handoff = buildExchangeOperatorHandoff({

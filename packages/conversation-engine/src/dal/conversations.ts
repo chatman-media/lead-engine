@@ -1,4 +1,4 @@
-import { conversations as conversationsTable } from "@chatman-media/storage";
+import { auditLog, conversations as conversationsTable } from "@chatman-media/storage";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
@@ -224,5 +224,70 @@ export class ConversationsRepo {
         ),
       );
     return (row as ConversationRow) ?? null;
+  }
+
+  async applyAutoHandoff(input: {
+    conversationId: number;
+    reason: string;
+    orderId?: number;
+    stageSlug?: string;
+    customerNoticeSent: boolean;
+    nowEpoch: number;
+  }): Promise<{ changed: boolean; reason: string } | null> {
+    const [existing] = await this.ctx.db
+      .select({
+        mode: conversationsTable.mode,
+        status: conversationsTable.status,
+        escalatedAt: conversationsTable.escalatedAt,
+      })
+      .from(conversationsTable)
+      .where(
+        and(
+          eq(conversationsTable.id, input.conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      )
+      .limit(1);
+    if (!existing) return null;
+
+    const changed =
+      existing.mode !== "human" ||
+      existing.status !== "pending" ||
+      existing.escalatedAt == null;
+    if (changed) {
+      await this.ctx.db
+        .update(conversationsTable)
+        .set({
+          mode: "human",
+          status: "pending",
+          escalatedAt: existing.escalatedAt ?? input.nowEpoch,
+          lastMessageAt: input.nowEpoch,
+        })
+        .where(
+          and(
+            eq(conversationsTable.id, input.conversationId),
+            eq(conversationsTable.tenantId, this.ctx.tenantId),
+          ),
+        );
+    }
+
+    await this.ctx.db.insert(auditLog).values({
+      tenantId: this.ctx.tenantId,
+      adminId: null,
+      action: "conversation.mode.auto_handoff",
+      targetKind: "conversation",
+      targetId: String(input.conversationId),
+      detailsJson: JSON.stringify({
+        from: existing.mode,
+        to: "human",
+        reason: input.reason,
+        customerNoticeSent: input.customerNoticeSent,
+        ...(input.orderId !== undefined ? { orderId: input.orderId } : {}),
+        ...(input.stageSlug ? { stageSlug: input.stageSlug } : {}),
+      }),
+      createdAt: input.nowEpoch,
+    });
+
+    return { changed, reason: input.reason };
   }
 }

@@ -25,17 +25,23 @@ export interface EmitOperatorHandoffInput {
 	userMessageText?: string | null;
 	inbound?: Pick<Inbound, "parts"> | null;
 	envelopes: readonly OutboundEnvelope[];
+	operatorHandoffs?: readonly OperatorHandoffMeta[];
 	notifications?: NotificationService | null;
 	sink?: PipelineSink;
 }
 
 function uniqueHandoffs(
 	envelopes: readonly OutboundEnvelope[],
+	extra: readonly OperatorHandoffMeta[] = [],
 ): OperatorHandoffMeta[] {
 	const seen = new Set<string>();
 	const handoffs: OperatorHandoffMeta[] = [];
-	for (const envelope of envelopes) {
-		const handoff = envelope.operatorHandoff;
+	for (const handoff of [
+		...extra,
+		...envelopes
+			.map((envelope) => envelope.operatorHandoff)
+			.filter((item): item is OperatorHandoffMeta => Boolean(item)),
+	]) {
 		if (!handoff) continue;
 		const key = `${handoff.reason}:${handoff.contractId ?? ""}:${handoff.orderId ?? ""}`;
 		if (seen.has(key)) continue;
@@ -43,6 +49,12 @@ function uniqueHandoffs(
 		handoffs.push(handoff);
 	}
 	return handoffs;
+}
+
+export function primaryOperatorHandoff(
+	handoffs: readonly OperatorHandoffMeta[] | null | undefined,
+): OperatorHandoffMeta | null {
+	return uniqueHandoffs([], handoffs ?? [])[0] ?? null;
 }
 
 export function collectOperatorHandoffMediaRefs(
@@ -94,7 +106,7 @@ export function operatorMediaNotificationData(
 export async function emitOperatorHandoffNotifications(
 	input: EmitOperatorHandoffInput,
 ): Promise<void> {
-	const handoffs = uniqueHandoffs(input.envelopes);
+	const handoffs = uniqueHandoffs(input.envelopes, input.operatorHandoffs ?? []);
 	if (handoffs.length === 0) return;
 	const mediaData = operatorMediaNotificationData(input.inbound);
 

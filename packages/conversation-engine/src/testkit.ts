@@ -161,6 +161,23 @@ export class FakeConversationsRepo {
     const row = this.rows.find((r) => r.id === conversationId);
     if (row) row.assignedAdminId = adminId;
   }
+  async applyAutoHandoff(input: {
+    conversationId: number;
+    reason: string;
+    customerNoticeSent: boolean;
+    nowEpoch: number;
+  }): Promise<{ changed: boolean; reason: string } | null> {
+    void input.customerNoticeSent;
+    const row = this.rows.find((r) => r.id === input.conversationId);
+    if (!row) return null;
+    const changed =
+      row.mode !== "human" || row.status !== "pending" || row.escalatedAt == null;
+    row.mode = "human";
+    row.status = "pending";
+    row.escalatedAt = row.escalatedAt ?? input.nowEpoch;
+    row.lastMessageAt = input.nowEpoch;
+    return { changed, reason: input.reason };
+  }
   all(): ConversationRow[] {
     return [...this.rows];
   }

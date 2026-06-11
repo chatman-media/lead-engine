@@ -23,9 +23,10 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
-  MessagesRepo,
-  OutboundQueueRepo,
-  processInbound,
+	MessagesRepo,
+	normalizeReplyStrategyResult,
+	OutboundQueueRepo,
+	processInbound,
   type ReplyStrategy,
   withTenant,
 } from "@chatman-media/conversation-engine";
@@ -336,20 +337,20 @@ export function makeAdminTestRoutes(opts: {
     // 6. Вызвать replyStrategy.generate() напрямую — БЕЗ записи в outbound_queue
     let responseParts: OutboundPart[] = [];
     try {
-      const envelopes = await opts.replyStrategy.generate({
-        tenant,
-        channel,
-        conversationId: piResult.conversationId,
-        contactId: piResult.contactId,
-        inbound,
-        userMessageText:
-          text ||
-          (mediaUrl
-            ? `[${body.mediaType ?? "photo"}]${body.caption ? ` ${body.caption}` : ""}`
-            : ""),
-      });
-      responseParts = envelopes?.flatMap((e) => e.parts) ?? [];
-    } catch (err) {
+			const result = await opts.replyStrategy.generate({
+				tenant,
+				channel,
+				conversationId: piResult.conversationId,
+				contactId: piResult.contactId,
+				inbound,
+				userMessageText:
+					text ||
+					(mediaUrl
+						? `[${body.mediaType ?? "photo"}]${body.caption ? ` ${body.caption}` : ""}`
+						: ""),
+			});
+			responseParts = normalizeReplyStrategyResult(result)?.envelopes.flatMap((e) => e.parts) ?? [];
+		} catch (err) {
       return c.json({
         error: `reply strategy error: ${err instanceof Error ? err.message : String(err)}`,
         conversationId: piResult.conversationId,

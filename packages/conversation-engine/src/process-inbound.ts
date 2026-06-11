@@ -2,6 +2,7 @@ import type {
   Inbound,
   InboundPart,
   MediaRef,
+  OperatorHandoffMeta,
   OutboundEnvelope,
 } from "@chatman-media/channel-core";
 import type { VerticalTemplate } from "@chatman-media/verticals";
@@ -21,6 +22,7 @@ import { dispatchOutbound } from "./outbound-dispatch.ts";
 import {
   emitOperatorHandoffNotifications,
   operatorMediaNotificationData,
+  primaryOperatorHandoff,
 } from "./operator-handoff.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
 import type { ITranscriber } from "./transcriber.ts";
@@ -54,7 +56,47 @@ export interface ReplyStrategy {
     contactId: number;
     inbound: Inbound;
     userMessageText: string;
-  }): Promise<OutboundEnvelope[] | null>;
+  }): Promise<ReplyStrategyResult>;
+}
+
+export interface ReplyStrategyOutput {
+  envelopes: OutboundEnvelope[];
+  operatorHandoffs?: OperatorHandoffMeta[];
+  autoTakeover?: boolean;
+  customerNoticeSent?: boolean;
+}
+
+export type ReplyStrategyResult = OutboundEnvelope[] | ReplyStrategyOutput | null;
+
+export function normalizeReplyStrategyResult(
+  result: ReplyStrategyResult,
+): ReplyStrategyOutput | null {
+  if (!result) return null;
+  const envelopes = Array.isArray(result) ? result : result.envelopes;
+  const explicitHandoffs = Array.isArray(result) ? [] : (result.operatorHandoffs ?? []);
+  const envelopeHandoffs = envelopes
+    .map((envelope) => envelope.operatorHandoff)
+    .filter((handoff): handoff is OperatorHandoffMeta => Boolean(handoff));
+  return {
+    envelopes,
+    operatorHandoffs: [...explicitHandoffs, ...envelopeHandoffs],
+    autoTakeover: Array.isArray(result) ? false : result.autoTakeover === true,
+    customerNoticeSent: Array.isArray(result)
+      ? envelopes.some((envelope) => envelope.parts.length > 0)
+      : result.customerNoticeSent === true,
+  };
+}
+
+function outboundEnvelopeText(envelope: OutboundEnvelope): string | null {
+  const text = envelope.parts
+    .map((part) => {
+      if (part.kind === "text") return part.text;
+      return part.caption ?? "";
+    })
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("\n");
+  return text || null;
 }
 
 export interface ProcessInboundDeps {
@@ -215,7 +257,7 @@ function exchangeMediaHandoffData(input: {
 	text: string;
 	currentStage?: string | null;
 	hasVideoNote: boolean;
-}): Record<string, unknown> {
+}): OperatorHandoffMeta {
 	const signal = `${input.text}\n${input.currentStage ?? ""}`.toLowerCase();
 	const paymentLike =
 		/(?:чек|оплат|receipt|proof|перевод|плат[её]ж|payment)/iu.test(signal);
@@ -374,7 +416,40 @@ export async function processInbound(
   // «Кружок» (video_note) — опциональная видео-верификация: уходит оператору
   // на визуальную проверку личности (см. обменник). Поток не блокируется.
   const hasVideoNote = inbound.parts.some((p) => p.kind === "video_note");
-  if (deps.notifications && !existingMsg) {
+  let escalatedReason: string | undefined;
+  if (
+    !existingMsg &&
+    conversation.mode === "ai" &&
+    deps.template?.slug === "exchange_v1" &&
+    hasMedia
+  ) {
+    const handoff = exchangeMediaHandoffData({
+      text,
+      currentStage: conversation.currentStage,
+      hasVideoNote,
+    });
+    await deps.conversations.applyAutoHandoff({
+      conversationId: conversation.id,
+      reason: handoff.reason,
+      ...(handoff.orderId !== undefined ? { orderId: handoff.orderId } : {}),
+      ...(handoff.stageSlug ? { stageSlug: handoff.stageSlug } : {}),
+      customerNoticeSent: false,
+      nowEpoch: now,
+    });
+    escalatedReason = handoff.reason;
+    await emitOperatorHandoffNotifications({
+      tenantId: deps.tenant.tenantId,
+      conversationId: conversation.id,
+      contactId: contact.id,
+      contactDisplayName: contact.displayName,
+      userMessageText: text,
+      inbound,
+      envelopes: [],
+      operatorHandoffs: [handoff],
+      notifications: deps.notifications ?? null,
+      ...(deps.sink ? { sink: deps.sink } : {}),
+    });
+  } else if (deps.notifications && !existingMsg) {
     if (conversation.mode === "human" || conversation.mode === "queued") {
       await deps.notifications.notify({
         tenantId: deps.tenant.tenantId,
@@ -384,23 +459,6 @@ export async function processInbound(
         data: {
           displayName: contact.displayName || "Без имени",
           text: text || "(Медиа)",
-        },
-      });
-    } else if (deps.template?.slug === "exchange_v1" && hasMedia) {
-      await deps.notifications.notify({
-        tenantId: deps.tenant.tenantId,
-        eventType: "operator_handoff_required",
-        conversationId: conversation.id,
-        contactId: contact.id,
-        data: {
-          displayName: contact.displayName || "Без имени",
-          text: text || "(Клиент загрузил документ/медиа)",
-          ...exchangeMediaHandoffData({
-            text,
-            currentStage: conversation.currentStage,
-            hasVideoNote,
-          }),
-          ...operatorMediaNotificationData(inbound),
         },
       });
     } else if (hasVideoNote) {
@@ -575,21 +633,29 @@ export async function processInbound(
       postProcessingDeferred,
       previousStage: conversation.currentStage,
       conversationCreated,
+      ...(escalatedReason ? { escalatedReason } : {}),
       replyDeferred: true,
     };
   }
 
   let outboundCount = 0;
-  if (conversation.mode === "ai" && deps.reply && !mediaOnly) {
-    const envelopes = await deps.reply.generate({
-      tenant: deps.tenant,
-      channel: deps.channel,
-      conversationId: conversation.id,
-      contactId: contact.id,
-      inbound,
-      userMessageText: text,
-    });
-    if (envelopes && envelopes.length > 0) {
+  if (conversation.mode === "ai" && !escalatedReason && deps.reply && !mediaOnly) {
+    const replyOutput = normalizeReplyStrategyResult(
+      await deps.reply.generate({
+        tenant: deps.tenant,
+        channel: deps.channel,
+        conversationId: conversation.id,
+        contactId: contact.id,
+        inbound,
+        userMessageText: text,
+      }),
+    );
+    if (
+      replyOutput &&
+      (replyOutput.envelopes.length > 0 ||
+        (replyOutput.autoTakeover && (replyOutput.operatorHandoffs?.length ?? 0) > 0))
+    ) {
+      const envelopes = replyOutput.envelopes;
       // 6b. Update lastMessageText to AI reply for the inbox list.
       const lastEnv = envelopes[envelopes.length - 1];
       if (lastEnv) {
@@ -602,6 +668,22 @@ export async function processInbound(
       }
 
       for (const env of envelopes) {
+        const aiText = outboundEnvelopeText(env);
+        if (aiText) {
+          const inserted = await deps.messages.insert({
+            conversationId: conversation.id,
+            role: "assistant",
+            text: aiText,
+            nowEpoch: now,
+          });
+          deps.sink?.emit?.({
+            type: "message-persisted",
+            tenantId: deps.tenant.tenantId,
+            conversationId: conversation.id,
+            messageId: inserted.id,
+            role: "assistant",
+          });
+        }
         const queued = await dispatchOutbound({
           channelDbId: deps.channelDbId,
           conversationId: conversation.id,
@@ -618,6 +700,20 @@ export async function processInbound(
           envelope: env,
         });
       }
+      if (replyOutput.autoTakeover) {
+        const handoff = primaryOperatorHandoff(replyOutput.operatorHandoffs);
+        if (handoff) {
+          await deps.conversations.applyAutoHandoff({
+            conversationId: conversation.id,
+            reason: handoff.reason,
+            ...(handoff.orderId !== undefined ? { orderId: handoff.orderId } : {}),
+            ...(handoff.stageSlug ? { stageSlug: handoff.stageSlug } : {}),
+            customerNoticeSent: replyOutput.customerNoticeSent === true,
+            nowEpoch: now,
+          });
+          escalatedReason = handoff.reason;
+        }
+      }
       await emitOperatorHandoffNotifications({
         tenantId: deps.tenant.tenantId,
         conversationId: conversation.id,
@@ -626,6 +722,9 @@ export async function processInbound(
         userMessageText: text,
         inbound,
         envelopes,
+        ...(replyOutput.operatorHandoffs
+          ? { operatorHandoffs: replyOutput.operatorHandoffs }
+          : {}),
         notifications: deps.notifications ?? null,
         ...(deps.sink ? { sink: deps.sink } : {}),
       });
@@ -648,5 +747,6 @@ export async function processInbound(
           conversationCreated,
         }
       : {}),
+    ...(escalatedReason ? { escalatedReason } : {}),
   };
 }

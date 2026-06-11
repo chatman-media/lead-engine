@@ -652,13 +652,20 @@ describe("processInbound", () => {
 		expect(memoryCalled).toBe(false);
 	});
 
-	it("exchange: фото с подписью про оплату → payment_review handoff (не KYC)", async () => {
-		const events: NotifyEvent[] = [];
-		const d = {
-			...makeDeps(),
-			template: {
-				slug: "exchange_v1",
-				displayName: "Exchange",
+		it("exchange: фото с подписью про оплату → payment_review handoff (не KYC)", async () => {
+			const events: NotifyEvent[] = [];
+			let replyCalls = 0;
+			const reply: ReplyStrategy = {
+				generate: async () => {
+					replyCalls += 1;
+					return [{ channelId: "10", externalUserId: "u-pay", parts: [{ kind: "text", text: "AI" }] }];
+				},
+			};
+			const d = {
+				...makeDeps(reply),
+				template: {
+					slug: "exchange_v1",
+					displayName: "Exchange",
 				version: 1,
 				funnelStages: [],
 				systemPromptFragment: "",
@@ -677,22 +684,40 @@ describe("processInbound", () => {
 				},
 			],
 			receivedAt: 1700000000,
-			raw: {},
-		};
+				raw: {},
+			};
 
-		await processInbound(inbound, d);
+			const result = await processInbound(inbound, d);
 
-		const handoff = events.find(
-			(e) => e.eventType === "operator_handoff_required",
-		);
+			const handoff = events.find(
+				(e) => e.eventType === "operator_handoff_required",
+			);
 		expect(handoff?.data).toMatchObject({
 			reason: "payment_review",
 			title: "Проверить оплату по чеку",
 			pending: "operator_payment_review",
 			priority: "high",
+			});
+			expect(String(handoff?.data?.reviewPath)).toContain("payment_confirmed");
+			expect(result.escalatedReason).toBe("payment_review");
+			expect(replyCalls).toBe(0);
+			const [conv] = d._fakes.conversations.all();
+			expect(conv).toMatchObject({
+				mode: "human",
+				status: "pending",
+				escalatedAt: 1700000000,
+			});
+
+			await processInbound(
+				textInbound({
+					extUserId: "u-pay",
+					extMessageId: "211",
+					text: "ну что там?",
+				}),
+				d,
+			);
+			expect(replyCalls).toBe(0);
 		});
-		expect(String(handoff?.data?.reviewPath)).toContain("payment_confirmed");
-	});
 
 	// ── Stage classifier + lead auto-advance (фейковый чейнящийся Db) ─────────
 	/**

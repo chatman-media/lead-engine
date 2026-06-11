@@ -16,7 +16,10 @@
 
 import type { Inbound, ReplyMarkup } from "@chatman-media/channel-core";
 import type { Db } from "@chatman-media/conversation-engine";
-import type { ReplyStrategy } from "@chatman-media/conversation-engine";
+import {
+  normalizeReplyStrategyResult,
+  type ReplyStrategy,
+} from "@chatman-media/conversation-engine";
 import { leads, stageDefinitions } from "@chatman-media/storage";
 import { and, desc, eq, notInArray } from "drizzle-orm";
 
@@ -89,8 +92,9 @@ export function wrapWithConciergeButtons(
 ): ReplyStrategy {
   return {
     generate: async (opts) => {
-      const envelopes = await strategy.generate(opts);
-      if (!envelopes || envelopes.length === 0) return envelopes;
+      const result = await strategy.generate(opts);
+      const normalized = normalizeReplyStrategyResult(result);
+      if (!normalized || normalized.envelopes.length === 0) return result;
 
       let stageSlug: string | null = null;
       try {
@@ -101,16 +105,18 @@ export function wrapWithConciergeButtons(
         );
       } catch {
         // Не ломаем reply при ошибке резолвинга стадии.
-        return envelopes;
+        return result;
       }
-      if (stageSlug !== CONCIERGE_INTAKE_STAGE) return envelopes;
+      if (stageSlug !== CONCIERGE_INTAKE_STAGE) return result;
 
       // Добавляем кнопки к последнему envelope'у.
+      const { envelopes } = normalized;
       const last = envelopes[envelopes.length - 1]!;
-      return [
+      const nextEnvelopes = [
         ...envelopes.slice(0, -1),
         { ...last, replyMarkup: CONCIERGE_REPLY_MARKUP },
       ];
+      return Array.isArray(result) ? nextEnvelopes : { ...result, envelopes: nextEnvelopes };
     },
   };
 }

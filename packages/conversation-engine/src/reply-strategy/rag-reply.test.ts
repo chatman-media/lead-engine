@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test";
 import { makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
+import { normalizeReplyStrategyResult } from "../process-inbound.ts";
 import { EXCHANGE_PAYMENT_FALLBACK } from "./exchange-policy-guard.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 import {
@@ -22,6 +23,12 @@ const CHANNEL = { channelId: 10 };
 
 // job-intent текст — не триггерит persona-shortcuts в answerWithRag.
 const QUESTION = "расскажи про условия обмена usdt на баты";
+
+function firstReplyText(result: Awaited<ReturnType<RagReplyStrategy["generate"]>>): string {
+  const normalized = normalizeReplyStrategyResult(result);
+  const part = normalized?.envelopes[0]?.parts[0];
+  return part?.kind === "text" ? part.text : "";
+}
 
 function chatReturning(reply: string): ChatClient {
   return { complete: async () => reply } as unknown as ChatClient;
@@ -165,13 +172,12 @@ describe("RagReplyStrategy.generate", () => {
       }),
     );
     const r = await s.generate(baseInput());
+    const normalized = normalizeReplyStrategyResult(r);
     expect(r).not.toBeNull();
-    expect(r).toHaveLength(1);
-    expect(r![0]!.channelId).toBe("10");
-    expect(r![0]!.externalUserId).toBe("u1");
-    const part = r![0]!.parts[0] as { kind: string; text: string };
-    expect(part.kind).toBe("text");
-    expect(part.text.toLowerCase()).toContain("курс");
+    expect(normalized?.envelopes).toHaveLength(1);
+    expect(normalized?.envelopes[0]?.channelId).toBe("10");
+    expect(normalized?.envelopes[0]?.externalUserId).toBe("u1");
+    expect(firstReplyText(r).toLowerCase()).toContain("курс");
   });
 
   it("injects brokered order context into RAG request context", async () => {
@@ -357,8 +363,7 @@ describe("RagReplyStrategy.generate", () => {
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+    expect(firstReplyText(r)).toBe(EXCHANGE_SAFE_FALLBACK);
   });
 
 	it("exchange: guard finding is recorded even without tool calls", async () => {
@@ -412,7 +417,7 @@ describe("RagReplyStrategy.generate", () => {
 		const r = await s.generate(baseInput());
 
 		expect(r).not.toBeNull();
-		expect((r![0]!.parts[0] as { text: string }).text).toBe(unsafeText);
+		expect(firstReplyText(r)).toBe(unsafeText);
 		expect(recorded).toHaveLength(0);
 	});
 
@@ -442,13 +447,12 @@ describe("RagReplyStrategy.generate", () => {
     const r = await s.generate(baseInput());
 
     expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text).toBe(EXCHANGE_PAYMENT_FALLBACK);
+    expect(firstReplyText(r)).toBe(EXCHANGE_PAYMENT_FALLBACK);
   });
 
-  it("exchange: payment proof answer attaches payment-review operator handoff", async () => {
-    const s = mk(
-      ctxWith({
+	it("exchange: payment proof answer attaches payment-review operator handoff", async () => {
+	    const s = mk(
+	      ctxWith({
         template: EXCHANGE_TEMPLATE,
         chat: chatReturning("Чек получили, передаю оператору на проверку."),
         kb: kbWith([HIT]),
@@ -486,17 +490,94 @@ describe("RagReplyStrategy.generate", () => {
     );
 
     const r = await s.generate(baseInput());
+    const normalized = normalizeReplyStrategyResult(r);
 
-    expect(r?.[0]?.operatorHandoff).toMatchObject({
+    expect(normalized?.operatorHandoffs?.[0]).toMatchObject({
       reason: "payment_review",
       orderId: 77,
       stageSlug: "payment_review",
       pending: "operator_payment_review",
     });
-  });
+	    expect(normalized?.autoTakeover).toBe(true);
+	  });
 
-  it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
-    const s = mk(
+	it("exchange: confirmation after quote creates order preflight and asks for KYC", async () => {
+		const chat = new CapturingRagChat("Сейчас снова посчитаю.");
+		const instructions =
+			"Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.";
+		let seenArgs: unknown = null;
+		const recorded: Array<
+			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{
+							role: "user",
+							text: "отдаю 10к рублей нужны песо в банкомате",
+						},
+						{ role: "assistant", text: "Получите 8126 PHP." },
+						{ role: "user", text: "супер давай" },
+					],
+				}),
+				exchangePolicyState: {
+					stageSlug: "quote_calculated",
+					verification: {
+						verified: false,
+						status: "missing",
+						needsVerification: true,
+					},
+				},
+				tools: [
+					{
+						name: "create_exchange_order",
+						description: "create order",
+						parameters: {},
+						execute: async (args: unknown) => {
+							seenArgs = args;
+							return {
+								ok: false,
+								needsVerification: true,
+								status: "missing",
+								instructions,
+							};
+						},
+					},
+				] as never,
+			}),
+			{
+				reflect: false,
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+		);
+
+		const r = await s.generate({
+			...baseInput(),
+			userMessageText: "супер давай",
+		});
+
+		expect(firstReplyText(r)).toBe(instructions);
+		expect(chat.lastCall).toBeNull();
+		expect(seenArgs).toMatchObject({
+			asset: "RUB",
+			amount: 10000,
+			amountMode: "source_amount",
+			paymentMethod: "bank_transfer",
+			payoutMethod: "atm",
+		});
+		expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe(
+			"create_exchange_order",
+		);
+	});
+
+	  it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
+	    const s = mk(
       ctxWith({
         template: EXCHANGE_TEMPLATE,
         chat: chatReturning("ответ"),
@@ -505,8 +586,7 @@ describe("RagReplyStrategy.generate", () => {
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+    expect(firstReplyText(r)).toBe(EXCHANGE_SAFE_FALLBACK);
   });
 
   it("exchange: reflect срезает неподкреплённый статус и возвращает safe fallback", async () => {
@@ -523,8 +603,7 @@ describe("RagReplyStrategy.generate", () => {
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+    expect(firstReplyText(r)).toBe(EXCHANGE_SAFE_FALLBACK);
   });
 
   it("no-context + softFallback → envelope с fallback-текстом + лог в suggestions", async () => {
@@ -542,8 +621,7 @@ describe("RagReplyStrategy.generate", () => {
     );
     const r = await s.generate(baseInput());
     expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text.length).toBeGreaterThan(0);
+    expect(firstReplyText(r).length).toBeGreaterThan(0);
     expect(logged).toBe(true);
   });
 
@@ -571,8 +649,7 @@ describe("RagReplyStrategy.generate", () => {
     const r = await s.generate(baseInput());
 
     expect(r).not.toBeNull();
-    const part = r?.[0]?.parts[0] as { text: string } | undefined;
-    expect(part?.text.toLowerCase()).toContain("курс");
+    expect(firstReplyText(r).toLowerCase()).toContain("курс");
   });
 
   it("compaction: ошибка LLM при сжатии глотается, ответ всё равно генерится", async () => {

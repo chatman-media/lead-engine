@@ -1,10 +1,15 @@
 import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
+import { ConversationsRepo } from "./dal/conversations.ts";
+import { MessagesRepo } from "./dal/messages.ts";
 import { OutboundQueueRepo } from "./dal/outbound.ts";
 import type { Db } from "./dal/types.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
-import { type ReplyStrategy } from "./process-inbound.ts";
+import { normalizeReplyStrategyResult, type ReplyStrategy } from "./process-inbound.ts";
 import type { NotificationService } from "./notifications.ts";
-import { emitOperatorHandoffNotifications } from "./operator-handoff.ts";
+import {
+  emitOperatorHandoffNotifications,
+  primaryOperatorHandoff,
+} from "./operator-handoff.ts";
 import { systemClock } from "./types.ts";
 import type { ChannelContext, PipelineSink, ProcessInboundResult, TenantContext } from "./types.ts";
 import { withTenant } from "./with-tenant.ts";
@@ -54,6 +59,19 @@ export interface GenerateReplyResult {
    *  или mediaOnly или conversation.mode != 'ai' (но проверка mode не
    *  делается тут — caller сам решает по результату processInbound). */
   outboundEnqueued: number;
+  escalatedReason?: string;
+}
+
+function envelopeText(envelope: OutboundEnvelope): string | null {
+  const text = envelope.parts
+    .map((part) => {
+      if (part.kind === "text") return part.text;
+      return part.caption ?? "";
+    })
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("\n");
+  return text || null;
 }
 
 export async function generateReplyAndEnqueue(
@@ -67,6 +85,9 @@ export async function generateReplyAndEnqueue(
   if (result.mediaOnly) {
     return { outboundEnqueued: 0 };
   }
+  if (result.escalatedReason) {
+    return { outboundEnqueued: 0, escalatedReason: result.escalatedReason };
+  }
 
   // userMessageText заполняется processInbound'ом при deferReply=true.
   // Если undefined — caller ошибся в orchestration'е; возвращаем 0.
@@ -74,24 +95,55 @@ export async function generateReplyAndEnqueue(
   if (text.length === 0) return { outboundEnqueued: 0 };
 
   // ── Phase 2A: LLM call ВНЕ tx ────────────────────────────────────────
-  const envelopes = await replyStrategy.generate({
-    tenant,
-    channel,
-    conversationId: result.conversationId,
-    contactId: result.contactId,
-    inbound,
-    userMessageText: text,
-  });
-  if (!envelopes || envelopes.length === 0) {
+  const replyOutput = normalizeReplyStrategyResult(
+    await replyStrategy.generate({
+      tenant,
+      channel,
+      conversationId: result.conversationId,
+      contactId: result.contactId,
+      inbound,
+      userMessageText: text,
+    }),
+  );
+  if (!replyOutput) {
+    return { outboundEnqueued: 0 };
+  }
+  const needsAutoTakeover =
+    replyOutput.autoTakeover && (replyOutput.operatorHandoffs?.length ?? 0) > 0;
+  if (replyOutput.envelopes.length === 0 && !needsAutoTakeover) {
     return { outboundEnqueued: 0 };
   }
 
   // ── Phase 2B: enqueue в новой короткой tx ────────────────────────────
   const now = clock.nowEpoch();
   let count = 0;
+  let escalatedReason: string | undefined;
   await withTenant(deps.db, tenant.tenantId, async (tx) => {
+    const repoCtx = { db: tx, tenantId: tenant.tenantId };
+    const conversations = new ConversationsRepo(repoCtx);
+    const messages = new MessagesRepo(repoCtx);
     const outbound = new OutboundQueueRepo({ db: tx, tenantId: tenant.tenantId });
-    for (const env of envelopes as OutboundEnvelope[]) {
+    for (const env of replyOutput.envelopes as OutboundEnvelope[]) {
+      const aiText = envelopeText(env);
+      if (aiText) {
+        const inserted = await messages.insert({
+          conversationId: result.conversationId,
+          role: "assistant",
+          text: aiText,
+          nowEpoch: now,
+        });
+        deps.sink?.emit?.({
+          type: "message-persisted",
+          tenantId: tenant.tenantId,
+          conversationId: result.conversationId,
+          messageId: inserted.id,
+          role: "assistant",
+        });
+        await conversations.updateInboxMetadata(result.conversationId, {
+          lastMessageAt: now,
+          lastMessageText: aiText.slice(0, 200),
+        });
+      }
       const queued = await dispatchOutbound({
         channelDbId,
         conversationId: result.conversationId,
@@ -108,6 +160,20 @@ export async function generateReplyAndEnqueue(
         envelope: env,
       });
     }
+    if (needsAutoTakeover) {
+      const handoff = primaryOperatorHandoff(replyOutput.operatorHandoffs);
+      if (handoff) {
+        await conversations.applyAutoHandoff({
+          conversationId: result.conversationId,
+          reason: handoff.reason,
+          ...(handoff.orderId !== undefined ? { orderId: handoff.orderId } : {}),
+          ...(handoff.stageSlug ? { stageSlug: handoff.stageSlug } : {}),
+          customerNoticeSent: replyOutput.customerNoticeSent === true,
+          nowEpoch: now,
+        });
+        escalatedReason = handoff.reason;
+      }
+    }
   });
   await emitOperatorHandoffNotifications({
     tenantId: tenant.tenantId,
@@ -116,9 +182,15 @@ export async function generateReplyAndEnqueue(
     contactDisplayName: result.contactDisplayName,
     userMessageText: text,
     inbound,
-    envelopes,
+    envelopes: replyOutput.envelopes,
+    ...(replyOutput.operatorHandoffs
+      ? { operatorHandoffs: replyOutput.operatorHandoffs }
+      : {}),
     notifications: deps.notifications ?? null,
     ...(deps.sink ? { sink: deps.sink } : {}),
   });
-  return { outboundEnqueued: count };
+  return {
+    outboundEnqueued: count,
+    ...(escalatedReason ? { escalatedReason } : {}),
+  };
 }

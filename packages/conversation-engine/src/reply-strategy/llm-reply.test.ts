@@ -3,6 +3,7 @@ import { type AnyRagTool, makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
+import { normalizeReplyStrategyResult } from "../process-inbound.ts";
 import { EXCHANGE_KYC_FALLBACK } from "./exchange-policy-guard.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 import { LlmReplyStrategy, type LlmReplyStrategyOpts } from "./llm-reply.ts";
@@ -19,6 +20,12 @@ const EXCHANGE_TEMPLATE: VerticalTemplate = {
   ...TEMPLATE,
   slug: "exchange_v1",
 };
+
+function firstReplyText(result: Awaited<ReturnType<LlmReplyStrategy["generate"]>>): string {
+	const normalized = normalizeReplyStrategyResult(result);
+	const part = normalized?.envelopes[0]?.parts[0];
+	return part?.kind === "text" ? part.text : "";
+}
 
 class CapturingChat implements ChatClient {
   lastCall: { messages: ChatMessage[]; opts: unknown } | null = null;
@@ -104,6 +111,21 @@ function exchangeQuoteTool(): AnyRagTool {
   };
 }
 
+function exchangeCreateOrderTool(): AnyRagTool {
+	return {
+		name: "create_exchange_order",
+		description: "Create exchange order",
+		parameters: {} as AnyRagTool["parameters"],
+		execute: async () => ({
+			ok: false,
+			needsVerification: true,
+			status: "missing",
+			instructions:
+				"Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.",
+		}),
+	};
+}
+
 describe("LlmReplyStrategy", () => {
   it("отправляет system + history + текущее в ChatClient, возвращает text envelope", async () => {
     const chat = new CapturingChat("Привет! Чем помочь?");
@@ -126,11 +148,12 @@ describe("LlmReplyStrategy", () => {
       userMessageText: "Расскажите про условия",
     });
 
-    expect(envelopes).not.toBeNull();
-		expect(envelopes![0]?.parts).toEqual([
+    const normalized = normalizeReplyStrategyResult(envelopes);
+    expect(normalized).not.toBeNull();
+		expect(normalized?.envelopes[0]?.parts).toEqual([
 			{ kind: "text", text: "Привет! Чем помочь?" },
 		]);
-    expect(envelopes![0]?.externalUserId).toBe("u1");
+    expect(normalized?.envelopes[0]?.externalUserId).toBe("u1");
 
     // System prompt состоит из base + template fragment.
     const sent = chat.lastCall!.messages;
@@ -281,7 +304,7 @@ describe("LlmReplyStrategy", () => {
       userMessageText: "сколько за 335 usdt?",
     });
     expect(result).not.toBeNull();
-		expect((result![0]!.parts[0] as { text: string }).text).toBe(
+		expect(firstReplyText(result)).toBe(
 			EXCHANGE_SAFE_FALLBACK,
 		);
 	});
@@ -347,8 +370,7 @@ describe("LlmReplyStrategy", () => {
 		// Ошибка резолва не роняет ответ; guard на null-state всё равно
 		// отбивает неподкреплённый курс.
 		expect(result).not.toBeNull();
-		const part = result?.[0]?.parts[0] as { text: string } | undefined;
-		expect(part?.text).toBe(EXCHANGE_SAFE_FALLBACK);
+		expect(firstReplyText(result)).toBe(EXCHANGE_SAFE_FALLBACK);
 	});
 
 	it("exchange: resolveExchangeResponseGuardEnabled упал → guard включён по умолчанию", async () => {
@@ -374,8 +396,7 @@ describe("LlmReplyStrategy", () => {
 		});
 
 		expect(result).not.toBeNull();
-		const part = result?.[0]?.parts[0] as { text: string } | undefined;
-		expect(part?.text).toBe(EXCHANGE_SAFE_FALLBACK);
+		expect(firstReplyText(result)).toBe(EXCHANGE_SAFE_FALLBACK);
 	});
 
 	it("exchange: response guard can be disabled by tenant flag", async () => {
@@ -407,11 +428,11 @@ describe("LlmReplyStrategy", () => {
 		});
 
 		expect(result).not.toBeNull();
-		expect((result![0]!.parts[0] as { text: string }).text).toBe(unsafeText);
+		expect(firstReplyText(result)).toBe(unsafeText);
 		expect(recorded).toHaveLength(0);
   });
 
-  it("exchange: явный запрос курса принудительно считает через compute_exchange_quote", async () => {
+	  it("exchange: явный запрос курса принудительно считает через compute_exchange_quote", async () => {
     const chat = new CapturingChat("Сейчас уточню у оператора.");
 		const repo = fakeMessagesRepo([
 			row(1, "user", "500 USDT TRC20 на баты, какой курс?"),
@@ -440,19 +461,62 @@ describe("LlmReplyStrategy", () => {
       userMessageText: "500 USDT TRC20 на баты, какой курс?",
     });
 
-    expect(result).not.toBeNull();
-    const text = (result![0]!.parts[0] as { text: string }).text;
-    expect(text).toContain("Курс: 31.5.");
-    expect(text).toContain("За 500 USDT (TRC20) получите 15750 THB.");
+	    expect(result).not.toBeNull();
+	    const text = firstReplyText(result);
+	    expect(text).toContain("Курс: 31.5.");
+	    expect(text).toContain("За 500 USDT (TRC20) получите 15750 THB.");
     expect(chat.lastCall).toBeNull();
     expect(recorded[0]?.toolCalls[0]).toMatchObject({
       name: "compute_exchange_quote",
       args: { asset: "USDT", amount: 500, network: "TRC20" },
       cycle: 0,
     });
-  });
+	  });
 
-  it("exchange: стартовый интент с длинным пробельным разрывом проверяется линейно", async () => {
+	it("exchange: подтверждение на quote_calculated принудительно ведёт в create_exchange_order/KYC", async () => {
+		const chat = new CapturingChat("Повторно считаю сумму.");
+		const repo = fakeMessagesRepo([
+			row(1, "user", "отдаю 10к рублей нужны песо в банкомате"),
+			row(2, "assistant", "Получите 8126 PHP."),
+		]);
+		const recorded: Array<
+			Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveTools: () => [exchangeQuoteTool(), exchangeCreateOrderTool()],
+				resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+			() => repo,
+		);
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "супер давай",
+		});
+
+		expect(result).not.toBeNull();
+		expect(firstReplyText(result)).toBe(
+			"Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.",
+		);
+		expect(chat.lastCall).toBeNull();
+		expect(recorded[0]?.toolCalls[0]).toMatchObject({
+			name: "create_exchange_order",
+			args: { asset: "RUB", amount: 10000, payoutMethod: "atm" },
+			cycle: 0,
+		});
+	});
+
+	  it("exchange: стартовый интент с длинным пробельным разрывом проверяется линейно", async () => {
     const userText = `хочу${" ".repeat(25_000)}поменять 500 USDT`;
     const chat = new CapturingChat("Сейчас уточню у оператора.");
     const repo = fakeMessagesRepo([row(1, "user", userText)]);
@@ -480,12 +544,10 @@ describe("LlmReplyStrategy", () => {
       userMessageText: userText,
     });
 
-    expect(result).not.toBeNull();
-    const part = result?.[0]?.parts[0];
-    expect(part?.kind).toBe("text");
-    expect(part?.kind === "text" ? part.text : "").toContain(
-      "За 500 USDT (TRC20) получите 15750 THB.",
-    );
+	    expect(result).not.toBeNull();
+	    expect(firstReplyText(result)).toContain(
+	      "За 500 USDT (TRC20) получите 15750 THB.",
+	    );
     expect(chat.lastCall).toBeNull();
 		expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
 			asset: "USDT",
@@ -527,10 +589,10 @@ describe("LlmReplyStrategy", () => {
       userMessageText: "15750 бат за 500 USDT? Точно?",
     });
 
-    expect(result).not.toBeNull();
-    expect((result![0]!.parts[0] as { text: string }).text).toContain(
-      "За 500 USDT (TRC20) получите 15750 THB.",
-    );
+	    expect(result).not.toBeNull();
+	    expect(firstReplyText(result)).toContain(
+	      "За 500 USDT (TRC20) получите 15750 THB.",
+	    );
 		expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
 			asset: "USDT",
 			amount: 500,
@@ -574,7 +636,7 @@ describe("LlmReplyStrategy", () => {
     });
 
     expect(result).not.toBeNull();
-    const text = (result![0]!.parts[0] as { text: string }).text;
+    const text = firstReplyText(result);
     expect(text).toContain("Перед реквизитами нужна верификация клиента.");
 		expect(text).toContain(
 			"Оператор или внешний сервис проведёт проверку личности.",
@@ -620,7 +682,7 @@ describe("LlmReplyStrategy", () => {
     });
 
     expect(result).not.toBeNull();
-    const text = (result![0]!.parts[0] as { text: string }).text;
+    const text = firstReplyText(result);
     expect(text).toContain("Перед реквизитами нужна верификация клиента.");
     expect(text).toContain("Пришлите короткое видео");
     expect(chat.lastCall).toBeNull();
@@ -647,7 +709,7 @@ describe("LlmReplyStrategy", () => {
       userMessageText: "сколько за 335 usdt?",
     });
     expect(result).not.toBeNull();
-		expect((result![0]!.parts[0] as { text: string }).text).toBe(
+		expect(firstReplyText(result)).toBe(
 			EXCHANGE_SAFE_FALLBACK,
 		);
   });
@@ -695,12 +757,60 @@ describe("LlmReplyStrategy", () => {
       tenantId: 1,
       conversationId: 100,
       contactId: 1,
-    });
-    expect(result).not.toBeNull();
-		expect((result![0]!.parts[0] as { text: string }).text).toBe(
-			EXCHANGE_KYC_FALLBACK,
+	    });
+	    expect(result).not.toBeNull();
+			expect(firstReplyText(result)).toBe(
+				EXCHANGE_KYC_FALLBACK,
+			);
+			expect(normalizeReplyStrategyResult(result)).toMatchObject({
+				autoTakeover: true,
+				customerNoticeSent: true,
+			});
+	  });
+
+	it("exchange: auto handoff can stop AI without customer notice", async () => {
+		const chat = new CapturingChat("KYC подтверждён. Продолжаем оформление.");
+		const repo = fakeMessagesRepo([
+			row(1, "assistant", "Для обмена нужно пройти KYC: пришлите видео."),
+			row(2, "user", "отправил видео"),
+		]);
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveExchangeCustomerNoticeEnabled: () => false,
+				resolveExchangePolicyState: () => ({
+					stageSlug: "kyc_collection",
+					verification: {
+						verified: false,
+						status: "pending_review",
+						needsVerification: true,
+					},
+				}),
+			},
+			() => repo,
 		);
-  });
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "отправил видео",
+		});
+		const normalized = normalizeReplyStrategyResult(result);
+
+		expect(normalized?.envelopes).toHaveLength(0);
+		expect(normalized?.operatorHandoffs?.[0]).toMatchObject({
+			reason: "kyc_review",
+			stageSlug: "kyc_collection",
+		});
+		expect(normalized).toMatchObject({
+			autoTakeover: true,
+			customerNoticeSent: false,
+		});
+	});
 
   it("пишет telemetry hook после generic tool-loop", async () => {
     const chat = new ToolLoopChat();
