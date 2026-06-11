@@ -40,8 +40,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { type Admin, clearToken, type FunnelListItem, saas, type Tenant } from "@/api/saas";
-import { ModeToggle } from "@/components/mode-toggle";
 import { CopilotDock } from "@/components/copilot";
+import { ModeToggle } from "@/components/mode-toggle";
 import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -117,6 +117,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Система",
     items: [
+      { to: "/settings", label: "Настройки", icon: SlidersHorizontalIcon },
       { to: "/notifications", label: "Уведомления", icon: BellIcon },
       { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
       { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
@@ -317,12 +318,7 @@ function AccountDropdown({
           <>
             <DropdownMenuItem asChild>
               <Link to="/settings">
-                <SlidersHorizontalIcon /> Настройки LLM
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link to="/settings/channels">
-                <CableIcon /> Каналы
+                <SlidersHorizontalIcon /> Настройки
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
@@ -536,9 +532,7 @@ async function getExchangeNavState(): Promise<{
     return { hasExchangeWorkflow: true, isExchangeTenant };
   }
 
-  const details = await Promise.allSettled(
-    funnels.map((funnel) => saas.getFunnelById(funnel.id)),
-  );
+  const details = await Promise.allSettled(funnels.map((funnel) => saas.getFunnelById(funnel.id)));
   const hasExchangeWorkflow = details.some((result) => {
     if (result.status !== "fulfilled") return false;
     return (
@@ -666,7 +660,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
       clearInterval(id);
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate is stable
   }, []);
 
   async function handleLogout() {

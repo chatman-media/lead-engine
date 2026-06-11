@@ -10,6 +10,7 @@ import { useAdminEvents } from "./hooks/useAdminEvents.ts";
 import { SaasAcceptInvite } from "./pages/SaasAcceptInvite.tsx";
 import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasBilling } from "./pages/SaasBilling.tsx";
+import { SaasCampaigns } from "./pages/SaasCampaigns.tsx";
 import { SaasChannels } from "./pages/SaasChannels.tsx";
 import { SaasConversations } from "./pages/SaasConversations.tsx";
 import { SaasDashboard } from "./pages/SaasDashboard.tsx";
@@ -22,7 +23,6 @@ import { SaasFunnel } from "./pages/SaasFunnel.tsx";
 import { SaasHooks } from "./pages/SaasHooks.tsx";
 import { SaasIntegrations } from "./pages/SaasIntegrations.tsx";
 import { SaasLeadDetail } from "./pages/SaasLeadDetail.tsx";
-import { SaasCampaigns } from "./pages/SaasCampaigns.tsx";
 import { SaasLeads } from "./pages/SaasLeads.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
 import { SaasNotifications } from "./pages/SaasNotifications.tsx";
@@ -164,62 +164,65 @@ export function App() {
         <CopilotProvider>
           <Routes>
             {/* Публичные (регистрация закрыта — только login + invite) */}
-          <Route path="/login" element={<SaasLogin />} />
-          <Route path="/accept-invite" element={<SaasAcceptInvite />} />
-          <Route path="/forgot-password" element={<SaasForgotPassword />} />
-          <Route path="/reset-password" element={<SaasResetPassword />} />
+            <Route path="/login" element={<SaasLogin />} />
+            <Route path="/accept-invite" element={<SaasAcceptInvite />} />
+            <Route path="/forgot-password" element={<SaasForgotPassword />} />
+            <Route path="/reset-password" element={<SaasResetPassword />} />
 
-          {/* Только для авторизованных */}
-          <Route element={<RequireAuth />}>
-            {/* Онбординг: доступен пока НЕ завершён; иначе → /dashboard */}
-            <Route element={<OnboardingGate require="not-done" />}>
-              <Route path="/onboarding" element={<SaasOnboarding />} />
-            </Route>
+            {/* Только для авторизованных */}
+            <Route element={<RequireAuth />}>
+              {/* Онбординг: доступен пока НЕ завершён; иначе → /dashboard */}
+              <Route element={<OnboardingGate require="not-done" />}>
+                <Route path="/onboarding" element={<SaasOnboarding />} />
+              </Route>
 
-            {/* Кабинет: доступен только когда онбординг завершён; иначе → /onboarding */}
-            <Route element={<OnboardingGate require="done" />}>
-              <Route element={<ShellLayout />}>
-                <Route index element={<Navigate to="/dashboard" replace />} />
-                <Route path="/dashboard" element={<SaasDashboard />} />
-                <Route path="/leads" element={<SaasLeads />} />
-                <Route path="/leads/:id" element={<SaasLeadDetail />} />
-                <Route path="/conversations" element={<SaasConversations />} />
-                <Route path="/conversations/:id" element={<SaasConversations />} />
-                <Route path="/orders" element={<SaasProviderOrders />} />
-                <Route path="/exchange" element={<SaasExchange />} />
-                <Route path="/profile" element={<SaasProfile />} />
-                <Route path="/notifications" element={<SaasNotifications />} />
-                <Route path="/quality" element={<SaasQuality />} />
-                <Route element={<RequireSuperadmin />}>
-                  <Route path="/outreach" element={<SaasOutreach />} />
-                  <Route path="/campaigns" element={<SaasCampaigns />} />
-                  <Route path="/funnel" element={<SaasFunnel />} />
-                  <Route path="/services" element={<SaasServiceCatalog />} />
-                  <Route path="/vacancies" element={<SaasVacancies />} />
-                  <Route path="/skills" element={<SaasSkills />} />
-                  <Route path="/hooks" element={<SaasHooks />} />
-                  <Route path="/styles" element={<SaasStyles />} />
-                  <Route path="/experiments" element={<SaasExperiments />} />
-                  <Route path="/channels" element={<SaasChannels />} />
-                  <Route path="/billing" element={<SaasBilling />} />
-                  <Route path="/settings" element={<SaasSettings />} />
-                  <Route path="/settings/channels" element={<SaasChannels />} />
-                  <Route path="/partners" element={<SaasPartners />} />
-                  <Route path="/providers" element={<SaasProviders />} />
-                  <Route path="/referral" element={<SaasReferral />} />
-                  <Route path="/integrations" element={<SaasIntegrations />} />
-                  <Route path="/faq" element={<SaasFaq />} />
-                  <Route path="/team" element={<SaasTeam />} />
-                  <Route path="/audit" element={<SaasAudit />} />
-                  <Route path="/diagnostics" element={<SaasDiagnostics />} />
-                  <Route path="/test" element={<SaasTestBot />} />
-                  <Route path="/superadmin" element={<SaasSuperadmin />} />
+              {/* Кабинет: доступен только когда онбординг завершён; иначе → /onboarding */}
+              <Route element={<OnboardingGate require="done" />}>
+                <Route element={<ShellLayout />}>
+                  <Route index element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/dashboard" element={<SaasDashboard />} />
+                  <Route path="/leads" element={<SaasLeads />} />
+                  <Route path="/leads/:id" element={<SaasLeadDetail />} />
+                  <Route path="/conversations" element={<SaasConversations />} />
+                  <Route path="/conversations/:id" element={<SaasConversations />} />
+                  <Route path="/orders" element={<SaasProviderOrders />} />
+                  <Route path="/exchange" element={<SaasExchange />} />
+                  <Route path="/profile" element={<SaasProfile />} />
+                  <Route path="/notifications" element={<SaasNotifications />} />
+                  <Route path="/quality" element={<SaasQuality />} />
+                  <Route element={<RequireSuperadmin />}>
+                    <Route path="/outreach" element={<SaasOutreach />} />
+                    <Route path="/campaigns" element={<SaasCampaigns />} />
+                    <Route path="/funnel" element={<SaasFunnel />} />
+                    <Route path="/services" element={<SaasServiceCatalog />} />
+                    <Route path="/vacancies" element={<SaasVacancies />} />
+                    <Route path="/skills" element={<SaasSkills />} />
+                    <Route path="/hooks" element={<SaasHooks />} />
+                    <Route path="/styles" element={<SaasStyles />} />
+                    <Route path="/experiments" element={<SaasExperiments />} />
+                    <Route path="/channels" element={<SaasChannels />} />
+                    <Route path="/billing" element={<SaasBilling />} />
+                    <Route path="/settings" element={<SaasSettings />} />
+                    <Route
+                      path="/settings/channels"
+                      element={<Navigate to="/channels" replace />}
+                    />
+                    <Route path="/partners" element={<SaasPartners />} />
+                    <Route path="/providers" element={<SaasProviders />} />
+                    <Route path="/referral" element={<SaasReferral />} />
+                    <Route path="/integrations" element={<SaasIntegrations />} />
+                    <Route path="/faq" element={<SaasFaq />} />
+                    <Route path="/team" element={<SaasTeam />} />
+                    <Route path="/audit" element={<SaasAudit />} />
+                    <Route path="/diagnostics" element={<SaasDiagnostics />} />
+                    <Route path="/test" element={<SaasTestBot />} />
+                    <Route path="/superadmin" element={<SaasSuperadmin />} />
+                  </Route>
                 </Route>
               </Route>
             </Route>
-          </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </CopilotProvider>
       </BrowserRouter>

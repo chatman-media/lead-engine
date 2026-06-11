@@ -1,6 +1,28 @@
-import { CableIcon, CheckIcon, KeyRoundIcon, SaveIcon, Trash2Icon } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import {
+  ActivityIcon,
+  BarChart2Icon,
+  BellIcon,
+  BlocksIcon,
+  BookOpenIcon,
+  CheckIcon,
+  FlaskConicalIcon,
+  KeyRoundIcon,
+  LinkIcon,
+  Loader2Icon,
+  type LucideIcon,
+  PaletteIcon,
+  SaveIcon,
+  ScrollTextIcon,
+  ShieldCheckIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+  Trash2Icon,
+  UserCircleIcon,
+  UsersIcon,
+  ZapIcon,
+} from "lucide-react";
+import { type FormEvent, type MouseEventHandler, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +38,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   ApiError,
   clearToken,
@@ -109,6 +133,257 @@ interface PurposeForm {
   timeoutMs: string;
 }
 
+interface SettingsShortcut {
+  to: string;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+interface SettingsSection {
+  title: string;
+  items: SettingsShortcut[];
+}
+
+const SETTINGS_SECTIONS: SettingsSection[] = [
+  {
+    title: "Аккаунт",
+    items: [
+      {
+        to: "/profile",
+        label: "Профиль",
+        description: "Имя, email и личные параметры администратора.",
+        icon: UserCircleIcon,
+      },
+      {
+        to: "/team",
+        label: "Команда",
+        description: "Администраторы, роли и ссылки-приглашения.",
+        icon: UsersIcon,
+      },
+      {
+        to: "/notifications",
+        label: "Уведомления",
+        description: "Telegram-информер, дайджесты и тихие часы.",
+        icon: BellIcon,
+      },
+    ],
+  },
+  {
+    title: "AI и бот",
+    items: [
+      {
+        to: "#llm",
+        label: "LLM",
+        description: "Провайдеры, модели и BYOK-ключи.",
+        icon: SlidersHorizontalIcon,
+      },
+      {
+        to: "/integrations",
+        label: "Интеграции",
+        description: "Инструменты бота и исходящие вебхуки.",
+        icon: BlocksIcon,
+      },
+      {
+        to: "/faq",
+        label: "База знаний",
+        description: "Документы, FAQ и RAG-поиск.",
+        icon: BookOpenIcon,
+      },
+      {
+        to: "/skills",
+        label: "Навыки",
+        description: "Доменные действия и инструкции бота.",
+        icon: ZapIcon,
+      },
+      {
+        to: "/hooks",
+        label: "Хуки",
+        description: "Автоматические реакции на события лидов.",
+        icon: SparklesIcon,
+      },
+      {
+        to: "/styles",
+        label: "Стили",
+        description: "Тон общения и поведение ассистента.",
+        icon: PaletteIcon,
+      },
+      {
+        to: "/experiments",
+        label: "Эксперименты",
+        description: "Проверки промптов и вариантов ответов.",
+        icon: FlaskConicalIcon,
+      },
+      {
+        to: "/quality",
+        label: "Качество",
+        description: "Оценка ответов и контроль деградаций.",
+        icon: ActivityIcon,
+      },
+    ],
+  },
+  {
+    title: "Система",
+    items: [
+      {
+        to: "/billing",
+        label: "LLM-использование",
+        description: "Расходы, лимиты и статистика моделей.",
+        icon: BarChart2Icon,
+      },
+      {
+        to: "/diagnostics",
+        label: "Диагностика",
+        description: "Ошибки каналов, LLM и инфраструктуры.",
+        icon: ActivityIcon,
+      },
+      {
+        to: "/audit",
+        label: "Аудит",
+        description: "История изменений и действий админов.",
+        icon: ScrollTextIcon,
+      },
+      {
+        to: "/referral",
+        label: "Рефкоды",
+        description: "Партнёрские коды и источники заявок.",
+        icon: LinkIcon,
+      },
+      {
+        to: "/superadmin",
+        label: "Alpha",
+        description: "Платформенные аккаунты и ранний доступ.",
+        icon: ShieldCheckIcon,
+      },
+    ],
+  },
+];
+
+function SettingsDirectory() {
+  return (
+    <div className="space-y-5">
+      {SETTINGS_SECTIONS.map((section) => (
+        <section key={section.title} className="space-y-3">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            {section.title}
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {section.items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={`${section.title}:${item.to}:${item.label}`}
+                  to={item.to}
+                  className="group flex min-h-[92px] items-start gap-3 rounded-lg border bg-card p-4 text-card-foreground transition-colors hover:border-primary/40 hover:bg-accent/40"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="min-w-0 space-y-1">
+                    <span className="block text-sm font-medium leading-none">{item.label}</span>
+                    <span className="block text-xs leading-5 text-muted-foreground">
+                      {item.description}
+                    </span>
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function InlineSaveButton({
+  label,
+  tooltip,
+  dirty,
+  saving,
+  disabled,
+  type = "button",
+  onClick,
+  className,
+}: {
+  label: string;
+  tooltip: string;
+  dirty?: boolean;
+  saving?: boolean;
+  disabled?: boolean;
+  type?: "button" | "submit";
+  onClick?: MouseEventHandler<HTMLButtonElement>;
+  className?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type={type}
+          variant="outline"
+          size="icon"
+          aria-label={label}
+          disabled={disabled || saving}
+          onClick={onClick}
+          className={cn(
+            "relative size-8 border-input bg-background/80 text-muted-foreground shadow-sm hover:border-primary/40 hover:bg-primary/10 hover:text-primary",
+            dirty && "border-primary/40 bg-primary/10 text-primary ring-1 ring-primary/15",
+            className,
+          )}
+        >
+          {saving ? (
+            <Loader2Icon className="size-3.5 animate-spin" />
+          ) : (
+            <SaveIcon className="size-3.5" />
+          )}
+          {dirty && !saving && (
+            <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary ring-2 ring-background" />
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function PurposeSaveState({
+  dirty,
+  isNew,
+  saving,
+}: {
+  dirty: boolean;
+  isNew: boolean;
+  saving: boolean;
+}) {
+  if (saving) {
+    return (
+      <Badge variant="secondary" className="h-6 gap-1.5 px-2 text-[10px]">
+        <Loader2Icon className="size-3 animate-spin" />
+        сохраняем
+      </Badge>
+    );
+  }
+
+  if (dirty) {
+    return (
+      <Badge className="h-6 gap-1.5 border-primary/20 bg-primary/10 px-2 text-[10px] text-primary">
+        <span className="size-1.5 rounded-full bg-primary" />
+        изменено
+      </Badge>
+    );
+  }
+
+  if (isNew) {
+    return (
+      <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[10px] text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-muted-foreground/60" />
+        не настроено
+      </Badge>
+    );
+  }
+
+  return null;
+}
+
 export function SaasSettings() {
   const navigate = useNavigate();
   const [configs, setConfigs] = useState<LlmConfig[]>([]);
@@ -188,7 +463,6 @@ export function SaasSettings() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
   function updateForm(purpose: LlmPurpose, patch: Partial<PurposeForm>) {
@@ -267,6 +541,9 @@ export function SaasSettings() {
         ...(f.embedDim ? { embedDim: Number.parseInt(f.embedDim, 10) } : {}),
         ...(f.timeoutMs ? { timeoutMs: Number.parseInt(f.timeoutMs, 10) } : {}),
       });
+      if (apiKey) {
+        setProviderKeys((prev) => ({ ...prev, [f.provider]: "" }));
+      }
       await refresh();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -291,6 +568,16 @@ export function SaasSettings() {
       await saas.deleteLlmConfig(purpose);
       const def = PURPOSES.find((p) => p.value === purpose)!;
       setForms((prev) => ({
+        ...prev,
+        [purpose]: {
+          provider: def.defaultProvider,
+          model: def.defaultModel,
+          baseUrl: "",
+          embedDim: "",
+          timeoutMs: "",
+        },
+      }));
+      setSavedForms((prev) => ({
         ...prev,
         [purpose]: {
           provider: def.defaultProvider,
@@ -336,8 +623,8 @@ export function SaasSettings() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Настройки LLM"
-        description="BYOK — собственные ключи. Хранятся зашифрованными (AES-256-GCM), применяются live."
+        title="Настройки"
+        description="Аккаунт, AI-модели, автоматизация и системные разделы."
       />
 
       {error && (
@@ -346,21 +633,14 @@ export function SaasSettings() {
         </p>
       )}
 
-      <Card>
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1">
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
-              <CableIcon className="size-4" /> Каналы сообщений
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Telegram, WhatsApp, Facebook Messenger, VK, MAX и web-виджет.
-            </p>
-          </div>
-          <Button type="button" variant="outline" onClick={() => navigate("/settings/channels")}>
-            <CableIcon className="size-4" /> Открыть каналы
-          </Button>
-        </CardContent>
-      </Card>
+      <SettingsDirectory />
+
+      <div id="llm" className="space-y-1">
+        <h2 className="text-lg font-semibold tracking-tight">Настройки LLM</h2>
+        <p className="text-sm text-muted-foreground">
+          BYOK — собственные ключи. Хранятся зашифрованными (AES-256-GCM), применяются live.
+        </p>
+      </div>
 
       {/* ── Ключи провайдеров ── */}
       <div className="space-y-3">
@@ -392,15 +672,19 @@ export function SaasSettings() {
                     placeholder={providerHasKey(provider) ? "•••••••• (обновить)" : "sk-…"}
                     className="text-xs h-8"
                   />
-                  <Button
+                  <InlineSaveButton
                     type="submit"
-                    size="sm"
-                    variant="outline"
+                    label={`Сохранить ключ ${PROVIDER_LABEL[provider]}`}
+                    tooltip={
+                      providerKeys[provider].trim()
+                        ? `Сохранить ключ ${PROVIDER_LABEL[provider]}`
+                        : "Введите ключ"
+                    }
+                    dirty={Boolean(providerKeys[provider].trim())}
+                    saving={savingProvider === provider}
                     disabled={savingProvider === provider || !providerKeys[provider].trim()}
-                    className="shrink-0 h-8"
-                  >
-                    {savingProvider === provider ? "…" : "OK"}
-                  </Button>
+                    className="size-8 shrink-0"
+                  />
                 </form>
               </CardContent>
             </Card>
@@ -417,64 +701,78 @@ export function SaasSettings() {
           {PURPOSES.map(({ value: purpose, label, hint }) => {
             const cfg = configs.find((c) => c.purpose === purpose);
             const f = forms[purpose];
+            const hasDraftKey =
+              f.provider !== "ollama" &&
+              !providerHasKey(f.provider) &&
+              Boolean(providerKeys[f.provider].trim());
+            const isDirty = isPurposeDirty(purpose) || hasDraftKey;
+            const isNew = !cfg;
+            const isSaving = savingPurpose === purpose;
+            const canSave = isDirty || isNew;
             return (
-              <Card key={purpose} className="group">
-                <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-                  <div className="space-y-0.5 flex-1 min-w-0">
-                    <CardTitle className="text-sm">{label}</CardTitle>
-                    <p className="text-xs text-muted-foreground">{hint}</p>
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0 ml-2">
-                    {/* Иконка сохранения — только при изменениях */}
-                    {isPurposeDirty(purpose) && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-6 text-primary hover:bg-primary/10"
-                        disabled={savingPurpose === purpose}
-                        onClick={() => savePurpose(purpose)}
-                      >
-                        {savingPurpose === purpose ? (
-                          <span className="text-[10px]">…</span>
+              <Card
+                key={purpose}
+                className={cn(
+                  "group transition-colors",
+                  (isDirty || isSaving) && "border-primary/30 ring-1 ring-primary/10",
+                )}
+              >
+                <CardHeader className="flex flex-col gap-2 space-y-0 pb-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <CardTitle className="text-sm">{label}</CardTitle>
+                      <p className="text-xs text-muted-foreground">{hint}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {(canSave || isSaving) && (
+                        <InlineSaveButton
+                          label={
+                            isNew ? `Создать назначение ${label}` : `Сохранить изменения ${label}`
+                          }
+                          tooltip={isNew ? "Создать назначение" : "Сохранить изменения"}
+                          dirty={isDirty || isNew}
+                          saving={isSaving}
+                          disabled={savingPurpose !== null && savingPurpose !== purpose}
+                          onClick={() => savePurpose(purpose)}
+                          className="size-7"
+                        />
+                      )}
+                      {/* Иконка удаления — при наведении, только если есть сохранённый конфиг */}
+                      {cfg &&
+                        (confirmDeletePurpose === purpose ? (
+                          <>
+                            <span className="text-xs text-muted-foreground mr-1">Удалить?</span>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-6 px-2 text-xs"
+                              onClick={() => handleDelete(purpose)}
+                            >
+                              Да
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-xs"
+                              onClick={() => setConfirmDeletePurpose(null)}
+                            >
+                              Нет
+                            </Button>
+                          </>
                         ) : (
-                          <SaveIcon className="size-3" />
-                        )}
-                      </Button>
-                    )}
-                    {/* Иконка удаления — при наведении, только если есть сохранённый конфиг */}
-                    {cfg &&
-                      (confirmDeletePurpose === purpose ? (
-                        <>
-                          <span className="text-xs text-muted-foreground mr-1">Удалить?</span>
                           <Button
-                            size="sm"
-                            variant="destructive"
-                            className="h-6 px-2 text-xs"
-                            onClick={() => handleDelete(purpose)}
-                          >
-                            Да
-                          </Button>
-                          <Button
-                            size="sm"
                             variant="ghost"
-                            className="h-6 px-2 text-xs"
-                            onClick={() => setConfirmDeletePurpose(null)}
+                            size="icon"
+                            aria-label={`Удалить назначение ${label}`}
+                            className="size-6 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setConfirmDeletePurpose(purpose)}
                           >
-                            Нет
+                            <Trash2Icon className="size-3" />
                           </Button>
-                        </>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-6 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => setConfirmDeletePurpose(purpose)}
-                        >
-                          <Trash2Icon className="size-3" />
-                        </Button>
-                      ))}
+                        ))}
+                    </div>
                   </div>
+                  <PurposeSaveState dirty={isDirty} isNew={isNew} saving={isSaving} />
                 </CardHeader>
                 <CardContent>
                   {cfg && (
@@ -578,16 +876,6 @@ export function SaasSettings() {
                         />
                       </div>
                     </div>
-                    {!cfg && (
-                      <Button
-                        type="submit"
-                        size="sm"
-                        className="w-full"
-                        disabled={savingPurpose !== null}
-                      >
-                        {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
-                      </Button>
-                    )}
                   </form>
                 </CardContent>
               </Card>
