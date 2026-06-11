@@ -1,6 +1,7 @@
 node_modules/
 data/
 .env
+.deploy.env
 .env.local
 .env.test.local
 .env.*.local
