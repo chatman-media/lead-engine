@@ -15,6 +15,7 @@ import {
 } from "@chatman-media/storage";
 import { and, asc, desc, eq, isNull, notInArray, or } from "drizzle-orm";
 import { SERVICE_CATALOG_CLASSIFIER_SYSTEM_PROMPT } from "../prompts/service-catalog-runtime.ts";
+import { safeFetch } from "./safe-fetch.ts";
 
 export type ServiceCatalogRouteType =
 	| "manual"
@@ -218,7 +219,9 @@ export function makeServiceCatalogRuntime(
 	deps: ServiceCatalogRuntimeDeps = {},
 ): ServiceCatalogRuntime {
 	const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
-	const fetchFn = deps.fetch ?? globalThis.fetch.bind(globalThis);
+	// SSRF guard by default: webhook URLs come from tenant-configured catalog
+	// items. Tests/callers can still inject their own fetch via deps.fetch.
+	const fetchFn = deps.fetch ?? safeFetch;
 
 	return {
 		async extract(input) {

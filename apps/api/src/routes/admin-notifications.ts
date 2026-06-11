@@ -116,6 +116,14 @@ export function makeAdminNotificationsRoutes(opts: {
     return c.json({ items });
   });
 
+  // POST /api/admin/notifications/informer/read — отметить in-app уведомления прочитанными.
+  app.post("/informer/read", async (c) => {
+    const adminId = c.var.adminId;
+    const tenantId = c.var.tenantId;
+    await opts.repo.markNotificationsRead(tenantId, adminId, Math.floor(Date.now() / 1000));
+    return c.json({ ok: true });
+  });
+
   // PUT /api/admin/notifications/informer — настройки информера (порог/темы/дайджест/мут).
   app.put("/informer", async (c) => {
     const adminId = c.var.adminId;

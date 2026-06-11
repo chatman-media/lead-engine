@@ -433,6 +433,24 @@ export class NotificationsRepo {
       .limit(limit);
   }
 
+  /** Помечает уведомления владельца прочитанными в in-app центре. */
+  async markNotificationsRead(
+    tenantId: number,
+    adminId: number,
+    readAt: number,
+  ): Promise<void> {
+    await this.db
+      .update(adminNotifications)
+      .set({ readAt })
+      .where(
+        and(
+          eq(adminNotifications.tenantId, tenantId),
+          eq(adminNotifications.adminId, adminId),
+          isNull(adminNotifications.readAt),
+        ),
+      );
+  }
+
   /** Очередь дайджеста: принято, в реалтайм не доставлено, ещё не сведено. */
   async listPendingDigest(tenantId: number, adminId: number): Promise<AdminNotificationRow[]> {
     return this.db

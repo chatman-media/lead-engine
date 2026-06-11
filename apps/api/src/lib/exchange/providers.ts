@@ -21,6 +21,7 @@ import {
 	westWalletCurrencyCandidates,
 	type WestWalletTransaction,
 } from "./westwallet.ts";
+import { withIpnKey } from "./westwallet-ipn.ts";
 
 export const CRYPTO_TTL_MIN = 15;
 export const FIAT_TTL_MIN = 20;
@@ -159,7 +160,12 @@ async function readWestWalletConfig(deps: {
 		return { client: null, ipnUrl: null, successUrl: successUrlSecret };
 	}
 	const publicUrl = process.env.PLATFORM_PUBLIC_URL?.replace(/\/+$/, "");
-	const ipnUrl = ipnUrlSecret || (publicUrl ? `${publicUrl}/webhook/westwallet/${deps.tenantId}` : null);
+	const ipnUrlBase = ipnUrlSecret || (publicUrl ? `${publicUrl}/webhook/westwallet/${deps.tenantId}` : null);
+	// Embed the per-tenant IPN auth token so the webhook can reject forged
+	// callbacks (see lib/exchange/westwallet-ipn.ts).
+	const ipnUrl = ipnUrlBase
+		? withIpnKey(ipnUrlBase, deps.tenantId, deps.masterKeyHex)
+		: null;
 	return {
 		client: new WestWalletClient({ apiKey, secretKey }),
 		ipnUrl,

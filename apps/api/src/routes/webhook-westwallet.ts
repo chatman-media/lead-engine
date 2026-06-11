@@ -2,6 +2,7 @@ import type { Db } from "@chatman-media/conversation-engine";
 import { Hono } from "hono";
 import { getOrderById, updateOrder } from "../lib/exchange/orders.ts";
 import { verifyWestWalletInvoicePayment } from "../lib/exchange/providers.ts";
+import { verifyIpnKey } from "../lib/exchange/westwallet-ipn.ts";
 
 export function makeWestWalletWebhookRoutes(opts: {
 	db: Db;
@@ -13,6 +14,15 @@ export function makeWestWalletWebhookRoutes(opts: {
 		const tenantId = Number(c.req.param("tenantId"));
 		if (!Number.isInteger(tenantId) || tenantId <= 0) {
 			return c.json({ error: "bad tenant" }, 400);
+		}
+
+		// Authenticate the IPN before any DB / provider work: the per-tenant
+		// `key` is embedded in the IPN URL we registered with WestWallet
+		// (see lib/exchange/westwallet-ipn.ts). Reject forged callbacks here so
+		// they can't be stored as proof or amplified into provider-API calls.
+		const providedKey = c.req.query("key") ?? "";
+		if (!verifyIpnKey(providedKey, tenantId, opts.masterKeyHex)) {
+			return c.json({ error: "unauthorized" }, 401);
 		}
 
 		const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, string | File>;
@@ -48,9 +58,12 @@ export function makeWestWalletWebhookRoutes(opts: {
 			expectedAmount: order.amountFrom,
 		});
 		await updateOrder(opts.db, tenantId, order.id, {
+			// Proof is built from the provider-verified transaction, NOT the raw
+			// IPN body — the callback payload is attacker-influenceable and must
+			// not be persisted as evidence. Keep only the matched label.
 			proofJson: JSON.stringify({
 				kind: "westwallet_ipn",
-				raw: body,
+				label,
 				invoiceToken: token,
 				transaction: verification.transaction ?? null,
 				verifiedOk: verification.ok,

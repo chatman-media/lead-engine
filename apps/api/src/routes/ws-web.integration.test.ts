@@ -18,9 +18,16 @@ import {
 	type WebChannelEntry,
 	WebChannelRegistry,
 } from "../lib/web-channel-registry.ts";
+import { signWebSession } from "../lib/web-session-token.ts";
 import { makeWebSocketRoutes } from "./ws-web.ts";
 
 const log = makeDefaultLogger("ws-web.test");
+const WS_SECRET = "s3cret";
+
+/** Build the bound query params (user + valid token) for a connection. */
+function bound(slug: string, user: string): Record<string, string> {
+	return { user, token: signWebSession(slug, user, WS_SECRET) };
+}
 
 /**
  * Тестовый shim над WebChannelRegistry — позволяет вручную добавить
@@ -84,7 +91,7 @@ beforeAll(() => {
 		registry,
 		log,
 		metrics,
-		sharedSecret: "s3cret",
+		signingSecret: WS_SECRET,
 	});
 
 	let lastError: unknown;
@@ -176,10 +183,7 @@ async function connect(
 describe("ws-web integration", () => {
 	it("happy path: connect → ready-frame → user_text → inbound в адаптер inbox'а", async () => {
 		if (!wsAvailable()) return;
-		const { ws, readyMessage } = await connect("alpha", {
-			user: "u-alpha-1",
-			auth: "s3cret",
-		});
+		const { ws, readyMessage } = await connect("alpha", bound("alpha", "u-alpha-1"));
 		expect(readyMessage).toEqual({
 			type: "ready",
 			channelId: "101",
@@ -208,10 +212,7 @@ describe("ws-web integration", () => {
 
 	it("server → client send(envelope) → клиент получает bot_text frame", async () => {
 		if (!wsAvailable()) return;
-		const { ws } = await connect("alpha", {
-			user: "u-alpha-2",
-			auth: "s3cret",
-		});
+		const { ws } = await connect("alpha", bound("alpha", "u-alpha-2"));
 
 		const entry = registry.byTenant("alpha");
 		if (!entry) throw new Error("entry missing");
@@ -245,9 +246,9 @@ describe("ws-web integration", () => {
 		ws.close();
 	});
 
-	it("auth: неверный sharedSecret → 401 (WebSocket closes без open)", async () => {
+	it("auth: неверный session token → 401 (WebSocket closes без open)", async () => {
 		if (!wsAvailable()) return;
-		const ws = new WebSocket(url("alpha", "user=u1&auth=wrong"));
+		const ws = new WebSocket(url("alpha", "user=u1&token=wrong"));
 		const code = await new Promise<number>((resolve) => {
 			ws.addEventListener("close", (e) => resolve(e.code), { once: true });
 			ws.addEventListener("error", () => resolve(-1), { once: true });
@@ -262,7 +263,9 @@ describe("ws-web integration", () => {
 
 	it("unknown tenant → upgrade rejected", async () => {
 		if (!wsAvailable()) return;
-		const ws = new WebSocket(url("unknown-tenant", "user=u1&auth=s3cret"));
+		const ws = new WebSocket(
+			url("unknown-tenant", new URLSearchParams(bound("unknown-tenant", "u1")).toString()),
+		);
 		const code = await new Promise<number>((resolve) => {
 			ws.addEventListener("close", (e) => resolve(e.code), { once: true });
 			ws.addEventListener("error", () => resolve(-1), { once: true });
@@ -271,9 +274,9 @@ describe("ws-web integration", () => {
 		expect(code).not.toBe(1000);
 	});
 
-	it("missing user param → 400", async () => {
+	it("user param without token → 401 (no unbound ids)", async () => {
 		if (!wsAvailable()) return;
-		const ws = new WebSocket(url("alpha", "auth=s3cret"));
+		const ws = new WebSocket(url("alpha", "user=u-unbound"));
 		const code = await new Promise<number>((resolve) => {
 			ws.addEventListener("close", (e) => resolve(e.code), { once: true });
 			ws.addEventListener("error", () => resolve(-1), { once: true });
@@ -284,7 +287,7 @@ describe("ws-web integration", () => {
 
 	it("multi-tenant isolation: connection в alpha не виден в beta inbox'е", async () => {
 		if (!wsAvailable()) return;
-		const { ws } = await connect("alpha", { user: "u-a", auth: "s3cret" });
+		const { ws } = await connect("alpha", bound("alpha", "u-a"));
 		ws.send(
 			JSON.stringify({ type: "user_text", id: "c-a", text: "from-alpha" }),
 		);

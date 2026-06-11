@@ -52,6 +52,19 @@ export interface InformerEvent {
   url?: string;
 }
 
+export interface AdminInformerRealtimeEvent {
+  id: number;
+  tenantId: number;
+  topic: InformerTopic;
+  severity: InformerSeverity;
+  kind: string;
+  title: string;
+  body: string;
+  deliveredAt: number | null;
+  readAt: number | null;
+  createdAt: number;
+}
+
 // ── Шкалы порога ─────────────────────────────────────────────────────────
 
 const SEV_RANK: Record<InformerSeverity, number> = { info: 1, important: 2, critical: 3 };
@@ -251,6 +264,8 @@ export interface AdminInformerDeps {
   telegram?: OpsTelegramSender | null;
   /** Анти-шторм: не повторять (tenant, dedupKey) чаще, сек. Default 1800 (30 мин). */
   cooldownSec?: number;
+  /** In-app realtime sink для админки; сеть/доставка остаются вне пакета. */
+  realtime?: (event: AdminInformerRealtimeEvent) => void;
   log?: { warn?: (msg: string, ctx?: unknown) => void; info?: (msg: string, ctx?: unknown) => void };
 }
 
@@ -259,6 +274,7 @@ interface DeliveryPlan {
   chatId: string | null;
   email: string | null;
   realtime: boolean;
+  inApp: AdminInformerRealtimeEvent;
 }
 
 export class AdminInformer {
@@ -344,7 +360,24 @@ export class AdminInformer {
         targetChatId: chatId,
         // delivered_at проставим ПОСЛЕ успешной реалтайм-доставки.
       });
-      return { rowId, chatId, email: owner.email, realtime } satisfies DeliveryPlan;
+      return {
+        rowId,
+        chatId,
+        email: owner.email,
+        realtime,
+        inApp: {
+          id: rowId,
+          tenantId: event.tenantId,
+          topic: event.topic,
+          severity: event.severity,
+          kind: event.kind,
+          title: event.title,
+          body: event.detail,
+          deliveredAt: null,
+          readAt: null,
+          createdAt: now,
+        },
+      } satisfies DeliveryPlan;
     }).catch((err) => {
       this.deps.log?.warn?.("[informer] resolve/insert failed", {
         tenantId: event.tenantId,
@@ -354,6 +387,7 @@ export class AdminInformer {
     });
 
     if (!plan) return;
+    this.deps.realtime?.(plan.inApp);
 
     // Фаза 2 (вне транзакции — сеть): реалтайм Telegram + email-для-critical.
     let delivered = false;

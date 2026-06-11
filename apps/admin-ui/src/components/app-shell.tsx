@@ -43,6 +43,7 @@ import {
   clearToken,
   type DashboardStats,
   type FunnelListItem,
+  type InformerNotification,
   saas,
   type Tenant,
 } from "@/api/saas";
@@ -50,6 +51,7 @@ import { CopilotDock } from "@/components/copilot";
 import { ModeToggle } from "@/components/mode-toggle";
 import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -172,6 +174,15 @@ function visibleNavItems(
 
 type NewMessageEvent = Extract<AdminEvent, { type: "new_message" }>;
 type BadgeTone = "message" | "warning";
+type NotificationSeverity = "critical" | "important" | "info";
+
+const NOTIFICATION_FEED_LIMIT = 20;
+
+const NOTIFICATION_SEVERITY_LABEL: Record<NotificationSeverity, string> = {
+  critical: "критично",
+  important: "важно",
+  info: "инфо",
+};
 
 function formatNotificationPreview(preview: string | null): string {
   const text = preview?.trim();
@@ -185,6 +196,34 @@ function newMessageTitle(event: NewMessageEvent): string {
 
 function countBadgeLabel(count: number): string {
   return count > 99 ? "99+" : String(count);
+}
+
+function normalizeSeverity(severity: string): NotificationSeverity {
+  if (severity === "critical" || severity === "important") return severity;
+  return "info";
+}
+
+function notificationBadgeVariant(severity: string): React.ComponentProps<typeof Badge>["variant"] {
+  const normalized = normalizeSeverity(severity);
+  if (normalized === "critical") return "destructive";
+  if (normalized === "important") return "warning";
+  return "secondary";
+}
+
+function notificationRoute(notification: InformerNotification): string {
+  if (notification.kind === "channel_down") return "/channels";
+  if (notification.kind.startsWith("rate_")) return "/exchange";
+  if (notification.topic === "orders" || notification.kind.includes("provider")) return "/orders";
+  if (notification.topic === "escalation") return "/conversations";
+  if (notification.topic === "leads") return "/leads";
+  return "/diagnostics";
+}
+
+function formatNotificationTime(epoch: number): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(epoch * 1000));
 }
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
@@ -462,6 +501,151 @@ function AccountDropdown({
   );
 }
 
+function NotificationBell({
+  items,
+  unreadCount,
+  loading,
+  collapsed = true,
+  side = "right",
+  align,
+  onOpen,
+  onMarkRead,
+  onNavigate,
+}: {
+  items: InformerNotification[];
+  unreadCount: number;
+  loading: boolean;
+  collapsed?: boolean;
+  side?: "right" | "bottom";
+  align?: "start" | "center" | "end";
+  onOpen: () => void;
+  onMarkRead: () => void;
+  onNavigate: (to: string) => void;
+}) {
+  const hasUnread = unreadCount > 0;
+
+  return (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) onOpen();
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size={collapsed ? "icon" : "sm"}
+          className={cn(
+            "relative text-muted-foreground hover:text-foreground",
+            collapsed ? "size-9" : "w-full justify-start gap-2 px-2",
+          )}
+          aria-label="Алерты"
+        >
+          <BellIcon className="size-4" />
+          {!collapsed && <span className="flex-1 text-left">Алерты</span>}
+          {hasUnread && (
+            <span
+              className={cn(
+                "grid min-w-[18px] place-items-center rounded-full bg-destructive px-1 py-0.5 text-[10px] font-bold leading-none text-destructive-foreground",
+                collapsed ? "absolute -right-0.5 -top-0.5" : "ml-auto",
+              )}
+            >
+              {countBadgeLabel(unreadCount)}
+            </span>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={align ?? (collapsed ? "center" : "start")}
+        side={side}
+        className="w-[360px] max-w-[calc(100vw-1rem)] p-0"
+      >
+        <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Алерты</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {hasUnread ? `${unreadCount} непрочит.` : "Нет непрочитанных"}
+            </p>
+          </div>
+          {hasUnread && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={(event) => {
+                event.preventDefault();
+                onMarkRead();
+              }}
+            >
+              Прочитано
+            </Button>
+          )}
+        </div>
+        <div className="max-h-[360px] overflow-y-auto p-1">
+          {loading && items.length === 0 ? (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">Загрузка...</div>
+          ) : items.length === 0 ? (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">Пока пусто</div>
+          ) : (
+            items.map((item) => {
+              const route = notificationRoute(item);
+              const severity = normalizeSeverity(item.severity);
+              return (
+                <DropdownMenuItem key={item.id} asChild className="p-0">
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left",
+                      item.readAt ? "" : "bg-accent/60",
+                    )}
+                    onClick={() => onNavigate(route)}
+                  >
+                    <span
+                      className={cn(
+                        "mt-1 size-2 shrink-0 rounded-full",
+                        severity === "critical"
+                          ? "bg-destructive"
+                          : severity === "important"
+                            ? "bg-amber-500"
+                            : "bg-primary",
+                      )}
+                    />
+                    <span className="min-w-0 flex-1 space-y-1">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-medium">{item.title}</span>
+                        <Badge
+                          variant={notificationBadgeVariant(item.severity)}
+                          className="h-5 px-1.5 text-[10px]"
+                        >
+                          {NOTIFICATION_SEVERITY_LABEL[severity]}
+                        </Badge>
+                      </span>
+                      {item.body && (
+                        <span className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+                          {item.body}
+                        </span>
+                      )}
+                      <span className="block text-[11px] text-muted-foreground">
+                        {formatNotificationTime(item.createdAt)}
+                      </span>
+                    </span>
+                  </button>
+                </DropdownMenuItem>
+              );
+            })
+          )}
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link to="/notifications" className="justify-center text-xs text-muted-foreground">
+            Настройки уведомлений
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function SidebarBody({
   admin,
   tenant,
@@ -469,6 +653,12 @@ function SidebarBody({
   onNavigate,
   conversationBadge,
   conversationBadgeTone,
+  notifications,
+  notificationUnreadCount,
+  notificationsLoading,
+  onNotificationsOpen,
+  onNotificationsMarkRead,
+  onNotificationNavigate,
   collapsed,
   onToggleCollapse,
   hasExchangeWorkflow,
@@ -481,6 +671,12 @@ function SidebarBody({
   onNavigate?: () => void;
   conversationBadge?: number;
   conversationBadgeTone?: BadgeTone;
+  notifications: InformerNotification[];
+  notificationUnreadCount: number;
+  notificationsLoading: boolean;
+  onNotificationsOpen: () => void;
+  onNotificationsMarkRead: () => void;
+  onNotificationNavigate: (to: string) => void;
   collapsed: boolean;
   onToggleCollapse?: () => void;
   hasExchangeWorkflow?: boolean;
@@ -548,6 +744,17 @@ function SidebarBody({
       </div>
 
       <div className="border-t border-sidebar-border p-3">
+        <div className={cn("mb-2 flex", collapsed ? "justify-center" : "")}>
+          <NotificationBell
+            items={notifications}
+            unreadCount={notificationUnreadCount}
+            loading={notificationsLoading}
+            collapsed={collapsed}
+            onOpen={onNotificationsOpen}
+            onMarkRead={onNotificationsMarkRead}
+            onNavigate={onNotificationNavigate}
+          />
+        </div>
         <AccountDropdown admin={admin} tenant={tenant} onLogout={onLogout} collapsed={collapsed} />
       </div>
     </div>
@@ -640,9 +847,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [escalatedCount, setEscalatedCount] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications] = useState<InformerNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === "true");
   const conversationBadge = unreadCount > 0 ? unreadCount : escalatedCount;
   const conversationBadgeTone: BadgeTone = unreadCount > 0 ? "message" : "warning";
+  const notificationUnreadCount = notifications.reduce(
+    (sum, item) => sum + (item.readAt ? 0 : 1),
+    0,
+  );
 
   function toggleCollapse() {
     setCollapsed((v) => {
@@ -650,6 +863,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return !v;
     });
   }
+
+  const reloadNotifications = useCallback(async () => {
+    setNotificationsLoading(true);
+    try {
+      const { items } = await saas.getInformerFeed(NOTIFICATION_FEED_LIMIT);
+      setNotifications(items);
+    } catch {
+      // ignore — no auth yet or transient API error
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, []);
+
+  const markNotificationsRead = useCallback(async () => {
+    const readAt = Math.floor(Date.now() / 1000);
+    setNotifications((items) => items.map((item) => (item.readAt ? item : { ...item, readAt })));
+    try {
+      await saas.markInformerNotificationsRead();
+    } catch {
+      void reloadNotifications();
+    }
+  }, [reloadNotifications]);
+
+  const handleNotificationsOpen = useCallback(() => {
+    void reloadNotifications();
+  }, [reloadNotifications]);
+
+  const handleNotificationNavigate = useCallback(
+    (to: string) => {
+      void markNotificationsRead();
+      navigate(to);
+    },
+    [markNotificationsRead, navigate],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -689,6 +936,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("admin-profile-updated", onProfileUpdated);
     };
   }, []);
+
+  useEffect(() => {
+    void reloadNotifications();
+    const id = setInterval(() => {
+      void reloadNotifications();
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [reloadNotifications]);
 
   // Poll counters every 30s; SSE below makes new messages visible immediately.
   const prevEscalatedRef = useRef<number | null>(null);
@@ -763,6 +1018,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       });
     } else if (event.type === "stage_changed") {
       toast.info(`Стадия изменена → ${event.toStageDisplayName}`, { duration: 3000 });
+    } else if (event.type === "admin_notification") {
+      const notification = event.notification;
+      const route = notificationRoute(notification);
+      const severity = normalizeSeverity(notification.severity);
+      setNotifications((items) =>
+        [notification, ...items.filter((item) => item.id !== notification.id)].slice(
+          0,
+          NOTIFICATION_FEED_LIMIT,
+        ),
+      );
+      const notify =
+        severity === "critical"
+          ? toast.error
+          : severity === "important"
+            ? toast.warning
+            : toast.info;
+      notify(notification.title, {
+        description: notification.body || undefined,
+        action: { label: "Открыть", onClick: () => navigate(route) },
+        duration: severity === "critical" ? 20_000 : 12_000,
+      });
     }
   });
 
@@ -791,6 +1067,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             onLogout={handleLogout}
             conversationBadge={conversationBadge}
             conversationBadgeTone={conversationBadgeTone}
+            notifications={notifications}
+            notificationUnreadCount={notificationUnreadCount}
+            notificationsLoading={notificationsLoading}
+            onNotificationsOpen={handleNotificationsOpen}
+            onNotificationsMarkRead={markNotificationsRead}
+            onNotificationNavigate={handleNotificationNavigate}
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
             hasExchangeWorkflow={hasExchangeWorkflow}
@@ -816,6 +1098,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   onNavigate={() => setMobileOpen(false)}
                   conversationBadge={conversationBadge}
                   conversationBadgeTone={conversationBadgeTone}
+                  notifications={notifications}
+                  notificationUnreadCount={notificationUnreadCount}
+                  notificationsLoading={notificationsLoading}
+                  onNotificationsOpen={handleNotificationsOpen}
+                  onNotificationsMarkRead={markNotificationsRead}
+                  onNotificationNavigate={(to) => {
+                    setMobileOpen(false);
+                    handleNotificationNavigate(to);
+                  }}
                   collapsed={false}
                   hasExchangeWorkflow={hasExchangeWorkflow}
                   isExchangeTenant={isExchangeTenant}
@@ -826,7 +1117,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <Brand collapsed={false} />
 
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-1">
+              <NotificationBell
+                items={notifications}
+                unreadCount={notificationUnreadCount}
+                loading={notificationsLoading}
+                side="bottom"
+                align="end"
+                onOpen={handleNotificationsOpen}
+                onMarkRead={markNotificationsRead}
+                onNavigate={handleNotificationNavigate}
+              />
               <ModeToggle />
             </div>
           </header>

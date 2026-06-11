@@ -27,6 +27,10 @@ function basePing(overrides: Partial<PartnerPingOpts> = {}): PartnerPingOpts {
 		appUrl: "https://app.test",
 		operatorBotToken: "123:token",
 		callbackSecret: SECRET,
+		// Route HTTP transport through the per-test global fetch mock instead of
+		// safeFetch, so the SSRF DNS check doesn't reject the reserved .test host.
+		fetchImpl: ((url: string | URL, init?: RequestInit) =>
+			globalThis.fetch(url, init)) as typeof fetch,
 		...overrides,
 	};
 }
