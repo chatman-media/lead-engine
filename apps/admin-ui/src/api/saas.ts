@@ -2087,6 +2087,7 @@ export interface InformerNotification {
   title: string;
   body: string;
   deliveredAt: number | null;
+  readAt: number | null;
   createdAt: number;
 }
 
@@ -4058,6 +4059,11 @@ export const saas = {
     return request<{ items: InformerNotification[] }>(
       `/api/admin/notifications/informer/feed?limit=${limit}`,
     );
+  },
+  markInformerNotificationsRead() {
+    return request<{ ok: boolean }>("/api/admin/notifications/informer/read", {
+      method: "POST",
+    });
   },
   updateNotificationSettings(body: {
     telegramChatId?: string | null;

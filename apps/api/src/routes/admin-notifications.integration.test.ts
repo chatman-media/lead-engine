@@ -3,7 +3,11 @@
 // services left unset to exercise the "not configured" branches.
 // Coverage epic #187 — apps/api untested routes.
 
-import { NotificationsRepo } from "@chatman-media/conversation-engine";
+import {
+  NotificationsRepo,
+  type NotificationService,
+  type OpsAlertRouter,
+} from "@chatman-media/conversation-engine";
 import {
   applyAllMigrations,
   createIsolatedDb,
@@ -11,6 +15,7 @@ import {
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
@@ -58,10 +63,10 @@ beforeAll(
       makeAdminNotificationsRoutes({
         repo,
         botUsername: "mybot",
-        // biome-ignore lint/suspicious/noExplicitAny: minimal service fake
-        notificationService: { sendTestMessage: async () => ({ ok: true }) } as any,
-        // biome-ignore lint/suspicious/noExplicitAny: minimal ops-router fake
-        opsRouter: { emit: async () => {} } as any,
+        notificationService: {
+          sendTestMessage: async () => ({ ok: true }),
+        } as unknown as NotificationService,
+        opsRouter: { emit: async () => {} } as unknown as OpsAlertRouter,
         opsEmailConfigured: true,
       }),
     );
@@ -150,6 +155,42 @@ describe("admin-notifications", () => {
       informerMutedUntil: null,
       informerTopics: { leads: true, orders: false },
     })).status).toBe(200);
+  });
+
+  it("informer: read endpoint marks feed rows read", async () => {
+    if (!sql) return;
+    const [admin] = await db
+      .select({ id: schema.admins.id, tenantId: schema.admins.tenantId })
+      .from(schema.admins)
+      .where(eq(schema.admins.email, "notif@demo.io"))
+      .limit(1);
+    expect(admin).toBeDefined();
+    if (!admin) throw new Error("admin not found");
+    const [inserted] = await db
+      .insert(schema.adminNotifications)
+      .values({
+        tenantId: admin.tenantId,
+        adminId: admin.id,
+        topic: "system",
+        severity: "critical",
+        kind: "channel_down",
+        title: "Канал упал",
+        body: "Проверьте подключение канала",
+        dedupKey: `test-read:${Date.now()}`,
+      })
+      .returning({ id: schema.adminNotifications.id });
+    if (!inserted) throw new Error("admin notification insert returned no row");
+
+    const before = (await (await req("GET", "/informer/feed?limit=5")).json()) as {
+      items: Array<{ id: number; readAt: number | null }>;
+    };
+    expect(before.items.find((item) => item.id === inserted.id)?.readAt).toBeNull();
+
+    expect((await req("POST", "/informer/read")).status).toBe(200);
+    const after = (await (await req("GET", "/informer/feed?limit=5")).json()) as {
+      items: Array<{ id: number; readAt: number | null }>;
+    };
+    expect(after.items.find((item) => item.id === inserted.id)?.readAt).toBeGreaterThan(0);
   });
 
   it("ops: status (без роутера) + ops-test (не настроен)", async () => {

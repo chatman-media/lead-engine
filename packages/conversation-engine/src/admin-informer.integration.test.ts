@@ -46,8 +46,12 @@ class FakeEmail implements OpsEmailSender {
   }
 }
 
-function makeInformer(tg: OpsTelegramSender | null, email: OpsEmailSender) {
-  return new AdminInformer({ db, botToken: "", appUrl: "http://x", telegram: tg, email, cooldownSec: 3600 });
+function makeInformer(
+  tg: OpsTelegramSender | null,
+  email: OpsEmailSender,
+  realtime?: ConstructorParameters<typeof AdminInformer>[0]["realtime"],
+) {
+  return new AdminInformer({ db, botToken: "", appUrl: "http://x", telegram: tg, email, cooldownSec: 3600, realtime });
 }
 
 const ev = (tenantId: number, over: Partial<InformerEvent>): InformerEvent => ({
@@ -218,7 +222,8 @@ describe("AdminInformer.emit", () => {
     if (!enabled) return;
     await setOwner(tenantWith, { informerLevel: "important" });
     const tg = new FakeTelegram();
-    await makeInformer(tg, new FakeEmail()).emitNotificationEvent({
+    const realtime: Array<{ id: number; title: string; kind: string; readAt: number | null }> = [];
+    await makeInformer(tg, new FakeEmail(), (event) => realtime.push(event)).emitNotificationEvent({
       tenantId: tenantWith,
       eventType: "human_takeover",
       leadId: 5,
@@ -229,6 +234,14 @@ describe("AdminInformer.emit", () => {
     expect(row?.topic).toBe("escalation");
     expect(row?.severity).toBe("important");
     expect(row?.kind).toBe("human_takeover");
+    expect(realtime).toEqual([
+      expect.objectContaining({
+        id: row?.id,
+        title: "Нужна помощь оператора",
+        kind: "human_takeover",
+        readAt: null,
+      }),
+    ]);
   });
 
   it("emitNotificationEvent: неизвестный eventType → ничего (нет строки)", async () => {

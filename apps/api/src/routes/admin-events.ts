@@ -12,6 +12,7 @@ import { adminEventBus } from "../lib/admin-event-bus.ts";
  *   new_message      — inbound message persisted in a conversation
  *   stage_changed    — lead moved to a different stage
  *   conversation_mode — conversation switched between ai/human mode
+ *   admin_notification — owner/operator informer notification persisted in admin_notifications
  *
  * Client reconnects automatically (native SSE behaviour).
  * Server sends a ping every 25s to keep the connection alive through proxies.
