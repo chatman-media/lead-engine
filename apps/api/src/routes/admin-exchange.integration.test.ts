@@ -66,7 +66,7 @@ const MOCK_RATE_CARD = [
 			{
 				minThb: 2_000,
 				maxThb: 3_000,
-				displayRate: 2.64,
+				displayRate: 99,
 				deviationPct: 3.5294,
 				formula: "market + 3.5294%",
 			},
@@ -213,7 +213,7 @@ async function createRubOrderThroughTools() {
 		amount: 10_000,
 		amountMode: "target_thb",
 	})) as ToolResult;
-	expect(quote.rate).toBe(2.52);
+	expect(Number(quote.rate)).toBeCloseTo(2.52, 4);
 	expect(quote.amountToThb).toBe(10_000);
 
 	const created = (await must(
@@ -347,7 +347,28 @@ describe("admin-exchange routes", () => {
 		const body = (await res.json()) as { ok: boolean; message: string };
 		expect(body.ok).toBe(true);
 		expect(body.message).toContain("АКТУАЛЬНЫЙ КУРС");
+		expect(body.message).toContain("2.64");
+		expect(body.message).not.toContain("99");
 		expect(reloadCalls).toEqual([tenantA]);
+
+		const [tier] = await withTenant(db, tenantA, (tx) =>
+			tx
+				.select({
+					displayRate: schema.exchangeRateTiers.displayRate,
+					deviationPct: schema.exchangeRateTiers.deviationPct,
+				})
+				.from(schema.exchangeRateTiers)
+				.where(
+					and(
+						eq(schema.exchangeRateTiers.tenantId, tenantA),
+						eq(schema.exchangeRateTiers.asset, "RUB"),
+						eq(schema.exchangeRateTiers.minAmount, 2_000),
+					),
+				)
+				.limit(1),
+		);
+		expect(Number(tier?.displayRate)).toBeCloseTo(2.64, 4);
+		expect(Number(tier?.deviationPct)).toBeCloseTo(3.5294, 4);
 
 		const ratesRes = await authReq(tokenA, "/api/admin/exchange/rates");
 		const ratesBody = (await ratesRes.json()) as {
@@ -545,7 +566,9 @@ describe("admin-exchange routes", () => {
 				.from(outboundQueue)
 				.where(eq(outboundQueue.tenantId, tenantA)),
 		);
-		expect(ob.some((r) => String(r.key).startsWith(`exch-pay-confirm-${orderId}`))).toBe(true);
+		expect(
+			ob.some((r) => String(r.key).startsWith(`exch-pay-confirm-${orderId}`)),
+		).toBe(true);
 	});
 
 	it("keeps exchange CRM isolated by tenant", async () => {
@@ -687,12 +710,16 @@ describe("admin-exchange routes", () => {
 		const searchBody = (await search.json()) as {
 			contacts: Array<Record<string, unknown>>;
 		};
-		expect(searchBody.contacts.some((c) => c.contactId === contactId)).toBe(true);
+		expect(searchBody.contacts.some((c) => c.contactId === contactId)).toBe(
+			true,
+		);
 		const miss = await authReq(
 			tokenA,
 			"/api/admin/exchange/kyc-contacts?q=nope-nobody",
 		);
-		expect(((await miss.json()) as { contacts: unknown[] }).contacts).toHaveLength(0);
+		expect(
+			((await miss.json()) as { contacts: unknown[] }).contacts,
+		).toHaveLength(0);
 
 		// Изоляция: tenant B чужих клиентов не видит.
 		const resB = await authReq(tokenB, "/api/admin/exchange/kyc-contacts");
@@ -753,7 +780,10 @@ describe("admin-exchange routes", () => {
 		expect(searchBody.contacts.map((c) => c.contactId)).toContain(contactId);
 		expect(searchBody.nextOffset).toBeNull();
 
-		const page1 = await authReq(tokenA, "/api/admin/exchange/kyc-contacts?limit=1");
+		const page1 = await authReq(
+			tokenA,
+			"/api/admin/exchange/kyc-contacts?limit=1",
+		);
 		const page1Body = (await page1.json()) as {
 			contacts: Array<Record<string, unknown>>;
 			nextOffset: number | null;
@@ -821,13 +851,17 @@ describe("admin-exchange settings (per-tenant частота/порог)", () =>
 describe("POST /api/admin/exchange/rates — upsert + validation", () => {
 	it("без auth → 401", async () => {
 		if (!sql) return;
-		const res = await app.request("/api/admin/exchange/rates", { method: "POST" });
+		const res = await app.request("/api/admin/exchange/rates", {
+			method: "POST",
+		});
 		expect(res.status).toBe(401);
 	});
 
 	it("без asset → 400", async () => {
 		if (!sql) return;
-		const res = await postJson(tokenA, "/api/admin/exchange/rates", { baseRate: 36 });
+		const res = await postJson(tokenA, "/api/admin/exchange/rates", {
+			baseRate: 36,
+		});
 		expect(res.status).toBe(400);
 	});
 
@@ -917,7 +951,9 @@ describe("POST /api/admin/exchange/rates — upsert + validation", () => {
 			network: "erc20",
 			baseRate: 200,
 		});
-		const secondBody = (await second.json()) as { rate: { id: number; baseRate: number } };
+		const secondBody = (await second.json()) as {
+			rate: { id: number; baseRate: number };
+		};
 		expect(secondBody.rate.id).toBe(firstBody.rate.id);
 		expect(Number(secondBody.rate.baseRate)).toBe(200);
 	});
@@ -983,7 +1019,9 @@ describe("exchange requisites", () => {
 		});
 		expect(res.status).toBe(200);
 		const getRes = await authReq(tokenA, "/api/admin/exchange/requisites");
-		const body = (await getRes.json()) as { items: Array<{ key: string; value: string }> };
+		const body = (await getRes.json()) as {
+			items: Array<{ key: string; value: string }>;
+		};
 		const bn = body.items.find((i) => i.key === "exchange_binance_id");
 		expect(bn?.value).toBe("binance-12345");
 	});

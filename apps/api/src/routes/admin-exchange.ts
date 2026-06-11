@@ -37,7 +37,10 @@ import {
 	refreshTenantRates,
 	renderRateCardMessage,
 } from "../lib/exchange/rate-feed.ts";
-import { getTenantQuoteCurrency } from "../lib/exchange/rates.ts";
+import {
+	applyRateDeviation,
+	getTenantQuoteCurrency,
+} from "../lib/exchange/rates.ts";
 import {
 	isAllowedExchangeSecretKey,
 	isSensitiveExchangeSecretKey,
@@ -51,6 +54,11 @@ export interface AdminExchangeRoutesOpts {
 }
 
 const QUOTE_MODES = ["multiply", "divide"] as const;
+
+function roundRate(n: number, dp = 6): number {
+	const f = 10 ** dp;
+	return Math.round(n * f) / f;
+}
 
 function resolveExchangeWorkflowStage(
 	order: typeof exchangeOrders.$inferSelect,
@@ -496,6 +504,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			? (body.proposals as RateCardProposal[])
 			: await buildDefaultRateCardProposal(currency);
 		const now = Math.floor(Date.now() / 1000);
+		const normalizedProposals: RateCardProposal[] = [];
 
 		await withTenant(opts.db, tenantId, async (tx) => {
 			for (const proposal of proposals) {
@@ -509,6 +518,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				const marketRate = Number(proposal.marketRate);
 				if (!asset || !(marketRate > 0) || !Array.isArray(proposal.tiers))
 					continue;
+				const normalizedTiers: RateCardProposal["tiers"] = [];
 
 				await tx
 					.insert(exchangeRates)
@@ -549,9 +559,32 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				for (const tier of proposal.tiers) {
 					const minAmount = Number(tier.minThb);
 					const maxAmount = tier.maxThb === null ? null : Number(tier.maxThb);
-					const displayRate = Number(tier.displayRate);
+					const rawDeviationPct = Number(
+						(tier as { deviationPct?: unknown }).deviationPct,
+					);
+					const rawDisplayRate = Number(
+						(tier as { displayRate?: unknown }).displayRate,
+					);
+					const deviationPct = Number.isFinite(rawDeviationPct)
+						? roundRate(rawDeviationPct, 8)
+						: rateDeviationPct(marketRate, rawDisplayRate, 8);
+					const displayRate = Number.isFinite(rawDeviationPct)
+						? roundRate(applyRateDeviation(marketRate, deviationPct))
+						: rawDisplayRate;
 					if (!(minAmount >= 0) || !(displayRate > 0)) continue;
-					const deviationPct = rateDeviationPct(marketRate, displayRate, 8);
+					const formula =
+						typeof tier.formula === "string" && tier.formula.trim()
+							? tier.formula
+							: `${marketRate} ${deviationPct >= 0 ? "+" : "-"} ${Math.abs(
+									deviationPct,
+								)}% = ${displayRate}`;
+					normalizedTiers.push({
+						minThb: minAmount,
+						maxThb: maxAmount,
+						displayRate,
+						deviationPct,
+						formula,
+					});
 					await tx
 						.insert(exchangeRateTiers)
 						.values({
@@ -571,7 +604,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 								marketRate,
 								displayRate,
 								deviationPct,
-								formula: tier.formula,
+								formula,
 							}),
 							isActive: true,
 							approvedByAdminId: adminId ?? null,
@@ -599,7 +632,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 									marketRate,
 									displayRate,
 									deviationPct,
-									formula: tier.formula,
+									formula,
 								}),
 								isActive: true,
 								approvedByAdminId: adminId ?? null,
@@ -608,13 +641,23 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 							},
 						});
 				}
+				if (normalizedTiers.length > 0) {
+					normalizedProposals.push({
+						asset,
+						network,
+						quoteMode,
+						marketRate,
+						tiers: normalizedTiers,
+						message: "",
+					});
+				}
 			}
 		});
 
 		opts.onReload?.(tenantId);
 		return c.json({
 			ok: true,
-			message: renderRateCardMessage(proposals, currency),
+			message: renderRateCardMessage(normalizedProposals, currency),
 		});
 	});
 
