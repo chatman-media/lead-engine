@@ -1,3 +1,10 @@
+# [@chatman-media/channel-telegram-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.4.0...@chatman-media/channel-telegram-v1.5.0) (2026-06-12)
+
+
+### Features
+
+* **exchange:** show handoff media to operators ([#578](https://github.com/chatman-media/lead-engine/issues/578)) ([9dd3cee](https://github.com/chatman-media/lead-engine/commit/9dd3cee3a559be63f9cb613ee94c173248f66edc))
+
 # [@chatman-media/channel-telegram-v1.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.3.0...@chatman-media/channel-telegram-v1.4.0) (2026-06-11)
 
 
