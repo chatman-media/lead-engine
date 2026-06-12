@@ -20,6 +20,8 @@ export interface RunDeferredInboundPostProcessingDeps {
   memoryExtractor?: MemoryExtractor | null;
   /** Preserve legacy lead auto-advance only for call sites that used LeadsRepo. */
   advanceLead?: boolean;
+  /** Prefer stages from the active funnel owned by the current vertical template. */
+  preferredVerticalTemplateId?: string | null;
   sink?: PipelineSink;
   clock?: Clock;
 }
@@ -81,6 +83,7 @@ async function runDeferredStageClassification(
             tenantId: deps.tenant.tenantId,
             contactId: deps.result.contactId,
             salesStage: newStage,
+            preferredVerticalTemplateId: deps.preferredVerticalTemplateId ?? null,
             nowEpoch: deps.now,
           });
           if (res && (res.created || res.advanced)) {

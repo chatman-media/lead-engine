@@ -241,7 +241,20 @@ export function makeWhatsAppWebhookRoutes(opts: {
           result,
           stageClassifier: opts.stageClassifier,
           memoryExtractor: opts.memoryExtractor,
+          preferredVerticalTemplateId: template?.slug ?? null,
           ...(opts.sink ? { sink: opts.sink } : {}),
+        });
+      }
+
+      if (result.persisted) {
+        await runPostInboundAutomation({
+          db: opts.db,
+          tenantId: entry.tenantId,
+          contactId: result.contactId,
+          conversationId: result.conversationId,
+          inbound,
+          fieldExtractor: opts.fieldExtractor,
+          serviceCatalogRuntime: opts.serviceCatalogRuntime,
         });
       }
 
@@ -270,17 +283,6 @@ export function makeWhatsAppWebhookRoutes(opts: {
             db: opts.db,
           })
           .catch(() => {});
-      }
-      if (result.persisted) {
-        void runPostInboundAutomation({
-          db: opts.db,
-          tenantId: entry.tenantId,
-          contactId: result.contactId,
-          conversationId: result.conversationId,
-          inbound,
-          fieldExtractor: opts.fieldExtractor,
-          serviceCatalogRuntime: opts.serviceCatalogRuntime,
-        });
       }
       if (result.persisted) {
         const preview = inbound.parts.find((p) => p.kind === "text") as { kind: "text"; text: string } | undefined;

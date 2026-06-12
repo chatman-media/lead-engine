@@ -6,17 +6,22 @@ import {
 	type TgUpdate,
 } from "@chatman-media/channel-telegram";
 import {
+	adminNotifications,
 	auditLog,
 	channelIdentities,
 	channels,
 	contacts,
 	conversations,
 	exchangeOrders,
+	funnels,
+	leadEvents,
+	leads,
 	messages,
 	operatorActionDrafts,
 	outboundQueue,
+	stageDefinitions,
 } from "@chatman-media/storage";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { NotificationsRepo } from "./dal/notifications.ts";
 import type { Db } from "./dal/types.ts";
 import { QUOTE_CURRENCY } from "./exchange-quote-currency.ts";
@@ -64,6 +69,8 @@ const SEV_EMOJI: Record<string, string> = {
 
 const PREVIEW_TTL_SEC = 10 * 60;
 const PAYOUT_CODE_TTL_SEC = 60 * 60;
+const EXCHANGE_VERTICAL_TEMPLATE_ID = "exchange_v1";
+const EXCHANGE_REQUEST_TYPE = "exchange";
 
 interface PendingOperatorDraft {
 	draftId: string;
@@ -1138,6 +1145,7 @@ export class OperatorBotHandler {
 		draft: PendingOperatorDraft,
 	): Promise<{
 		id: number;
+		leadId: number | null;
 		status: string;
 		payoutCode: string | null;
 		payoutCodeExpiresAt: number | null;
@@ -1149,6 +1157,7 @@ export class OperatorBotHandler {
 		const orderId = this.metadataOrderId(draft.metadata);
 		const selection = {
 			id: exchangeOrders.id,
+			leadId: exchangeOrders.leadId,
 			status: exchangeOrders.status,
 			payoutCode: exchangeOrders.payoutCode,
 			payoutCodeExpiresAt: exchangeOrders.payoutCodeExpiresAt,
@@ -1288,6 +1297,31 @@ export class OperatorBotHandler {
 			}
 		}
 
+		const leadAdvance = decision.verified
+			? await this.advanceExchangeLeadAfterKycApproved(
+					tx,
+					draft,
+					now,
+					contactId,
+					order?.leadId ?? null,
+				)
+			: null;
+
+		await tx
+			.update(adminNotifications)
+			.set({ readAt: now })
+			.where(
+				and(
+					eq(adminNotifications.tenantId, draft.tenantId),
+					inArray(adminNotifications.dedupKey, [
+						`operator_handoff_required:${draft.conversationId}`,
+						`verification_requested:${draft.conversationId}`,
+						`document_uploaded:${draft.conversationId}`,
+					]),
+					isNull(adminNotifications.readAt),
+				),
+			);
+
 		return {
 			action,
 			contactId,
@@ -1296,6 +1330,190 @@ export class OperatorBotHandler {
 			verificationId,
 			statusPatched: true,
 			...(orderId ? { orderId, orderVerificationPatched } : {}),
+			...(leadAdvance ? { leadAdvance } : {}),
+		};
+	}
+
+	private async advanceExchangeLeadAfterKycApproved(
+		tx: Db,
+		draft: PendingOperatorDraft,
+		now: number,
+		contactId: number,
+		orderLeadId: number | null,
+	): Promise<Record<string, unknown>> {
+		const leadFilter =
+			orderLeadId != null
+				? eq(leads.id, orderLeadId)
+				: eq(leads.userId, contactId);
+		const [lead] = await tx
+			.select({
+				id: leads.id,
+				state: leads.state,
+				stageDefinitionId: leads.stageDefinitionId,
+				stageSlug: stageDefinitions.slug,
+				stageFunnelId: stageDefinitions.funnelId,
+				stagePosition: stageDefinitions.position,
+				stageNextStages: stageDefinitions.nextStages,
+			})
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(and(eq(leads.tenantId, draft.tenantId), leadFilter))
+			.orderBy(desc(leads.updatedAt), desc(leads.id))
+			.limit(1);
+		if (!lead) {
+			return {
+				advanced: false,
+				reason: "lead_not_found",
+				...(orderLeadId != null ? { leadId: orderLeadId } : {}),
+			};
+		}
+
+		const currentSlug = lead.stageSlug ?? lead.state;
+		if (
+			currentSlug !== "verification_check" &&
+			currentSlug !== "kyc_collection"
+		) {
+			const [target] = await tx
+				.select({
+					id: stageDefinitions.id,
+					slug: stageDefinitions.slug,
+				})
+				.from(stageDefinitions)
+				.innerJoin(funnels, eq(stageDefinitions.funnelId, funnels.id))
+				.where(
+					and(
+						eq(stageDefinitions.tenantId, draft.tenantId),
+						eq(stageDefinitions.slug, "risk_review"),
+						eq(funnels.tenantId, draft.tenantId),
+						eq(funnels.isActive, true),
+						eq(funnels.verticalTemplateId, EXCHANGE_VERTICAL_TEMPLATE_ID),
+					),
+				)
+				.limit(1);
+			if (target) {
+				await tx
+					.update(leads)
+					.set({
+						stageDefinitionId: target.id,
+						state: target.slug,
+						requestType: EXCHANGE_REQUEST_TYPE,
+						updatedAt: now,
+					})
+					.where(
+						and(eq(leads.tenantId, draft.tenantId), eq(leads.id, lead.id)),
+					);
+				await tx.insert(leadEvents).values({
+					tenantId: draft.tenantId,
+					leadId: lead.id,
+					fromState: lead.state,
+					toState: target.slug,
+					byAdminId: draft.adminId,
+					notes: JSON.stringify({
+						type: "operator_bot_kyc_approved_recovered_exchange_stage",
+						conversationId: draft.conversationId,
+						fromStage: currentSlug,
+					}),
+					createdAt: now,
+				});
+				return {
+					leadId: lead.id,
+					advanced: true,
+					recovered: true,
+					reason: "recovered_wrong_stage",
+					fromState: lead.state,
+					toState: target.slug,
+					stageDefinitionId: target.id,
+				};
+			}
+			return {
+				leadId: lead.id,
+				advanced: false,
+				reason: "stage_not_eligible",
+				stage: currentSlug,
+			};
+		}
+		if (lead.stageFunnelId == null || lead.stagePosition == null) {
+			return {
+				leadId: lead.id,
+				advanced: false,
+				reason: "stage_context_missing",
+				stage: currentSlug,
+			};
+		}
+		const nextStages = lead.stageNextStages ?? [];
+		if (nextStages.length > 0 && !nextStages.includes("risk_review")) {
+			return {
+				leadId: lead.id,
+				advanced: false,
+				reason: "transition_not_allowed",
+				stage: currentSlug,
+			};
+		}
+
+		const [target] = await tx
+			.select({
+				id: stageDefinitions.id,
+				slug: stageDefinitions.slug,
+				position: stageDefinitions.position,
+			})
+			.from(stageDefinitions)
+			.where(
+				and(
+					eq(stageDefinitions.tenantId, draft.tenantId),
+					eq(stageDefinitions.funnelId, lead.stageFunnelId),
+					eq(stageDefinitions.slug, "risk_review"),
+				),
+			)
+			.limit(1);
+		if (!target) {
+			return {
+				leadId: lead.id,
+				advanced: false,
+				reason: "target_stage_not_found",
+				stage: currentSlug,
+			};
+		}
+		if (target.position <= lead.stagePosition) {
+			return {
+				leadId: lead.id,
+				advanced: false,
+				reason: "target_not_ahead",
+				stage: currentSlug,
+				targetStage: target.slug,
+			};
+		}
+
+		await tx
+			.update(leads)
+			.set({
+				stageDefinitionId: target.id,
+				state: target.slug,
+				requestType: EXCHANGE_REQUEST_TYPE,
+				updatedAt: now,
+			})
+			.where(and(eq(leads.tenantId, draft.tenantId), eq(leads.id, lead.id)));
+		await tx.insert(leadEvents).values({
+			tenantId: draft.tenantId,
+			leadId: lead.id,
+			fromState: lead.state,
+			toState: target.slug,
+			byAdminId: draft.adminId,
+			notes: JSON.stringify({
+				type: "operator_bot_kyc_approved",
+				conversationId: draft.conversationId,
+			}),
+			createdAt: now,
+		});
+
+		return {
+			leadId: lead.id,
+			advanced: true,
+			fromState: lead.state,
+			toState: target.slug,
+			stageDefinitionId: target.id,
 		};
 	}
 

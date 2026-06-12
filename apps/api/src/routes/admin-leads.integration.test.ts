@@ -8,13 +8,16 @@ import { DrizzleKbStore } from "@chatman-media/conversation-engine";
 import { ingestText } from "@chatman-media/kb";
 import { NullEmbeddingClient } from "@chatman-media/llm-router";
 import {
+  adminNotifications,
   applyAllMigrations,
   channelIdentities,
   channels,
   contacts,
   conversations,
   createIsolatedDb,
+  exchangeOrders,
   funnels,
+  leadEvents,
   leadFieldValues,
   leads,
   messages,
@@ -603,6 +606,390 @@ describe("GET /api/admin/leads/:id/kb-guidance", () => {
   });
 });
 
+describe("POST /api/admin/leads/:id/verification/revoke", () => {
+  it("revokes contact KYC and clears active exchange order verification", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const verificationId = "kyc-admin-revoke-1";
+    const [contact] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "Verified Revoke Contact",
+        attributesJson: JSON.stringify({
+          isVerified: true,
+          verificationStatus: "verified",
+          kycStatus: "verified",
+          passport_number: "AB1234567",
+          exchangeKyc: {
+            status: "verified",
+            verified: true,
+            needsVerification: false,
+            verificationId,
+            reviewedAt: now - 60,
+          },
+        }),
+      })
+      .returning({ id: contacts.id });
+    if (!contact) throw new Error("failed to create contact");
+    const [lead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contact.id,
+        state: "review",
+        stageDefinitionId: stageIdA2,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    if (!lead) throw new Error("failed to create lead");
+    const [activeOrder] = await db
+      .insert(exchangeOrders)
+      .values({
+        tenantId: tenantA,
+        contactId: contact.id,
+        leadId: lead.id,
+        verificationId,
+        direction: "RUB_PHP",
+        assetFrom: "RUB",
+        network: "",
+        amountFrom: 10_000,
+        rate: 1.23,
+        amountToThb: 8126,
+        status: "quote",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: exchangeOrders.id });
+    if (!activeOrder) throw new Error("failed to create active order");
+    const [completedOrder] = await db
+      .insert(exchangeOrders)
+      .values({
+        tenantId: tenantA,
+        contactId: contact.id,
+        leadId: lead.id,
+        verificationId,
+        direction: "RUB_PHP",
+        assetFrom: "RUB",
+        network: "",
+        amountFrom: 5000,
+        rate: 1.25,
+        amountToThb: 4000,
+        status: "completed",
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: exchangeOrders.id });
+    if (!completedOrder) throw new Error("failed to create completed order");
+
+    const res = await authReq(tokenA, `/api/admin/leads/${lead.id}/verification/revoke`, {
+      method: "POST",
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      contactId: number;
+      status: string;
+      ordersPatched: number;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.contactId).toBe(contact.id);
+    expect(body.status).toBe("revoked");
+    expect(body.ordersPatched).toBe(1);
+
+    const [updatedContact] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(eq(contacts.id, contact.id));
+    if (!updatedContact) throw new Error("contact was not updated");
+    const attrs = JSON.parse(updatedContact.attributesJson ?? "{}") as {
+      isVerified?: boolean;
+      verificationStatus?: string;
+      kycStatus?: string;
+      exchangeKyc?: Record<string, unknown>;
+    };
+    expect(attrs.isVerified).toBe(false);
+    expect(attrs.verificationStatus).toBe("revoked");
+    expect(attrs.kycStatus).toBe("revoked");
+    expect(attrs.exchangeKyc).toMatchObject({
+      status: "revoked",
+      verified: false,
+      needsVerification: true,
+      verificationId: null,
+      previousStatus: "verified",
+      previousVerificationId: verificationId,
+      source: "admin_lead_detail",
+    });
+
+    const orderRows = await db
+      .select({
+        id: exchangeOrders.id,
+        status: exchangeOrders.status,
+        verificationId: exchangeOrders.verificationId,
+      })
+      .from(exchangeOrders)
+      .where(and(eq(exchangeOrders.contactId, contact.id), eq(exchangeOrders.tenantId, tenantA)));
+    expect(orderRows.find((order) => order.id === activeOrder.id)?.verificationId).toBeNull();
+    expect(orderRows.find((order) => order.id === completedOrder.id)?.verificationId).toBe(
+      verificationId,
+    );
+
+    const events = await db
+      .select({ notes: leadEvents.notes, toState: leadEvents.toState })
+      .from(leadEvents)
+      .where(and(eq(leadEvents.leadId, lead.id), eq(leadEvents.tenantId, tenantA)));
+    const revokeEvent = events.find((event) => event.notes?.includes("verification_revoked"));
+    if (!revokeEvent) throw new Error("missing verification revoke event");
+    expect(revokeEvent?.toState).toBe("review");
+    expect(JSON.parse(revokeEvent.notes ?? "{}")).toMatchObject({
+      type: "verification_revoked",
+      contactId: contact.id,
+      previousStatus: "verified",
+      previousVerificationId: verificationId,
+      ordersPatched: 1,
+    });
+  });
+
+  it("cross-tenant revoke is hidden as not found", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}/verification/revoke`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/admin/leads/:id/contact/ban", () => {
+  it("marks the lead contact as banned and records a lead event", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "Ban Contact",
+        attributesJson: JSON.stringify({ segment: "risk" }),
+      })
+      .returning({ id: contacts.id });
+    if (!contact) throw new Error("failed to create contact");
+    const [lead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contact.id,
+        state: "review",
+        stageDefinitionId: stageIdA2,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    if (!lead) throw new Error("failed to create lead");
+
+    const res = await authReq(tokenA, `/api/admin/leads/${lead.id}/contact/ban`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "fraud risk" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; contactId: number; status: string };
+    expect(body).toMatchObject({ ok: true, contactId: contact.id, status: "banned" });
+
+    const [updatedContact] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(eq(contacts.id, contact.id));
+    if (!updatedContact) throw new Error("contact was not updated");
+    const attrs = JSON.parse(updatedContact.attributesJson ?? "{}") as {
+      segment?: string;
+      isBanned?: boolean;
+      banStatus?: string;
+      banReason?: string;
+      ban?: Record<string, unknown>;
+    };
+    expect(attrs.segment).toBe("risk");
+    expect(attrs.isBanned).toBe(true);
+    expect(attrs.banStatus).toBe("banned");
+    expect(attrs.banReason).toBe("fraud risk");
+    expect(attrs.ban).toMatchObject({
+      status: "banned",
+      banned: true,
+      reason: "fraud risk",
+      source: "admin_lead_detail",
+    });
+
+    const events = await db
+      .select({ notes: leadEvents.notes, toState: leadEvents.toState })
+      .from(leadEvents)
+      .where(and(eq(leadEvents.leadId, lead.id), eq(leadEvents.tenantId, tenantA)));
+    const banEvent = events.find((event) => event.notes?.includes("contact_banned"));
+    if (!banEvent) throw new Error("missing contact ban event");
+    expect(banEvent.toState).toBe("review");
+    expect(JSON.parse(banEvent.notes ?? "{}")).toMatchObject({
+      type: "contact_banned",
+      contactId: contact.id,
+      reason: "fraud risk",
+    });
+  });
+
+  it("cross-tenant ban is hidden as not found", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}/contact/ban`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/admin/leads/:id/verification/unblock", () => {
+  it("clears rejected contact KYC/OCR and active exchange order verification", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const verificationId = "kyc-admin-unblock-1";
+    const [contact] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "Rejected KYC Contact",
+        attributesJson: JSON.stringify({
+          city: "Patong",
+          isVerified: false,
+          verificationStatus: "rejected",
+          kycStatus: "rejected",
+          passport_number: "CD7654321",
+          passport_family_name: "PETROV",
+          last_photo_class: "passport",
+          exchangeKyc: {
+            status: "rejected",
+            verified: false,
+            needsVerification: true,
+            verificationId,
+            reviewedAt: now - 60,
+          },
+        }),
+      })
+      .returning({ id: contacts.id });
+    if (!contact) throw new Error("failed to create contact");
+    const [lead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contact.id,
+        state: "kyc_collection",
+        stageDefinitionId: stageIdA2,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    if (!lead) throw new Error("failed to create lead");
+    const [activeOrder] = await db
+      .insert(exchangeOrders)
+      .values({
+        tenantId: tenantA,
+        contactId: contact.id,
+        leadId: lead.id,
+        verificationId,
+        direction: "RUB_PHP",
+        assetFrom: "RUB",
+        network: "",
+        amountFrom: 10_000,
+        rate: 1.23,
+        amountToThb: 8126,
+        status: "awaiting_payment",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: exchangeOrders.id });
+    if (!activeOrder) throw new Error("failed to create active order");
+    const [completedOrder] = await db
+      .insert(exchangeOrders)
+      .values({
+        tenantId: tenantA,
+        contactId: contact.id,
+        leadId: lead.id,
+        verificationId,
+        direction: "RUB_PHP",
+        assetFrom: "RUB",
+        network: "",
+        amountFrom: 5000,
+        rate: 1.25,
+        amountToThb: 4000,
+        status: "completed",
+        completedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: exchangeOrders.id });
+    if (!completedOrder) throw new Error("failed to create completed order");
+
+    const res = await authReq(tokenA, `/api/admin/leads/${lead.id}/verification/unblock`, {
+      method: "POST",
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      contactId: number;
+      status: string;
+      attributesCleared: boolean;
+      ordersPatched: number;
+    };
+    expect(body).toMatchObject({
+      ok: true,
+      contactId: contact.id,
+      status: "unblocked",
+      attributesCleared: true,
+      ordersPatched: 1,
+    });
+
+    const [updatedContact] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(eq(contacts.id, contact.id));
+    expect(JSON.parse(updatedContact?.attributesJson ?? "{}")).toEqual({ city: "Patong" });
+
+    const orderRows = await db
+      .select({
+        id: exchangeOrders.id,
+        status: exchangeOrders.status,
+        verificationId: exchangeOrders.verificationId,
+      })
+      .from(exchangeOrders)
+      .where(and(eq(exchangeOrders.contactId, contact.id), eq(exchangeOrders.tenantId, tenantA)));
+    expect(orderRows.find((order) => order.id === activeOrder.id)?.verificationId).toBeNull();
+    expect(orderRows.find((order) => order.id === completedOrder.id)?.verificationId).toBe(
+      verificationId,
+    );
+
+    const events = await db
+      .select({ notes: leadEvents.notes, toState: leadEvents.toState })
+      .from(leadEvents)
+      .where(and(eq(leadEvents.leadId, lead.id), eq(leadEvents.tenantId, tenantA)));
+    const unblockEvent = events.find((event) => event.notes?.includes("verification_unblocked"));
+    if (!unblockEvent) throw new Error("missing verification unblock event");
+    expect(unblockEvent?.toState).toBe("kyc_collection");
+    expect(JSON.parse(unblockEvent.notes ?? "{}")).toMatchObject({
+      type: "verification_unblocked",
+      contactId: contact.id,
+      previousStatus: "rejected",
+      previousVerificationId: verificationId,
+      attributesCleared: true,
+      ordersPatched: 1,
+    });
+  });
+
+  it("cross-tenant unblock is hidden as not found", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}/verification/unblock`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("PATCH /api/admin/leads/:id/stage", () => {
   it("without auth → 401", async () => {
     if (!sql) return;
@@ -1060,6 +1447,133 @@ describe("DELETE /api/admin/leads/:id", () => {
     // Verify lead is gone
     const check = await authReq(tokenA, `/api/admin/leads/${newLead!.id}`);
     expect(check.status).toBe(404);
+  });
+
+  it("clears notification links and contact KYC/OCR when deleting the last lead", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [c] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "KYC Cleanup",
+        attributesJson: JSON.stringify({
+          city: "Bangkok",
+          exchangeKyc: { status: "verified", verificationId: "kyc-delete" },
+          isVerified: true,
+          verificationStatus: "verified",
+          kycStatus: "manual_override",
+          verificationCrmId: "crm-delete",
+          last_photo_class: "passport",
+          passport_family_name: "IVANOV",
+          passport_given_name: "IVAN",
+          passport_number: "75 1234567",
+          passport_expiry: "01.01.2030",
+        }),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: contacts.id });
+    if (!c) throw new Error("expected cleanup contact");
+    const [newLead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: c.id,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    if (!newLead) throw new Error("expected cleanup lead");
+    await db.insert(adminNotifications).values({
+      tenantId: tenantA,
+      topic: "leads",
+      severity: "info",
+      kind: "lead_created",
+      title: "Lead created",
+      body: "",
+      dedupKey: `lead-delete-${newLead.id}`,
+      leadId: newLead.id,
+      createdAt: now,
+    });
+
+    const res = await authReq(tokenA, `/api/admin/leads/${newLead.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const [contactAfter] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(and(eq(contacts.tenantId, tenantA), eq(contacts.id, c.id)));
+    expect(JSON.parse(contactAfter?.attributesJson ?? "{}")).toEqual({ city: "Bangkok" });
+    const [notificationAfter] = await db
+      .select({ leadId: adminNotifications.leadId })
+      .from(adminNotifications)
+      .where(
+        and(
+          eq(adminNotifications.tenantId, tenantA),
+          eq(adminNotifications.dedupKey, `lead-delete-${newLead.id}`),
+        ),
+      );
+    expect(notificationAfter?.leadId).toBeNull();
+  });
+
+  it("keeps contact KYC/OCR while another lead for the same contact remains", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [c] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "KYC Shared",
+        attributesJson: JSON.stringify({
+          city: "Phuket",
+          exchangeKyc: { status: "verified", verificationId: "kyc-shared" },
+          passport_number: "70 7654321",
+        }),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: contacts.id });
+    if (!c) throw new Error("expected shared contact");
+    const inserted = await db
+      .insert(leads)
+      .values([
+        {
+          tenantId: tenantA,
+          userId: c.id,
+          state: "intake_pending",
+          stageDefinitionId: stageIdA,
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          tenantId: tenantA,
+          userId: c.id,
+          state: "review",
+          stageDefinitionId: stageIdA2,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ])
+      .returning({ id: leads.id });
+    const [deletedLead, remainingLead] = inserted;
+    if (!deletedLead || !remainingLead) throw new Error("expected shared leads");
+
+    const res = await authReq(tokenA, `/api/admin/leads/${deletedLead.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const [contactAfter] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(and(eq(contacts.tenantId, tenantA), eq(contacts.id, c.id)));
+    const attrs = JSON.parse(contactAfter?.attributesJson ?? "{}") as Record<string, unknown>;
+    expect(attrs.exchangeKyc).toEqual({ status: "verified", verificationId: "kyc-shared" });
+    expect(attrs.passport_number).toBe("70 7654321");
+
+    const check = await authReq(tokenA, `/api/admin/leads/${remainingLead.id}`);
+    expect(check.status).toBe(200);
   });
 
   it("cross-tenant: cannot delete another tenant's lead", async () => {

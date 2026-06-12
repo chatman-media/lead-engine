@@ -246,6 +246,9 @@ jobs:
             export PATH="$BUN_INSTALL/bin:$PATH"
             cd /opt/lead-engine
             git fetch origin
+            if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+              git stash push -m "pre-deploy dirty tracked worktree $(date -u +%Y%m%dT%H%M%SZ)"
+            fi
             git checkout main
             git pull --ff-only origin main
             # workspace job уже выполнил полный typecheck+tests. На сервере
@@ -283,6 +286,9 @@ jobs:
             export PATH="$BUN_INSTALL/bin:$PATH"
             cd /opt/lead-engine-dev
             git fetch origin
+            if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+              git stash push -m "pre-deploy dirty tracked worktree $(date -u +%Y%m%dT%H%M%SZ)"
+            fi
             git checkout dev
             git pull --ff-only origin dev
             DEPLOY_TYPECHECK=0 APP_DIR=/opt/lead-engine-dev ./deploy.sh

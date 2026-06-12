@@ -1,11 +1,12 @@
 import {
   type Db,
   DrizzleKbStore,
-  withTenant,
   type NotificationService,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
 import {
+  adminNotifications,
   channelIdentities,
   channels,
   contacts,
@@ -20,8 +21,8 @@ import {
   messages,
   outboundQueue,
   partnerDeals,
-  partners,
   partnerServices,
+  partners,
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
@@ -49,6 +50,9 @@ import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webho
  * GET  /api/admin/leads                — список лидов с фильтром по стадии
  * POST /api/admin/leads                — создать лида вручную
  * GET  /api/admin/leads/:id            — карточка лида с полями и историей
+ * POST /api/admin/leads/:id/verification/revoke — отозвать KYC контакта
+ * POST /api/admin/leads/:id/verification/unblock — снять KYC-блокировку
+ * POST /api/admin/leads/:id/contact/ban — забанить контакт лида
  * PATCH /api/admin/leads/:id/stage     — переместить в стадию
  * DELETE /api/admin/leads/:id          — удалить лида
  * GET  /api/admin/leads/:id/field-values — значения полей
@@ -78,6 +82,14 @@ type LeadKbRawHit = {
 
 const DEFAULT_LEAD_KB_GUIDANCE_LIMIT = 5;
 const MAX_LEAD_KB_GUIDANCE_LIMIT = 8;
+const CONTACT_KYC_ATTRIBUTE_KEYS = new Set([
+  "exchangeKyc",
+  "isVerified",
+  "verificationStatus",
+  "kycStatus",
+  "verificationCrmId",
+  "last_photo_class",
+]);
 
 function parseLeadKbGuidanceLimit(value: string | undefined): number {
   const n = Number.parseInt(value ?? "", 10);
@@ -92,6 +104,51 @@ function parseFieldValue(valueJson: string | null | undefined): unknown {
   } catch {
     return valueJson;
   }
+}
+
+function parseJsonObject(valueJson: string | null | undefined): Record<string, unknown> {
+  if (!valueJson) return {};
+  try {
+    const parsed = JSON.parse(valueJson);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore bad legacy attributes
+  }
+  return {};
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stripContactKycAttributes(
+  attributesJson: string | null | undefined,
+): { changed: boolean; attributesJson: string | null } {
+  if (!attributesJson) return { changed: false, attributesJson: null };
+  let attrs: Record<string, unknown>;
+  try {
+    attrs = JSON.parse(attributesJson) as Record<string, unknown>;
+  } catch {
+    return { changed: false, attributesJson };
+  }
+
+  let changed = false;
+  for (const key of Object.keys(attrs)) {
+    if (CONTACT_KYC_ATTRIBUTE_KEYS.has(key) || key.startsWith("passport_")) {
+      delete attrs[key];
+      changed = true;
+    }
+  }
+
+  if (!changed) return { changed: false, attributesJson };
+  return {
+    changed: true,
+    attributesJson: Object.keys(attrs).length > 0 ? JSON.stringify(attrs) : null,
+  };
 }
 
 function fieldValueFilled(valueJson: string | null | undefined): boolean {
@@ -1110,6 +1167,379 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
   });
 
   /**
+   * POST /api/admin/leads/:id/verification/revoke
+   * Отзывает контактную KYC-верификацию и чистит verificationId у активных
+   * exchange-заявок контакта, чтобы policy guard снова требовал проверку.
+   */
+  app.post("/api/admin/leads/:id/verification/revoke", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({
+          id: leads.id,
+          userId: leads.userId,
+          state: leads.state,
+        })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return { kind: "not_found" } as const;
+
+      const [contact] = await tx
+        .select({ id: contacts.id, attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)));
+      if (!contact) return { kind: "contact_not_found" } as const;
+
+      const attrs = parseJsonObject(contact.attributesJson);
+      const currentKyc = objectValue(attrs.exchangeKyc);
+      const previousStatus =
+        typeof currentKyc.status === "string"
+          ? currentKyc.status
+          : attrs.isVerified === true
+            ? "verified"
+            : null;
+      const previousVerificationId =
+        typeof currentKyc.verificationId === "string"
+          ? currentKyc.verificationId
+          : typeof attrs.verificationCrmId === "string"
+            ? attrs.verificationCrmId
+            : null;
+
+      const nextKyc = {
+        ...currentKyc,
+        status: "revoked",
+        verified: false,
+        needsVerification: true,
+        verificationId: null,
+        previousStatus,
+        previousVerificationId,
+        revokedByAdminId: adminId ?? null,
+        revokedAt: now,
+        source: "admin_lead_detail",
+      };
+      const nextAttrs = {
+        ...attrs,
+        exchangeKyc: nextKyc,
+        verificationStatus: "revoked",
+        kycStatus: "revoked",
+        isVerified: false,
+      };
+
+      await tx
+        .update(contacts)
+        .set({
+          attributesJson: JSON.stringify(nextAttrs),
+          updatedAt: now,
+        })
+        .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
+
+      const patchedOrders = await tx
+        .update(exchangeOrders)
+        .set({
+          verificationId: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(exchangeOrders.tenantId, tenantId),
+            eq(exchangeOrders.contactId, lead.userId),
+            inArray(exchangeOrders.status, ["quote", "awaiting_payment"]),
+          ),
+        )
+        .returning({ id: exchangeOrders.id });
+
+      await tx.insert(leadEvents).values({
+        tenantId,
+        leadId: id,
+        fromState: lead.state,
+        toState: lead.state,
+        byAdminId: adminId,
+        notes: JSON.stringify({
+          type: "verification_revoked",
+          contactId: contact.id,
+          previousStatus,
+          previousVerificationId,
+          ordersPatched: patchedOrders.length,
+        }),
+        createdAt: now,
+      });
+
+      return {
+        kind: "ok",
+        contactId: contact.id,
+        status: "revoked",
+        previousStatus,
+        previousVerificationId,
+        ordersPatched: patchedOrders.length,
+      } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.verification_revoke",
+      targetKind: "lead",
+      targetId: String(id),
+      details: {
+        contactId: outcome.contactId,
+        previousStatus: outcome.previousStatus,
+        previousVerificationId: outcome.previousVerificationId,
+        ordersPatched: outcome.ordersPatched,
+      },
+    });
+
+    return c.json({
+      ok: true,
+      contactId: outcome.contactId,
+      status: outcome.status,
+      ordersPatched: outcome.ordersPatched,
+    });
+  });
+
+  /**
+   * POST /api/admin/leads/:id/verification/unblock
+   * Снимает ручной KYC-блок (rejected/revoked): очищает контактный KYC/OCR
+   * след и активные verificationId, чтобы клиента можно было проверить заново.
+   */
+  app.post("/api/admin/leads/:id/verification/unblock", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({
+          id: leads.id,
+          userId: leads.userId,
+          state: leads.state,
+        })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return { kind: "not_found" } as const;
+
+      const [contact] = await tx
+        .select({ id: contacts.id, attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)));
+      if (!contact) return { kind: "contact_not_found" } as const;
+
+      const attrs = parseJsonObject(contact.attributesJson);
+      const currentKyc = objectValue(attrs.exchangeKyc);
+      const previousStatus =
+        typeof currentKyc.status === "string"
+          ? currentKyc.status
+          : attrs.isVerified === true
+            ? "verified"
+            : null;
+      const previousVerificationId =
+        typeof currentKyc.verificationId === "string"
+          ? currentKyc.verificationId
+          : typeof attrs.verificationCrmId === "string"
+            ? attrs.verificationCrmId
+            : null;
+      const stripped = stripContactKycAttributes(contact.attributesJson);
+
+      if (stripped.changed) {
+        await tx
+          .update(contacts)
+          .set({
+            attributesJson: stripped.attributesJson,
+            updatedAt: now,
+          })
+          .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
+      }
+
+      const patchedOrders = await tx
+        .update(exchangeOrders)
+        .set({
+          verificationId: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(exchangeOrders.tenantId, tenantId),
+            eq(exchangeOrders.contactId, lead.userId),
+            inArray(exchangeOrders.status, ["quote", "awaiting_payment"]),
+          ),
+        )
+        .returning({ id: exchangeOrders.id });
+
+      await tx.insert(leadEvents).values({
+        tenantId,
+        leadId: id,
+        fromState: lead.state,
+        toState: lead.state,
+        byAdminId: adminId,
+        notes: JSON.stringify({
+          type: "verification_unblocked",
+          contactId: contact.id,
+          previousStatus,
+          previousVerificationId,
+          attributesCleared: stripped.changed,
+          ordersPatched: patchedOrders.length,
+        }),
+        createdAt: now,
+      });
+
+      return {
+        kind: "ok",
+        contactId: contact.id,
+        status: "unblocked",
+        previousStatus,
+        previousVerificationId,
+        attributesCleared: stripped.changed,
+        ordersPatched: patchedOrders.length,
+      } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.verification_unblock",
+      targetKind: "lead",
+      targetId: String(id),
+      details: {
+        contactId: outcome.contactId,
+        previousStatus: outcome.previousStatus,
+        previousVerificationId: outcome.previousVerificationId,
+        attributesCleared: outcome.attributesCleared,
+        ordersPatched: outcome.ordersPatched,
+      },
+    });
+
+    return c.json({
+      ok: true,
+      contactId: outcome.contactId,
+      status: outcome.status,
+      attributesCleared: outcome.attributesCleared,
+      ordersPatched: outcome.ordersPatched,
+    });
+  });
+
+  /**
+   * POST /api/admin/leads/:id/contact/ban
+   * Блокирует контакт лида. Inbound pipeline продолжит сохранять входящие
+   * сообщения, но не будет генерировать ответы для isBanned контакта.
+   */
+  app.post("/api/admin/leads/:id/contact/ban", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    let reason = "";
+    try {
+      const body = (await c.req.json()) as { reason?: unknown };
+      if (typeof body.reason === "string") reason = body.reason.trim().slice(0, 500);
+    } catch {
+      // empty body is allowed
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({
+          id: leads.id,
+          userId: leads.userId,
+          state: leads.state,
+        })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return { kind: "not_found" } as const;
+
+      const [contact] = await tx
+        .select({ id: contacts.id, attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)));
+      if (!contact) return { kind: "contact_not_found" } as const;
+
+      const attrs = parseJsonObject(contact.attributesJson);
+      const currentBan = objectValue(attrs.ban);
+      const nextBan = {
+        ...currentBan,
+        status: "banned",
+        banned: true,
+        bannedByAdminId: adminId ?? null,
+        bannedAt: now,
+        reason: reason || null,
+        source: "admin_lead_detail",
+      };
+      const nextAttrs = {
+        ...attrs,
+        isBanned: true,
+        banStatus: "banned",
+        bannedAt: now,
+        bannedByAdminId: adminId ?? null,
+        banReason: reason || null,
+        ban: nextBan,
+      };
+
+      await tx
+        .update(contacts)
+        .set({
+          attributesJson: JSON.stringify(nextAttrs),
+          updatedAt: now,
+        })
+        .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
+
+      await tx.insert(leadEvents).values({
+        tenantId,
+        leadId: id,
+        fromState: lead.state,
+        toState: lead.state,
+        byAdminId: adminId,
+        notes: JSON.stringify({
+          type: "contact_banned",
+          contactId: contact.id,
+          reason: reason || null,
+        }),
+        createdAt: now,
+      });
+
+      return {
+        kind: "ok",
+        contactId: contact.id,
+        status: "banned",
+        reason: reason || null,
+      } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.contact_ban",
+      targetKind: "lead",
+      targetId: String(id),
+      details: {
+        contactId: outcome.contactId,
+        reason: outcome.reason,
+      },
+    });
+
+    return c.json({
+      ok: true,
+      contactId: outcome.contactId,
+      status: outcome.status,
+    });
+  });
+
+  /**
    * PATCH /api/admin/leads/:id/stage
    * Body: { stageDefinitionId: number } — переход в указанную стадию
    */
@@ -1254,25 +1684,60 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
   /**
    * DELETE /api/admin/leads/:id
-   * Удаляет лида вместе с field_values, events и notes.
+   * Удаляет лида вместе с field_values, events и notes. Если это последняя
+   * заявка контакта и нет exchange orders, очищает контактный KYC/OCR след.
    */
   app.delete("/api/admin/leads/:id", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = (c.var.adminId as number | null) ?? undefined;
     const id = Number(c.req.param("id"));
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+    const now = Math.floor(Date.now() / 1000);
 
     await withTenant(opts.db, tenantId, async (tx) => {
       const [lead] = await tx
-        .select({ id: leads.id })
+        .select({ id: leads.id, contactId: leads.userId })
         .from(leads)
         .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
       if (!lead) return;
 
+      await tx
+        .update(adminNotifications)
+        .set({ leadId: null })
+        .where(and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.leadId, id)));
       await tx.delete(leadFieldValues).where(eq(leadFieldValues.leadId, id));
       await tx.delete(leadEvents).where(eq(leadEvents.leadId, id));
       await tx.delete(leadNotes).where(eq(leadNotes.leadId, id));
       await tx.delete(leads).where(eq(leads.id, id));
+
+      const [remainingLead] = await tx
+        .select({ id: leads.id })
+        .from(leads)
+        .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, lead.contactId)))
+        .limit(1);
+      if (remainingLead) return;
+
+      const [remainingExchangeOrder] = await tx
+        .select({ id: exchangeOrders.id })
+        .from(exchangeOrders)
+        .where(
+          and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.contactId, lead.contactId)),
+        )
+        .limit(1);
+      if (remainingExchangeOrder) return;
+
+      const [contact] = await tx
+        .select({ attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.tenantId, tenantId), eq(contacts.id, lead.contactId)))
+        .limit(1);
+      const stripped = stripContactKycAttributes(contact?.attributesJson);
+      if (stripped.changed) {
+        await tx
+          .update(contacts)
+          .set({ attributesJson: stripped.attributesJson, updatedAt: now })
+          .where(and(eq(contacts.tenantId, tenantId), eq(contacts.id, lead.contactId)));
+      }
     });
 
     await recordAudit(opts.db, {

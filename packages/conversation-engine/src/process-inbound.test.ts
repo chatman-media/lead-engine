@@ -202,6 +202,47 @@ describe("processInbound", () => {
 		expect(deps._fakes.outbound.all()).toHaveLength(0);
 	});
 
+	it("забаненный contact сохраняет inbound, но не зовёт reply-strategy", async () => {
+		let replyCalls = 0;
+		deps = makeDeps({
+			async generate() {
+				replyCalls += 1;
+				return [
+					{
+						channelId: "10",
+						externalUserId: "u1",
+						parts: [{ kind: "text", text: "reply" }],
+					},
+				];
+			},
+		});
+		const contact = await deps._fakes.contacts.create({
+			displayName: "Blocked User",
+			attributesJson: JSON.stringify({
+				isBanned: true,
+				banStatus: "banned",
+				ban: { status: "banned" },
+			}),
+		});
+		await deps._fakes.identities.create({
+			contactId: contact.id,
+			channelId: 10,
+			externalUserId: "u1",
+		});
+
+		const result = await processInbound(
+			textInbound({ extUserId: "u1", extMessageId: "100", text: "spam" }),
+			deps,
+		);
+
+		expect(result.persisted).toBe(true);
+		expect(result.outboundEnqueued).toBe(0);
+		expect(result.escalatedReason).toBe("contact_banned");
+		expect(replyCalls).toBe(0);
+		expect(deps._fakes.messages.all()).toHaveLength(1);
+		expect(deps._fakes.outbound.all()).toHaveLength(0);
+	});
+
 	it("human/queued conversation → notifications human_takeover", async () => {
 		const events: Array<{ eventType: string; data?: { text?: string } }> = [];
 		const d = {
@@ -739,6 +780,7 @@ describe("processInbound", () => {
 				"from",
 				"where",
 				"innerJoin",
+				"leftJoin",
 				"orderBy",
 				"limit",
 				"set",

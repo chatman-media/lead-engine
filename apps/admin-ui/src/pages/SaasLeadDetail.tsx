@@ -1,10 +1,12 @@
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
+  BanIcon,
   CheckIcon,
   EditIcon,
   HandshakeIcon,
   SendIcon,
+  ShieldOffIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -270,6 +272,17 @@ export function SaasLeadDetail() {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Verification state
+  const [revokingVerification, setRevokingVerification] = useState(false);
+  const [confirmRevokeVerification, setConfirmRevokeVerification] = useState(false);
+  const [unblockingVerification, setUnblockingVerification] = useState(false);
+  const [confirmUnblockVerification, setConfirmUnblockVerification] = useState(false);
+
+  // Contact ban state
+  const [banningContact, setBanningContact] = useState(false);
+  const [confirmBanContact, setConfirmBanContact] = useState(false);
+  const [banReason, setBanReason] = useState("");
+
   // Send-photo (QR) state
   const [photoRef, setPhotoRef] = useState("");
   const [photoCaption, setPhotoCaption] = useState("");
@@ -444,6 +457,49 @@ export function SaasLeadDetail() {
     }
   }
 
+  async function handleRevokeVerification() {
+    if (!id) return;
+    setConfirmRevokeVerification(false);
+    setRevokingVerification(true);
+    try {
+      await saas.revokeLeadVerification(Number(id));
+      reload();
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setRevokingVerification(false);
+    }
+  }
+
+  async function handleBanContact() {
+    if (!id) return;
+    setConfirmBanContact(false);
+    setBanningContact(true);
+    try {
+      await saas.banLeadContact(Number(id), banReason.trim() || undefined);
+      setBanReason("");
+      reload();
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setBanningContact(false);
+    }
+  }
+
+  async function handleUnblockVerification() {
+    if (!id) return;
+    setConfirmUnblockVerification(false);
+    setUnblockingVerification(true);
+    try {
+      await saas.unblockLeadVerification(Number(id));
+      reload();
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setUnblockingVerification(false);
+    }
+  }
+
   async function handleSave() {
     if (!id || !data) return;
     setSaving(true);
@@ -517,6 +573,7 @@ export function SaasLeadDetail() {
 
   const editableFields = fields.filter((f) => f.fieldType !== "file" && f.fieldType !== "photo");
   const kycBadge = getLeadKycBadge(contact?.attributesJson ?? null);
+  const banBadge = getLeadBanBadge(contact?.attributesJson ?? null);
 
   return (
     <div className="flex flex-col gap-6">
@@ -534,6 +591,12 @@ export function SaasLeadDetail() {
           <Badge variant={kycBadge.variant} className="gap-1">
             {kycBadge.status === "verified" && <CheckIcon className="size-3" />}
             {kycBadge.label}
+          </Badge>
+        )}
+        {banBadge && (
+          <Badge variant="destructive" className="gap-1">
+            <BanIcon className="size-3" />
+            {banBadge.label}
           </Badge>
         )}
         <div className="ml-auto">
@@ -991,7 +1054,26 @@ export function SaasLeadDetail() {
             </CardContent>
           </Card>
 
-          <LeadVerificationCard attributesJson={contact?.attributesJson ?? null} />
+          <LeadVerificationCard
+            attributesJson={contact?.attributesJson ?? null}
+            confirmRevoke={confirmRevokeVerification}
+            revoking={revokingVerification}
+            confirmUnblock={confirmUnblockVerification}
+            unblocking={unblockingVerification}
+            onConfirmRevokeChange={setConfirmRevokeVerification}
+            onRevoke={handleRevokeVerification}
+            onConfirmUnblockChange={setConfirmUnblockVerification}
+            onUnblock={handleUnblockVerification}
+          />
+          <LeadContactBanCard
+            attributesJson={contact?.attributesJson ?? null}
+            banning={banningContact}
+            banReason={banReason}
+            confirmBan={confirmBanContact}
+            onBan={handleBanContact}
+            onConfirmBanChange={setConfirmBanContact}
+            onReasonChange={setBanReason}
+          />
 
           {/* Заметки */}
           <Card>
@@ -1153,6 +1235,7 @@ const LEAD_KYC_STATUS_RU: Record<
   documents_received: { label: "Прислал документы", variant: "warning" },
   materials_requested: { label: "Ждём материалы", variant: "warning" },
   pending_review: { label: "На проверке", variant: "warning" },
+  revoked: { label: "Верификация отозвана", variant: "destructive" },
   rejected: { label: "Отклонён", variant: "destructive" },
 };
 
@@ -1181,7 +1264,63 @@ function getLeadKycBadge(attributesJson: string | null) {
   return { status, ...st };
 }
 
-function LeadVerificationCard({ attributesJson }: { attributesJson: string | null }) {
+function leadObjectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function getLeadBanBadge(attributesJson: string | null) {
+  if (!attributesJson) return null;
+  let attrs: Record<string, unknown> = {};
+  try {
+    attrs = JSON.parse(attributesJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const ban = leadObjectValue(attrs.ban);
+  const banned =
+    attrs.isBanned === true ||
+    attrs.banStatus === "banned" ||
+    ban.status === "banned" ||
+    ban.banned === true;
+  if (!banned) return null;
+  const reason =
+    typeof ban.reason === "string"
+      ? ban.reason
+      : typeof attrs.banReason === "string"
+        ? attrs.banReason
+        : null;
+  const bannedAt =
+    typeof ban.bannedAt === "number"
+      ? ban.bannedAt
+      : typeof attrs.bannedAt === "number"
+        ? attrs.bannedAt
+        : null;
+  return { label: "Забанен", reason, bannedAt };
+}
+
+function LeadVerificationCard({
+  attributesJson,
+  confirmRevoke = false,
+  revoking = false,
+  confirmUnblock = false,
+  unblocking = false,
+  onConfirmRevokeChange,
+  onRevoke,
+  onConfirmUnblockChange,
+  onUnblock,
+}: {
+  attributesJson: string | null;
+  confirmRevoke?: boolean;
+  revoking?: boolean;
+  confirmUnblock?: boolean;
+  unblocking?: boolean;
+  onConfirmRevokeChange?: (value: boolean) => void;
+  onRevoke?: () => void;
+  onConfirmUnblockChange?: (value: boolean) => void;
+  onUnblock?: () => void;
+}) {
   if (!attributesJson) return null;
   let attrs: Record<string, unknown> = {};
   try {
@@ -1207,6 +1346,9 @@ function LeadVerificationCard({ attributesJson }: { attributesJson: string | nul
     ? `•••• ${passportNumber.replace(/\s+/g, "").slice(-4)}`
     : null;
   const reviewedAt = typeof kyc.reviewedAt === "number" ? kyc.reviewedAt : null;
+  const canRevoke =
+    onRevoke && (status === "verified" || kyc.verified === true || attrs.isVerified === true);
+  const canUnblock = onUnblock && (status === "rejected" || status === "revoked");
 
   return (
     <Card>
@@ -1255,6 +1397,171 @@ function LeadVerificationCard({ attributesJson }: { attributesJson: string | nul
             <span className="text-muted-foreground">Действителен до</span>
             <span>{attrs.passport_expiry}</span>
           </div>
+        )}
+        {(canRevoke || canUnblock) && (
+          <div className="border-t pt-3">
+            {canRevoke && confirmRevoke ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-destructive text-xs">Отозвать KYC?</span>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="destructive" onClick={onRevoke} disabled={revoking}>
+                    Да
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onConfirmRevokeChange?.(false)}
+                    disabled={revoking}
+                  >
+                    Нет
+                  </Button>
+                </div>
+              </div>
+            ) : canUnblock && confirmUnblock ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">Снять KYC-блокировку?</span>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" onClick={onUnblock} disabled={unblocking}>
+                    Да
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onConfirmUnblockChange?.(false)}
+                    disabled={unblocking}
+                  >
+                    Нет
+                  </Button>
+                </div>
+              </div>
+            ) : canUnblock ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full justify-start gap-2"
+                onClick={() => {
+                  onConfirmRevokeChange?.(false);
+                  onConfirmUnblockChange?.(true);
+                }}
+                disabled={unblocking}
+              >
+                <ShieldOffIcon className="size-3.5" />
+                Снять блокировку
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => {
+                  onConfirmUnblockChange?.(false);
+                  onConfirmRevokeChange?.(true);
+                }}
+                disabled={revoking}
+              >
+                <ShieldOffIcon className="size-3.5" />
+                Отозвать верификацию
+              </Button>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LeadContactBanCard({
+  attributesJson,
+  banning,
+  banReason,
+  confirmBan,
+  onBan,
+  onConfirmBanChange,
+  onReasonChange,
+}: {
+  attributesJson: string | null;
+  banning: boolean;
+  banReason: string;
+  confirmBan: boolean;
+  onBan: () => void;
+  onConfirmBanChange: (value: boolean) => void;
+  onReasonChange: (value: string) => void;
+}) {
+  const ban = getLeadBanBadge(attributesJson);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Блокировка</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {ban ? (
+          <>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Статус</span>
+              <Badge variant="destructive" className="gap-1">
+                <BanIcon className="size-3" />
+                {ban.label}
+              </Badge>
+            </div>
+            {ban.bannedAt && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Дата</span>
+                <span>
+                  {new Date(ban.bannedAt * 1000).toLocaleString("ru-RU", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+            )}
+            {ban.reason && (
+              <div className="space-y-1">
+                <span className="text-muted-foreground">Причина</span>
+                <p className="rounded-md bg-muted/50 p-2 text-xs">{ban.reason}</p>
+              </div>
+            )}
+          </>
+        ) : confirmBan ? (
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <Label htmlFor="lead-ban-reason">Причина</Label>
+              <Input
+                id="lead-ban-reason"
+                value={banReason}
+                onChange={(event) => onReasonChange(event.target.value)}
+                placeholder="Опционально"
+                disabled={banning}
+              />
+            </div>
+            <div className="flex items-center justify-end gap-1">
+              <Button size="sm" variant="destructive" onClick={onBan} disabled={banning}>
+                Да
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onConfirmBanChange(false)}
+                disabled={banning}
+              >
+                Нет
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => onConfirmBanChange(true)}
+            disabled={banning}
+          >
+            <BanIcon className="size-3.5" />
+            Забанить пользователя
+          </Button>
         )}
       </CardContent>
     </Card>

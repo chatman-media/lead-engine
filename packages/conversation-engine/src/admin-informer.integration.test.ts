@@ -234,11 +234,15 @@ describe("AdminInformer.emit", () => {
     expect(row?.topic).toBe("escalation");
     expect(row?.severity).toBe("important");
     expect(row?.kind).toBe("human_takeover");
+    expect(row?.leadId).toBe(5);
     expect(realtime).toEqual([
       expect.objectContaining({
         id: row?.id,
         title: "Нужна помощь оператора",
         kind: "human_takeover",
+        dedupKey: "human_takeover:5",
+        leadId: 5,
+        conversationId: null,
         readAt: null,
       }),
     ]);

@@ -38,6 +38,7 @@ let entry: Record<string, unknown> | null = null;
 let appFull: Hono; // вариант со всеми опц. зависимостями (rate-limit/reply/field-extract)
 let rlAllow = true;
 let fieldExtractCalled = false;
+let appFullEvents: string[] = [];
 
 async function post(slug: string, body: unknown, secret: string | null, instance?: Hono): Promise<Response> {
   return (instance ?? app).request(`/webhook/telegram/${slug}`, {
@@ -121,9 +122,16 @@ beforeAll(
         // biome-ignore lint/suspicious/noExplicitAny: rate-limiter fake
         rateLimiter: { check: () => (rlAllow ? { allowed: true } : { allowed: false, reason: "test", retryAfterSec: 30 }) } as any,
         // biome-ignore lint/suspicious/noExplicitAny: reply-strategy fake
-        replyStrategy: { generate: async () => [] } as any,
+        replyStrategy: { generate: async () => { appFullEvents.push("reply"); return []; } } as any,
         // biome-ignore lint/suspicious/noExplicitAny: field-extractor fake
-        fieldExtractor: { extract: async () => { fieldExtractCalled = true; } } as any,
+        fieldExtractor: { extract: async () => { fieldExtractCalled = true; appFullEvents.push("field"); } } as any,
+        // biome-ignore lint/suspicious/noExplicitAny: service catalog fake
+        serviceCatalogRuntime: {
+          extract: async () => {
+            appFullEvents.push("catalog");
+            return { created: [], skipped: [] };
+          },
+        } as any,
       }),
     );
   },
@@ -176,10 +184,11 @@ describe("webhook-telegram", () => {
   it("со всеми опц. зависимостями: 200 + field-extractor вызван", async () => {
     if (!sql) return;
     fieldExtractCalled = false;
+    appFullEvents = [];
     const res = await post("demo", tgUpdate("обмен 1000 usdt"), TG_SECRET, appFull);
     expect(res.status).toBe(200);
-    await new Promise((r) => setTimeout(r, 50)); // extract — fire-and-forget
     expect(fieldExtractCalled).toBe(true);
+    expect(appFullEvents).toEqual(["field", "catalog", "reply"]);
   });
 });
 

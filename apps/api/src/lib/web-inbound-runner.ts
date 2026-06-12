@@ -95,7 +95,19 @@ export function startWebInboundRunner(opts: {
               result,
               stageClassifier: opts.stageClassifier,
               memoryExtractor: opts.memoryExtractor,
+              preferredVerticalTemplateId: template?.slug ?? null,
               ...(opts.sink ? { sink: opts.sink } : {}),
+            });
+          }
+          if (result.persisted) {
+            await runPostInboundAutomation({
+              db,
+              tenantId: entry.tenantId,
+              contactId: result.contactId,
+              conversationId: result.conversationId,
+              inbound,
+              fieldExtractor: opts.fieldExtractor,
+              serviceCatalogRuntime: opts.serviceCatalogRuntime,
             });
           }
           // ── Phase 2: reply.generate ВНЕ tx + enqueue новой короткой tx ──
@@ -112,17 +124,6 @@ export function startWebInboundRunner(opts: {
               ...(opts.sink ? { sink: opts.sink } : {}),
             });
             result = { ...result, outboundEnqueued: gen.outboundEnqueued };
-          }
-          if (result.persisted) {
-            void runPostInboundAutomation({
-              db,
-              tenantId: entry.tenantId,
-              contactId: result.contactId,
-              conversationId: result.conversationId,
-              inbound,
-              fieldExtractor: opts.fieldExtractor,
-              serviceCatalogRuntime: opts.serviceCatalogRuntime,
-            });
           }
           if (!result.persisted) {
             opts.metrics?.inboundDeduped.inc(1, { tenant: String(entry.tenantId) });

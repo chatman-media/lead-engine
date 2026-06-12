@@ -144,6 +144,13 @@ describe("notificationEventToInformer", () => {
     expect(e?.severity).toBe("info");
     expect(e?.dedupKey).toBe("stage_changed:42");
   });
+  it("прокидывает target ids для in-app deep links", () => {
+    const e = notificationEventToInformer(
+      ev({ eventType: "verification_requested", conversationId: 32, leadId: 7 }),
+    );
+    expect(e?.conversationId).toBe(32);
+    expect(e?.leadId).toBe(7);
+  });
   it("неизвестный тип → null", () => {
     expect(notificationEventToInformer(ev({ eventType: "no_such_event" }))).toBeNull();
   });

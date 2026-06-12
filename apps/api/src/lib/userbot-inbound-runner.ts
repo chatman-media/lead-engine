@@ -115,7 +115,19 @@ export function startUserbotInboundRunner(opts: {
               result,
               stageClassifier: opts.stageClassifier,
               memoryExtractor: opts.memoryExtractor,
+              preferredVerticalTemplateId: template?.slug ?? null,
               ...(opts.sink ? { sink: opts.sink } : {}),
+            });
+          }
+          if (result.persisted) {
+            await runPostInboundAutomation({
+              db,
+              tenantId: entry.tenantId,
+              contactId: result.contactId,
+              conversationId: result.conversationId,
+              inbound,
+              fieldExtractor: opts.fieldExtractor,
+              serviceCatalogRuntime: opts.serviceCatalogRuntime,
             });
           }
           if (result.replyDeferred && opts.replyStrategy) {
@@ -142,17 +154,6 @@ export function startUserbotInboundRunner(opts: {
                 db,
               })
               .catch(() => {});
-          }
-          if (result.persisted) {
-            void runPostInboundAutomation({
-              db,
-              tenantId: entry.tenantId,
-              contactId: result.contactId,
-              conversationId: result.conversationId,
-              inbound,
-              fieldExtractor: opts.fieldExtractor,
-              serviceCatalogRuntime: opts.serviceCatalogRuntime,
-            });
           }
           if (result.persisted) {
             const inboundParts = inbound.parts as Array<{ kind: string; text?: string }>;

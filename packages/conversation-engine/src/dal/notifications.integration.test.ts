@@ -281,6 +281,14 @@ describe("NotificationsRepo: ledger + resolveOwnerSettings", () => {
     });
     await repo.markDigested([id2], 12345);
     expect((await repo.listPendingDigest(tenantId, adminId)).some((r) => r.id === id2)).toBe(false);
+
+    const id3 = await repo.insertAdminNotification({
+      tenantId, adminId, topic: "escalation", severity: "important", kind: "verification_requested",
+      title: "kyc", body: "", dedupKey: "led-3",
+    });
+    expect((await repo.listPendingDigest(tenantId, adminId)).some((r) => r.id === id3)).toBe(true);
+    await repo.markNotificationsRead(tenantId, adminId, Math.floor(Date.now() / 1000));
+    expect((await repo.listPendingDigest(tenantId, adminId)).some((r) => r.id === id3)).toBe(false);
   });
 
   it("resolveOwnerSettings возвращает superadmin + его settings", async () => {

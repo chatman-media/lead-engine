@@ -1482,6 +1482,8 @@ export const adminNotifications = pgTable("admin_notifications", {
   title: text("title").notNull(),
   body: text("body").notNull().default(""),
   dedupKey: text("dedup_key").notNull(),
+  conversationId: integer("conversation_id"),
+  leadId: integer("lead_id"),
   targetChatId: text("target_chat_id"),
   // epoch реалтайм-доставки; NULL = в реалтайм не слали (ждёт дайджеста).
   deliveredAt: integer("delivered_at"),
@@ -1492,6 +1494,8 @@ export const adminNotifications = pgTable("admin_notifications", {
 }, (t) => [
   index("idx_admin_notif_tenant_admin_created").on(t.tenantId, t.adminId, t.createdAt),
   index("idx_admin_notif_dedup").on(t.tenantId, t.dedupKey, t.createdAt),
+  index("idx_admin_notif_conversation").on(t.tenantId, t.conversationId),
+  index("idx_admin_notif_lead").on(t.tenantId, t.leadId),
   check(
     "admin_notifications_topic_check",
     sql`${t.topic} IN ('leads','escalation','orders','system')`,

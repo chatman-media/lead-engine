@@ -327,6 +327,157 @@ describe("admin-conversations", () => {
     });
   });
 
+  it("GET /:id/operator-handoffs → hides read operator events", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[1]!;
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(adminNotifications).values([
+      {
+        tenantId: tenantA,
+        topic: "escalation",
+        severity: "important",
+        kind: "operator_confirm_needed",
+        title: "Уже прочитано",
+        body: "",
+        dedupKey: `operator_confirm_needed:${id}`,
+        readAt: now,
+        createdAt: now,
+      },
+      {
+        tenantId: tenantA,
+        topic: "escalation",
+        severity: "important",
+        kind: "human_takeover",
+        title: "Активное действие",
+        body: "",
+        dedupKey: `human_takeover:${id}`,
+        createdAt: now,
+      },
+    ]);
+
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/operator-handoffs`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{ title: string; kind: string; readAt: number | null }>;
+    };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({
+      kind: "human_takeover",
+      title: "Активное действие",
+      readAt: null,
+    });
+  });
+
+  it("GET /:id/operator-handoffs → hides KYC tasks already resolved on contact", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[2]!;
+    const now = Math.floor(Date.now() / 1000);
+    const [conv] = await db
+      .select({ contactId: conversations.userId })
+      .from(conversations)
+      .where(eq(conversations.id, id))
+      .limit(1);
+    if (!conv) throw new Error("conversation fixture not found");
+
+    await db
+      .update(contacts)
+      .set({
+        attributesJson: JSON.stringify({
+          isVerified: true,
+          verificationStatus: "verified",
+          kycStatus: "verified",
+          exchangeKyc: {
+            status: "verified",
+            verified: true,
+            needsVerification: false,
+            reviewedAt: now,
+          },
+        }),
+      })
+      .where(eq(contacts.id, conv.contactId));
+    await db.insert(adminNotifications).values([
+      {
+        tenantId: tenantA,
+        topic: "escalation",
+        severity: "important",
+        kind: "operator_handoff_required",
+        title: "Проверить KYC клиента",
+        body: "Клиент прислал документ и видео для проверки.",
+        dedupKey: `operator_handoff_required:${id}`,
+        createdAt: now - 12,
+      },
+      {
+        tenantId: tenantA,
+        topic: "escalation",
+        severity: "important",
+        kind: "verification_requested",
+        title: "Проверить KYC клиента",
+        body: "Нужно проверить документ и видео.",
+        dedupKey: `verification_requested:${id}`,
+        createdAt: now - 10,
+      },
+      {
+        tenantId: tenantA,
+        topic: "escalation",
+        severity: "info",
+        kind: "document_uploaded",
+        title: "Документ загружен",
+        body: "",
+        dedupKey: `document_uploaded:${id}`,
+        createdAt: now - 5,
+      },
+      {
+        tenantId: tenantA,
+        topic: "escalation",
+        severity: "important",
+        kind: "human_takeover",
+        title: "Обычный handoff",
+        body: "",
+        dedupKey: `human_takeover:${id}`,
+        createdAt: now - 1,
+      },
+    ]);
+
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/operator-handoffs`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{ title: string; kind: string }>;
+    };
+    expect(body.items).toEqual([
+      expect.objectContaining({
+        kind: "human_takeover",
+        title: "Обычный handoff",
+      }),
+    ]);
+
+    const notificationRows = await db
+      .select({
+        kind: adminNotifications.kind,
+        dedupKey: adminNotifications.dedupKey,
+        readAt: adminNotifications.readAt,
+      })
+      .from(adminNotifications)
+      .where(eq(adminNotifications.tenantId, tenantA));
+    const relevantRows = notificationRows.filter((row) =>
+      [
+        `operator_handoff_required:${id}`,
+        `verification_requested:${id}`,
+        `document_uploaded:${id}`,
+        `human_takeover:${id}`,
+      ].includes(row.dedupKey),
+    );
+    expect(relevantRows.find((row) => row.kind === "verification_requested")?.readAt).toBeGreaterThan(
+      0,
+    );
+    expect(relevantRows.find((row) => row.kind === "operator_handoff_required")?.readAt).toBeGreaterThan(
+      0,
+    );
+    expect(relevantRows.find((row) => row.kind === "document_uploaded")?.readAt).toBeGreaterThan(
+      0,
+    );
+    expect(relevantRows.find((row) => row.kind === "human_takeover")?.readAt).toBeNull();
+  });
+
   it("GET /:id для чужого conversation → 404 (cross-tenant)", async () => {
     if (!sql) return;
     // Tenant B пытается читать tenant A's conversation

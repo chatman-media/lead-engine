@@ -169,6 +169,7 @@ function hasIssuedPayout(
 
 function hasPendingKyc(input: ExchangePolicyGuardInput): boolean {
 	const stageSlug = input.state?.stageSlug ?? input.stageSlug;
+	if (input.state?.verification?.verified === true) return false;
 	if (input.state?.verification?.needsVerification === true) return true;
 	return (
 		KYC_PENDING_STAGES.has(stageSlug ?? "") ||

@@ -100,6 +100,38 @@ function outboundEnvelopeText(envelope: OutboundEnvelope): string | null {
   return text || null;
 }
 
+function parseJsonObject(valueJson: string | null | undefined): Record<string, unknown> {
+  if (!valueJson) return {};
+  try {
+    const parsed = JSON.parse(valueJson);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Bad legacy attributes should not break inbound handling.
+  }
+  return {};
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function contactIsBanned(attributesJson: string | null | undefined): boolean {
+  const attrs = parseJsonObject(attributesJson);
+  const ban = objectValue(attrs.ban);
+  const moderation = objectValue(attrs.moderation);
+  return (
+    attrs.isBanned === true ||
+    attrs.banStatus === "banned" ||
+    ban.status === "banned" ||
+    ban.banned === true ||
+    moderation.status === "banned"
+  );
+}
+
 export interface ProcessInboundDeps {
   tenant: TenantContext;
   channel: ChannelContext;
@@ -412,6 +444,22 @@ export async function processInbound(
     });
   }
 
+  if (contactIsBanned(contact.attributesJson)) {
+    deps.sink?.log?.("info", "inbound ignored for banned contact", {
+      tenantId: deps.tenant.tenantId,
+      conversationId: conversation.id,
+      contactId: contact.id,
+    });
+    return {
+      contactId: contact.id,
+      contactDisplayName: contact.displayName,
+      conversationId: conversation.id,
+      persisted: !existingMsg,
+      outboundEnqueued: 0,
+      escalatedReason: "contact_banned",
+    };
+  }
+
   // 4b. Notifications (Human takeover / Verification video / Document upload).
   const hasMedia = inbound.parts.some((p) => p.kind !== "text" && p.kind !== "callback_query");
   // «Кружок» (video_note) — опциональная видео-верификация: уходит оператору
@@ -558,6 +606,7 @@ export async function processInbound(
             tenantId: deps.tenant.tenantId,
             contactId: contact.id,
             salesStage: newStage,
+            preferredVerticalTemplateId: deps.template?.slug ?? null,
             nowEpoch: now,
           });
           if (res && (res.created || res.advanced)) {

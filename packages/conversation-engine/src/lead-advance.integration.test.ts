@@ -31,7 +31,7 @@ async function makeStage(
   phase: string | null,
   position: number,
 ) {
-  await db.insert(schema.stageDefinitions).values({
+  const [row] = await db.insert(schema.stageDefinitions).values({
     tenantId,
     funnelId,
     slug,
@@ -43,7 +43,9 @@ async function makeStage(
     nextStages: [],
     createdAt: n,
     updatedAt: n,
-  });
+  }).returning({ id: schema.stageDefinitions.id });
+  if (!row) throw new Error("makeStage: insert returned no row");
+  return row.id;
 }
 
 beforeAll(async () => {
@@ -121,6 +123,97 @@ describe("ensureAndAdvanceLeadByPhase", () => {
     expect(r!.created).toBe(true);
     expect(r!.advanced).toBe(true);
     expect(r!.stageSlug).toBe("qual");
+  });
+
+  it("preferred vertical template keeps exchange auto-advance out of another active funnel", async () => {
+    if (!enabled) return;
+    const [tenant] = await db
+      .insert(schema.tenants)
+      .values({ slug: `ladv-multi-${n}` })
+      .returning({ id: schema.tenants.id });
+    if (!tenant) throw new Error("tenant insert returned no row");
+    const tenantId = tenant.id;
+    const contactId = await freshContact(tenantId);
+
+    const [greenFunnel] = await db
+      .insert(schema.funnels)
+      .values({
+        tenantId,
+        slug: "green-corridor",
+        verticalTemplateId: "green_corridor_v1",
+        isActive: true,
+        createdAt: n,
+        updatedAt: n,
+      })
+      .returning({ id: schema.funnels.id });
+    if (!greenFunnel) throw new Error("green funnel insert returned no row");
+    const greenStageId = await makeStage(
+      tenantId,
+      greenFunnel.id,
+      "gc_request",
+      "active",
+      "qualify",
+      1,
+    );
+    await db.insert(schema.leads).values({
+      tenantId,
+      userId: contactId,
+      state: "gc_request",
+      stageDefinitionId: greenStageId,
+      requestType: "green_corridor",
+      createdAt: n,
+      updatedAt: n,
+    });
+
+    const [exchangeFunnel] = await db
+      .insert(schema.funnels)
+      .values({
+        tenantId,
+        slug: "exchange",
+        verticalTemplateId: "exchange_v1",
+        isActive: true,
+        createdAt: n,
+        updatedAt: n,
+      })
+      .returning({ id: schema.funnels.id });
+    if (!exchangeFunnel) throw new Error("exchange funnel insert returned no row");
+    await makeStage(tenantId, exchangeFunnel.id, "exchange_intake", "intake", null, 0);
+    await makeStage(tenantId, exchangeFunnel.id, "exchange_request", "active", "qualify", 1);
+
+    const r = await ensureAndAdvanceLeadByPhase({
+      db,
+      tenantId,
+      contactId,
+      salesStage: "qualify",
+      preferredVerticalTemplateId: "exchange_v1",
+      nowEpoch: n + 1,
+    });
+
+    expect(r).toMatchObject({
+      created: true,
+      advanced: true,
+      stageSlug: "exchange_request",
+    });
+    const rows = await db
+      .select({
+        state: schema.leads.state,
+        requestType: schema.leads.requestType,
+        funnelId: schema.stageDefinitions.funnelId,
+      })
+      .from(schema.leads)
+      .leftJoin(
+        schema.stageDefinitions,
+        eq(schema.leads.stageDefinitionId, schema.stageDefinitions.id),
+      )
+      .where(and(eq(schema.leads.tenantId, tenantId), eq(schema.leads.userId, contactId)));
+    expect(rows).toHaveLength(2);
+    expect(
+      rows.find((row) => row.requestType === "green_corridor"),
+    ).toMatchObject({ state: "gc_request", funnelId: greenFunnel.id });
+    expect(rows.find((row) => row.requestType === "exchange")).toMatchObject({
+      state: "exchange_request",
+      funnelId: exchangeFunnel.id,
+    });
   });
 
   it("pitch → offer-фаза", async () => {

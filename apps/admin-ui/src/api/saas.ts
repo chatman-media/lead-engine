@@ -2082,11 +2082,15 @@ export interface NotificationTemplate {
 
 export interface InformerNotification {
   id: number;
+  tenantId?: number;
   topic: string;
   severity: string;
   kind: string;
   title: string;
   body: string;
+  dedupKey: string;
+  conversationId: number | null;
+  leadId: number | null;
   deliveredAt: number | null;
   readAt: number | null;
   createdAt: number;
@@ -2943,6 +2947,30 @@ export const saas = {
   },
   getLead(id: number) {
     return request<LeadDetail>(`/api/admin/leads/${id}`);
+  },
+  banLeadContact(id: number, reason?: string) {
+    return request<{ ok: boolean; contactId: number; status: string }>(
+      `/api/admin/leads/${id}/contact/ban`,
+      {
+        method: "POST",
+        body: JSON.stringify(reason ? { reason } : {}),
+      },
+    );
+  },
+  revokeLeadVerification(id: number) {
+    return request<{ ok: boolean; contactId: number; status: string; ordersPatched: number }>(
+      `/api/admin/leads/${id}/verification/revoke`,
+      { method: "POST" },
+    );
+  },
+  unblockLeadVerification(id: number) {
+    return request<{
+      ok: boolean;
+      contactId: number;
+      status: string;
+      attributesCleared: boolean;
+      ordersPatched: number;
+    }>(`/api/admin/leads/${id}/verification/unblock`, { method: "POST" });
   },
   getLeadKbGuidance(id: number) {
     return request<LeadKbGuidance>(`/api/admin/leads/${id}/kb-guidance`);

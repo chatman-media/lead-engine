@@ -1,3 +1,17 @@
+# [@chatman-media/storage-v1.31.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.31.0...@chatman-media/storage-v1.31.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** open conversation notifications by target ([#586](https://github.com/chatman-media/lead-engine/issues/586)) ([c07f87e](https://github.com/chatman-media/lead-engine/commit/c07f87e97f88be116fdc23b76cf4f3bbc97c0ad5))
+
+# [@chatman-media/storage-v1.31.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.30.0...@chatman-media/storage-v1.31.0) (2026-06-11)
+
+
+### Features
+
+* **exchange:** add silent auto handoff setting ([#571](https://github.com/chatman-media/lead-engine/issues/571)) ([7a961b5](https://github.com/chatman-media/lead-engine/commit/7a961b53306fb6b0b25d0141e04a42ca234cf430))
+
 # [@chatman-media/storage-v1.30.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.29.1...@chatman-media/storage-v1.30.0) (2026-06-11)
 
 

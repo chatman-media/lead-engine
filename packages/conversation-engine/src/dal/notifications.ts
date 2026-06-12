@@ -462,6 +462,7 @@ export class NotificationsRepo {
           eq(adminNotifications.adminId, adminId),
           isNull(adminNotifications.deliveredAt),
           isNull(adminNotifications.digestBatchId),
+          isNull(adminNotifications.readAt),
         ),
       )
       .orderBy(adminNotifications.createdAt);

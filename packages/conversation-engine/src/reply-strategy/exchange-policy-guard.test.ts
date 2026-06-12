@@ -204,6 +204,34 @@ describe("guardExchangePolicy", () => {
 		expect(result.text).toBe(EXCHANGE_SAFE_FALLBACK);
 	});
 
+	it("allows fetched requisites after persisted KYC verification despite old KYC history", () => {
+		const result = guardExchangePolicy({
+			history: kycHistory,
+			text: "Реквизиты готовы: оплатите по карте 2200 7000 1234 5678.",
+			state: {
+				stageSlug: "kyc_collection",
+				verification: {
+					verified: true,
+					status: "verified",
+					needsVerification: false,
+					verificationId: "operator-bot-109-123",
+				},
+			},
+			telemetry: {
+				toolCalls: [
+					{
+						name: "fetch_exchange_requisites",
+						args: {},
+						result: { ok: true },
+						cycle: 0,
+					},
+				],
+			},
+		});
+
+		expect(result.ok).toBe(true);
+	});
+
 	it("keeps old factual guard behavior for unbacked quotes", () => {
 		const result = guardExchangePolicy({
 			text: "Курс 31.5, получите 10553 THB.",

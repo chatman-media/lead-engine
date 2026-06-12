@@ -9,7 +9,7 @@ import {
   messages,
   outboundQueue,
 } from "@chatman-media/storage";
-import { and, desc, eq, ilike, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
@@ -31,6 +31,59 @@ export interface AdminConversationsRoutesOpts {
   /** Для пинга оператору при входе лида в awaiting_operator-стадию. */
   notifications?: NotificationService | null;
   partnerPing?: { appUrl: string; operatorBotToken: string; callbackSecret: string } | null;
+}
+
+const kycHandoffKinds = new Set(["verification_requested", "document_uploaded"]);
+
+function hasKycMarker(row: { title: string; body: string }): boolean {
+  const text = `${row.title}\n${row.body}`.toLowerCase();
+  return text.includes("kyc") || text.includes("верификац");
+}
+
+function parseJsonObject(value: string | null): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function isResolvedKycHandoff(
+  row: { kind: string; title: string; body: string; createdAt: number },
+  contactAttributesJson: string | null,
+): boolean {
+  if (!kycHandoffKinds.has(row.kind)) {
+    if (row.kind !== "operator_handoff_required" || !hasKycMarker(row)) {
+      return false;
+    }
+  }
+
+  const attrs = parseJsonObject(contactAttributesJson);
+  const kyc = objectValue(attrs.exchangeKyc);
+  const reviewedAt = numberValue(kyc.reviewedAt);
+  if (reviewedAt !== null && reviewedAt >= row.createdAt) return true;
+
+  return (
+    kyc.verified === true ||
+    attrs.isVerified === true ||
+    kyc.status === "verified" ||
+    attrs.verificationStatus === "verified" ||
+    attrs.kycStatus === "verified"
+  );
 }
 
 export function makeAdminConversationsRoutes(
@@ -224,8 +277,18 @@ export function makeAdminConversationsRoutes(
       return c.json({ error: "invalid conversation id" }, 400);
     }
 
-    const rows = await withTenant(opts.db, tenantId, async (tx) =>
-      tx
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      const [conv] = await tx
+        .select({
+          contactAttributesJson: contacts.attributesJson,
+        })
+        .from(conversations)
+        .leftJoin(contacts, eq(contacts.id, conversations.userId))
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, id)))
+        .limit(1);
+      if (!conv) return [];
+
+      const candidates = await tx
         .select({
           id: adminNotifications.id,
           kind: adminNotifications.kind,
@@ -240,6 +303,7 @@ export function makeAdminConversationsRoutes(
         .where(
           and(
             eq(adminNotifications.tenantId, tenantId),
+            isNull(adminNotifications.readAt),
             inArray(
               adminNotifications.dedupKey,
               operatorHandoffKinds.map((kind) => `${kind}:${id}`),
@@ -247,8 +311,27 @@ export function makeAdminConversationsRoutes(
           ),
         )
         .orderBy(desc(adminNotifications.createdAt), desc(adminNotifications.id))
-        .limit(20),
-    );
+        .limit(50);
+
+      const resolvedIds = candidates
+        .filter((row) => isResolvedKycHandoff(row, conv.contactAttributesJson))
+        .map((row) => row.id);
+      if (resolvedIds.length > 0) {
+        await tx
+          .update(adminNotifications)
+          .set({ readAt: Math.floor(Date.now() / 1000) })
+          .where(
+            and(
+              eq(adminNotifications.tenantId, tenantId),
+              inArray(adminNotifications.id, resolvedIds),
+              isNull(adminNotifications.readAt),
+            ),
+          );
+      }
+
+      const resolvedIdSet = new Set(resolvedIds);
+      return candidates.filter((row) => !resolvedIdSet.has(row.id)).slice(0, 20);
+    });
 
     return c.json({ items: rows });
   });
