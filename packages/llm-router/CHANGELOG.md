@@ -1,3 +1,10 @@
+# [@chatman-media/llm-router-v1.2.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/llm-router-v1.2.0...@chatman-media/llm-router-v1.2.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* **exchange:** stabilize bot handoff flow ([#576](https://github.com/chatman-media/lead-engine/issues/576)) ([f206fbe](https://github.com/chatman-media/lead-engine/commit/f206fbea0ba8eebf34ec1bcc8c05af453e65b363))
+
 # [@chatman-media/llm-router-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/llm-router-v1.1.1...@chatman-media/llm-router-v1.2.0) (2026-06-11)
 
 
