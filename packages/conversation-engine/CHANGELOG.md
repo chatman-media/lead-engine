@@ -1,3 +1,15 @@
+# [@chatman-media/conversation-engine-v3.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.5.2...@chatman-media/conversation-engine-v3.6.0) (2026-06-12)
+
+
+### Bug Fixes
+
+* **exchange:** stabilize bot handoff flow ([#576](https://github.com/chatman-media/lead-engine/issues/576)) ([f206fbe](https://github.com/chatman-media/lead-engine/commit/f206fbea0ba8eebf34ec1bcc8c05af453e65b363))
+
+
+### Features
+
+* **exchange:** show handoff media to operators ([#578](https://github.com/chatman-media/lead-engine/issues/578)) ([9dd3cee](https://github.com/chatman-media/lead-engine/commit/9dd3cee3a559be63f9cb613ee94c173248f66edc))
+
 # [@chatman-media/conversation-engine-v3.5.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.5.1...@chatman-media/conversation-engine-v3.5.2) (2026-06-11)
 
 
