@@ -282,6 +282,8 @@ export function SaasLeadDetail() {
   const [banningContact, setBanningContact] = useState(false);
   const [confirmBanContact, setConfirmBanContact] = useState(false);
   const [banReason, setBanReason] = useState("");
+  const [unbanningContact, setUnbanningContact] = useState(false);
+  const [confirmUnbanContact, setConfirmUnbanContact] = useState(false);
 
   // Send-photo (QR) state
   const [photoRef, setPhotoRef] = useState("");
@@ -483,6 +485,20 @@ export function SaasLeadDetail() {
       onAuthError(err);
     } finally {
       setBanningContact(false);
+    }
+  }
+
+  async function handleUnbanContact() {
+    if (!id) return;
+    setConfirmUnbanContact(false);
+    setUnbanningContact(true);
+    try {
+      await saas.unbanLeadContact(Number(id));
+      reload();
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setUnbanningContact(false);
     }
   }
 
@@ -1070,9 +1086,13 @@ export function SaasLeadDetail() {
             banning={banningContact}
             banReason={banReason}
             confirmBan={confirmBanContact}
+            confirmUnban={confirmUnbanContact}
+            unbanning={unbanningContact}
             onBan={handleBanContact}
             onConfirmBanChange={setConfirmBanContact}
+            onConfirmUnbanChange={setConfirmUnbanContact}
             onReasonChange={setBanReason}
+            onUnban={handleUnbanContact}
           />
 
           {/* Заметки */}
@@ -1475,17 +1495,25 @@ function LeadContactBanCard({
   banning,
   banReason,
   confirmBan,
+  confirmUnban,
+  unbanning,
   onBan,
   onConfirmBanChange,
+  onConfirmUnbanChange,
   onReasonChange,
+  onUnban,
 }: {
   attributesJson: string | null;
   banning: boolean;
   banReason: string;
   confirmBan: boolean;
+  confirmUnban: boolean;
+  unbanning: boolean;
   onBan: () => void;
   onConfirmBanChange: (value: boolean) => void;
+  onConfirmUnbanChange: (value: boolean) => void;
   onReasonChange: (value: string) => void;
+  onUnban: () => void;
 }) {
   const ban = getLeadBanBadge(attributesJson);
 
@@ -1524,6 +1552,37 @@ function LeadContactBanCard({
                 <p className="rounded-md bg-muted/50 p-2 text-xs">{ban.reason}</p>
               </div>
             )}
+            <div className="border-t pt-3">
+              {confirmUnban ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">Разбанить пользователя?</span>
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" onClick={onUnban} disabled={unbanning}>
+                      Да
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onConfirmUnbanChange(false)}
+                      disabled={unbanning}
+                    >
+                      Нет
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full justify-start gap-2"
+                  onClick={() => onConfirmUnbanChange(true)}
+                  disabled={unbanning}
+                >
+                  <CheckIcon className="size-3.5" />
+                  Разбанить пользователя
+                </Button>
+              )}
+            </div>
           </>
         ) : confirmBan ? (
           <div className="space-y-2">

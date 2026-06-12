@@ -1540,6 +1540,110 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
   });
 
   /**
+   * POST /api/admin/leads/:id/contact/unban
+   * Снимает блокировку контакта: очищает все ban-атрибуты, после чего
+   * inbound pipeline снова генерирует ответы. Идемпотентен.
+   */
+  app.post("/api/admin/leads/:id/contact/unban", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({
+          id: leads.id,
+          userId: leads.userId,
+          state: leads.state,
+        })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return { kind: "not_found" } as const;
+
+      const [contact] = await tx
+        .select({ id: contacts.id, attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)));
+      if (!contact) return { kind: "contact_not_found" } as const;
+
+      const attrs = parseJsonObject(contact.attributesJson);
+      const currentBan = objectValue(attrs.ban);
+      const {
+        isBanned: _isBanned,
+        banStatus: _banStatus,
+        bannedAt: _bannedAt,
+        bannedByAdminId: _bannedByAdminId,
+        banReason: _banReason,
+        ...restAttrs
+      } = attrs;
+      const nextAttrs: Record<string, unknown> = {
+        ...restAttrs,
+        ban: {
+          ...currentBan,
+          status: "unbanned",
+          banned: false,
+          unbannedByAdminId: adminId ?? null,
+          unbannedAt: now,
+        },
+      };
+      // contactIsBanned в pipeline также трактует moderation.status === "banned" как бан
+      const moderation = objectValue(attrs.moderation);
+      if (moderation.status === "banned") {
+        nextAttrs.moderation = { ...moderation, status: "unbanned" };
+      }
+
+      await tx
+        .update(contacts)
+        .set({
+          attributesJson: JSON.stringify(nextAttrs),
+          updatedAt: now,
+        })
+        .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
+
+      await tx.insert(leadEvents).values({
+        tenantId,
+        leadId: id,
+        fromState: lead.state,
+        toState: lead.state,
+        byAdminId: adminId,
+        notes: JSON.stringify({
+          type: "contact_unbanned",
+          contactId: contact.id,
+        }),
+        createdAt: now,
+      });
+
+      return {
+        kind: "ok",
+        contactId: contact.id,
+        status: "unbanned",
+      } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.contact_unban",
+      targetKind: "lead",
+      targetId: String(id),
+      details: {
+        contactId: outcome.contactId,
+      },
+    });
+
+    return c.json({
+      ok: true,
+      contactId: outcome.contactId,
+      status: outcome.status,
+    });
+  });
+
+  /**
    * PATCH /api/admin/leads/:id/stage
    * Body: { stageDefinitionId: number } — переход в указанную стадию
    */

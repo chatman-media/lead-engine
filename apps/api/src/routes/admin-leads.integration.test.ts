@@ -844,6 +844,101 @@ describe("POST /api/admin/leads/:id/contact/ban", () => {
   });
 });
 
+describe("POST /api/admin/leads/:id/contact/unban", () => {
+  it("clears ban attributes and records a lead event", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "Unban Contact",
+        attributesJson: JSON.stringify({
+          segment: "risk",
+          isBanned: true,
+          banStatus: "banned",
+          bannedAt: now - 100,
+          bannedByAdminId: 1,
+          banReason: "fraud risk",
+          ban: {
+            status: "banned",
+            banned: true,
+            bannedAt: now - 100,
+            reason: "fraud risk",
+            source: "admin_lead_detail",
+          },
+          moderation: { status: "banned" },
+        }),
+      })
+      .returning({ id: contacts.id });
+    if (!contact) throw new Error("failed to create contact");
+    const [lead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contact.id,
+        state: "review",
+        stageDefinitionId: stageIdA2,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    if (!lead) throw new Error("failed to create lead");
+
+    const res = await authReq(tokenA, `/api/admin/leads/${lead.id}/contact/unban`, {
+      method: "POST",
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; contactId: number; status: string };
+    expect(body).toMatchObject({ ok: true, contactId: contact.id, status: "unbanned" });
+
+    const [updatedContact] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(eq(contacts.id, contact.id));
+    if (!updatedContact) throw new Error("contact was not updated");
+    const attrs = JSON.parse(updatedContact.attributesJson ?? "{}") as {
+      segment?: string;
+      isBanned?: boolean;
+      banStatus?: string;
+      banReason?: string;
+      ban?: Record<string, unknown>;
+      moderation?: Record<string, unknown>;
+    };
+    expect(attrs.segment).toBe("risk");
+    expect(attrs.isBanned).toBeUndefined();
+    expect(attrs.banStatus).toBeUndefined();
+    expect(attrs.banReason).toBeUndefined();
+    expect(attrs.ban).toMatchObject({
+      status: "unbanned",
+      banned: false,
+      reason: "fraud risk",
+    });
+    expect(attrs.moderation).toMatchObject({ status: "unbanned" });
+
+    const events = await db
+      .select({ notes: leadEvents.notes, toState: leadEvents.toState })
+      .from(leadEvents)
+      .where(and(eq(leadEvents.leadId, lead.id), eq(leadEvents.tenantId, tenantA)));
+    const unbanEvent = events.find((event) => event.notes?.includes("contact_unbanned"));
+    if (!unbanEvent) throw new Error("missing contact unban event");
+    expect(unbanEvent.toState).toBe("review");
+    expect(JSON.parse(unbanEvent.notes ?? "{}")).toMatchObject({
+      type: "contact_unbanned",
+      contactId: contact.id,
+    });
+  });
+
+  it("cross-tenant unban is hidden as not found", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}/contact/unban`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("POST /api/admin/leads/:id/verification/unblock", () => {
   it("clears rejected contact KYC/OCR and active exchange order verification", async () => {
     if (!sql) return;
