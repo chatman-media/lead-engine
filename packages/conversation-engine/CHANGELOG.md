@@ -1,3 +1,15 @@
+# [@chatman-media/conversation-engine-v3.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.8.0...@chatman-media/conversation-engine-v3.9.0) (2026-06-13)
+
+
+### Bug Fixes
+
+* **exchange:** quote amount inflated x1000 (500 USDT -> 500000) ([4944411](https://github.com/chatman-media/lead-engine/commit/494441115f484293aa0e04215ae766acbdb1b403))
+
+
+### Features
+
+* **settings:** configurable bot context window (reply history limit) ([1951e12](https://github.com/chatman-media/lead-engine/commit/1951e1280acc06b6ab6bb2c466f62108a2b52c5a))
+
 # [@chatman-media/conversation-engine-v3.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.7.3...@chatman-media/conversation-engine-v3.8.0) (2026-06-13)
 
 
