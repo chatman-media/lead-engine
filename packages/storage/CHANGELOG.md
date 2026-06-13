@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.33.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.32.0...@chatman-media/storage-v1.33.0) (2026-06-13)
+
+
+### Features
+
+* **settings:** configurable bot context window (reply history limit) ([1951e12](https://github.com/chatman-media/lead-engine/commit/1951e1280acc06b6ab6bb2c466f62108a2b52c5a))
+
 # [@chatman-media/storage-v1.32.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.31.1...@chatman-media/storage-v1.32.0) (2026-06-13)
 
 
