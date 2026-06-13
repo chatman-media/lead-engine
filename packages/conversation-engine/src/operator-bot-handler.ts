@@ -588,6 +588,15 @@ export class OperatorBotHandler {
 			});
 			return;
 		}
+
+		// KYC OK — один тап: засчитываем верификацию, двигаем воронку и
+		// возвращаем диалог в AI (бот продолжает сам). Без превью и без
+		// отдельного сообщения клиенту — следующий шаг бот выдаёт сам.
+		if (input.action === "kyc_approved") {
+			await this.applyInstantKycApproved(cq, chatId, settings, input, now);
+			return;
+		}
+
 		const resolved = await this.resolveExchangeQuickReply({
 			tenantId: settings.tenantId,
 			conversationId: input.conversationId,
@@ -625,6 +634,101 @@ export class OperatorBotHandler {
 			text: "Preview готов",
 		});
 		await this.sendDraftPreview(chatId, draft, resolved.quickReply.title);
+	}
+
+	/**
+	 * KYC OK в один тап: верификация засчитывается сразу (как при отправке
+	 * черновика), воронка двигается дальше (applyKycDecisionSideEffect), а диалог
+	 * возвращается в AI-режим — бот продолжает обмен сам. Клиенту отдельное
+	 * сообщение НЕ шлём: следующий шаг (оплата) выдаёт бот.
+	 */
+	private async applyInstantKycApproved(
+		cq: TgCallbackQuery,
+		chatId: string,
+		settings: { adminId: number; tenantId: number },
+		input: { conversationId: number; orderId?: number },
+		now: number,
+	): Promise<void> {
+		if (!this.client) return;
+		const db = this.actions.db;
+		if (!db) {
+			await this.client.answerCallbackQuery({
+				callbackQueryId: cq.id,
+				text: "Действия не настроены",
+				showAlert: true,
+			});
+			return;
+		}
+
+		const draft: PendingOperatorDraft = {
+			draftId: this.createDraftId(),
+			tenantId: settings.tenantId,
+			adminId: settings.adminId,
+			chatId,
+			conversationId: input.conversationId,
+			text: "",
+			metadata: {
+				source: "operator_bot_exchange_action",
+				exchangeAction: "kyc_approved",
+				...(input.orderId ? { orderId: input.orderId } : {}),
+			},
+			createdAt: now,
+			expiresAt: now + PREVIEW_TTL_SEC,
+		};
+
+		const outcome = await withTenant(db, settings.tenantId, async (tx) => {
+			const [conv] = await tx
+				.select({ contactId: conversations.userId, mode: conversations.mode })
+				.from(conversations)
+				.where(
+					and(
+						eq(conversations.tenantId, settings.tenantId),
+						eq(conversations.id, input.conversationId),
+					),
+				)
+				.limit(1);
+			if (!conv) return { kind: "not_found" } as const;
+
+			await this.applyKycDecisionSideEffect(tx, draft, now, conv.contactId, "kyc_approved");
+
+			// Возвращаем диалог боту, чтобы он продолжил обмен.
+			if (conv.mode !== "ai") {
+				await tx
+					.update(conversations)
+					.set({ mode: "ai", lastMessageAt: now })
+					.where(
+						and(
+							eq(conversations.tenantId, settings.tenantId),
+							eq(conversations.id, input.conversationId),
+						),
+					);
+			}
+			return { kind: "ok" } as const;
+		});
+
+		if (outcome.kind === "not_found") {
+			await this.client.answerCallbackQuery({
+				callbackQueryId: cq.id,
+				text: "Диалог не найден",
+				showAlert: true,
+			});
+			return;
+		}
+
+		await this.client.answerCallbackQuery({
+			callbackQueryId: cq.id,
+			text: "✅ KYC подтверждён",
+		});
+		await this.client.sendMessage({
+			chatId,
+			parseMode: "HTML",
+			text: `✅ <b>KYC подтверждён</b>\nДиалог #${input.conversationId}: верификация засчитана, диалог вернулся в AI — бот продолжит обмен сам.`,
+			replyMarkup: {
+				inline_keyboard: [
+					[{ text: "👁 Открыть чат", url: this.conversationUrl(input.conversationId) }],
+				],
+			},
+		});
 	}
 
 	private async resolveExchangeActionScope(input: {
