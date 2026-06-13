@@ -333,10 +333,10 @@ export function SaasLeadDetail() {
       .catch(() => {});
   }, [id]);
 
-  useEffect(() => {
-    if (!data?.contact) return;
+  // Перечитать последнюю переписку контакта (для живого чата на странице).
+  function loadConversation(contactId: number) {
     saas
-      .listConversations({ contactId: data.contact.id, limit: 1 })
+      .listConversations({ contactId, limit: 1 })
       .then((r) => {
         const cid = r.items[0]?.id ?? null;
         setConversationId(cid);
@@ -348,7 +348,31 @@ export function SaasLeadDetail() {
         }
       })
       .catch(() => {});
+  }
+
+  useEffect(() => {
+    if (!data?.contact) return;
+    loadConversation(data.contact.id);
   }, [data?.contact?.id]);
+
+  // Живое обновление: пока вкладка активна, тихо перечитываем статус лида и
+  // переписку каждые 5 с — без спиннера и не трогая режим редактирования полей.
+  // Ответы бота не шлют SSE-событие, поэтому опрос надёжнее подписки.
+  useEffect(() => {
+    if (!id) return;
+    const contactId = data?.contact?.id ?? null;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (!editing) {
+        saas
+          .getLead(Number(id))
+          .then(setData)
+          .catch(() => {});
+      }
+      if (contactId) loadConversation(contactId);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [id, data?.contact?.id, editing]);
 
   async function handleAddNote() {
     if (!id || !noteText.trim()) return;
