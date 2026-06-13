@@ -344,6 +344,50 @@ describe("processInbound", () => {
 		expect(String(takeover?.data?.mediaRefsJson)).toContain("passport_file_1");
 	});
 
+	it("human_takeover в exchange с медиа помечается reason=kyc_review (KYC-кнопки в боте)", async () => {
+		const events: Array<{ eventType: string; data?: Record<string, unknown> }> = [];
+		const d = {
+			...makeDeps(),
+			template: { slug: "exchange_v1" } as unknown as Parameters<
+				typeof processInbound
+			>[1]["template"],
+			notifications: {
+				notify: async (e: { eventType: string; data?: Record<string, unknown> }) => {
+					events.push(e);
+				},
+			} as unknown as Parameters<typeof processInbound>[1]["notifications"],
+		};
+		await d._fakes.conversations.create({
+			contactId: 1,
+			source: "bot",
+			mode: "human",
+			nowEpoch: 1700000000,
+		});
+		await d._fakes.contacts.create({ displayName: "KYC user" });
+		await d._fakes.identities.create({
+			contactId: 1,
+			channelId: 10,
+			externalUserId: "u-kyc",
+		});
+
+		const photoInbound = {
+			channelId: "tg-1",
+			externalMessageId: "301",
+			externalUserId: "u-kyc",
+			parts: [
+				{ kind: "photo", mediaRef: { channelId: "10", externalRef: "passport_2" } },
+			],
+			receivedAt: 1700000000,
+			raw: {},
+		} as unknown as Inbound;
+
+		await processInbound(photoInbound, d);
+
+		const takeover = events.find((e) => e.eventType === "human_takeover");
+		expect(takeover).toBeDefined();
+		expect(takeover?.data?.reason).toBe("kyc_review");
+	});
+
 	it("в mode='ai' зовёт reply-strategy и кладёт envelopes в outbound_queue", async () => {
 		const envelope: OutboundEnvelope = {
 			channelId: "tg-1",

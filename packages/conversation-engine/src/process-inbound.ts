@@ -512,6 +512,13 @@ export async function processInbound(
         data: {
           displayName: contact.displayName || "Без имени",
           text: text || "(Медиа)",
+          // Exchange + медиа в режиме оператора — обычно KYC-документ (паспорт/
+          // видео). Помечаем reason=kyc_review, чтобы в операторском боте под
+          // уведомлением появились быстрые кнопки ✅ KYC OK / 📎 Дослать /
+          // ⛔ Отклонить (иначе оператор видит только «Открыть/Взять/Вернуть AI»).
+          ...(deps.template?.slug === "exchange_v1" && hasMedia
+            ? { reason: "kyc_review" }
+            : {}),
           // Клиент мог прислать паспорт/видео уже после передачи диалога оператору
           // (mode=human/queued). Прикладываем медиа-рефы, чтобы оператор видел сам
           // файл, а не только «(Медиа)» — как в verification_requested/document_uploaded.
