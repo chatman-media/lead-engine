@@ -415,6 +415,12 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
 
       const existing = await getOrderByIdempotencyKey(db, tenantId, idempotencyKey);
       if (existing) {
+        await moveExchangeLeadToStage({
+          db,
+          tenantId,
+          conversationId,
+          stageSlug: "order_created",
+        });
         return {
           orderId: existing.id,
           status: existing.status,
@@ -464,6 +470,15 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         }),
         rateExpiresAt,
         idempotencyKey,
+      });
+      // Заявка создана — продвигаем лида на order_created. Иначе он застревает
+      // на quote_calculated, а fetch_exchange_requisites гейтится матрицей на
+      // order_created/requisites_sent → реквизиты не выдать (лид «не двигается»).
+      await moveExchangeLeadToStage({
+        db,
+        tenantId,
+        conversationId,
+        stageSlug: "order_created",
       });
       return {
         orderId: order.id,
@@ -517,6 +532,13 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
           note: req.note ?? "Реквизиты выдаст оператор.",
         };
       }
+      // Реквизиты получены и уходят клиенту — двигаем лида на requisites_sent.
+      await moveExchangeLeadToStage({
+        db,
+        tenantId,
+        conversationId,
+        stageSlug: "requisites_sent",
+      });
       if (req.kind === "crypto") {
         if (req.exchangeId) {
           const exchangeName = req.exchangeName ?? req.network ?? "exchange";
