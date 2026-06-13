@@ -763,6 +763,69 @@ describe("RagReplyStrategy.generate", () => {
 		);
 	});
 
+	it("exchange: краткое «отл» после котировки тоже форсит create_exchange_order", async () => {
+		const chat = new CapturingRagChat("Сейчас снова посчитаю.");
+		const instructions =
+			"Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.";
+		let seenArgs: unknown = null;
+		const recorded: Array<
+			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "отдаю 10к рублей нужны песо в банкомате" },
+						{ role: "assistant", text: "Получите 8126 PHP." },
+						{ role: "user", text: "отл" },
+					],
+				}),
+				exchangePolicyState: {
+					stageSlug: "quote_calculated",
+					verification: {
+						verified: false,
+						status: "missing",
+						needsVerification: true,
+					},
+				},
+				tools: [
+					{
+						name: "create_exchange_order",
+						description: "create order",
+						parameters: {},
+						execute: async (args: unknown) => {
+							seenArgs = args;
+							return {
+								ok: false,
+								needsVerification: true,
+								status: "missing",
+								instructions,
+							};
+						},
+					},
+				] as never,
+			}),
+			{
+				reflect: false,
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+		);
+
+		const r = await s.generate({ ...baseInput(), userMessageText: "отл" });
+
+		expect(firstReplyText(r)).toBe(instructions);
+		expect(chat.lastCall).toBeNull();
+		expect(seenArgs).toMatchObject({ asset: "RUB", amount: 10000 });
+		expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe(
+			"create_exchange_order",
+		);
+	});
+
 	  it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
 	    const s = mk(
       ctxWith({
