@@ -65,7 +65,17 @@ beforeAll(
     // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
     app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
     app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminConversationsRoutes({ db }));
+    app.route(
+      "/",
+      makeAdminConversationsRoutes({
+        db,
+        // Mock media-proxy: возвращает фиктивные байты с content-type.
+        downloadMedia: async () =>
+          new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+            headers: { "content-type": "image/png" },
+          }),
+      }),
+    );
 
     // Tenant A.
     const sa = await app.request("/api/auth/signup", {
@@ -951,6 +961,70 @@ describe("POST /api/admin/conversations/:id/contact/ban + unban", () => {
       { method: "POST" },
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/admin/conversations/:id/media", () => {
+  it("отдаёт байты медиа по ref сообщения (оператор видит паспорт/видео)", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Media Sender" })
+      .returning({ id: contacts.id });
+    if (!contact) throw new Error("failed to create contact");
+    const [conv] = await db
+      .insert(conversations)
+      .values({
+        tenantId: tenantA,
+        userId: contact.id,
+        source: "bot",
+        mode: "ai",
+        status: "open",
+        lastMessageAt: now,
+        createdAt: now,
+      })
+      .returning({ id: conversations.id });
+    if (!conv) throw new Error("failed to create conversation");
+    const [msg] = await db
+      .insert(messages)
+      .values({
+        tenantId: tenantA,
+        conversationId: conv.id,
+        role: "user",
+        text: "",
+        createdAt: now,
+        metaJson: JSON.stringify({
+          parts: [
+            { kind: "photo", mediaRef: { channelId: "10", externalRef: "passport_xyz" } },
+          ],
+        }),
+      })
+      .returning({ id: messages.id });
+    if (!msg) throw new Error("failed to create message");
+
+    const res = await authReq(
+      tokenA,
+      `/api/admin/conversations/${conv.id}/media?msgId=${msg.id}&ref=passport_xyz`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("image/png");
+    const buf = new Uint8Array(await res.arrayBuffer());
+    expect(buf.length).toBeGreaterThan(0);
+
+    // ref, которого нет в parts этого сообщения → 404
+    const bad = await authReq(
+      tokenA,
+      `/api/admin/conversations/${conv.id}/media?msgId=${msg.id}&ref=nope`,
+    );
+    expect(bad.status).toBe(404);
+
+    // cross-tenant → 404 (RLS-скоуп)
+    const cross = await authReq(
+      tokenB,
+      `/api/admin/conversations/${conv.id}/media?msgId=${msg.id}&ref=passport_xyz`,
+    );
+    expect(cross.status).toBe(404);
   });
 });
 

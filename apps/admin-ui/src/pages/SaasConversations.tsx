@@ -186,7 +186,77 @@ function MediaPartIcon({ kind }: { kind: string }) {
   return <FileTextIcon className="size-4 text-primary" />;
 }
 
-function MessageMediaList({ parts }: { parts: MessageMediaPart[] }) {
+function MediaPreview({
+  conversationId,
+  messageId,
+  part,
+}: {
+  conversationId: number | null;
+  messageId: number;
+  part: MessageMediaPart;
+}) {
+  const ref = part.mediaRef?.externalRef ?? null;
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!conversationId || !ref) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setUrl(null);
+    setFailed(false);
+    saas
+      .getConversationMedia(conversationId, messageId, ref)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [conversationId, messageId, ref]);
+
+  // Превью только для отображаемых типов; для прочего — ничего (останется ярлык).
+  const kind = part.kind;
+  const previewable =
+    kind === "photo" || kind === "video" || kind === "video_note" || kind === "voice";
+  if (!conversationId || !ref || !previewable || failed) return null;
+  if (!url) return <Skeleton className="h-40 w-full max-w-[260px] rounded-md" />;
+
+  if (kind === "photo") {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="block w-fit">
+        <img
+          src={url}
+          alt="Вложение клиента"
+          className="max-h-72 max-w-[260px] rounded-md border object-contain"
+        />
+      </a>
+    );
+  }
+  if (kind === "video" || kind === "video_note") {
+    // biome-ignore lint/a11y/useMediaCaption: пользовательское видео без субтитров
+    return <video src={url} controls className="max-h-72 max-w-[260px] rounded-md border" />;
+  }
+  // voice
+  // biome-ignore lint/a11y/useMediaCaption: голосовое сообщение без субтитров
+  return <audio src={url} controls className="w-full max-w-[260px]" />;
+}
+
+function MessageMediaList({
+  parts,
+  conversationId,
+  messageId,
+}: {
+  parts: MessageMediaPart[];
+  conversationId: number | null;
+  messageId: number;
+}) {
   if (parts.length === 0) return null;
   return (
     <div className="space-y-1.5">
@@ -198,7 +268,8 @@ function MessageMediaList({ parts }: { parts: MessageMediaPart[] }) {
         ].filter(Boolean).join(" · ");
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: media parts have no stable ids in stored meta
-          <div key={index} className="rounded-lg border bg-background/70 px-2.5 py-2">
+          <div key={index} className="space-y-2 rounded-lg border bg-background/70 px-2.5 py-2">
+            <MediaPreview conversationId={conversationId} messageId={messageId} part={part} />
             <div className="flex items-start gap-2">
               <MediaPartIcon kind={part.kind} />
               <div className="min-w-0 flex-1">
@@ -1298,7 +1369,11 @@ export function SaasConversations() {
                             if (attachments.length > 0) {
                               return (
                                 <div className="space-y-2">
-                                  <MessageMediaList parts={attachments} />
+                                  <MessageMediaList
+                                    parts={attachments}
+                                    conversationId={selectedId}
+                                    messageId={m.id}
+                                  />
                                   {m.text && <div>{m.text}</div>}
                                 </div>
                               );

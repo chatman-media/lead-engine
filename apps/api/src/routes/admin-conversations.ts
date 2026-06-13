@@ -38,6 +38,12 @@ export interface AdminConversationsRoutesOpts {
   /** Для пинга оператору при входе лида в awaiting_operator-стадию. */
   notifications?: NotificationService | null;
   partnerPing?: { appUrl: string; operatorBotToken: string; callbackSecret: string } | null;
+  /**
+   * Скачать медиа клиента по mediaRef (для media-proxy: оператор видит
+   * паспорт/видео прямо в инбоксе). Использует адаптер канала-владельца
+   * file_id. null — канал не найден/медиа недоступно.
+   */
+  downloadMedia?: (ref: { channelId: string; externalRef: string }) => Promise<Response | null>;
 }
 
 const kycHandoffKinds = new Set(["verification_requested", "document_uploaded"]);
@@ -290,6 +296,82 @@ export function makeAdminConversationsRoutes(
         contactBan: contactBanState(result.conversation.contactAttributesJson),
       },
       messages: [...result.messages].reverse(),
+    });
+  });
+
+  /**
+   * GET /api/admin/conversations/:id/media?msgId=<id>&ref=<externalRef>
+   * Media-proxy: качает файл клиента (паспорт/видео/документ) через адаптер
+   * канала-владельца file_id и отдаёт байты — чтобы оператор видел медиа прямо
+   * в инбоксе. Доступ скоупится по tenant + conversation + message (RLS), а ref
+   * должен реально присутствовать в parts сообщения.
+   */
+  app.get("/api/admin/conversations/:id/media", async (c) => {
+    const tenantId = c.var.tenantId;
+    const conversationId = Number.parseInt(c.req.param("id"), 10);
+    const msgId = Number.parseInt(c.req.query("msgId") ?? "", 10);
+    const ref = c.req.query("ref")?.trim();
+    if (!Number.isFinite(conversationId) || !Number.isFinite(msgId) || !ref) {
+      return c.json({ error: "bad request" }, 400);
+    }
+    if (!opts.downloadMedia) return c.json({ error: "media proxy disabled" }, 501);
+
+    const row = await withTenant(opts.db, tenantId, async (tx) => {
+      const [msg] = await tx
+        .select({ metaJson: messages.metaJson })
+        .from(messages)
+        .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+        .where(
+          and(
+            eq(messages.id, msgId),
+            eq(messages.conversationId, conversationId),
+            eq(conversations.tenantId, tenantId),
+          ),
+        )
+        .limit(1);
+      return msg ?? null;
+    });
+    if (!row) return c.json({ error: "message not found" }, 404);
+
+    // Ищем part с этим externalRef — заодно авторизация (ref должен принадлежать
+    // именно этому сообщению текущего tenant'а, а не быть произвольным file_id).
+    const meta = parseJsonObject(row.metaJson);
+    const parts = Array.isArray(meta.parts) ? (meta.parts as unknown[]) : [];
+    let channelId = "";
+    let kind = "";
+    for (const p of parts) {
+      const part = objectValue(p);
+      const mr = objectValue(part.mediaRef);
+      if (typeof mr.externalRef === "string" && mr.externalRef === ref) {
+        channelId =
+          typeof mr.channelId === "string" ? mr.channelId : String(mr.channelId ?? "");
+        kind = typeof part.kind === "string" ? part.kind : "";
+        break;
+      }
+    }
+    if (!channelId) return c.json({ error: "media ref not found in message" }, 404);
+
+    let resp: Response | null = null;
+    try {
+      resp = await opts.downloadMedia({ channelId, externalRef: ref });
+    } catch {
+      resp = null;
+    }
+    if (!resp || !resp.ok) return c.json({ error: "media download failed" }, 502);
+
+    const buf = await resp.arrayBuffer();
+    const ct =
+      resp.headers.get("content-type") ||
+      (kind === "photo"
+        ? "image/jpeg"
+        : kind === "video" || kind === "video_note"
+          ? "video/mp4"
+          : kind === "voice"
+            ? "audio/ogg"
+            : "application/octet-stream");
+    return c.body(buf, 200, {
+      "Content-Type": ct,
+      "Cache-Control": "private, max-age=300",
     });
   });
 

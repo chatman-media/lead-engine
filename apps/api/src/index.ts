@@ -477,6 +477,17 @@ async function main() {
       operatorBotToken: cfg.operatorBotToken,
       callbackSecret: cfg.partnerCallbackSecret,
     },
+    // Media-proxy для инбокса: качаем файл клиента адаптером канала-владельца.
+    downloadMedia: async (ref) => {
+      const channelId = Number(ref.channelId);
+      if (!Number.isInteger(channelId) || channelId <= 0) return null;
+      const entry = channels.byChannelId(channelId);
+      if (!entry) return null;
+      return entry.adapter.downloadMedia({
+        channelId: ref.channelId,
+        externalRef: ref.externalRef,
+      });
+    },
   }));
   log.info("admin-conversations routes enabled (list + thread + reply)");
 
