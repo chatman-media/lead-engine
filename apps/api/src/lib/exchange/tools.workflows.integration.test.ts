@@ -15,7 +15,10 @@ import {
 	exchangeOrders,
 	exchangeRates,
 	exchangeRateTiers,
+	funnels,
+	leads,
 	schema,
+	stageDefinitions,
 	tryConnectToPg,
 } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
@@ -921,5 +924,86 @@ describe("Exchange workflow fixtures", () => {
 		expect(alerts.length).toBeGreaterThanOrEqual(1);
 		expect(alerts[0]?.asset).toBe("ETH");
 		expect(alerts[0]?.reason).toBe("implausible_deviation");
+	});
+
+	// Регрессия: заявка/реквизиты двигают лида по воронке. Раньше успешный
+	// create_exchange_order не звал moveExchangeLeadToStage → лид застревал на
+	// quote_calculated, а fetch_exchange_requisites гейтился матрицей стадий.
+	it("продвигает лида: order_created при заявке, requisites_sent при реквизитах", async () => {
+		if (!sql) return;
+		const { contactId, conversationId } = await makeConversation(
+			{ id: "stage-advance", title: "Stage advance" } as Parameters<
+				typeof makeConversation
+			>[0],
+			true,
+		);
+		const now = Math.floor(Date.now() / 1000);
+		await withTenant(db, tenantId, async (tx) => {
+			const [funnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: "exchange",
+					verticalTemplateId: "exchange_v1",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const funnelId = must(funnel, "funnel").id;
+			const stages = await tx
+				.insert(stageDefinitions)
+				.values([
+					{ tenantId, funnelId, slug: "quote_calculated", displayName: "Курс рассчитан", position: 1 },
+					{ tenantId, funnelId, slug: "order_created", displayName: "Заявка создана", position: 5 },
+					{ tenantId, funnelId, slug: "requisites_sent", displayName: "Реквизиты отправлены", position: 6 },
+				])
+				.returning({ id: stageDefinitions.id, slug: stageDefinitions.slug });
+			const quote = must(
+				stages.find((s) => s.slug === "quote_calculated"),
+				"quote stage",
+			);
+			await tx.insert(leads).values({
+				tenantId,
+				userId: contactId,
+				stageDefinitionId: quote.id,
+				state: "quote_calculated",
+				createdAt: now,
+				updatedAt: now,
+			});
+		});
+
+		const leadState = () =>
+			withTenant(db, tenantId, (tx) =>
+				tx
+					.select({ state: leads.state })
+					.from(leads)
+					.where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)))
+					.limit(1),
+			);
+
+		const tools = toTools(conversationId);
+		const created = (await must(
+			tools.create_exchange_order,
+			"create_exchange_order",
+		).execute({
+			asset: "USDT",
+			amount: 100,
+			amountMode: "source_amount",
+			network: "trc20",
+			paymentMethod: "crypto_transfer",
+			paymentRail: "trc20",
+			payoutMethod: "office_cash",
+			payoutLocation: "office",
+		})) as Record<string, unknown>;
+		expect(typeof created.orderId).toBe("number");
+		expect((await leadState())[0]?.state).toBe("order_created");
+
+		const req = (await must(
+			tools.fetch_exchange_requisites,
+			"fetch_exchange_requisites",
+		).execute({})) as Record<string, unknown>;
+		expect(req.needsOperator).not.toBe(true);
+		expect((await leadState())[0]?.state).toBe("requisites_sent");
 	});
 });
