@@ -2397,6 +2397,20 @@ export const saas = {
     }
     return res.blob();
   },
+  /** Скачать медиа сообщения (паспорт/видео/документ) — для превью в инбоксе. */
+  async getConversationMedia(conversationId: number, msgId: number, ref: string): Promise<Blob> {
+    const token = getToken();
+    const res = await fetch(
+      `${API_BASE}/api/admin/conversations/${conversationId}/media?msgId=${msgId}&ref=${encodeURIComponent(ref)}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const errorCode = (body.error as string | undefined) ?? res.statusText;
+      throw new ApiError(res.status, errorCode);
+    }
+    return res.blob();
+  },
   listKbRequirements(funnelId: number) {
     return request<{
       funnel: { id: number; slug: string; verticalTemplateId: string | null };
