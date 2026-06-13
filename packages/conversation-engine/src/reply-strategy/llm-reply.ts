@@ -74,6 +74,13 @@ export interface LlmReplyStrategyOpts {
    * при наличии conversationsRepoFor сворачиваются в rolling summary.
    */
   historyLimit?: number;
+  /**
+   * Per-tenant override окна истории (заменяет historyLimit). Резолвится из
+   * tenants.reply_history_limit; NULL/ошибка → historyLimit. Правится в админке.
+   */
+  resolveHistoryLimit?: (input: {
+    tenantId: number;
+  }) => Promise<number | null | undefined> | number | null | undefined;
   /** Per-call temperature, default 0.7. */
   temperature?: number;
   /** Output token cap, default 600. */
@@ -537,6 +544,15 @@ export class LlmReplyStrategy implements ReplyStrategy {
 
     const chat = this.opts.resolveChat(tenantId);
     const messages = this.messagesRepoFor(tenantId);
+    let recentWindow = this.opts.historyLimit ?? 20;
+    if (this.opts.resolveHistoryLimit) {
+      try {
+        const v = await this.opts.resolveHistoryLimit({ tenantId });
+        if (typeof v === "number" && Number.isFinite(v) && v >= 2) recentWindow = v;
+      } catch (err) {
+        console.warn("[llm-reply] failed to resolve history limit:", err);
+      }
+    }
     const { history, conversationSummary } =
       await loadRollingConversationContext({
         conversationId: input.conversationId,
@@ -544,7 +560,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
         conversations: this.conversationsRepoFor?.(tenantId) ?? null,
         chat,
         options: {
-          recentWindow: this.opts.historyLimit ?? 20,
+          recentWindow,
           summarizeAfterMessages: this.opts.compactAfterMessages ?? 20,
           summaryMaxChars: this.opts.summaryMaxChars ?? 600,
         },

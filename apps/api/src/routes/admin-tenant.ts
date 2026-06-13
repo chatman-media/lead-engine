@@ -56,6 +56,7 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
           plan: tenants.plan,
           status: tenants.status,
           llmBillingMode: tenants.llmBillingMode,
+          replyHistoryLimit: tenants.replyHistoryLimit,
           createdAt: tenants.createdAt,
         })
         .from(tenants)
@@ -64,6 +65,39 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
     });
     if (!row) return c.json({ error: "tenant not found" }, 404);
     return c.json({ tenant: row });
+  });
+
+  /**
+   * PUT /api/admin/tenant/reply-history-limit
+   * Body: { limit: number | null } — окно истории диалога (сообщений) в LLM-контексте.
+   * null → дефолт стратегии (20). Допустимый диапазон 2..100.
+   */
+  app.put("/api/admin/tenant/reply-history-limit", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: { limit?: unknown };
+    try {
+      body = (await c.req.json()) as { limit?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    let limit: number | null;
+    if (body.limit === null || body.limit === undefined || body.limit === "") {
+      limit = null;
+    } else {
+      const n = Number(body.limit);
+      if (!Number.isInteger(n) || n < 2 || n > 100) {
+        return c.json({ error: "limit must be an integer 2..100 or null" }, 400);
+      }
+      limit = n;
+    }
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    await withTenant(opts.db, tenantId, async (tx) => {
+      await tx
+        .update(tenants)
+        .set({ replyHistoryLimit: limit, updatedAt: nowEpoch })
+        .where(eq(tenants.id, tenantId));
+    });
+    return c.json({ ok: true, replyHistoryLimit: limit });
   });
 
   /**
