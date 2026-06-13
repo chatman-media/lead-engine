@@ -16,6 +16,7 @@ import {
 	funnels,
 	leadEvents,
 	leads,
+	messages,
 	outboundQueue,
 	partnerDeals,
 	partnerServices,
@@ -343,6 +344,74 @@ describe("advanceLead", () => {
 		expect(queued.some((q) => q.payload.includes("Переходим дальше"))).toBe(
 			true,
 		);
+	});
+
+	it("без note: стадию двигаем молча — клиенту не шлём внутренние названия этапов", async () => {
+		if (!enabled) return;
+		const { leadId, contactId } = await makeLead(intakeId, "intake");
+		const [ch] = await db
+			.insert(channels)
+			.values({
+				tenantId,
+				kind: "telegram_bot",
+				externalId: `b-silent-${n}-${leadId}`,
+				status: "active",
+				createdAt: n,
+				updatedAt: n,
+			})
+			.returning({ id: channels.id });
+		const channel = requireRow(ch, "channel");
+		await db.insert(channelIdentities).values({
+			contactId,
+			channelId: channel.id,
+			externalUserId: `tg-silent-${leadId}`,
+			createdAt: n,
+		});
+		const [conv] = await db
+			.insert(conversations)
+			.values({
+				tenantId,
+				userId: contactId,
+				source: "bot",
+				mode: "ai",
+				lastMessageAt: n,
+				createdAt: n,
+			})
+			.returning({ id: conversations.id });
+		const conversation = requireRow(conv, "conversation");
+
+		// без note
+		const r = await advanceLead({ db, tenantId, selector: { contactId } });
+		expect(r.kind).toBe("advanced");
+
+		// стадия продвинулась…
+		const [lead] = await db
+			.select({ state: leads.state })
+			.from(leads)
+			.where(eq(leads.id, leadId));
+		expect(lead?.state).toBe("qualify");
+
+		// …но клиенту ничего не ушло и сообщения о смене стадии нет
+		const msgs = await db
+			.select({ id: messages.id })
+			.from(messages)
+			.where(
+				and(
+					eq(messages.tenantId, tenantId),
+					eq(messages.conversationId, conversation.id),
+				),
+			);
+		expect(msgs.length).toBe(0);
+		const queued = await db
+			.select({ id: outboundQueue.id })
+			.from(outboundQueue)
+			.where(
+				and(
+					eq(outboundQueue.tenantId, tenantId),
+					eq(outboundQueue.conversationId, conversation.id),
+				),
+			);
+		expect(queued.length).toBe(0);
 	});
 
 	it("self_play диалог → НЕ доставляется в outbound", async () => {
