@@ -455,6 +455,21 @@ function forcedExchangeOrderText(result: unknown): string | null {
 	return null;
 }
 
+/**
+ * Текст реквизитов из результата fetch_exchange_requisites. null —
+ * needsOperator/ошибка: реквизиты выдаст оператор, не дописываем их в ответ.
+ */
+function forcedExchangeRequisitesText(result: unknown): string | null {
+	if (!result || typeof result !== "object") return null;
+	const row = result as Record<string, unknown>;
+	if (row.needsOperator === true) return null;
+	if (typeof row.error === "string" && row.error.trim()) return null;
+	if (typeof row.instructions === "string" && row.instructions.trim()) {
+		return row.instructions.trim();
+	}
+	return null;
+}
+
 async function maybeForceExchangeOrderReply(input: {
 	userMessageText: string;
 	history: MessageRow[];
@@ -478,10 +493,38 @@ async function maybeForceExchangeOrderReply(input: {
 	const result = await createOrderTool.execute(args);
 	const text = forcedExchangeOrderText(result);
 	if (!text) return null;
-	return {
-		text,
-		toolCalls: [{ name: createOrderTool.name, args, result, cycle: 0 }],
-	};
+	const toolCalls: ToolCallRecord[] = [
+		{ name: createOrderTool.name, args, result, cycle: 0 },
+	];
+	// Заявка создана успешно — сразу тянем реквизиты, чтобы выдать их в том же
+	// сообщении: иначе клиент ждёт «сейчас подготовлю», а заявка протухает по TTL.
+	// needsOperator/ошибка реквизитов — оставляем исходный текст (выдаст оператор).
+	const orderRow = result as Record<string, unknown> | null;
+	if (
+		orderRow &&
+		typeof orderRow.orderId === "number" &&
+		orderRow.needsVerification !== true
+	) {
+		const fetchTool = input.tools.find(
+			(tool) => tool.name === "fetch_exchange_requisites",
+		);
+		if (fetchTool) {
+			try {
+				const reqResult = await fetchTool.execute({});
+				toolCalls.push({
+					name: fetchTool.name,
+					args: {},
+					result: reqResult,
+					cycle: 1,
+				});
+				const reqText = forcedExchangeRequisitesText(reqResult);
+				if (reqText) return { text: `Заявка создана.\n\n${reqText}`, toolCalls };
+			} catch (err) {
+				console.warn("[rag-reply] forced requisites fetch failed:", err);
+			}
+		}
+	}
+	return { text, toolCalls };
 }
 
 function hasAssignmentMetadata(style: ResolvedStyleAssignment | null): boolean {
