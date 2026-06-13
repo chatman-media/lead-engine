@@ -9,6 +9,34 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 const OPEN_STATUSES = ["quote", "awaiting_payment", "paid", "payout"] as const;
 
+/**
+ * Живая ли заявка для идемпотентного переиспользования. Только OPEN_STATUSES
+ * (заявка ещё «в работе») можно вернуть на повторный create. Протухшие/отменённые/
+ * завершённые переиспользовать нельзя — по ним надо создавать свежую.
+ */
+export function isReusableOrderStatus(status: string): boolean {
+  return (OPEN_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * Освободить idempotency_key мёртвой заявки (NULL), чтобы create мог вставить
+ * свежую с тем же ключом. В Postgres NULL-ключи в unique-индексе различны, так
+ * что старая заявка остаётся в истории, а ключ переходит к новой.
+ */
+export async function releaseOrderIdempotencyKey(
+  db: Db,
+  tenantId: number,
+  orderId: number,
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  await withTenant(db, tenantId, async (tx) => {
+    await tx
+      .update(exchangeOrders)
+      .set({ idempotencyKey: null, updatedAt: now })
+      .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, orderId)));
+  });
+}
+
 export interface OrderRow {
   id: number;
   status: string;
