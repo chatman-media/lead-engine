@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.9.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.9.0...@chatman-media/conversation-engine-v3.9.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* **exchange:** распознавать больше подтверждений котировки («отл» и пр.) ([df24cbc](https://github.com/chatman-media/lead-engine/commit/df24cbcc1ccb1acc1e25fbe6ddd8b4a2b81e7376))
+
 # [@chatman-media/conversation-engine-v3.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.8.0...@chatman-media/conversation-engine-v3.9.0) (2026-06-13)
 
 
