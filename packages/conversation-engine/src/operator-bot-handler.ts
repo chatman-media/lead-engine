@@ -691,11 +691,12 @@ export class OperatorBotHandler {
 
 			await this.applyKycDecisionSideEffect(tx, draft, now, conv.contactId, "kyc_approved");
 
-			// Возвращаем диалог боту, чтобы он продолжил обмен.
+			// Возвращаем диалог боту, чтобы он продолжил обмен. Снимаем метку
+			// эскалации — KYC одобрен, оператор больше не нужен.
 			if (conv.mode !== "ai") {
 				await tx
 					.update(conversations)
-					.set({ mode: "ai", lastMessageAt: now })
+					.set({ mode: "ai", lastMessageAt: now, escalatedAt: null })
 					.where(
 						and(
 							eq(conversations.tenantId, settings.tenantId),
