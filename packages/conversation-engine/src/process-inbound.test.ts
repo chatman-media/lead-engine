@@ -298,6 +298,52 @@ describe("processInbound", () => {
 		);
 	});
 
+	it("human_takeover прикладывает медиа-рефы (паспорт/видео после передачи оператору)", async () => {
+		const events: Array<{ eventType: string; data?: Record<string, unknown> }> = [];
+		const d = {
+			...makeDeps(),
+			notifications: {
+				notify: async (e: { eventType: string; data?: Record<string, unknown> }) => {
+					events.push(e);
+				},
+			} as unknown as Parameters<typeof processInbound>[1]["notifications"],
+		};
+		// Диалог уже у оператора (mode=human); клиент досылает паспорт.
+		await d._fakes.conversations.create({
+			contactId: 1,
+			source: "bot",
+			mode: "human",
+			nowEpoch: 1700000000,
+		});
+		await d._fakes.contacts.create({ displayName: "KYC user" });
+		await d._fakes.identities.create({
+			contactId: 1,
+			channelId: 10,
+			externalUserId: "u-doc",
+		});
+
+		const photoInbound = {
+			channelId: "tg-1",
+			externalMessageId: "300",
+			externalUserId: "u-doc",
+			parts: [
+				{
+					kind: "photo",
+					mediaRef: { channelId: "10", externalRef: "passport_file_1" },
+				},
+			],
+			receivedAt: 1700000000,
+			raw: {},
+		} as unknown as Inbound;
+
+		await processInbound(photoInbound, d);
+
+		const takeover = events.find((e) => e.eventType === "human_takeover");
+		expect(takeover).toBeDefined();
+		expect(takeover?.data?.mediaCount).toBe(1);
+		expect(String(takeover?.data?.mediaRefsJson)).toContain("passport_file_1");
+	});
+
 	it("в mode='ai' зовёт reply-strategy и кладёт envelopes в outbound_queue", async () => {
 		const envelope: OutboundEnvelope = {
 			channelId: "tg-1",

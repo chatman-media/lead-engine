@@ -512,6 +512,10 @@ export async function processInbound(
         data: {
           displayName: contact.displayName || "Без имени",
           text: text || "(Медиа)",
+          // Клиент мог прислать паспорт/видео уже после передачи диалога оператору
+          // (mode=human/queued). Прикладываем медиа-рефы, чтобы оператор видел сам
+          // файл, а не только «(Медиа)» — как в verification_requested/document_uploaded.
+          ...operatorMediaNotificationData(inbound),
         },
       });
     } else if (hasVideoNote) {
