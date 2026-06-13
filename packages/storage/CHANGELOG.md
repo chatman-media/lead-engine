@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.32.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.31.1...@chatman-media/storage-v1.32.0) (2026-06-13)
+
+
+### Features
+
+* **exchange:** risk-review settings + engine (amount/first-deal/daily-limit) ([752950e](https://github.com/chatman-media/lead-engine/commit/752950eb0763a36d0436c8cfdd512ac641013013))
+
 # [@chatman-media/storage-v1.31.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.31.0...@chatman-media/storage-v1.31.1) (2026-06-11)
 
 
