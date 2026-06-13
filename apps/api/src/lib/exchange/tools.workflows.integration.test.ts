@@ -1006,4 +1006,53 @@ describe("Exchange workflow fixtures", () => {
 		expect(req.needsOperator).not.toBe(true);
 		expect((await leadState())[0]?.state).toBe("requisites_sent");
 	});
+
+	// Регрессия: повторная заявка той же суммы после протухшей не должна
+	// «залипать» на мёртвой заявке (детерминированный idempotency_key) — нужно
+	// создать свежую активную, иначе fetch_exchange_requisites её не видит.
+	it("повторная заявка после протухшей создаёт свежую (idempotency revive)", async () => {
+		if (!sql) return;
+		const { conversationId } = await makeConversation(
+			{ id: "idem-revive", title: "Idem revive" } as Parameters<
+				typeof makeConversation
+			>[0],
+			true,
+		);
+		const tools = toTools(conversationId);
+		const orderArgs = {
+			asset: "USDT",
+			amount: 100,
+			amountMode: "source_amount",
+			network: "trc20",
+			paymentMethod: "crypto_transfer",
+			paymentRail: "trc20",
+			payoutMethod: "office_cash",
+			payoutLocation: "office",
+		};
+		const first = (await must(
+			tools.create_exchange_order,
+			"create_exchange_order",
+		).execute(orderArgs)) as Record<string, unknown>;
+		const firstId = first.orderId as number;
+		expect(typeof firstId).toBe("number");
+
+		await updateOrder(db, tenantId, firstId, { status: "expired" });
+
+		const second = (await must(
+			tools.create_exchange_order,
+			"create_exchange_order",
+		).execute(orderArgs)) as Record<string, unknown>;
+		const secondId = second.orderId as number;
+		expect(typeof secondId).toBe("number");
+		expect(secondId).not.toBe(firstId);
+		expect(second.idempotent).not.toBe(true);
+
+		// Реквизиты выдаются по свежей активной заявке, а не падают на «нет заявки».
+		const req = (await must(
+			tools.fetch_exchange_requisites,
+			"fetch_exchange_requisites",
+		).execute({})) as Record<string, unknown>;
+		expect(req.orderId).toBe(secondId);
+		expect(req.error).toBeUndefined();
+	});
 });

@@ -21,7 +21,9 @@ import {
   createOrderIdempotent,
   findActiveOrder,
   getOrderByIdempotencyKey,
+  isReusableOrderStatus,
   markOrderPaidWithUniqueTxHash,
+  releaseOrderIdempotencyKey,
   resolveConversationParties,
   updateOrder,
 } from "./orders.ts";
@@ -414,7 +416,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       const idempotencyKey = `conv:${conversationId}:${asset}:${network}:${amountMode}:${args.amount}`;
 
       const existing = await getOrderByIdempotencyKey(db, tenantId, idempotencyKey);
-      if (existing) {
+      if (existing && isReusableOrderStatus(existing.status)) {
+        // Заявка ещё живая — возвращаем её (истинная идемпотентность).
         await moveExchangeLeadToStage({
           db,
           tenantId,
@@ -429,6 +432,13 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
           rate: existing.rate,
           idempotent: true,
         };
+      }
+      if (existing) {
+        // Заявка протухла/отменена/завершена, но ключ идемпотентности
+        // детерминированный (conv+asset+amount) — без этого повторный заказ той
+        // же суммы вечно «попадал» в мёртвую заявку, новую создать нельзя, а
+        // fetch_exchange_requisites её не видит. Освобождаем ключ → создаём свежую.
+        await releaseOrderIdempotencyKey(db, tenantId, existing.id);
       }
 
       const parties = await resolveConversationParties(db, tenantId, conversationId);
