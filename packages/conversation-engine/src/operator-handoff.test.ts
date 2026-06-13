@@ -160,10 +160,11 @@ describe("formatOperatorHandoffMediaSummary", () => {
 			},
 			{ kind: "video_note", channelId: "1", externalRef: "note-1" },
 		]);
+		// file_id (channelId:externalRef) больше не показываем оператору.
 		expect(summary.split("\n")).toEqual([
-			"1. document (statement.pdf, application/pdf) · 1:doc-1",
-			"2. voice (12s) · 1:voice-1",
-			"3. video_note · 1:note-1",
+			"1. document (statement.pdf, application/pdf)",
+			"2. voice (12s)",
+			"3. video_note",
 		]);
 	});
 });

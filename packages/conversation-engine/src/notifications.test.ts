@@ -279,23 +279,28 @@ describe("NotificationService.formatMessage", () => {
 		expect(msg).toContain("Уведомление");
 	});
 
-	it("renders media summary without dumping raw refs json", () => {
+	it("renders media summary without dumping raw refs json / internal fields", () => {
 		const msg = svc.formatMessage({
 			tenantId: 1,
 			eventType: "verification_requested",
 			conversationId: 55,
 			data: {
 				displayName: "KYC Client",
-				mediaSummary: "1. video_note (7s) · tg-1:vn1",
+				mediaSummary: "1. video_note (7s)",
 				mediaRefsJson: '[{"kind":"video_note","externalRef":"vn1"}]',
+				mediaCount: 1,
+				reason: "kyc_review",
 				action: "Проверить видео.",
 			},
 		});
 		expect(msg).toContain("Материалы");
 		expect(msg).toContain("video_note");
-		expect(msg).toContain("tg-1:vn1");
+		expect(msg).toContain("Проверить видео.");
+		// Служебные поля наружу не показываем (file_id, refs json, счётчик, reason).
 		expect(msg).not.toContain("mediaRefsJson");
 		expect(msg).not.toContain("externalRef");
+		expect(msg).not.toContain("mediaCount");
+		expect(msg).not.toContain("kyc_review");
 	});
 });
 

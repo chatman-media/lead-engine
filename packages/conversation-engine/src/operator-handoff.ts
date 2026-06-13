@@ -86,7 +86,8 @@ export function formatOperatorHandoffMediaSummary(
 			const details = [ref.fileName, ref.mimeType, ref.durationSec ? `${ref.durationSec}s` : null]
 				.filter(Boolean)
 				.join(", ");
-			return `${index + 1}. ${ref.kind}${details ? ` (${details})` : ""} · ${ref.channelId}:${ref.externalRef}`;
+			// file_id (channelId:externalRef) — внутренний, оператору не показываем.
+			return `${index + 1}. ${ref.kind}${details ? ` (${details})` : ""}`;
 		})
 		.join("\n");
 }

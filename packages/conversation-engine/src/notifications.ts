@@ -485,8 +485,12 @@ export class NotificationService {
 					"displayName",
 					"toStage",
 					"fromStage",
+					// Служебные поля — нужны для кнопок/логики, оператору их не показываем.
 					"mediaRefsJson",
 					"mediaSummary",
+					"mediaCount",
+					"reason",
+					"orderId",
 				].includes(key)
 			) {
 				continue;
