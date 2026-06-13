@@ -1625,6 +1625,13 @@ export const exchangeSettings = pgTable("exchange_settings", {
   quoteAsset: text("quote_asset").notNull().default("PHP"),
   // отправлять ли клиенту сообщение при автоматической передаче exchange-диалога оператору.
   handoffCustomerNotice: boolean("handoff_customer_notice").notNull().default(true),
+  // Risk-review: правила ручной проверки заявки (суммы — в валюте выдачи; NULL/0 = выкл).
+  // Суммовой порог одной заявки → ручная проверка оператором.
+  riskAmountThreshold: integer("risk_amount_threshold"),
+  // Первая сделка клиента (нет завершённых заявок) → ручная проверка.
+  riskFirstDealReview: boolean("risk_first_deal_review").notNull().default(false),
+  // Суточный кумулятивный лимит клиента за 24ч → ручная проверка (анти-дробление).
+  riskDailyLimit: integer("risk_daily_limit"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
