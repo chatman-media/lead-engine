@@ -229,7 +229,11 @@ describe("admin-diagnostics", () => {
       checks: Array<{ name: string; latencyMs?: number }>;
     };
     const chan = body.checks.find((c) => c.name === "channel.telegram")!;
-    expect(chan.latencyMs).toBeGreaterThan(0);
+    // latencyMs = Math.round(performance.now() - start): на быстром раннере
+    // проверка укладывается в <0.5 мс и округляется в 0 — это валидно. Поэтому
+    // проверяем, что латентность записана и в разумных пределах [0, 5000), а не
+    // строго > 0 (иначе тест флейкает в CI, см. падение на быстром runner'е).
+    expect(chan.latencyMs).toBeGreaterThanOrEqual(0);
     expect(chan.latencyMs).toBeLessThan(5000);
   });
 
