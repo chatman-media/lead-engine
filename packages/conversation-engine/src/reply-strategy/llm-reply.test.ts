@@ -596,6 +596,47 @@ describe("LlmReplyStrategy", () => {
 		});
 	});
 
+	it("exchange: краткое «отл» на quote_calculated принудительно ведёт в create_exchange_order", async () => {
+		const chat = new CapturingChat("Повторно считаю сумму.");
+		const repo = fakeMessagesRepo([
+			row(1, "user", "отдаю 10к рублей нужны песо в банкомате"),
+			row(2, "assistant", "Получите 8126 PHP."),
+		]);
+		const recorded: Array<
+			Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveTools: () => [exchangeQuoteTool(), exchangeCreateOrderTool()],
+				resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+			() => repo,
+		);
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "отл",
+		});
+
+		expect(result).not.toBeNull();
+		// модель не вызывается — заявку форсим детерминированно
+		expect(chat.lastCall).toBeNull();
+		expect(recorded[0]?.toolCalls[0]).toMatchObject({
+			name: "create_exchange_order",
+			args: { asset: "RUB", amount: 10000, payoutMethod: "atm" },
+			cycle: 0,
+		});
+	});
+
 	it("exchange: long repeated confirmation-like text does not hit order regex path", async () => {
 		const chat = new CapturingChat("Уточню детали.");
 		const repo = fakeMessagesRepo([
