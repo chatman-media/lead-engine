@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.7.3...@chatman-media/conversation-engine-v3.8.0) (2026-06-13)
+
+
+### Features
+
+* **exchange:** one-tap KYC approval from operator bot (verify + return to AI) ([b88676d](https://github.com/chatman-media/lead-engine/commit/b88676de3f757b6765aa27f7c393072e3b02ab73))
+
 # [@chatman-media/conversation-engine-v3.7.3](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.7.2...@chatman-media/conversation-engine-v3.7.3) (2026-06-13)
 
 
