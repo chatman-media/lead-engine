@@ -315,7 +315,9 @@ function amountCandidates(text: string, asset: string): AmountCandidate[] {
 
     let score = 0;
     const afterTrimmed = after.trimStart();
-    const multiplier = /тыс/i.test(afterTrimmed) || /^[кk](?:\b|\s|$)/iu.test(afterTrimmed) ? 1000 : 1;
+    // «тыс»/«к»/«k» — множитель тысяч ТОЛЬКО как суффикс сразу после числа
+    // (иначе слово вроде «тысяч»/обрезанное «к» в окне даёт ложный ×1000).
+    const multiplier = /^тыс/i.test(afterTrimmed) || /^[кk](?:\b|\s|$)/iu.test(afterTrimmed) ? 1000 : 1;
     const window = `${before}${raw}${after}`;
     if (assetRe.test(window)) score += 5;
     if (/(?:^|\s)за\s*$/iu.test(before) || /\bза\b/iu.test(before)) score += 2;

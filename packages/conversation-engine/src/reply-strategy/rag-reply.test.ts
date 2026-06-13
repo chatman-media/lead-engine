@@ -640,6 +640,54 @@ describe("RagReplyStrategy.generate", () => {
 		);
 	});
 
+	it("exchange: «500 USDT … Какой курс» парсит сумму как 500, не 500000", async () => {
+		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
+		let seenArgs: unknown = null;
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				tools: [
+					{
+						name: "compute_exchange_quote",
+						description: "compute quote",
+						parameters: {},
+						execute: async (args: unknown) => {
+							seenArgs = args;
+							return {
+								direction: "USDT->PHP",
+								asset: "USDT",
+								quoteAsset: "PHP",
+								amountMode: "source_amount",
+								amountFrom: 500,
+								rate: 58,
+								amountToThb: 29000,
+							};
+						},
+					},
+				] as never,
+			}),
+			{ reflect: false },
+		);
+
+		const r = await s.generate({
+			...baseInput(),
+			userMessageText:
+				"Хочу обменять 500 USDT (TRC20) на песо. Какой курс и сколько песо я получу на руки?",
+		});
+
+		// Регрессия: слово «Какой» обрезалось окном `after` до хвостового «к» и
+		// давало ложный множитель ×1000 → 500 превращалось в 500000.
+		expect(seenArgs).toMatchObject({
+			asset: "USDT",
+			amount: 500,
+			network: "TRC20",
+		});
+		expect(firstReplyText(r)).toBe("Получите 29000 PHP.");
+		expect(chat.lastCall).toBeNull();
+	});
+
 	it("exchange: confirmation after quote creates order preflight and asks for KYC", async () => {
 		const chat = new CapturingRagChat("Сейчас снова посчитаю.");
 		const instructions =

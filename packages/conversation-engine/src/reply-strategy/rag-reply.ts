@@ -302,7 +302,12 @@ function parseExchangeSourceArgs(text: string): ExchangeOrderArgs | null {
 		const after = text.slice(end, end + 24).toLowerCase();
 		const amount = Number(raw.replace(/[ \u00a0]/g, "").replace(",", "."));
 		if (!Number.isFinite(amount) || amount <= 0) continue;
-		const multiplier = /тыс|к(?![а-яёa-z])|k\b/iu.test(after) ? 1000 : 1;
+		// Множитель «тысяч» (10к / 5 тыс / 100k) — ТОЛЬКО как суффикс сразу после
+		// числа. Раньше regex искал «к» по всему окну `after`; обрезанное на
+		// границе 24 символов слово (напр. «…Какой» → «к») ложно давало ×1000:
+		// «500 USDT … Какой курс» парсилось как 500000.
+		const afterTrimmed = after.trimStart();
+		const multiplier = /^(?:тыс|к(?![а-яёa-z])|k\b)/iu.test(afterTrimmed) ? 1000 : 1;
 		const window = `${before}${raw}${after}`;
 		if (!exchangeAssetMentionRe(asset).test(window)) continue;
 		const network = /trc[\s-]?20|tron/iu.test(text)
