@@ -2957,6 +2957,12 @@ export const saas = {
       },
     );
   },
+  unbanLeadContact(id: number) {
+    return request<{ ok: boolean; contactId: number; status: string }>(
+      `/api/admin/leads/${id}/contact/unban`,
+      { method: "POST" },
+    );
+  },
   revokeLeadVerification(id: number) {
     return request<{ ok: boolean; contactId: number; status: string; ordersPatched: number }>(
       `/api/admin/leads/${id}/verification/revoke`,
