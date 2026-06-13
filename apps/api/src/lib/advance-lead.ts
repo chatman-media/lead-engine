@@ -101,10 +101,11 @@ export async function advanceLead(opts: {
       .orderBy(desc(conversations.lastMessageAt))
       .limit(1);
 
-    const msgText =
-      note ||
-      `✅ ${transition.fromDisplayName} — готово. Переходим к этапу: ${transition.toDisplayName}.`;
-    if (conv) {
+    // Клиенту шлём сообщение ТОЛЬКО если оператор задал свой текст (note).
+    // Без note стадию двигаем молча: клиенту незачем видеть внутренние
+    // названия этапов воронки («Проверка риска», «Сбор документов» и т.п.).
+    const msgText = note?.trim() ?? "";
+    if (conv && msgText) {
       const [msg] = await tx
         .insert(messages)
         .values({
