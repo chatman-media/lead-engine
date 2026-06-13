@@ -826,6 +826,78 @@ describe("RagReplyStrategy.generate", () => {
 		);
 	});
 
+	it("exchange: подтверждение выдаёт заявку И реквизиты в одном ходе", async () => {
+		const chat = new CapturingRagChat("Сейчас снова посчитаю.");
+		const ADDRESS = "TMockExchangeWallet111111111111111111";
+		let orderCalls = 0;
+		let reqCalls = 0;
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "отдаю 10к рублей нужны песо в банкомате" },
+						{ role: "assistant", text: "Получите 8126 PHP." },
+						{ role: "user", text: "отл" },
+					],
+				}),
+				exchangePolicyState: {
+					stageSlug: "quote_calculated",
+					verification: {
+						verified: true,
+						status: "verified",
+						needsVerification: false,
+					},
+				},
+				tools: [
+					{
+						name: "create_exchange_order",
+						description: "create order",
+						parameters: {},
+						execute: async () => {
+							orderCalls += 1;
+							return {
+								orderId: 77,
+								status: "awaiting_payment",
+								direction: "RUB->PHP",
+								amountToThb: 8126,
+								rate: 1.23,
+							};
+						},
+					},
+					{
+						name: "fetch_exchange_requisites",
+						description: "fetch requisites",
+						parameters: {},
+						execute: async () => {
+							reqCalls += 1;
+							return {
+								orderId: 77,
+								kind: "crypto",
+								address: ADDRESS,
+								network: "trc20",
+								ttlMin: 15,
+								instructions: `Адрес для USDT (trc20): ${ADDRESS}\nАдрес актуален 15 минут.`,
+							};
+						},
+					},
+				] as never,
+			}),
+			{ reflect: false },
+		);
+
+		const r = await s.generate({ ...baseInput(), userMessageText: "отл" });
+
+		expect(orderCalls).toBe(1);
+		expect(reqCalls).toBe(1);
+		const text = firstReplyText(r);
+		expect(text).toContain("Заявка создана");
+		expect(text).toContain(ADDRESS);
+		expect(chat.lastCall).toBeNull();
+	});
+
 	  it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
 	    const s = mk(
       ctxWith({

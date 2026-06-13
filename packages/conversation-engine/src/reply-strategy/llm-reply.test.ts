@@ -637,6 +637,79 @@ describe("LlmReplyStrategy", () => {
 		});
 	});
 
+	it("exchange: подтверждение выдаёт заявку И реквизиты в одном сообщении", async () => {
+		const chat = new CapturingChat("Повторно считаю сумму.");
+		const ADDRESS = "TMockExchangeWallet111111111111111111";
+		const repo = fakeMessagesRepo([
+			row(1, "user", "отдаю 10к рублей нужны песо в банкомате"),
+			row(2, "assistant", "Получите 8126 PHP."),
+		]);
+		const recorded: Array<
+			Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const createTool: AnyRagTool = {
+			name: "create_exchange_order",
+			description: "Create order",
+			parameters: {} as AnyRagTool["parameters"],
+			execute: async () => ({
+				orderId: 77,
+				status: "awaiting_payment",
+				direction: "RUB->PHP",
+				amountToThb: 8126,
+				rate: 1.23,
+			}),
+		};
+		const reqTool: AnyRagTool = {
+			name: "fetch_exchange_requisites",
+			description: "Fetch requisites",
+			parameters: {} as AnyRagTool["parameters"],
+			execute: async () => ({
+				orderId: 77,
+				kind: "crypto",
+				address: ADDRESS,
+				network: "trc20",
+				ttlMin: 15,
+				instructions: `Адрес для USDT (trc20): ${ADDRESS}\nАдрес актуален 15 минут.`,
+			}),
+		};
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveTools: () => [createTool, reqTool],
+				resolveExchangePolicyState: () => ({
+					stageSlug: "quote_calculated",
+					verification: {
+						verified: true,
+						status: "verified",
+						needsVerification: false,
+					},
+				}),
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+			() => repo,
+		);
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "отл",
+		});
+
+		const text = firstReplyText(result);
+		expect(text).toContain("Заявка создана");
+		expect(text).toContain(ADDRESS);
+		expect(chat.lastCall).toBeNull();
+		const names = recorded[0]?.toolCalls.map((t) => t.name) ?? [];
+		expect(names).toContain("create_exchange_order");
+		expect(names).toContain("fetch_exchange_requisites");
+	});
+
 	it("exchange: long repeated confirmation-like text does not hit order regex path", async () => {
 		const chat = new CapturingChat("Уточню детали.");
 		const repo = fakeMessagesRepo([
