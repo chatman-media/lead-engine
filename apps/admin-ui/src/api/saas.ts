@@ -3028,10 +3028,10 @@ export const saas = {
   getLeadKbGuidance(id: number) {
     return request<LeadKbGuidance>(`/api/admin/leads/${id}/kb-guidance`);
   },
-  moveLeadStage(id: number, stageDefinitionId: number) {
+  moveLeadStage(id: number, stageDefinitionId: number, force = false) {
     return request<{ ok: boolean }>(`/api/admin/leads/${id}/stage`, {
       method: "PATCH",
-      body: JSON.stringify({ stageDefinitionId }),
+      body: JSON.stringify({ stageDefinitionId, force }),
     });
   },
   advanceLead(id: number, text?: string) {

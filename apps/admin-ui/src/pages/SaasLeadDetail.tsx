@@ -694,7 +694,9 @@ export function SaasLeadDetail() {
           onMove={async (stageId) => {
             setMovingStage(true);
             try {
-              await saas.moveLeadStage(Number(id), stageId);
+              // force: админ/тест-перевод на любую стадию (в т.ч. откат назад,
+              // мимо whitelist next_stages).
+              await saas.moveLeadStage(Number(id), stageId, true);
               reload();
             } catch (err) {
               onAuthError(err);
@@ -1111,12 +1113,22 @@ function PipelineStepper({
   onMove: (stageId: number) => Promise<void>;
 }) {
   const [pendingId, setPendingId] = useState<number | null>(null);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
   const currentIdx = stages.findIndex((s) => s.id === currentStageId);
 
-  async function handleClick(stageId: number) {
+  function handleClick(stageId: number) {
     if (stageId === currentStageId || movingStage) return;
-    setPendingId(stageId);
-    await onMove(stageId);
+    // Клик не двигает сразу — сначала спрашиваем подтверждение
+    // (повторный клик по той же стадии снимает запрос).
+    setConfirmId((prev) => (prev === stageId ? null : stageId));
+  }
+
+  async function confirmMove() {
+    if (confirmId === null) return;
+    const target = confirmId;
+    setConfirmId(null);
+    setPendingId(target);
+    await onMove(target);
     setPendingId(null);
   }
 
@@ -1126,7 +1138,9 @@ function PipelineStepper({
   return (
     <div className="rounded-lg border bg-card px-4 py-3">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">Пайплайн · клик по стадии — перевести лида</p>
+        <p className="text-xs text-muted-foreground">
+          Пайплайн · клик по стадии — перевести лида (с подтверждением)
+        </p>
         <span className="text-xs font-medium">
           Пройдено <span className="text-foreground">{Math.max(currentIdx + 1, 0)}</span>/{total}
           <span className="ml-1 text-muted-foreground">· {donePct}%</span>
@@ -1139,6 +1153,7 @@ function PipelineStepper({
           const isDone = isPast; // пройдено
           const reached = currentIdx >= 0 && idx <= currentIdx;
           const isPending = pendingId === stage.id;
+          const isConfirming = confirmId === stage.id;
           const isTerminalWon = stage.kind === "terminal_won";
 
           return (
@@ -1148,7 +1163,9 @@ function PipelineStepper({
               disabled={movingStage}
               onClick={() => handleClick(stage.id)}
               title={stage.displayName}
-              className={`group relative flex min-w-[84px] flex-1 shrink-0 flex-col items-center gap-1.5 px-1 ${
+              className={`group relative flex min-w-[84px] flex-1 shrink-0 flex-col items-center gap-1.5 rounded-md px-1 py-1 ${
+                isConfirming ? "ring-2 ring-primary/50" : ""
+              } ${
                 isCurrent
                   ? "cursor-default"
                   : movingStage
@@ -1199,6 +1216,33 @@ function PipelineStepper({
           );
         })}
       </div>
+      {confirmId !== null &&
+        (() => {
+          const target = stages.find((s) => s.id === confirmId);
+          const targetIdx = stages.findIndex((s) => s.id === confirmId);
+          const isBack = currentIdx >= 0 && targetIdx >= 0 && targetIdx < currentIdx;
+          return (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+              <span className="text-xs text-foreground">
+                Перевести лида в стадию <b>«{target?.displayName}»</b>?
+                {isBack && <span className="ml-1 font-medium text-amber-600">— откат назад</span>}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Button size="sm" onClick={confirmMove} disabled={movingStage}>
+                  {movingStage ? "Перевод…" : "Да, перевести"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmId(null)}
+                  disabled={movingStage}
+                >
+                  Отмена
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }
