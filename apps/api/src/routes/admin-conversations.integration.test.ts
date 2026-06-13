@@ -1026,6 +1026,58 @@ describe("GET /api/admin/conversations/:id/media", () => {
     );
     expect(cross.status).toBe(404);
   });
+
+  it("видео-файл (document + mime video/mp4) отдаётся с content-type из mimeType части", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Video Sender" })
+      .returning({ id: contacts.id });
+    if (!contact) throw new Error("failed to create contact");
+    const [conv] = await db
+      .insert(conversations)
+      .values({
+        tenantId: tenantA,
+        userId: contact.id,
+        source: "bot",
+        mode: "ai",
+        status: "open",
+        lastMessageAt: now,
+        createdAt: now,
+      })
+      .returning({ id: conversations.id });
+    if (!conv) throw new Error("failed to create conversation");
+    const [msg] = await db
+      .insert(messages)
+      .values({
+        tenantId: tenantA,
+        conversationId: conv.id,
+        role: "user",
+        text: "",
+        createdAt: now,
+        metaJson: JSON.stringify({
+          parts: [
+            {
+              kind: "document",
+              mediaRef: { channelId: "10", externalRef: "vid_ref_1" },
+              mimeType: "video/mp4",
+              fileName: "IMG_6466.mp4",
+            },
+          ],
+        }),
+      })
+      .returning({ id: messages.id });
+    if (!msg) throw new Error("failed to create message");
+
+    const res = await authReq(
+      tokenA,
+      `/api/admin/conversations/${conv.id}/media?msgId=${msg.id}&ref=vid_ref_1`,
+    );
+    expect(res.status).toBe(200);
+    // content-type — из mimeType части (video/mp4), а не из мок-ответа (image/png).
+    expect(res.headers.get("content-type")).toContain("video/mp4");
+  });
 });
 
 // tenantB used only as cross-tenant guard
