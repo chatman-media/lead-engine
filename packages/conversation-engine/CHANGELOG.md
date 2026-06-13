@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.6.0...@chatman-media/conversation-engine-v3.7.0) (2026-06-13)
+
+
+### Features
+
+* **moderation:** ban/unban contacts from lead detail and inbox ([89e5cbe](https://github.com/chatman-media/lead-engine/commit/89e5cbec4ed85fab9f1950534e4ae6cf1a33b7a8))
+
 # [@chatman-media/conversation-engine-v3.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.5.2...@chatman-media/conversation-engine-v3.6.0) (2026-06-12)
 
 
