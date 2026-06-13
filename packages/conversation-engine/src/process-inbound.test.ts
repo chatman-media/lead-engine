@@ -229,6 +229,17 @@ describe("processInbound", () => {
 			channelId: 10,
 			externalUserId: "u1",
 		});
+		// Пред-создаём resolved-диалог: забаненный inbound не должен его
+		// переоткрывать и инкрементить unread (иначе всплывёт «новым» диалогом).
+		const existing = await deps._fakes.conversations.create({
+			contactId: contact.id,
+			source: "bot",
+			channelId: 10,
+			nowEpoch: 1700000000,
+		});
+		await deps._fakes.conversations.updateInboxMetadata(existing.id, {
+			status: "resolved",
+		});
 
 		const result = await processInbound(
 			textInbound({ extUserId: "u1", extMessageId: "100", text: "spam" }),
@@ -241,6 +252,10 @@ describe("processInbound", () => {
 		expect(replyCalls).toBe(0);
 		expect(deps._fakes.messages.all()).toHaveLength(1);
 		expect(deps._fakes.outbound.all()).toHaveLength(0);
+		// Инбокс не дёрнут: resolved не переоткрыт, unread не вырос.
+		const conv = deps._fakes.conversations.all()[0];
+		expect(conv?.status).toBe("resolved");
+		expect(conv?.unreadCount).toBe(0);
 	});
 
 	it("human/queued conversation → notifications human_takeover", async () => {

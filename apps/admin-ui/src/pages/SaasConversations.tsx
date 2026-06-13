@@ -1,5 +1,6 @@
 import {
   AlertTriangleIcon,
+  BanIcon,
   ExternalLinkIcon,
   FileTextIcon,
   ImageIcon,
@@ -335,6 +336,7 @@ export function SaasConversations() {
   const [filterSource, setFilterSource] = useState("");
   const [filterMode, setFilterMode] = useState("");
   const [filterEscalated, setFilterEscalated] = useState(false);
+  const [filterBanned, setFilterBanned] = useState(false);
   const [filterQ, setFilterQ] = useState("");
   const [filterQDebounced, setFilterQDebounced] = useState("");
   const filterQTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -350,6 +352,11 @@ export function SaasConversations() {
   const [togglingMode, setTogglingMode] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [confirmingTakeover, setConfirmingTakeover] = useState(false);
+  const [banningContact, setBanningContact] = useState(false);
+  const [confirmBanContact, setConfirmBanContact] = useState(false);
+  const [banReason, setBanReason] = useState("");
+  const [unbanningContact, setUnbanningContact] = useState(false);
+  const [confirmUnbanContact, setConfirmUnbanContact] = useState(false);
   const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
   const [kbGuidance, setKbGuidance] = useState<LeadKbGuidance | null>(null);
   const [kbGuidanceLoading, setKbGuidanceLoading] = useState(false);
@@ -482,8 +489,9 @@ export function SaasConversations() {
     ...(filterSource ? { source: filterSource } : {}),
     ...(filterMode ? { mode: filterMode } : {}),
     ...(filterEscalated ? { escalated: true } : {}),
+    ...(filterBanned ? { includeBanned: true } : {}),
     ...(filterQDebounced ? { q: filterQDebounced } : {}),
-  }), [filterStatus, filterSource, filterMode, filterEscalated, filterQDebounced]);
+  }), [filterStatus, filterSource, filterMode, filterEscalated, filterBanned, filterQDebounced]);
 
   async function refreshList(limit = 30, filters = buildFilters()) {
     try {
@@ -621,10 +629,11 @@ export function SaasConversations() {
       ...(filterSource ? { source: filterSource } : {}),
       ...(filterMode ? { mode: filterMode } : {}),
       ...(filterEscalated ? { escalated: true } : {}),
+      ...(filterBanned ? { includeBanned: true } : {}),
       ...(filterQDebounced ? { q: filterQDebounced } : {}),
     };
     refreshList(30, filters).finally(() => setListLoading(false));
-  }, [filterStatus, filterSource, filterMode, filterEscalated, filterQDebounced]);
+  }, [filterStatus, filterSource, filterMode, filterEscalated, filterBanned, filterQDebounced]);
 
   async function handleToggleMode() {
     if (!detail || !selectedId) return;
@@ -645,6 +654,41 @@ export function SaasConversations() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setTogglingMode(false);
+    }
+  }
+
+  async function handleBanContact() {
+    if (!selectedId) return;
+    setConfirmBanContact(false);
+    setBanningContact(true);
+    setError("");
+    try {
+      await saas.banConversationContact(selectedId, banReason.trim() || undefined);
+      setBanReason("");
+      await refreshDetail(selectedId);
+      await refreshList();
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBanningContact(false);
+    }
+  }
+
+  async function handleUnbanContact() {
+    if (!selectedId) return;
+    setConfirmUnbanContact(false);
+    setUnbanningContact(true);
+    setError("");
+    try {
+      await saas.unbanConversationContact(selectedId);
+      await refreshDetail(selectedId);
+      await refreshList();
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUnbanningContact(false);
     }
   }
 
@@ -909,8 +953,18 @@ export function SaasConversations() {
                 size="sm"
                 className="h-7 px-2 text-xs shrink-0"
                 onClick={() => setFilterEscalated((v) => !v)}
+                title="Только эскалированные"
               >
                 🔴
+              </Button>
+              <Button
+                variant={filterBanned ? "destructive" : "outline"}
+                size="sm"
+                className="h-7 px-2 text-xs shrink-0"
+                onClick={() => setFilterBanned((v) => !v)}
+                title="Показывать забаненных"
+              >
+                🚫
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground px-0.5">
@@ -945,6 +999,7 @@ export function SaasConversations() {
                           c.id === selectedId
                             ? "border-primary/50 bg-accent"
                             : "border-transparent hover:bg-muted/60",
+                          c.contactBan?.banned && "opacity-60",
                         )}
                       >
                         <div className="flex items-baseline justify-between gap-2">
@@ -969,6 +1024,7 @@ export function SaasConversations() {
                             {MODE_RU[c.mode] ?? c.mode}
                           </Badge>
                           {c.escalatedAt && <Badge variant="destructive">эскалация</Badge>}
+                          {c.contactBan?.banned && <Badge variant="destructive">бан</Badge>}
                         </div>
                         {c.lastMessagePreview && (
                           <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -1040,6 +1096,12 @@ export function SaasConversations() {
                     {detail.conversation.escalatedAt && (
                       <Badge variant="destructive">эскалация</Badge>
                     )}
+                    {detail.conversation.contactBan?.banned && (
+                      <Badge variant="destructive" className="gap-1">
+                        <BanIcon className="size-3" />
+                        бан
+                      </Badge>
+                    )}
                     {contactLead && (
                       <Link
                         to={`/leads/${contactLead.id}`}
@@ -1051,30 +1113,104 @@ export function SaasConversations() {
                     )}
                   </div>
                 </div>
-                {confirmingTakeover ? (
-                  <div className="flex items-center gap-1.5 text-sm">
-                    <span className="text-muted-foreground">AI замолчит?</span>
-                    <Button size="sm" variant="destructive" onClick={handleToggleMode} disabled={togglingMode}>
-                      Да
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {detail.conversation.contactBan?.banned ? (
+                    confirmUnbanContact ? (
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <span className="text-muted-foreground">Разбанить?</span>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={handleUnbanContact}
+                          disabled={unbanningContact}
+                        >
+                          Да
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setConfirmUnbanContact(false)}
+                          disabled={unbanningContact}
+                        >
+                          Нет
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5"
+                        onClick={() => setConfirmUnbanContact(true)}
+                        disabled={unbanningContact}
+                        title="Снять блокировку контакта"
+                      >
+                        <BanIcon className="size-3.5" />
+                        Разбанить
+                      </Button>
+                    )
+                  ) : confirmBanContact ? (
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <Input
+                        value={banReason}
+                        onChange={(e) => setBanReason(e.target.value)}
+                        placeholder="Причина (опц.)"
+                        className="h-8 w-36 text-xs"
+                        disabled={banningContact}
+                      />
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleBanContact}
+                        disabled={banningContact}
+                      >
+                        Бан
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConfirmBanContact(false)}
+                        disabled={banningContact}
+                      >
+                        Отмена
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => setConfirmBanContact(true)}
+                      disabled={banningContact}
+                      title="Забанить контакт"
+                    >
+                      <BanIcon className="size-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmingTakeover(false)}>
-                      Нет
+                  )}
+                  {confirmingTakeover ? (
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <span className="text-muted-foreground">AI замолчит?</span>
+                      <Button size="sm" variant="destructive" onClick={handleToggleMode} disabled={togglingMode}>
+                        Да
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirmingTakeover(false)}>
+                        Нет
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant={detail.conversation.mode === "human" ? "outline" : "default"}
+                      size="sm"
+                      onClick={handleToggleMode}
+                      disabled={togglingMode}
+                    >
+                      {togglingMode
+                        ? "…"
+                        : detail.conversation.mode === "human"
+                          ? "Вернуть AI"
+                          : "Перехватить"}
                     </Button>
-                  </div>
-                ) : (
-                  <Button
-                    variant={detail.conversation.mode === "human" ? "outline" : "default"}
-                    size="sm"
-                    onClick={handleToggleMode}
-                    disabled={togglingMode}
-                  >
-                    {togglingMode
-                      ? "…"
-                      : detail.conversation.mode === "human"
-                        ? "Вернуть AI"
-                        : "Перехватить"}
-                  </Button>
-                )}
+                  )}
+                </div>
               </div>
 
               {operatorHandoffs.length > 0 && (

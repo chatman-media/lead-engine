@@ -404,10 +404,17 @@ export interface WebSnippet {
   };
 }
 
+export interface ContactBanState {
+  banned: boolean;
+  reason: string | null;
+  bannedAt: number | null;
+}
+
 export interface ConversationListItem {
   id: number;
   contactId: number;
   contactName: string | null;
+  contactBan: ContactBanState;
   source: string;
   mode: string;
   status: string;
@@ -425,6 +432,7 @@ export interface ConversationDetail {
   contactId: number;
   contactName: string | null;
   contactAttributesJson: string | null;
+  contactBan: ContactBanState;
   source: string;
   mode: string;
   status: string;
@@ -2622,6 +2630,7 @@ export const saas = {
       source?: string;
       mode?: string;
       escalated?: boolean;
+      includeBanned?: boolean;
       q?: string;
     } = {},
   ) {
@@ -2632,6 +2641,7 @@ export const saas = {
     if (opts.source) params.set("source", opts.source);
     if (opts.mode) params.set("mode", opts.mode);
     if (opts.escalated) params.set("escalated", "1");
+    if (opts.includeBanned) params.set("includeBanned", "1");
     if (opts.q) params.set("q", opts.q);
     const qs = params.toString();
     return request<{
@@ -2644,6 +2654,21 @@ export const saas = {
       conversation: ConversationDetail;
       messages: MessageRow[];
     }>(`/api/admin/conversations/${id}`);
+  },
+  banConversationContact(id: number, reason?: string) {
+    return request<{ ok: boolean; contactId: number; status: string }>(
+      `/api/admin/conversations/${id}/contact/ban`,
+      {
+        method: "POST",
+        body: JSON.stringify(reason ? { reason } : {}),
+      },
+    );
+  },
+  unbanConversationContact(id: number) {
+    return request<{ ok: boolean; contactId: number; status: string }>(
+      `/api/admin/conversations/${id}/contact/unban`,
+      { method: "POST" },
+    );
   },
   getConversationOperatorHandoffs(id: number) {
     return request<{ items: OperatorHandoffNotification[] }>(
