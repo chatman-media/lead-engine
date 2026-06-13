@@ -844,5 +844,115 @@ describe("PATCH /api/admin/conversations/:id", () => {
   });
 });
 
+describe("POST /api/admin/conversations/:id/contact/ban + unban", () => {
+  it("bans the contact, hides it from the list, then unbans it", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Inbox Ban Target" })
+      .returning({ id: contacts.id });
+    if (!contact) throw new Error("failed to create contact");
+    const [conv] = await db
+      .insert(conversations)
+      .values({
+        tenantId: tenantA,
+        userId: contact.id,
+        source: "bot",
+        mode: "ai",
+        status: "open",
+        lastMessageText: "hi",
+        lastMessageAt: now + 1000, // newest → точно попадёт в первую страницу
+        createdAt: now,
+      })
+      .returning({ id: conversations.id });
+    if (!conv) throw new Error("failed to create conversation");
+
+    // ban из инбокса
+    const banRes = await authReq(tokenA, `/api/admin/conversations/${conv.id}/contact/ban`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "spam from inbox" }),
+    });
+    expect(banRes.status).toBe(200);
+    expect(await banRes.json()).toMatchObject({
+      ok: true,
+      contactId: contact.id,
+      status: "banned",
+    });
+
+    const [bannedContact] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(eq(contacts.id, contact.id));
+    const bannedAttrs = JSON.parse(bannedContact?.attributesJson ?? "{}") as {
+      isBanned?: boolean;
+      ban?: Record<string, unknown>;
+    };
+    expect(bannedAttrs.isBanned).toBe(true);
+    expect(bannedAttrs.ban).toMatchObject({
+      status: "banned",
+      source: "admin_inbox",
+      reason: "spam from inbox",
+    });
+
+    // дефолтный список прячет забаненного…
+    const hiddenRes = await authReq(tokenA, "/api/admin/conversations?limit=100");
+    const hidden = (await hiddenRes.json()) as { items: Array<{ id: number }> };
+    expect(hidden.items.find((it) => it.id === conv.id)).toBeUndefined();
+
+    // …а includeBanned=1 показывает его с contactBan.banned === true
+    const shownRes = await authReq(tokenA, "/api/admin/conversations?limit=100&includeBanned=1");
+    const shown = (await shownRes.json()) as {
+      items: Array<{ id: number; contactBan?: { banned: boolean } }>;
+    };
+    expect(shown.items.find((it) => it.id === conv.id)?.contactBan?.banned).toBe(true);
+
+    // detail отдаёт состояние бана
+    const detailRes = await authReq(tokenA, `/api/admin/conversations/${conv.id}`);
+    const detail = (await detailRes.json()) as {
+      conversation: { contactBan?: { banned: boolean } };
+    };
+    expect(detail.conversation.contactBan?.banned).toBe(true);
+
+    // unban
+    const unbanRes = await authReq(tokenA, `/api/admin/conversations/${conv.id}/contact/unban`, {
+      method: "POST",
+    });
+    expect(unbanRes.status).toBe(200);
+    expect(await unbanRes.json()).toMatchObject({
+      ok: true,
+      contactId: contact.id,
+      status: "unbanned",
+    });
+
+    const [unbannedContact] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(eq(contacts.id, contact.id));
+    const unbannedAttrs = JSON.parse(unbannedContact?.attributesJson ?? "{}") as {
+      isBanned?: boolean;
+      banStatus?: string;
+    };
+    expect(unbannedAttrs.isBanned).toBe(false);
+    expect(unbannedAttrs.banStatus).toBe("unbanned");
+
+    // снова виден в дефолтном списке
+    const visibleRes = await authReq(tokenA, "/api/admin/conversations?limit=100");
+    const visible = (await visibleRes.json()) as { items: Array<{ id: number }> };
+    expect(visible.items.find((it) => it.id === conv.id)).toBeDefined();
+  });
+
+  it("cross-tenant ban is hidden as not found", async () => {
+    if (!sql) return;
+    const res = await authReq(
+      tokenB,
+      `/api/admin/conversations/${conversationIdsA[0]}/contact/ban`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
 // tenantB used only as cross-tenant guard
 void tenants;

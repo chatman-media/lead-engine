@@ -845,7 +845,7 @@ describe("POST /api/admin/leads/:id/contact/ban", () => {
 });
 
 describe("POST /api/admin/leads/:id/contact/unban", () => {
-  it("clears ban attributes and records a lead event", async () => {
+  it("clears the banned flags and records a lead event", async () => {
     if (!sql) return;
     const now = Math.floor(Date.now() / 1000);
     const [contact] = await db
@@ -858,16 +858,14 @@ describe("POST /api/admin/leads/:id/contact/unban", () => {
           isBanned: true,
           banStatus: "banned",
           bannedAt: now - 100,
-          bannedByAdminId: 1,
           banReason: "fraud risk",
           ban: {
             status: "banned",
             banned: true,
-            bannedAt: now - 100,
             reason: "fraud risk",
+            bannedAt: now - 100,
             source: "admin_lead_detail",
           },
-          moderation: { status: "banned" },
         }),
       })
       .returning({ id: contacts.id });
@@ -902,20 +900,12 @@ describe("POST /api/admin/leads/:id/contact/unban", () => {
       segment?: string;
       isBanned?: boolean;
       banStatus?: string;
-      banReason?: string;
       ban?: Record<string, unknown>;
-      moderation?: Record<string, unknown>;
     };
     expect(attrs.segment).toBe("risk");
-    expect(attrs.isBanned).toBeUndefined();
-    expect(attrs.banStatus).toBeUndefined();
-    expect(attrs.banReason).toBeUndefined();
-    expect(attrs.ban).toMatchObject({
-      status: "unbanned",
-      banned: false,
-      reason: "fraud risk",
-    });
-    expect(attrs.moderation).toMatchObject({ status: "unbanned" });
+    expect(attrs.isBanned).toBe(false);
+    expect(attrs.banStatus).toBe("unbanned");
+    expect(attrs.ban).toMatchObject({ status: "unbanned", banned: false });
 
     const events = await db
       .select({ notes: leadEvents.notes, toState: leadEvents.toState })
@@ -927,6 +917,8 @@ describe("POST /api/admin/leads/:id/contact/unban", () => {
     expect(JSON.parse(unbanEvent.notes ?? "{}")).toMatchObject({
       type: "contact_unbanned",
       contactId: contact.id,
+      wasBanned: true,
+      previousReason: "fraud risk",
     });
   });
 

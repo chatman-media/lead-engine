@@ -31,6 +31,7 @@ import { Hono } from "hono";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import { advanceLead } from "../lib/advance-lead.ts";
 import { recordAudit } from "../lib/audit.ts";
+import { buildBannedAttributes, buildUnbannedAttributes } from "../lib/contact-ban.ts";
 import {
   buildKbRequirementDrafts,
   coverKbRequirements,
@@ -53,6 +54,7 @@ import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webho
  * POST /api/admin/leads/:id/verification/revoke — отозвать KYC контакта
  * POST /api/admin/leads/:id/verification/unblock — снять KYC-блокировку
  * POST /api/admin/leads/:id/contact/ban — забанить контакт лида
+ * POST /api/admin/leads/:id/contact/unban — разбанить контакт лида
  * PATCH /api/admin/leads/:id/stage     — переместить в стадию
  * DELETE /api/admin/leads/:id          — удалить лида
  * GET  /api/admin/leads/:id/field-values — значения полей
@@ -1466,31 +1468,15 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)));
       if (!contact) return { kind: "contact_not_found" } as const;
 
-      const attrs = parseJsonObject(contact.attributesJson);
-      const currentBan = objectValue(attrs.ban);
-      const nextBan = {
-        ...currentBan,
-        status: "banned",
-        banned: true,
-        bannedByAdminId: adminId ?? null,
-        bannedAt: now,
-        reason: reason || null,
-        source: "admin_lead_detail",
-      };
-      const nextAttrs = {
-        ...attrs,
-        isBanned: true,
-        banStatus: "banned",
-        bannedAt: now,
-        bannedByAdminId: adminId ?? null,
-        banReason: reason || null,
-        ban: nextBan,
-      };
-
       await tx
         .update(contacts)
         .set({
-          attributesJson: JSON.stringify(nextAttrs),
+          attributesJson: buildBannedAttributes(contact.attributesJson, {
+            adminId,
+            reason,
+            now,
+            source: "admin_lead_detail",
+          }),
           updatedAt: now,
         })
         .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
@@ -1541,8 +1527,8 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
   /**
    * POST /api/admin/leads/:id/contact/unban
-   * Снимает блокировку контакта: очищает все ban-атрибуты, после чего
-   * inbound pipeline снова генерирует ответы. Идемпотентен.
+   * Снимает блокировку контакта лида: сбрасывает isBanned/banStatus, чтобы
+   * inbound pipeline снова генерировал ответы. Зеркало /contact/ban.
    */
   app.post("/api/admin/leads/:id/contact/unban", async (c) => {
     const tenantId = c.var.tenantId;
@@ -1568,36 +1554,13 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)));
       if (!contact) return { kind: "contact_not_found" } as const;
 
-      const attrs = parseJsonObject(contact.attributesJson);
-      const currentBan = objectValue(attrs.ban);
-      const {
-        isBanned: _isBanned,
-        banStatus: _banStatus,
-        bannedAt: _bannedAt,
-        bannedByAdminId: _bannedByAdminId,
-        banReason: _banReason,
-        ...restAttrs
-      } = attrs;
-      const nextAttrs: Record<string, unknown> = {
-        ...restAttrs,
-        ban: {
-          ...currentBan,
-          status: "unbanned",
-          banned: false,
-          unbannedByAdminId: adminId ?? null,
-          unbannedAt: now,
-        },
-      };
-      // contactIsBanned в pipeline также трактует moderation.status === "banned" как бан
-      const moderation = objectValue(attrs.moderation);
-      if (moderation.status === "banned") {
-        nextAttrs.moderation = { ...moderation, status: "unbanned" };
-      }
+      const unban = buildUnbannedAttributes(contact.attributesJson, { adminId, now });
+      const { wasBanned, previousReason, previousBannedAt } = unban;
 
       await tx
         .update(contacts)
         .set({
-          attributesJson: JSON.stringify(nextAttrs),
+          attributesJson: unban.attributesJson,
           updatedAt: now,
         })
         .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
@@ -1611,6 +1574,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         notes: JSON.stringify({
           type: "contact_unbanned",
           contactId: contact.id,
+          wasBanned,
+          previousReason,
+          previousBannedAt,
         }),
         createdAt: now,
       });
@@ -1619,6 +1585,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         kind: "ok",
         contactId: contact.id,
         status: "unbanned",
+        wasBanned,
+        previousReason,
+        previousBannedAt,
       } as const;
     });
 
@@ -1633,6 +1602,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       targetId: String(id),
       details: {
         contactId: outcome.contactId,
+        wasBanned: outcome.wasBanned,
+        previousReason: outcome.previousReason,
+        previousBannedAt: outcome.previousBannedAt,
       },
     });
 

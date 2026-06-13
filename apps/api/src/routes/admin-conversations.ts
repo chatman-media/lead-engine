@@ -6,6 +6,8 @@ import {
   channels,
   contacts,
   conversations,
+  leadEvents,
+  leads,
   messages,
   outboundQueue,
 } from "@chatman-media/storage";
@@ -14,6 +16,11 @@ import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import { advanceLead } from "../lib/advance-lead.ts";
+import {
+  buildBannedAttributes,
+  buildUnbannedAttributes,
+  contactBanState,
+} from "../lib/contact-ban.ts";
 
 /**
  * Per-tenant read-only conversations API под /api/admin/conversations/*.
@@ -122,6 +129,8 @@ export function makeAdminConversationsRoutes(
     const assigneeFilter = c.req.query("assigneeId") ? Number.parseInt(c.req.query("assigneeId")!, 10) : null;
     const escalatedOnly = c.req.query("escalated") === "1";
     const qFilter = c.req.query("q")?.trim() || null;
+    const includeBanned = c.req.query("includeBanned") === "1" || contactIdFilter !== null;
+    const dbLimit = includeBanned ? limit + 1 : Math.min(limit * 3 + 1, 300);
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       const conditions = [
@@ -141,6 +150,7 @@ export function makeAdminConversationsRoutes(
           id: conversations.id,
           contactId: conversations.userId,
           contactName: contacts.displayName,
+          contactAttributesJson: contacts.attributesJson,
           source: conversations.source,
           mode: conversations.mode,
           status: conversations.status,
@@ -156,32 +166,43 @@ export function makeAdminConversationsRoutes(
         .leftJoin(contacts, eq(contacts.id, conversations.userId))
         .where(and(...conditions))
         .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
-        .limit(limit + 1);
+        .limit(dbLimit);
     });
 
-    const hasMore = rows.length > limit;
-    const items = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor =
-      hasMore && items.length > 0
-        ? items[items.length - 1]?.lastMessageAt ?? null
-        : null;
+    const mapped = rows.map((r) => ({
+      id: r.id,
+      contactId: r.contactId,
+      contactName: r.contactName,
+      contactBan: contactBanState(r.contactAttributesJson),
+      source: r.source,
+      mode: r.mode,
+      status: r.status,
+      unreadCount: r.unreadCount,
+      assignedAdminId: r.assignedAdminId,
+      currentStage: r.currentStage,
+      lastMessageAt: r.lastMessageAt,
+      createdAt: r.createdAt,
+      ...(r.escalatedAt !== null ? { escalatedAt: r.escalatedAt } : {}),
+      ...(r.lastMessagePreview !== null ? { lastMessagePreview: r.lastMessagePreview } : {}),
+    }));
+    const visible = includeBanned ? mapped : mapped.filter((item) => !item.contactBan.banned);
+    const items = visible.slice(0, limit);
+    const hasMore =
+      visible.length > limit ||
+      (!includeBanned && rows.length === dbLimit) ||
+      (includeBanned && rows.length > limit);
+    const cursorSource =
+      visible.length > limit
+        ? items[items.length - 1]
+        : !includeBanned && rows.length === dbLimit
+          ? rows[rows.length - 1]
+          : includeBanned && rows.length > limit
+            ? items[items.length - 1]
+            : null;
+    const nextCursor = hasMore ? cursorSource?.lastMessageAt ?? null : null;
 
     return c.json({
-      items: items.map((r) => ({
-        id: r.id,
-        contactId: r.contactId,
-        contactName: r.contactName,
-        source: r.source,
-        mode: r.mode,
-        status: r.status,
-        unreadCount: r.unreadCount,
-        assignedAdminId: r.assignedAdminId,
-        currentStage: r.currentStage,
-        lastMessageAt: r.lastMessageAt,
-        createdAt: r.createdAt,
-        ...(r.escalatedAt !== null ? { escalatedAt: r.escalatedAt } : {}),
-        ...(r.lastMessagePreview !== null ? { lastMessagePreview: r.lastMessagePreview } : {}),
-      })),
+      items,
       ...(nextCursor !== null ? { nextCursor } : {}),
     });
   });
@@ -264,7 +285,10 @@ export function makeAdminConversationsRoutes(
     if (!result) return c.json({ error: "conversation not found" }, 404);
     // Reverse так чтобы client получил chronological order (oldest first).
     return c.json({
-      conversation: result.conversation,
+      conversation: {
+        ...result.conversation,
+        contactBan: contactBanState(result.conversation.contactAttributesJson),
+      },
       messages: [...result.messages].reverse(),
     });
   });
@@ -571,6 +595,166 @@ export function makeAdminConversationsRoutes(
       awaitingOperator: outcome.awaitingOperator,
       terminal: outcome.terminal,
     });
+  });
+
+  /**
+   * Общий путь для бана/разбана из диалога: беседа → контакт → мутация
+   * attributesJson, плюс best-effort событие в историю лида (если он есть),
+   * чтобы запись о бане была консистентна с карточкой лида.
+   */
+  async function moderateConversationContact(
+    tenantId: number,
+    conversationId: number,
+    adminId: number | undefined,
+    now: number,
+    mutate: (attributesJson: string | null) => {
+      attributesJson: string;
+      eventType: string;
+      eventDetails: Record<string, unknown>;
+    },
+  ) {
+    return withTenant(opts.db, tenantId, async (tx) => {
+      const [conv] = await tx
+        .select({ contactId: conversations.userId })
+        .from(conversations)
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
+        .limit(1);
+      if (!conv) return { kind: "not_found" } as const;
+
+      const [contact] = await tx
+        .select({ id: contacts.id, attributesJson: contacts.attributesJson })
+        .from(contacts)
+        .where(and(eq(contacts.id, conv.contactId), eq(contacts.tenantId, tenantId)))
+        .limit(1);
+      if (!contact) return { kind: "contact_not_found" } as const;
+
+      const result = mutate(contact.attributesJson);
+
+      await tx
+        .update(contacts)
+        .set({ attributesJson: result.attributesJson, updatedAt: now })
+        .where(and(eq(contacts.id, contact.id), eq(contacts.tenantId, tenantId)));
+
+      const [lead] = await tx
+        .select({ id: leads.id, state: leads.state })
+        .from(leads)
+        .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contact.id)))
+        .orderBy(desc(leads.id))
+        .limit(1);
+      if (lead) {
+        await tx.insert(leadEvents).values({
+          tenantId,
+          leadId: lead.id,
+          fromState: lead.state,
+          toState: lead.state,
+          byAdminId: adminId,
+          notes: JSON.stringify({
+            type: result.eventType,
+            contactId: contact.id,
+            ...result.eventDetails,
+          }),
+          createdAt: now,
+        });
+      }
+
+      return { kind: "ok", contactId: contact.id, mutation: result } as const;
+    });
+  }
+
+  /**
+   * POST /api/admin/conversations/:id/contact/ban
+   * Банит контакт беседы (зеркало /api/admin/leads/:id/contact/ban, но по
+   * conversation id — чтобы оператор банил прямо из инбокса).
+   */
+  app.post("/api/admin/conversations/:id/contact/ban", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const conversationId = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(conversationId) || conversationId <= 0) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+    let reason = "";
+    try {
+      const body = (await c.req.json()) as { reason?: unknown };
+      if (typeof body.reason === "string") reason = body.reason.trim().slice(0, 500);
+    } catch {
+      // empty body allowed
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await moderateConversationContact(
+      tenantId,
+      conversationId,
+      adminId,
+      now,
+      (attrs) => ({
+        attributesJson: buildBannedAttributes(attrs, {
+          adminId,
+          reason,
+          now,
+          source: "admin_inbox",
+        }),
+        eventType: "contact_banned",
+        eventDetails: { reason: reason || null },
+      }),
+    );
+    if (outcome.kind === "not_found") return c.json({ error: "conversation not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "conversation.contact_ban",
+      targetKind: "contact",
+      targetId: String(outcome.contactId),
+      details: { conversationId, ...outcome.mutation.eventDetails },
+    });
+
+    return c.json({ ok: true, contactId: outcome.contactId, status: "banned" });
+  });
+
+  /**
+   * POST /api/admin/conversations/:id/contact/unban
+   * Снимает бан контакта беседы. Зеркало /contact/ban.
+   */
+  app.post("/api/admin/conversations/:id/contact/unban", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const conversationId = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(conversationId) || conversationId <= 0) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await moderateConversationContact(
+      tenantId,
+      conversationId,
+      adminId,
+      now,
+      (attrs) => {
+        const unban = buildUnbannedAttributes(attrs, { adminId, now });
+        return {
+          attributesJson: unban.attributesJson,
+          eventType: "contact_unbanned",
+          eventDetails: {
+            wasBanned: unban.wasBanned,
+            previousReason: unban.previousReason,
+            previousBannedAt: unban.previousBannedAt,
+          },
+        };
+      },
+    );
+    if (outcome.kind === "not_found") return c.json({ error: "conversation not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "conversation.contact_unban",
+      targetKind: "contact",
+      targetId: String(outcome.contactId),
+      details: { conversationId, ...outcome.mutation.eventDetails },
+    });
+
+    return c.json({ ok: true, contactId: outcome.contactId, status: "unbanned" });
   });
 
   /**

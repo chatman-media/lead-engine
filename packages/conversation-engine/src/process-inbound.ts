@@ -433,17 +433,10 @@ export async function processInbound(
     });
   }
 
-  // 4. Update inbox state (touch TS, set preview, inc unread).
-  if (!existingMsg) {
-    await deps.conversations.updateInboxMetadata(conversation.id, {
-      lastMessageAt: now,
-      lastMessageText: text.slice(0, 200) || "(Медиа)",
-      incrementUnread: true,
-      // Если диалог был закрыт — переоткрываем.
-      ...(conversation.status === "resolved" ? { status: "open" } : {}),
-    });
-  }
-
+  // Забаненный контакт: сообщение уже сохранено (шаг 3, для аудита), но дальше
+  // НИЧЕГО не делаем — не трогаем инбокс (без unread и без переоткрытия
+  // resolved-диалога) и не зовём reply-strategy. Так забаненный не всплывает
+  // новым/непрочитанным диалогом, и бот молчит. Проверка ДО шага 4 намеренно.
   if (contactIsBanned(contact.attributesJson)) {
     deps.sink?.log?.("info", "inbound ignored for banned contact", {
       tenantId: deps.tenant.tenantId,
@@ -458,6 +451,17 @@ export async function processInbound(
       outboundEnqueued: 0,
       escalatedReason: "contact_banned",
     };
+  }
+
+  // 4. Update inbox state (touch TS, set preview, inc unread).
+  if (!existingMsg) {
+    await deps.conversations.updateInboxMetadata(conversation.id, {
+      lastMessageAt: now,
+      lastMessageText: text.slice(0, 200) || "(Медиа)",
+      incrementUnread: true,
+      // Если диалог был закрыт — переоткрываем.
+      ...(conversation.status === "resolved" ? { status: "open" } : {}),
+    });
   }
 
   // 4b. Notifications (Human takeover / Verification video / Document upload).
