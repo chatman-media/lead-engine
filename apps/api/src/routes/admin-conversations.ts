@@ -339,6 +339,7 @@ export function makeAdminConversationsRoutes(
     const parts = Array.isArray(meta.parts) ? (meta.parts as unknown[]) : [];
     let channelId = "";
     let kind = "";
+    let partMime = "";
     for (const p of parts) {
       const part = objectValue(p);
       const mr = objectValue(part.mediaRef);
@@ -346,6 +347,7 @@ export function makeAdminConversationsRoutes(
         channelId =
           typeof mr.channelId === "string" ? mr.channelId : String(mr.channelId ?? "");
         kind = typeof part.kind === "string" ? part.kind : "";
+        partMime = typeof part.mimeType === "string" ? part.mimeType : "";
         break;
       }
     }
@@ -360,7 +362,10 @@ export function makeAdminConversationsRoutes(
     if (!resp || !resp.ok) return c.json({ error: "media download failed" }, 502);
 
     const buf = await resp.arrayBuffer();
+    // mimeType части — самый надёжный (оригинал из Telegram, особенно для
+    // документов: видео-файл IMG.mp4 приходит kind="document" + mime video/mp4).
     const ct =
+      partMime ||
       resp.headers.get("content-type") ||
       (kind === "photo"
         ? "image/jpeg"

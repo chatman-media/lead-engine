@@ -221,14 +221,19 @@ function MediaPreview({
     };
   }, [conversationId, messageId, ref]);
 
-  // Превью только для отображаемых типов; для прочего — ничего (останется ярлык).
+  // Эффективный тип превью — по kind И по mimeType: видео/фото, присланные
+  // «файлом», приходят kind="document" (напр. IMG_6466.mp4 → document+video/mp4),
+  // а кружок — video_note. Учитываем оба, чтобы рендерить везде одинаково.
   const kind = part.kind;
-  const previewable =
-    kind === "photo" || kind === "video" || kind === "video_note" || kind === "voice";
-  if (!conversationId || !ref || !previewable || failed) return null;
+  const mime = part.mimeType ?? "";
+  const isImage = kind === "photo" || mime.startsWith("image/");
+  const isVideo = kind === "video" || kind === "video_note" || mime.startsWith("video/");
+  const isAudio = kind === "voice" || mime.startsWith("audio/");
+
+  if (!conversationId || !ref || failed) return null;
   if (!url) return <Skeleton className="h-40 w-full max-w-[260px] rounded-md" />;
 
-  if (kind === "photo") {
+  if (isImage) {
     return (
       <a href={url} target="_blank" rel="noreferrer" className="block w-fit">
         <img
@@ -239,13 +244,25 @@ function MediaPreview({
       </a>
     );
   }
-  if (kind === "video" || kind === "video_note") {
+  if (isVideo) {
     // biome-ignore lint/a11y/useMediaCaption: пользовательское видео без субтитров
     return <video src={url} controls className="max-h-72 max-w-[260px] rounded-md border" />;
   }
-  // voice
-  // biome-ignore lint/a11y/useMediaCaption: голосовое сообщение без субтитров
-  return <audio src={url} controls className="w-full max-w-[260px]" />;
+  if (isAudio) {
+    // biome-ignore lint/a11y/useMediaCaption: голосовое сообщение без субтитров
+    return <audio src={url} controls className="w-full max-w-[260px]" />;
+  }
+  // Прочие документы (pdf и т.п.) — ссылка на скачивание.
+  return (
+    <a
+      href={url}
+      download={part.fileName ?? "attachment"}
+      className="inline-flex w-fit items-center gap-1 text-xs text-primary underline"
+    >
+      <FileTextIcon className="size-3.5" />
+      Скачать {part.fileName ?? "файл"}
+    </a>
+  );
 }
 
 function MessageMediaList({
