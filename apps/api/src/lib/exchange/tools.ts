@@ -425,13 +425,14 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         };
       }
 
+      const parties = await resolveConversationParties(db, tenantId, conversationId);
       const risk = await assessOrderRisk(db, tenantId, {
         conversationId,
+        contactId: parties.contactId,
         amountToThb: q.amountToThb,
       });
       if (!risk.ok) return { error: risk.reasons.join(" ") };
 
-      const parties = await resolveConversationParties(db, tenantId, conversationId);
       const ttlMin = isCryptoAsset(asset) ? 15 : 20;
       const rateExpiresAt = Math.floor(Date.now() / 1000) + ttlMin * 60;
 
@@ -456,7 +457,11 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         payoutLocation: args.payoutLocation ?? null,
         payoutDestinationJson: args.payoutDestination ? JSON.stringify(args.payoutDestination) : null,
         verificationId: verification.verificationId,
-        riskJson: JSON.stringify({ ok: true, reasons: risk.reasons }),
+        riskJson: JSON.stringify({
+          ok: true,
+          decision: risk.needsOperator ? "manual" : "pass",
+          reasons: risk.reasons,
+        }),
         rateExpiresAt,
         idempotencyKey,
       });
