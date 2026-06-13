@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.7.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.7.1...@chatman-media/conversation-engine-v3.7.2) (2026-06-13)
+
+
+### Bug Fixes
+
+* **exchange:** KYC approve buttons in operator bot on human_takeover ([da87c55](https://github.com/chatman-media/lead-engine/commit/da87c55411124ee6ec5936437e7fb801fe43258d))
+
 # [@chatman-media/conversation-engine-v3.7.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.7.0...@chatman-media/conversation-engine-v3.7.1) (2026-06-13)
 
 
