@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.7.3](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.7.2...@chatman-media/conversation-engine-v3.7.3) (2026-06-13)
+
+
+### Bug Fixes
+
+* **notifications:** hide internal fields from operator handoff message ([15de117](https://github.com/chatman-media/lead-engine/commit/15de1171d9c7a9bc6770404ad5ec6c449d03b0a7)), closes [#602](https://github.com/chatman-media/lead-engine/issues/602)
+
 # [@chatman-media/conversation-engine-v3.7.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.7.1...@chatman-media/conversation-engine-v3.7.2) (2026-06-13)
 
 
