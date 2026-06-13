@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.9.1...@chatman-media/conversation-engine-v3.10.0) (2026-06-13)
+
+
+### Features
+
+* **exchange:** выдавать реквизиты в том же ходе, что и создание заявки ([520e6fa](https://github.com/chatman-media/lead-engine/commit/520e6fa38e267da259cf998045e055ba216fa09a)), closes [#614](https://github.com/chatman-media/lead-engine/issues/614)
+
 # [@chatman-media/conversation-engine-v3.9.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.9.0...@chatman-media/conversation-engine-v3.9.1) (2026-06-13)
 
 
