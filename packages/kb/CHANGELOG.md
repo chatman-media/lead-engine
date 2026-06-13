@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.13.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.13.0...@chatman-media/kb-v1.13.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* **kb:** drop MRZ country code from passport name (RUSIVANOVA → IVANOVA) ([77743e0](https://github.com/chatman-media/lead-engine/commit/77743e04090d074df859d7e318a5acf76ca8cfbd))
+
 # [@chatman-media/kb-v1.13.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.12.0...@chatman-media/kb-v1.13.0) (2026-06-10)
 
 
