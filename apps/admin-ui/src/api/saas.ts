@@ -543,6 +543,8 @@ export interface TenantInfo {
   plan: string;
   status: "active" | "suspended" | "deleted";
   llmBillingMode: "byok" | "managed";
+  /** Окно истории диалога (сообщений) в LLM-контексте; null → дефолт (20). */
+  replyHistoryLimit: number | null;
   createdAt: number;
 }
 
@@ -2867,6 +2869,12 @@ export const saas = {
     return request<{ ok: boolean; status: TenantInfo["status"]; reloadError?: string }>(
       "/api/admin/tenant/status",
       { method: "PUT", body: JSON.stringify({ paused }) },
+    );
+  },
+  setReplyHistoryLimit(limit: number | null) {
+    return request<{ ok: boolean; replyHistoryLimit: number | null }>(
+      "/api/admin/tenant/reply-history-limit",
+      { method: "PUT", body: JSON.stringify({ limit }) },
     );
   },
 

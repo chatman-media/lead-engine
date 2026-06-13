@@ -59,6 +59,7 @@ import {
 	skills,
 	stageDefinitions,
 	tenantFeatureFlags,
+	tenants,
 } from "@chatman-media/storage";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
@@ -1117,6 +1118,26 @@ function makeExchangeCustomerNoticeResolver(db: Db) {
 	};
 }
 
+// Окно истории диалога (сообщений) в LLM-контексте, настраивается per-tenant в
+// админке «Общие» (tenants.reply_history_limit). NULL → дефолт стратегии.
+function makeHistoryLimitResolver(db: Db) {
+	return async (input: { tenantId: number }): Promise<number | null> => {
+		try {
+			return await withTenant(db, input.tenantId, async (tx) => {
+				const [row] = await tx
+					.select({ limit: tenants.replyHistoryLimit })
+					.from(tenants)
+					.where(eq(tenants.id, input.tenantId))
+					.limit(1);
+				return row?.limit ?? null;
+			});
+		} catch (err) {
+			console.warn("[llm-bootstrap] failed to resolve reply history limit:", err);
+			return null;
+		}
+	};
+}
+
 export function makeReplyStrategy(
 	ref: LoadedRef,
 	cfg: ApiConfig,
@@ -1149,6 +1170,7 @@ export function makeReplyStrategy(
 		makeExchangeResponseGuardFlagResolver(db);
 	const resolveExchangeCustomerNoticeEnabled =
 		makeExchangeCustomerNoticeResolver(db);
+	const resolveHistoryLimit = makeHistoryLimitResolver(db);
 
 	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
 	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
@@ -1168,6 +1190,7 @@ export function makeReplyStrategy(
 					resolveExchangePolicyState,
 					resolveExchangeResponseGuardEnabled,
 					resolveExchangeCustomerNoticeEnabled,
+					resolveHistoryLimit,
 					recordToolCalls: makeToolCallRecorder(db, "llm_reply"),
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
@@ -1326,6 +1349,7 @@ export function makeReplyStrategy(
 
 	const strategy = new RagReplyStrategy({
 		loadTurnContext,
+		resolveHistoryLimit,
 		recordToolCalls: makeToolCallRecorder(db, "rag_reply"),
 		// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
 		// генерируем мягкий ответ в персоне, а не молчим.

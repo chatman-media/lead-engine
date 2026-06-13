@@ -151,6 +151,13 @@ export interface RagReplyStrategyOpts {
   /** Лимит history сообщений (default 12 — answerWithRag сам ужмёт через summary). */
   historyLimit?: number;
   /**
+   * Per-tenant override окна истории (заменяет historyLimit). Резолвится из
+   * tenants.reply_history_limit; NULL/ошибка → historyLimit.
+   */
+  resolveHistoryLimit?: (input: {
+    tenantId: number;
+  }) => Promise<number | null | undefined> | number | null | undefined;
+  /**
    * Включить hybrid retrieval (vector + BM25 RRF). Default true.
    * False = pure vector — быстрее, но хуже на keyword-questions.
    */
@@ -533,6 +540,15 @@ export class RagReplyStrategy implements ReplyStrategy {
     if (ctx.isSupport) return null;
 
     const { template, chat, messages: messagesRepo } = ctx;
+    let recentWindow = this.opts.historyLimit ?? 12;
+    if (this.opts.resolveHistoryLimit) {
+      try {
+        const v = await this.opts.resolveHistoryLimit({ tenantId });
+        if (typeof v === "number" && Number.isFinite(v) && v >= 2) recentWindow = v;
+      } catch (err) {
+        console.warn("[rag-reply] failed to resolve history limit:", err);
+      }
+    }
     const { history: historyWithoutCurrent, conversationSummary } =
       await loadRollingConversationContext({
         conversationId: input.conversationId,
@@ -543,7 +559,7 @@ export class RagReplyStrategy implements ReplyStrategy {
           ? { currentMessageId: input.userMessageId }
           : { currentMessageText: input.userMessageText }),
         options: {
-          recentWindow: this.opts.historyLimit ?? 12,
+          recentWindow,
           summarizeAfterMessages: this.opts.compactAfterMessages ?? 20,
         },
         onWarn: (_message, err) => {

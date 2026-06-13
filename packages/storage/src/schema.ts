@@ -882,11 +882,15 @@ export const tenants = pgTable("tenants", {
   llmBillingMode: text("llm_billing_mode").notNull().default("byok"),
   // Реферальный код, использованный при регистрации (NULL если не было).
   referredByCode: text("referred_by_code"),
+  // Размер окна истории диалога (сообщений), которое бот шлёт в LLM как контекст.
+  // NULL → дефолт стратегии (20). Правится из админки «Общие».
+  replyHistoryLimit: integer("reply_history_limit"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   check("tenants_status_check", sql`${t.status} IN ('active','suspended','deleted')`),
   check("tenants_llm_billing_check", sql`${t.llmBillingMode} IN ('byok','managed')`),
+  check("tenants_reply_history_limit_check", sql`${t.replyHistoryLimit} IS NULL OR (${t.replyHistoryLimit} >= 2 AND ${t.replyHistoryLimit} <= 100)`),
 ]);
 
 // Per-tenant feature flags for gradual rollout of high-risk flows.

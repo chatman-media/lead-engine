@@ -443,6 +443,10 @@ export function SaasSettings() {
   const [configs, setConfigs] = useState<LlmConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Окно истории диалога (сообщений) в LLM-контексте; пусто = дефолт (20).
+  const [historyLimit, setHistoryLimit] = useState<string>("");
+  const [savingHistory, setSavingHistory] = useState(false);
+  const [historyMsg, setHistoryMsg] = useState("");
 
   // Ключи по провайдерам (вводятся один раз)
   const [providerKeys, setProviderKeys] = useState<Record<LlmProvider, string>>({
@@ -498,6 +502,12 @@ export function SaasSettings() {
       const { items } = await saas.listLlmConfigs();
       setConfigs(items);
       for (const cfg of items) applyConfigToForm(cfg);
+      try {
+        const { tenant } = await saas.getTenantInfo();
+        setHistoryLimit(tenant.replyHistoryLimit == null ? "" : String(tenant.replyHistoryLimit));
+      } catch {
+        // tenant info необязателен для основной страницы
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearToken();
@@ -521,6 +531,20 @@ export function SaasSettings() {
 
   function updateForm(purpose: LlmPurpose, patch: Partial<PurposeForm>) {
     setForms((prev) => ({ ...prev, [purpose]: { ...prev[purpose], ...patch } }));
+  }
+
+  async function saveHistoryLimit() {
+    setSavingHistory(true);
+    setHistoryMsg("");
+    try {
+      const trimmed = historyLimit.trim();
+      await saas.setReplyHistoryLimit(trimmed === "" ? null : Number(trimmed));
+      setHistoryMsg("✓ Сохранено");
+    } catch (err) {
+      setHistoryMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingHistory(false);
+    }
   }
 
   // Сохранить ключ для провайдера — применяется ко всем назначениям этого провайдера
@@ -688,6 +712,36 @@ export function SaasSettings() {
       )}
 
       <SettingsDirectory />
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Контекст бота</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-xs text-muted-foreground">
+            Сколько последних сообщений диалога бот учитывает как контекст. Пусто = по
+            умолчанию (20). Диапазон 2–100. Меньше — короче «память», дешевле; больше —
+            бот помнит дальше.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={2}
+              max={100}
+              value={historyLimit}
+              onChange={(e) => setHistoryLimit(e.target.value)}
+              placeholder="20"
+              className="h-8 w-28 text-sm"
+            />
+            <Button size="sm" onClick={saveHistoryLimit} disabled={savingHistory}>
+              Сохранить
+            </Button>
+            {historyMsg && (
+              <span className="text-xs text-muted-foreground">{historyMsg}</span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <div id="llm" className="space-y-1">
         <h2 className="text-lg font-semibold tracking-tight">Настройки LLM</h2>

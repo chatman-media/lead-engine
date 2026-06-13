@@ -122,6 +122,47 @@ describe("admin-tenant", () => {
     expect(body.tenant.slug).toBeDefined();
   });
 
+  it("PUT /reply-history-limit → сохраняет, GET отдаёт", async () => {
+    if (!sql) return;
+    const put = await authReq("/api/admin/tenant/reply-history-limit", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 8 }),
+    });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toMatchObject({ ok: true, replyHistoryLimit: 8 });
+
+    const get = await authReq("/api/admin/tenant");
+    const body = (await get.json()) as { tenant: { replyHistoryLimit: number | null } };
+    expect(body.tenant.replyHistoryLimit).toBe(8);
+  });
+
+  it("PUT /reply-history-limit { limit: null } → сброс в дефолт", async () => {
+    if (!sql) return;
+    const put = await authReq("/api/admin/tenant/reply-history-limit", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: null }),
+    });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toMatchObject({ ok: true, replyHistoryLimit: null });
+    const get = await authReq("/api/admin/tenant");
+    const body = (await get.json()) as { tenant: { replyHistoryLimit: number | null } };
+    expect(body.tenant.replyHistoryLimit).toBeNull();
+  });
+
+  it("PUT /reply-history-limit вне диапазона/дробное → 400", async () => {
+    if (!sql) return;
+    for (const bad of [1, 101, 3.5]) {
+      const res = await authReq("/api/admin/tenant/reply-history-limit", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: bad }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it("PUT /status { paused: true } → status=suspended + onStatusChange triggered", async () => {
     if (!sql) return;
     reloadCalls = [];
