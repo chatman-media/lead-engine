@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.7.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.7.0...@chatman-media/conversation-engine-v3.7.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* **exchange:** forward client media to operator on human_takeover ([a8ada1a](https://github.com/chatman-media/lead-engine/commit/a8ada1ab9028d882a88a9b739d82d5cde482a6ec)), closes [#578](https://github.com/chatman-media/lead-engine/issues/578)
+
 # [@chatman-media/conversation-engine-v3.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.6.0...@chatman-media/conversation-engine-v3.7.0) (2026-06-13)
 
 
