@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.36.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.35.0...@chatman-media/storage-v1.36.0) (2026-06-14)
+
+
+### Features
+
+* **exchange:** тулы читают собранные поля воронки (leadFieldValues) — фаза 1 ([642d6ad](https://github.com/chatman-media/lead-engine/commit/642d6adf9ec8af1f986e6d9950c93786fb8a089f)), closes [642/#646](https://github.com/chatman-media/lead-engine/issues/646)
+
 # [@chatman-media/storage-v1.35.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.34.0...@chatman-media/storage-v1.35.0) (2026-06-14)
 
 
