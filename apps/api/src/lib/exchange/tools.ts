@@ -88,8 +88,10 @@ async function moveExchangeLeadToStage(opts: {
   tenantId: number;
   conversationId: number;
   stageSlug: string;
+  /** Разрешить откат на более раннюю стадию (по умолчанию move forward-only). */
+  allowBackward?: boolean;
 }): Promise<{ leadId: number; stageSlug: string; changed: boolean } | null> {
-  const { db, tenantId, conversationId, stageSlug } = opts;
+  const { db, tenantId, conversationId, stageSlug, allowBackward = false } = opts;
   const nowEpoch = Math.floor(Date.now() / 1000);
 
   return withTenant(db, tenantId, async (tx) => {
@@ -147,7 +149,7 @@ async function moveExchangeLeadToStage(opts: {
 
     const currentPosition =
       typeof lead.currentPosition === "number" ? lead.currentPosition : null;
-    if (currentPosition != null && target.position < currentPosition) {
+    if (!allowBackward && currentPosition != null && target.position < currentPosition) {
       return { leadId: lead.id, stageSlug: lead.state, changed: false };
     }
 
@@ -250,7 +252,15 @@ const KNOWN_EXCHANGE_STAGES = new Set([
 ]);
 
 const TOOL_STAGE_MATRIX: Record<string, Set<string> | "any"> = {
-  compute_exchange_quote: new Set(["exchange_request", "quote_calculated", "kyc_collection"]),
+  compute_exchange_quote: new Set([
+    "exchange_request",
+    "quote_calculated",
+    "kyc_collection",
+    // Перекотировка ДО оплаты: клиент может передумать (другая сумма/направление)
+    // уже после создания заявки/выдачи реквизитов. После оплаты — нельзя.
+    "order_created",
+    "requisites_sent",
+  ]),
   check_exchange_verification: new Set([
     "quote_calculated",
     "verification_check",
@@ -408,6 +418,32 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         if (q.guard?.tripped) onGuardTrip(args.asset, args.network, q.guard);
         return { error: q.error };
       }
+
+      // Перекотировка до оплаты: если клиент назвал ДРУГУЮ сумму/актив/режим, чем
+      // в активной заявке — отменяем старую заявку и откатываем лида на
+      // quote_calculated, чтобы воронка пошла под новую сумму (подтверждение →
+      // новая заявка → новые реквизиты). Совпадающая перекотировка — без побочек.
+      const activeForRequote = await findActiveOrder(db, tenantId, conversationId);
+      if (activeForRequote) {
+        const reqAmount =
+          activeForRequote.requestedAmount ?? activeForRequote.amountFrom;
+        const sameDeal =
+          activeForRequote.assetFrom === normAsset(args.asset) &&
+          Number(reqAmount) === Number(args.amount) &&
+          (activeForRequote.amountMode ?? "source_amount") ===
+            (args.amountMode ?? "source_amount");
+        if (!sameDeal) {
+          await updateOrder(db, tenantId, activeForRequote.id, { status: "cancelled" });
+          await moveExchangeLeadToStage({
+            db,
+            tenantId,
+            conversationId,
+            stageSlug: "quote_calculated",
+            allowBackward: true,
+          });
+        }
+      }
+
       return {
         direction: q.direction,
         asset: q.asset,

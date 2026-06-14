@@ -1269,4 +1269,114 @@ describe("Exchange workflow fixtures", () => {
 		);
 		expect(row?.status).not.toBe("expired");
 	});
+
+	// Перекотировка до оплаты: клиент меняет сумму после создания заявки —
+	// старую отменяем, лида откатываем на quote_calculated под новую сумму.
+	it("перекотировка с другой суммой отменяет заявку и откатывает на quote_calculated", async () => {
+		if (!sql) return;
+		const { contactId, conversationId } = await makeConversation(
+			{ id: "requote", title: "Requote" } as Parameters<
+				typeof makeConversation
+			>[0],
+			true,
+		);
+		const now = Math.floor(Date.now() / 1000);
+		await withTenant(db, tenantId, async (tx) => {
+			const [funnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: "exchange-requote",
+					verticalTemplateId: "exchange_v1",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const funnelId = must(funnel, "funnel").id;
+			const stages = await tx
+				.insert(stageDefinitions)
+				.values([
+					{ tenantId, funnelId, slug: "quote_calculated", displayName: "Курс", position: 1 },
+					{ tenantId, funnelId, slug: "order_created", displayName: "Заявка", position: 5 },
+					{ tenantId, funnelId, slug: "requisites_sent", displayName: "Реквизиты", position: 6 },
+				])
+				.returning({ id: stageDefinitions.id, slug: stageDefinitions.slug });
+			const quote = must(
+				stages.find((s) => s.slug === "quote_calculated"),
+				"quote stage",
+			);
+			await tx.insert(leads).values({
+				tenantId,
+				userId: contactId,
+				stageDefinitionId: quote.id,
+				state: "quote_calculated",
+				createdAt: now,
+				updatedAt: now,
+			});
+		});
+
+		const leadState = () =>
+			withTenant(db, tenantId, (tx) =>
+				tx
+					.select({ state: leads.state })
+					.from(leads)
+					.where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)))
+					.limit(1),
+			);
+
+		const tools = toTools(conversationId);
+		const created = (await must(
+			tools.create_exchange_order,
+			"create_exchange_order",
+		).execute({
+			asset: "USDT",
+			amount: 100,
+			amountMode: "source_amount",
+			network: "trc20",
+			paymentMethod: "crypto_transfer",
+			paymentRail: "trc20",
+			payoutMethod: "office_cash",
+			payoutLocation: "office",
+		})) as Record<string, unknown>;
+		const orderId = created.orderId as number;
+		expect((await leadState())[0]?.state).toBe("order_created");
+
+		// Та же сумма — без побочек (заявка жива, стадия не откатывается).
+		await must(tools.compute_exchange_quote, "compute_exchange_quote").execute({
+			asset: "USDT",
+			amount: 100,
+			amountMode: "source_amount",
+			network: "trc20",
+		});
+		const [sameOrd] = await withTenant(db, tenantId, (tx) =>
+			tx
+				.select({ status: exchangeOrders.status })
+				.from(exchangeOrders)
+				.where(eq(exchangeOrders.id, orderId)),
+		);
+		expect(sameOrd?.status).not.toBe("cancelled");
+		expect((await leadState())[0]?.state).toBe("order_created");
+
+		// Другая сумма → отмена старой заявки + откат на quote_calculated.
+		const q = (await must(
+			tools.compute_exchange_quote,
+			"compute_exchange_quote",
+		).execute({
+			asset: "USDT",
+			amount: 300,
+			amountMode: "source_amount",
+			network: "trc20",
+		})) as Record<string, unknown>;
+		expect(q.amountToThb).toBeDefined();
+
+		const [ord] = await withTenant(db, tenantId, (tx) =>
+			tx
+				.select({ status: exchangeOrders.status })
+				.from(exchangeOrders)
+				.where(eq(exchangeOrders.id, orderId)),
+		);
+		expect(ord?.status).toBe("cancelled");
+		expect((await leadState())[0]?.state).toBe("quote_calculated");
+	});
 });
