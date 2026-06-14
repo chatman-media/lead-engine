@@ -371,6 +371,8 @@ export function makeTelegramWebhookRoutes(opts: {
           replyStrategy: replyStrategyWithButtons,
           notifications: opts.notificationService,
           splitReplies: botSettings.splitReplies,
+          fallbackText: botSettings.fallbackText,
+          handoffAfterFallbacks: botSettings.handoffAfterFallbacks,
           ...(opts.sink ? { sink: opts.sink } : {}),
         });
         result = { ...result, outboundEnqueued: gen.outboundEnqueued };

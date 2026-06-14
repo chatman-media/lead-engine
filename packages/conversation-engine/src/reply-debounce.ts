@@ -40,6 +40,10 @@ export interface GenerateReplyForConversationDeps {
   clock?: { nowEpoch: () => number };
   /** #628 — дробить длинный ответ на несколько сообщений (из botSettings). */
   splitReplies?: boolean;
+  /** #630 — кастомный текст фолбэка (из botSettings). */
+  fallbackText?: string | null;
+  /** #627 — порог серии фолбэков для передачи оператору (из botSettings). */
+  handoffAfterFallbacks?: number | null;
 }
 
 function partsFromMetaJson(metaJson: string | null, fallbackText: string): InboundPart[] {
@@ -139,6 +143,10 @@ export async function generateReplyForConversation(
     notifications: deps.notifications ?? null,
     clock: deps.clock ?? systemClock,
     ...(deps.splitReplies ? { splitReplies: true } : {}),
+    ...(deps.fallbackText ? { fallbackText: deps.fallbackText } : {}),
+    ...(deps.handoffAfterFallbacks
+      ? { handoffAfterFallbacks: deps.handoffAfterFallbacks }
+      : {}),
     ...(deps.sink ? { sink: deps.sink } : {}),
   });
   return { outboundEnqueued: gen.outboundEnqueued };
