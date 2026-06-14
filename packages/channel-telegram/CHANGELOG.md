@@ -1,3 +1,10 @@
+# [@chatman-media/channel-telegram-v1.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.5.0...@chatman-media/channel-telegram-v1.6.0) (2026-06-14)
+
+
+### Features
+
+* **inbound:** обработка правок сообщений + настраиваемая пауза перед ответом ([dc8b117](https://github.com/chatman-media/lead-engine/commit/dc8b11741a0b3128d0f993234aff5d98dfce77b5))
+
 # [@chatman-media/channel-telegram-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.4.0...@chatman-media/channel-telegram-v1.5.0) (2026-06-12)
 
 
