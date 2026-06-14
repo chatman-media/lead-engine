@@ -628,6 +628,38 @@ describe("NotificationService.notify", () => {
 		expect(markup).toContain("opx:payout:111:78");
 	});
 
+	it("generic operator_request handoff exposes payment+payout quick actions", async () => {
+		const sent: SendMessageInput[] = [];
+		const svc = new NotificationService(
+			makeRepo([], [makeOperatorSettings({ telegramChatId: "operator-chat" })]),
+			"fake-token",
+			"https://app.example",
+		);
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramClient((input) => sent.push(input));
+
+		await svc.notify({
+			tenantId: 1,
+			eventType: "operator_handoff_required",
+			conversationId: 112,
+			contactId: 10,
+			data: {
+				displayName: "Пётр",
+				reason: "operator_request",
+				title: "Разобрать обмен вручную",
+				action: "Продолжить вручную или вернуть AI.",
+				orderId: 79,
+			},
+		});
+
+		const markup = JSON.stringify(sent[0]?.replyMarkup);
+		expect(markup).toContain("opx:payok:112:79");
+		expect(markup).toContain("opx:payout:112:79");
+		expect(markup).toContain("opx:reply:112:79");
+		// + базовые кнопки возврата боту никуда не делись
+		expect(markup).toContain("return_ai");
+	});
+
 	it("sendTestMessage: без токена → ok:false 'Бот не настроен'", async () => {
 		const svc = new NotificationService(makeRepo(), "", "http://app");
 		expect(await svc.sendTestMessage("chat-1")).toEqual({
