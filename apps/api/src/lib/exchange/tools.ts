@@ -13,7 +13,7 @@
 
 import { type Db, getDecryptedSecret, QUOTE_CURRENCY, withTenant } from "@chatman-media/conversation-engine";
 import type { AnyRagTool } from "@chatman-media/kb";
-import { conversations, exchangeRates, funnels, leads, stageDefinitions } from "@chatman-media/storage";
+import { conversations, exchangeRates, funnels, leadFieldValues, leads, stageDefinitions, stageFields } from "@chatman-media/storage";
 import { and, asc, desc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_TX_MAX_AGE_SECONDS, extractTxHash, verifyTronUsdt } from "./chain.ts";
@@ -187,6 +187,142 @@ async function resolveLeadStageSlug(
       .orderBy(desc(leads.updatedAt), desc(leads.id))
       .limit(1);
     return row?.slug ?? undefined;
+  });
+}
+
+/**
+ * Поля, собранные универсальным движком воронки (field-extractor →
+ * leadFieldValues) на стадии exchange_request. Источник правды для аргументов
+ * тулов: что отдаёт клиент / сумма / сеть / способ выдачи / способ внесения.
+ * Тулы используют это как fallback, когда LLM не передал arg явно — чтобы
+ * собранные универсально данные реально доходили до действий (курс/заявка).
+ */
+export interface ExchangeCollectedFields {
+  asset?: string;
+  amount?: number;
+  network?: string;
+  payoutMethod?: string;
+  paymentMethod?: string;
+}
+
+// stageField option `value` → enum тулов. Актив/сеть нормализует сам тул
+// (normAsset/resolveNetwork), здесь маппим только payout (seed: office/atm).
+const PAYOUT_VALUE_MAP: Record<string, string> = {
+  office: "office_cash",
+  office_cash: "office_cash",
+  atm: "atm",
+  cardless_atm: "cardless_atm",
+  cardless: "cardless_atm",
+  courier: "courier_cash",
+  courier_cash: "courier_cash",
+  thai_bank_transfer: "thai_bank_transfer",
+};
+const PAYMENT_VALUE_MAP: Record<string, string> = {
+  sbp_qr: "sbp_qr",
+  sbp: "sbp_qr",
+  qr: "sbp_qr",
+  card_transfer: "card_transfer",
+  card: "card_transfer",
+  bank_transfer: "bank_transfer",
+  crypto_transfer: "crypto_transfer",
+  cash: "cash",
+};
+
+function fieldString(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function fieldNumber(value: unknown): number | undefined {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.replace(/\s/g, "").replace(",", "."))
+        : Number.NaN;
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * Чистый маппер: сырые значения stageField (slug → parsed JSON) → аргументы
+ * тулов. Вынесен из readExchangeCollectedFields для unit-тестов без БД.
+ */
+export function mapExchangeCollectedValues(
+  bySlug: Record<string, unknown>,
+): ExchangeCollectedFields {
+  const collected: ExchangeCollectedFields = {};
+  const asset = fieldString(bySlug.asset_from);
+  if (asset) collected.asset = asset;
+  const amount = fieldNumber(bySlug.amount_from);
+  if (amount !== undefined) collected.amount = amount;
+  const network = fieldString(bySlug.network);
+  if (network) collected.network = network;
+  const payout = fieldString(bySlug.payout_method);
+  if (payout)
+    collected.payoutMethod = PAYOUT_VALUE_MAP[payout.toLowerCase()] ?? payout;
+  const payment = fieldString(bySlug.payment_method);
+  if (payment)
+    collected.paymentMethod = PAYMENT_VALUE_MAP[payment.toLowerCase()] ?? payment;
+  return collected;
+}
+
+/**
+ * Читает универсально собранные значения (asset_from/amount_from/network/
+ * payout_method/payment_method) из leadFieldValues лида беседы. Пусто — поля
+ * ещё не собраны (тул тогда полагается на явные аргументы LLM).
+ */
+export async function readExchangeCollectedFields(
+  db: Db,
+  tenantId: number,
+  conversationId: number,
+): Promise<ExchangeCollectedFields> {
+  return withTenant(db, tenantId, async (tx) => {
+    const [lead] = await tx
+      .select({ id: leads.id })
+      .from(conversations)
+      .innerJoin(
+        leads,
+        and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)),
+      )
+      .where(
+        and(
+          eq(conversations.tenantId, tenantId),
+          eq(conversations.id, conversationId),
+        ),
+      )
+      .orderBy(desc(leads.updatedAt), desc(leads.id))
+      .limit(1);
+    if (!lead) return {};
+
+    // Один slug может быть заведён на нескольких стадиях (разные fieldId) —
+    // берём САМОЕ СВЕЖЕЕ значение (updatedAt desc → первое вхождение выигрывает).
+    const rows = await tx
+      .select({
+        slug: stageFields.slug,
+        valueJson: leadFieldValues.valueJson,
+        updatedAt: leadFieldValues.updatedAt,
+      })
+      .from(leadFieldValues)
+      .innerJoin(stageFields, eq(stageFields.id, leadFieldValues.fieldId))
+      .where(
+        and(
+          eq(leadFieldValues.leadId, lead.id),
+          eq(leadFieldValues.tenantId, tenantId),
+        ),
+      )
+      .orderBy(desc(leadFieldValues.updatedAt));
+
+    const bySlug: Record<string, unknown> = {};
+    for (const row of rows) {
+      if (row.slug in bySlug) continue; // свежее уже взято
+      try {
+        bySlug[row.slug] = JSON.parse(row.valueJson);
+      } catch {
+        // невалидный JSON — пропускаем
+      }
+    }
+    return mapExchangeCollectedValues(bySlug);
   });
 }
 
@@ -399,8 +535,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       "Клиенту показывай только amountToThb/quoteAsset. Курс в ответе клиенту не пиши.",
     ].join(" "),
     parameters: z.object({
-      asset: AssetEnum,
-      amount: z.number().positive().describe(`Сумма. По умолчанию в активе-источнике; если клиент сказал 'нужно 10000 ${QUOTE_CURRENCY.word}', передай amountMode=target_thb и amount=10000.`),
+      asset: AssetEnum.optional(),
+      amount: z.number().positive().optional().describe(`Сумма. По умолчанию в активе-источнике; если клиент сказал 'нужно 10000 ${QUOTE_CURRENCY.word}', передай amountMode=target_thb и amount=10000. Если не передать — берётся из собранных полей заявки.`),
       amountMode: AmountModeEnum,
       network: z
         .string()
@@ -408,14 +544,23 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         .describe("Сеть для крипты: TRC20/ERC20/BEP20. Для USDT по умолчанию TRC20."),
     }),
     execute: async (args) => {
+      // Источник правды — универсально собранные поля (field-extractor →
+      // leadFieldValues); явный аргумент LLM переопределяет.
+      const collected = await readExchangeCollectedFields(db, tenantId, conversationId);
+      const asset = args.asset ?? collected.asset;
+      const amount = args.amount ?? collected.amount;
+      const network = args.network ?? collected.network;
+      if (!asset || amount === undefined) {
+        return { error: "Не хватает данных для расчёта: уточните, что меняете и на какую сумму." };
+      }
       const q = await computeQuote(db, tenantId, {
-        asset: args.asset,
-        amount: args.amount,
+        asset,
+        amount,
         amountMode: args.amountMode,
-        network: args.network,
+        network,
       });
       if (!q.ok) {
-        if (q.guard?.tripped) onGuardTrip(args.asset, args.network, q.guard);
+        if (q.guard?.tripped) onGuardTrip(asset, network, q.guard);
         return { error: q.error };
       }
 
@@ -428,8 +573,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         const reqAmount =
           activeForRequote.requestedAmount ?? activeForRequote.amountFrom;
         const sameDeal =
-          activeForRequote.assetFrom === normAsset(args.asset) &&
-          Number(reqAmount) === Number(args.amount) &&
+          activeForRequote.assetFrom === normAsset(asset) &&
+          Number(reqAmount) === Number(amount) &&
           (activeForRequote.amountMode ?? "source_amount") ===
             (args.amountMode ?? "source_amount");
         if (!sameDeal) {
@@ -476,8 +621,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       "Не вызывай до согласия и до compute_exchange_quote.",
     ].join(" "),
     parameters: z.object({
-      asset: AssetEnum,
-      amount: z.number().positive().describe(`Сумма: source asset или целевые ${QUOTE_CURRENCY.code}, если amountMode=target_thb.`),
+      asset: AssetEnum.optional(),
+      amount: z.number().positive().optional().describe(`Сумма: source asset или целевые ${QUOTE_CURRENCY.code}, если amountMode=target_thb. Если не передать — берётся из собранных полей заявки.`),
       amountMode: AmountModeEnum,
       network: z.string().optional(),
       paymentMethod: PaymentMethodEnum,
@@ -493,14 +638,25 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         .describe("Структурированные данные выдачи: hotel/location, atmBank, thaiBankName, thaiAccountLast4 и т.д."),
     }),
     execute: async (args) => {
+      // Собранные универсально поля — fallback к аргументам LLM (источник правды
+      // для asset/amount/network/payout/payment, если LLM их не передал).
+      const collected = await readExchangeCollectedFields(db, tenantId, conversationId);
+      const assetArg = args.asset ?? collected.asset;
+      const amountArg = args.amount ?? collected.amount;
+      const networkArg = args.network ?? collected.network;
+      const paymentMethodArg = args.paymentMethod ?? collected.paymentMethod;
+      const payoutMethodArg = args.payoutMethod ?? collected.payoutMethod;
+      if (!assetArg || amountArg === undefined) {
+        return { error: "Не хватает данных для заявки: уточните, что меняете и на какую сумму." };
+      }
       const q = await computeQuote(db, tenantId, {
-        asset: args.asset,
-        amount: args.amount,
+        asset: assetArg,
+        amount: amountArg,
         amountMode: args.amountMode,
-        network: args.network,
+        network: networkArg,
       });
       if (!q.ok) {
-        if (q.guard?.tripped) onGuardTrip(args.asset, args.network, q.guard);
+        if (q.guard?.tripped) onGuardTrip(assetArg, networkArg, q.guard);
         return { error: q.error };
       }
 
@@ -521,10 +677,10 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         };
       }
 
-      const asset = normAsset(args.asset);
-      const network = resolveNetwork(asset, args.network);
+      const asset = normAsset(assetArg);
+      const network = resolveNetwork(asset, networkArg);
       const amountMode = args.amountMode === "target_thb" ? "target_thb" : "source_amount";
-      const idempotencyKey = `conv:${conversationId}:${asset}:${network}:${amountMode}:${args.amount}`;
+      const idempotencyKey = `conv:${conversationId}:${asset}:${network}:${amountMode}:${amountArg}`;
 
       const existing = await getOrderByIdempotencyKey(db, tenantId, idempotencyKey);
       if (existing && isReusableOrderStatus(existing.status)) {
@@ -572,15 +728,15 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         network,
         amountFrom: q.amountFrom,
         amountMode,
-        requestedAmount: args.amount,
+        requestedAmount: amountArg,
         rate: q.rate,
         amountToThb: q.amountToThb,
-        paymentMethod: args.paymentMethod ?? (isCryptoAsset(asset) ? "crypto_transfer" : null),
+        paymentMethod: paymentMethodArg ?? (isCryptoAsset(asset) ? "crypto_transfer" : null),
         paymentRail: args.paymentRail ?? (isCryptoAsset(asset) ? network : null),
         sourceBank: args.sourceBank ?? null,
         payerName: args.payerName ?? null,
         thirdPartyApproved: args.thirdPartyApproved ?? false,
-        payoutMethod: args.payoutMethod ?? null,
+        payoutMethod: payoutMethodArg ?? null,
         payoutLocation: args.payoutLocation ?? null,
         payoutDestinationJson: args.payoutDestination ? JSON.stringify(args.payoutDestination) : null,
         verificationId: verification.verificationId,
