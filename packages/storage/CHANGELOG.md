@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.35.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.34.0...@chatman-media/storage-v1.35.0) (2026-06-14)
+
+
+### Features
+
+* **bot:** раздел настроек поведения бота + 8 настроек (эпик [#623](https://github.com/chatman-media/lead-engine/issues/623)) ([56895b6](https://github.com/chatman-media/lead-engine/commit/56895b659b44db4d0a9861e805669ffcb2989bd7)), closes [#624](https://github.com/chatman-media/lead-engine/issues/624) [#625](https://github.com/chatman-media/lead-engine/issues/625) [#626](https://github.com/chatman-media/lead-engine/issues/626) [#628](https://github.com/chatman-media/lead-engine/issues/628) [#629](https://github.com/chatman-media/lead-engine/issues/629) [#631](https://github.com/chatman-media/lead-engine/issues/631) [#632](https://github.com/chatman-media/lead-engine/issues/632) [#633](https://github.com/chatman-media/lead-engine/issues/633) [#627](https://github.com/chatman-media/lead-engine/issues/627) [#630](https://github.com/chatman-media/lead-engine/issues/630)
+
 # [@chatman-media/storage-v1.34.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.33.0...@chatman-media/storage-v1.34.0) (2026-06-14)
 
 
