@@ -251,6 +251,10 @@ export function SaasLeadDetail() {
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [recentMessages, setRecentMessages] = useState<import("@/api/saas").MessageRow[]>([]);
+  const [conversation, setConversation] = useState<
+    import("@/api/saas").ConversationDetail | null
+  >(null);
+  const [unescalating, setUnescalating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -343,11 +347,31 @@ export function SaasLeadDetail() {
         if (cid) {
           saas
             .getConversation(cid)
-            .then((d) => setRecentMessages(d.messages))
+            .then((d) => {
+              setRecentMessages(d.messages);
+              setConversation(d.conversation);
+            })
             .catch(() => {});
+        } else {
+          setConversation(null);
         }
       })
       .catch(() => {});
+  }
+
+  // Снять эскалацию = вернуть диалог боту (бэкенд заодно очищает escalatedAt).
+  async function handleReturnToAi() {
+    if (conversationId == null) return;
+    setUnescalating(true);
+    try {
+      await saas.setConversationMode(conversationId, "ai");
+      const cid = data?.contact?.id;
+      if (cid) loadConversation(cid);
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setUnescalating(false);
+    }
   }
 
   useEffect(() => {
@@ -686,6 +710,26 @@ export function SaasLeadDetail() {
             )}
           </CardHeader>
           <CardContent className="space-y-1.5 pb-3">
+            {conversation &&
+              (conversation.mode === "human" || conversation.escalatedAt != null) && (
+                <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
+                  <span className="text-xs text-amber-700 dark:text-amber-400">
+                    <span className="font-semibold">⚠ Эскалация</span>
+                    {conversation.mode === "human"
+                      ? " · диалог у оператора, бот молчит"
+                      : " · диалог передавался оператору"}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 shrink-0 text-xs"
+                    onClick={handleReturnToAi}
+                    disabled={unescalating}
+                  >
+                    {unescalating ? "Возврат…" : "Вернуть боту"}
+                  </Button>
+                </div>
+              )}
             {recentMessages.length === 0 && (
               <p className="text-xs text-muted-foreground">Сообщений пока нет</p>
             )}

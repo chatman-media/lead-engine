@@ -341,9 +341,11 @@ export class NotificationsRepo {
         .set({
           mode: newMode,
           lastMessageAt: now,
+          // Возврат боту снимает метку эскалации (иначе «эскалация» висит на
+          // лиде вечно после хендоффа, хотя диалог уже в AI).
           ...(input.action === "takeover"
             ? { assignedAdminId: input.adminId, unreadCount: 0 }
-            : {}),
+            : { escalatedAt: null }),
         })
         .where(
           and(

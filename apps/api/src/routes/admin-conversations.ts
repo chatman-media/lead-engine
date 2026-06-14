@@ -889,7 +889,13 @@ export function makeAdminConversationsRoutes(
       }
       await tx
         .update(conversations)
-        .set({ mode: newMode, lastMessageAt: nowEpoch })
+        // Возврат боту снимает метку эскалации (иначе «эскалация» висит на
+        // лиде вечно после KYC-/медиа-хендоффа, хотя диалог уже в AI).
+        .set({
+          mode: newMode,
+          lastMessageAt: nowEpoch,
+          ...(newMode === "ai" ? { escalatedAt: null } : {}),
+        })
         .where(eq(conversations.id, conversationId));
       return { kind: "changed", from: existing.mode, to: newMode } as const;
     });
