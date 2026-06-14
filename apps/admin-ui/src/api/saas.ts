@@ -545,9 +545,7 @@ export interface TenantInfo {
   llmBillingMode: "byok" | "managed";
   /** Окно истории диалога (сообщений) в LLM-контексте; null → дефолт (20). */
   replyHistoryLimit: number | null;
-  /** Пауза перед ответом бота (сек., debounce); null/0 → выкл. (отвечает сразу). */
-  replyDelaySeconds: number | null;
-  /** Расширенные настройки поведения бота (эпик #623). */
+  /** Расширенные настройки поведения бота (эпик #623), включая replyDelaySeconds. */
   botSettings: BotSettings;
   createdAt: number;
 }
@@ -571,6 +569,8 @@ export interface BotSettings {
   autocloseHours: number | null;
   voiceStt: boolean;
   mediaAckText: string | null;
+  /** Debounce: пауза перед ответом (сек.). null/0 = отвечать сразу. */
+  replyDelaySeconds: number | null;
 }
 
 export interface AuditEntry {
@@ -2900,12 +2900,6 @@ export const saas = {
     return request<{ ok: boolean; replyHistoryLimit: number | null }>(
       "/api/admin/tenant/reply-history-limit",
       { method: "PUT", body: JSON.stringify({ limit }) },
-    );
-  },
-  setReplyDelaySeconds(seconds: number | null) {
-    return request<{ ok: boolean; replyDelaySeconds: number | null }>(
-      "/api/admin/tenant/reply-delay-seconds",
-      { method: "PUT", body: JSON.stringify({ seconds }) },
     );
   },
   /** Частичный patch настроек поведения бота (#623). Возвращает нормализованный объект. */

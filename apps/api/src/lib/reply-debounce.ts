@@ -15,77 +15,89 @@
  * Атомарный claim исключает двойной ответ пересекающимися тиками.
  */
 import {
-  type BotSettings,
-  ConversationsRepo,
-  type Db,
-  generateReplyForConversation,
-  type NotificationService,
-  type PipelineSink,
-  type ReplyStrategy,
-  withTenant,
+	type BotSettings,
+	ConversationsRepo,
+	type Db,
+	generateReplyForConversation,
+	isWithinBotHours,
+	type NotificationService,
+	type PipelineSink,
+	type ReplyStrategy,
+	withTenant,
 } from "@chatman-media/conversation-engine";
 import { tenants } from "@chatman-media/storage";
 import { eq } from "drizzle-orm";
 import { wrapWithConciergeButtons } from "./concierge-reply-markup.ts";
 
 export interface ReplyDebounceOpts {
-  nowSec: number;
-  replyStrategy: ReplyStrategy;
-  notifications?: NotificationService | null;
-  sink?: PipelineSink;
-  /** #628 — резолвер настроек бота, чтобы отложенный ответ тоже дробился. */
-  resolveBotSettings?: ((tenantId: number) => Promise<BotSettings>) | null;
-  log?: { warn?: (msg: string) => void; info?: (msg: string) => void };
+	nowSec: number;
+	replyStrategy: ReplyStrategy;
+	notifications?: NotificationService | null;
+	sink?: PipelineSink;
+	/** #628 — резолвер настроек бота, чтобы отложенный ответ тоже дробился. */
+	resolveBotSettings?: ((tenantId: number) => Promise<BotSettings>) | null;
+	log?: { warn?: (msg: string) => void; info?: (msg: string) => void };
 }
 
 /** Один тик по всем активным тенантам. */
-export async function replyDebounceTick(db: Db, opts: ReplyDebounceOpts): Promise<void> {
-  const activeTenants = await db
-    .select({ id: tenants.id, slug: tenants.slug })
-    .from(tenants)
-    .where(eq(tenants.status, "active"));
+export async function replyDebounceTick(
+	db: Db,
+	opts: ReplyDebounceOpts,
+): Promise<void> {
+	const activeTenants = await db
+		.select({ id: tenants.id, slug: tenants.slug })
+		.from(tenants)
+		.where(eq(tenants.status, "active"));
 
-  // Concierge-кнопки добавляются и к отложенному ответу — как в inline-пути webhook'а.
-  const replyStrategy = wrapWithConciergeButtons(opts.replyStrategy, db);
+	// Concierge-кнопки добавляются и к отложенному ответу — как в inline-пути webhook'а.
+	const replyStrategy = wrapWithConciergeButtons(opts.replyStrategy, db);
 
-  for (const t of activeTenants) {
-    try {
-      // Атомарно забираем диалоги с наступившим дедлайном (сбрасывая reply_due_at).
-      const due = await withTenant(db, t.id, async (tx) =>
-        new ConversationsRepo({ db: tx, tenantId: t.id }).claimDueReplies(opts.nowSec),
-      );
-      if (due.length === 0) continue;
-      const settings = opts.resolveBotSettings
-        ? await opts.resolveBotSettings(t.id).catch(() => null)
-        : null;
-      for (const conv of due) {
-        // mode != 'ai' — диалог ушёл к оператору за время паузы: due_at уже
-        // очищен claim'ом, ответ не генерим.
-        if (conv.mode !== "ai") continue;
-        try {
-          await generateReplyForConversation({
-            db,
-            tenant: { tenantId: t.id, slug: t.slug, llmBillingMode: "byok" },
-            conversation: conv,
-            replyStrategy,
-            notifications: opts.notifications ?? null,
-            ...(settings?.splitReplies ? { splitReplies: true } : {}),
-            ...(settings?.fallbackText ? { fallbackText: settings.fallbackText } : {}),
-            ...(settings?.handoffAfterFallbacks
-              ? { handoffAfterFallbacks: settings.handoffAfterFallbacks }
-              : {}),
-            ...(opts.sink ? { sink: opts.sink } : {}),
-          });
-        } catch (err) {
-          opts.log?.warn?.(
-            `reply-debounce conv=${conv.id}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-    } catch (err) {
-      opts.log?.warn?.(
-        `reply-debounce tenant=${t.id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+	for (const t of activeTenants) {
+		try {
+			// Атомарно забираем диалоги с наступившим дедлайном (сбрасывая reply_due_at).
+			const due = await withTenant(db, t.id, async (tx) =>
+				new ConversationsRepo({ db: tx, tenantId: t.id }).claimDueReplies(
+					opts.nowSec,
+				),
+			);
+			if (due.length === 0) continue;
+			const settings = opts.resolveBotSettings
+				? await opts.resolveBotSettings(t.id).catch(() => null)
+				: null;
+			for (const conv of due) {
+				// mode != 'ai' — диалог ушёл к оператору за время паузы: due_at уже
+				// очищен claim'ом, ответ не генерим.
+				if (conv.mode !== "ai") continue;
+				// #arch-fix: рабочие часы проверяем на момент ОТПРАВКИ, а не прихода.
+				// Если клиент написал в 16:58 (в часы), но дедлайн наступил в 17:01
+				// (вне часов) — бот молчит, диалог ждёт оператора или следующего окна.
+				if (settings && !isWithinBotHours(settings, opts.nowSec)) continue;
+				try {
+					await generateReplyForConversation({
+						db,
+						tenant: { tenantId: t.id, slug: t.slug, llmBillingMode: "byok" },
+						conversation: conv,
+						replyStrategy,
+						notifications: opts.notifications ?? null,
+						...(settings?.splitReplies ? { splitReplies: true } : {}),
+						...(settings?.fallbackText
+							? { fallbackText: settings.fallbackText }
+							: {}),
+						...(settings?.handoffAfterFallbacks
+							? { handoffAfterFallbacks: settings.handoffAfterFallbacks }
+							: {}),
+						...(opts.sink ? { sink: opts.sink } : {}),
+					});
+				} catch (err) {
+					opts.log?.warn?.(
+						`reply-debounce conv=${conv.id}: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
+			}
+		} catch (err) {
+			opts.log?.warn?.(
+				`reply-debounce tenant=${t.id}: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+	}
 }

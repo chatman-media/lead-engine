@@ -4,7 +4,7 @@
 // весь suite skip'ается (как webhook-telegram.integration.test.ts).
 
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
-import { withTenant } from "@chatman-media/conversation-engine";
+import { DEFAULT_BOT_SETTINGS, withTenant } from "@chatman-media/conversation-engine";
 import {
   applyAllMigrations,
   channelIdentities,
@@ -40,7 +40,7 @@ let channelDbId = 0;
 let entry: Record<string, unknown> | null = null;
 
 // Эхо-стратегия: один текстовый envelope получателю из inbound. Используется и
-// webhook'ом (через resolveReplyDelaySeconds=3 он не зовётся сразу), и поллером.
+// webhook'ом (через botSettings.replyDelaySeconds=3 он не зовётся сразу), и поллером.
 const echoStrategy = {
   // biome-ignore lint/suspicious/noExplicitAny: тестовый fake ReplyStrategy
   generate: async (o: any) => [
@@ -134,8 +134,8 @@ beforeAll(async () => {
       webhookSecret: TG_SECRET,
       // biome-ignore lint/suspicious/noExplicitAny: fake ReplyStrategy
       replyStrategy: echoStrategy as any,
-      // Пауза включена → webhook планирует, а не отвечает сразу.
-      resolveReplyDelaySeconds: async () => DELAY_SEC,
+      // Пауза включена через botSettings.replyDelaySeconds → webhook планирует, не отвечает сразу.
+      resolveBotSettings: async () => ({ ...DEFAULT_BOT_SETTINGS, replyDelaySeconds: DELAY_SEC }),
     }),
   );
 

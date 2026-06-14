@@ -132,8 +132,11 @@ export const conversations = pgTable("conversations", {
   metaJson: text("meta_json"),
   // Debounce: epoch «когда сгенерировать отложенный ответ». NULL = нет
   // запланированного ответа. Входящее/правка в окне перезаписывает (now+delay);
-  // поллер apps/api claim'ит due-строки (reply_due_at <= now). См. tenants.reply_delay_seconds.
+  // поллер apps/api claim'ит due-строки (reply_due_at <= now). См. botSettings.replyDelaySeconds.
   replyDueAt: integer("reply_due_at"),
+  // #arch-fix: выделенные колонки вместо meta_json (атомарный UPDATE без SELECT).
+  fallbackStreak: integer("fallback_streak").notNull().default(0),
+  offhoursLastAutoSent: integer("offhours_last_auto_sent"),
 }, (t) => [
   check("conversations_source_check", sql`${t.source} IN ('bot', 'userbot', 'self_play')`),
   check("conversations_mode_check", sql`${t.mode} IN ('ai', 'queued', 'human')`),

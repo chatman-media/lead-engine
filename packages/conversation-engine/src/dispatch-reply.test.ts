@@ -66,8 +66,13 @@ function makeAutoHandoffDb() {
     }),
     update: () => ({
       set: (patch: Record<string, unknown>) => {
-        Object.assign(conversation, patch);
-        return { where: async () => undefined };
+        // Применяем только примитивы: SQL-шаблоны (bumpFallbackStreak) пропускаем.
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+            (conversation as Record<string, unknown>)[k] = v;
+          }
+        }
+        return { where: () => ({ returning: async () => [conversation] }) };
       },
     }),
     insert: () => ({
@@ -311,7 +316,7 @@ describe("generateReplyAndEnqueue", () => {
         events.push("tx-open");
         const out = await fn({
           insert: () => ({ values: () => ({ returning: async () => [{ id: 99 }] }) }),
-          update: () => ({ set: () => ({ where: async () => undefined }) }),
+          update: () => ({ set: () => ({ where: () => ({ returning: async () => [] }) }) }),
           select: () => ({ from: () => ({ where: async () => [] }) }),
           execute: async () => [],
         } as unknown as Db);

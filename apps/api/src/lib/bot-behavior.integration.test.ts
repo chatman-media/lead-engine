@@ -142,7 +142,7 @@ beforeAll(async () => {
       webhookSecret: TG_SECRET,
       // biome-ignore lint/suspicious/noExplicitAny: fake ReplyStrategy
       replyStrategy: echoStrategy as any,
-      resolveReplyDelaySeconds: async () => 0, // без debounce — ответ inline
+      // без debounce — ответ inline (replyDelaySeconds: null по умолчанию в botSettings)
       resolveBotSettings: async () => botSettings,
     }),
   );
