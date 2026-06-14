@@ -907,6 +907,191 @@ describe("RagReplyStrategy.generate", () => {
 		expect(chat.lastCall).not.toBeNull();
 	});
 
+	it("exchange: USDT — когда все поля собраны, выдаёт сводку + подтверждение", async () => {
+		const chat = new CapturingRagChat("LLM-fallback");
+		const quoteTool = {
+			name: "compute_exchange_quote",
+			description: "compute quote",
+			parameters: {},
+			execute: async () => ({
+				direction: "USDT->PHP",
+				asset: "USDT",
+				quoteAsset: "PHP",
+				amountMode: "source_amount",
+				amountFrom: 2000,
+				rate: 58.36,
+				amountToThb: 116710,
+			}),
+		};
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{
+							role: "user",
+							text: "хочу обменять usdt 2000 на песо, какой курс?",
+						},
+						{
+							role: "assistant",
+							text: "Меняем 2000 USDT. Получите 116710 PHP.\n\nПодскажите, в какой сети будете отправлять USDT, и как удобнее получить деньги?",
+						},
+					],
+				}),
+				exchangePolicyState: { stageSlug: "quote_calculated" },
+				tools: [quoteTool] as never,
+			}),
+			{ reflect: false },
+		);
+		const r = await s.generate({
+			...baseInput(),
+			userMessageText: "TRC20 в банкомате",
+		});
+		const text = firstReplyText(r);
+		// Сводка с суммой/сетью/выдачей + подтверждение, НЕ «уточните сумму».
+		expect(text).toContain("Оформляю заявку?");
+		expect(text).toContain("2000 USDT");
+		expect(text).toContain("TRC20");
+		expect(text).toContain("снятие в банкомате");
+		expect(text).not.toContain("банк-приложении"); // крипта → без вопроса оплаты
+		expect(chat.lastCall).toBeNull(); // forced — LLM не вызывали
+	});
+
+	it("exchange: RUB — «на счёт, сбер» после выдачи даёт сводку (не «уточните сумму»)", async () => {
+		const chat = new CapturingRagChat("уточните сумму");
+		const quoteTool = {
+			name: "compute_exchange_quote",
+			description: "compute quote",
+			parameters: {},
+			execute: async () => ({
+				direction: "RUB->PHP",
+				asset: "RUB",
+				quoteAsset: "PHP",
+				amountMode: "source_amount",
+				amountFrom: 20000,
+				rate: 0.81,
+				amountToThb: 16220,
+			}),
+		};
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "хочу обменять 20к рублей на песо" },
+						{
+							role: "assistant",
+							text: "Меняем 20000 RUB. Получите 16220 PHP.\n\nКак удобнее получить деньги?",
+						},
+						{ role: "user", text: "в банкомате" },
+						{
+							role: "assistant",
+							text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
+						},
+					],
+				}),
+				exchangePolicyState: { stageSlug: "quote_calculated" },
+				tools: [quoteTool] as never,
+			}),
+			{ reflect: false },
+		);
+		const r = await s.generate({
+			...baseInput(),
+			userMessageText: "на счёт, сбер",
+		});
+		const text = firstReplyText(r);
+		expect(text).toContain("Оформляю заявку?");
+		expect(text).toContain("банковским зачислением"); // card_transfer (сбер/счёт)
+		expect(chat.lastCall).toBeNull(); // не ушли в LLM «уточните сумму»
+	});
+
+	it("exchange: «да» после сводки создаёт заявку с собранным paymentMethod", async () => {
+		let seenOrderArgs: unknown = null;
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat: new CapturingRagChat("x"),
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "хочу обменять 20к рублей на песо" },
+						{ role: "assistant", text: "Меняем 20000 RUB. Получите 16220 PHP." },
+						{ role: "user", text: "в банкомате" },
+						{
+							role: "assistant",
+							text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
+						},
+						{ role: "user", text: "переводом со счёта, сбер" },
+						{
+							role: "assistant",
+							text: "Итак: меняем 20000 RUB → получите 16220 PHP, выдача — снятие в банкомате, внесение — банковским зачислением.\n\nОформляю заявку?",
+						},
+					],
+				}),
+				exchangePolicyState: { stageSlug: "quote_calculated" },
+				tools: [
+					{
+						name: "create_exchange_order",
+						description: "create order",
+						parameters: {},
+						execute: async (args: unknown) => {
+							seenOrderArgs = args;
+							return { orderId: 88 };
+						},
+					},
+				] as never,
+			}),
+			{ reflect: false },
+		);
+		await s.generate({ ...baseInput(), userMessageText: "да" });
+		expect(seenOrderArgs).toMatchObject({
+			asset: "RUB",
+			amount: 20000,
+			paymentMethod: "card_transfer",
+			payoutMethod: "atm",
+		});
+	});
+
+	it("exchange: «2к баксов» парсится как USD 2000", async () => {
+		let seenArgs: unknown = null;
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat: new CapturingRagChat("x"),
+				kb: kbWith([HIT]),
+				tools: [
+					{
+						name: "compute_exchange_quote",
+						description: "compute quote",
+						parameters: {},
+						execute: async (args: unknown) => {
+							seenArgs = args;
+							return {
+								direction: "USD->PHP",
+								asset: "USD",
+								quoteAsset: "PHP",
+								amountMode: "source_amount",
+								amountFrom: 2000,
+								rate: 56,
+								amountToThb: 112000,
+							};
+						},
+					},
+				] as never,
+			}),
+			{ reflect: false },
+		);
+		await s.generate({
+			...baseInput(),
+			userMessageText: "хочу обменять 2к баксов на песо",
+		});
+		expect(seenArgs).toMatchObject({ asset: "USD", amount: 2000 });
+	});
+
 	it("exchange: «500 USDT … Какой курс» парсит сумму как 500, не 500000", async () => {
 		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
 		let seenArgs: unknown = null;

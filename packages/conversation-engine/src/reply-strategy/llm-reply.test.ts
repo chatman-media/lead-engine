@@ -747,6 +747,73 @@ describe("LlmReplyStrategy", () => {
 		expect(chat.lastCall).not.toBeNull();
 	});
 
+	it("exchange: «на счёт, сбер» после выдачи → сводка+подтверждение (не «уточните сумму»)", async () => {
+		const chat = new CapturingChat("уточните сумму");
+		const repo = fakeMessagesRepo([
+			row(1, "user", "хочу обменять 20000 рублей на песо"),
+			row(
+				2,
+				"assistant",
+				"Меняем 20000 RUB. Получите 15750 THB. Как удобнее получить деньги?",
+			),
+			row(3, "user", "в банкомате"),
+			row(
+				4,
+				"assistant",
+				"Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
+			),
+		]);
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveTools: () => [exchangeQuoteTool()],
+				resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+			},
+			() => repo,
+		);
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "на счёт, сбер",
+		});
+		const text = firstReplyText(result);
+		expect(text).toContain("Оформляю заявку?");
+		expect(text).toContain("банковским зачислением");
+		expect(chat.lastCall).toBeNull(); // forced — не ушли в LLM «уточните сумму»
+	});
+
+	it("exchange: грунтинг собранного состояния попадает в system-prompt", async () => {
+		const chat = new CapturingChat("Да, мы работаем официально.");
+		const repo = fakeMessagesRepo([
+			row(1, "user", "хочу обменять 2000 usdt на песо"),
+			row(
+				2,
+				"assistant",
+				"Меняем 2000 USDT. Получите 116710 THB. В какой сети?",
+			),
+		]);
+		const strategy = new LlmReplyStrategy(
+			{ template: EXCHANGE_TEMPLATE, resolveChat: () => chat },
+			() => repo,
+		);
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "а вы надёжная компания?",
+		});
+		expect(result).not.toBeNull();
+		const system = chat.lastCall?.messages[0]?.content ?? "";
+		expect(system).toContain("КОНТЕКСТ ЗАЯВКИ");
+		expect(system).toContain("2000 USDT");
+	});
+
   it("exchange: стартовый интент с длинным пробельным разрывом проверяется линейно", async () => {
     const userText = `хочу${" ".repeat(25_000)}поменять 500 USDT`;
     const chat = new CapturingChat("Сейчас уточню у оператора.");
