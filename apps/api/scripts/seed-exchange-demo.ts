@@ -355,6 +355,30 @@ function buildSampleLeads(
 			],
 		},
 		{
+			// RUB-сценарий: показывает универсальный сбор способа ВНЕСЕНИЯ
+			// (payment_method) — нового поля воронки.
+			key: "rate-request-rub",
+			stage: "exchange_request",
+			name: "Ольга Сафина",
+			telegramId: "demo_exchange_001b",
+			fields: {
+				asset_from: "rub",
+				amount_from: 50000,
+				payout_method: "atm",
+				payment_method: "card_transfer",
+			},
+			messages: [
+				{
+					role: "user",
+					text: `Хочу обменять 50000 рублей на ${QUOTE_WORD_PL}, внесу переводом со счёта, получу в банкомате.`,
+				},
+				{
+					role: "assistant",
+					text: "Принял: 50000 RUB, внесение банковским переводом, выдача через банкомат. Сейчас рассчитаю сумму.",
+				},
+			],
+		},
+		{
 			key: "quote-confirmed",
 			stage: "quote_calculated",
 			name: "Мария Соколова",

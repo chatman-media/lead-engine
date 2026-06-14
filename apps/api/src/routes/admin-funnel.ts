@@ -734,7 +734,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 					hint: "Офис (код) или банкомат (cardless)",
 					position: 3,
 					optionsJson:
-						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"}]',
+						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"},{"value":"courier_cash","label":"Курьер"},{"value":"thai_bank_transfer","label":"Перевод на тайский банк"}]',
 				},
 				{
 					slug: "payment_method",
@@ -811,7 +811,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 					hint: "Офис (код) или банкомат (cardless)",
 					position: 4,
 					optionsJson:
-						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"}]',
+						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"},{"value":"courier_cash","label":"Курьер"},{"value":"thai_bank_transfer","label":"Перевод на тайский банк"}]',
 				},
 				{
 					slug: "payment_method",

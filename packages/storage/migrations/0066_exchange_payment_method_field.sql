@@ -40,7 +40,7 @@ CROSS JOIN (VALUES
    '[{"value":"trc20","label":"TRC20"},{"value":"erc20","label":"ERC20"},{"value":"bep20","label":"BEP20"}]',
    'Обязательно для USDT, принимаем TRC20'),
   ('payout_method', 'Способ получения', 4,
-   '[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"}]',
+   '[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"},{"value":"courier_cash","label":"Курьер"},{"value":"thai_bank_transfer","label":"Перевод на тайский банк"}]',
    'Офис (код) или банкомат (cardless)'),
   ('payment_method', 'Способ внесения (для рублей)', 5,
    '[{"value":"sbp_qr","label":"СБП / QR"},{"value":"card_transfer","label":"Карта / перевод"}]',
@@ -52,3 +52,18 @@ WHERE sd.slug = 'quote_calculated'
     SELECT 1 FROM stage_fields ex
     WHERE ex.stage_id = sd.id AND ex.slug = v.slug
   );
+
+-- Расширяем варианты способа выдачи у УЖЕ заведённых полей payout_method
+-- (раньше только office/atm) — добавляем курьера и тайский банк, которые бот/тул
+-- и так поддерживают (PayoutMethodEnum). Идемпотентно: ставим полный набор
+-- только там, где сейчас старый сокращённый. Значения office/atm остаются
+-- (нормализуются в тулах), просто пополняем список.
+UPDATE stage_fields sf
+SET options_json =
+  '[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"},{"value":"courier_cash","label":"Курьер"},{"value":"thai_bank_transfer","label":"Перевод на тайский банк"}]'
+FROM stage_definitions sd, funnels f
+WHERE sf.stage_id = sd.id
+  AND sd.funnel_id = f.id
+  AND sf.slug = 'payout_method'
+  AND (f.vertical_template_id = 'exchange_v1' OR f.slug = 'exchange')
+  AND sf.options_json NOT LIKE '%courier_cash%';
