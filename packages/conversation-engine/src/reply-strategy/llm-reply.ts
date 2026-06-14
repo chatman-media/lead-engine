@@ -700,9 +700,8 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 	const currency = resolveQuoteCurrency(
 		typeof row.quoteAsset === "string" ? row.quoteAsset : directionQuote,
 	);
-	const head = `Получите ${amountToThb} ${currency.code}.`;
-	// Повторяем исходную сумму/актив, чтобы LLM на следующих ходах не «терял» её.
-	// Подстрока «Получите N» сохраняется (backing tool-call есть, guard пропускает).
+	// Тёплая формулировка (не сухое «Получите X»). Число/валюта — от compute_quote
+	// (guard пропускает). Исходную сумму повторяем, чтобы LLM не «терял» её.
 	const amountFrom = numberLike(row.amountFrom);
 	const srcAsset =
 		typeof row.asset === "string"
@@ -711,8 +710,8 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 				? row.direction.split("->")[0]
 				: null;
 	return amountFrom !== null && srcAsset
-		? `Меняем ${amountFrom} ${srcAsset}. ${head}`
-		: head;
+		? `Посчитал! Отдаёте ${amountFrom} ${srcAsset} — получите ${amountToThb} ${currency.code} на руки.`
+		: `Посчитал — получите ${amountToThb} ${currency.code} на руки.`;
 }
 
 const EXCHANGE_PAYOUT_KNOWN_RE =
@@ -786,7 +785,7 @@ function forcedExchangeOrderText(result: unknown): string | null {
 	if (typeof row.error === "string" && row.error.trim())
 		return row.error.trim();
 	if (row.orderId !== undefined) {
-		return "Заявка создана. Сейчас подготовлю следующий шаг.";
+		return "Отлично, заявку оформил! 🙌 Секунду — подготовлю следующий шаг.";
 	}
 	return null;
 }
@@ -847,7 +846,10 @@ async function maybeForceExchangeOrderReply(
 				});
 				const reqText = forcedExchangeRequisitesText(reqResult);
 				if (reqText)
-					return { text: `Заявка создана.\n\n${reqText}`, toolCalls };
+					return {
+						text: `Отлично, заявку оформил! 🙌 Вот реквизиты для оплаты:\n\n${reqText}`,
+						toolCalls,
+					};
 			} catch (err) {
 				console.warn("[llm-reply] forced requisites fetch failed:", err);
 			}

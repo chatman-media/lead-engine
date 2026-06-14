@@ -435,10 +435,9 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 	const currency = resolveQuoteCurrency(
 		typeof row.quoteAsset === "string" ? row.quoteAsset : directionQuote,
 	);
-	const head = `Получите ${amountToThb} ${currency.code}.`;
-	// Повторяем исходную сумму/актив, чтобы она оставалась в истории и LLM на
-	// следующих ходах не «терял» её (фикс «уточните сумму»). Подстрока «Получите N»
-	// сохраняется — backing tool-call есть, guard пропускает.
+	// Тёплая, живая формулировка (не сухое «Получите X»). Число/валюта — от
+	// compute_quote, поэтому guard пропускает. Исходную сумму повторяем, чтобы
+	// она оставалась в истории и LLM на следующих ходах не «терял» её.
 	const amountFrom = numberLike(row.amountFrom);
 	const srcAsset =
 		typeof row.asset === "string"
@@ -447,8 +446,8 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 				? row.direction.split("->")[0]
 				: null;
 	return amountFrom !== null && srcAsset
-		? `Меняем ${amountFrom} ${srcAsset}. ${head}`
-		: head;
+		? `Посчитал! Отдаёте ${amountFrom} ${srcAsset} — получите ${amountToThb} ${currency.code} на руки.`
+		: `Посчитал — получите ${amountToThb} ${currency.code} на руки.`;
 }
 
 const EXCHANGE_PAYOUT_KNOWN_RE =
@@ -767,7 +766,7 @@ function forcedExchangeOrderText(result: unknown): string | null {
 		);
 	}
 	if (typeof row.orderId === "number") {
-		return "Заявка создана. Сейчас подготовлю реквизиты для оплаты.";
+		return "Отлично, заявку оформил! 🙌 Секунду — подготовлю реквизиты для оплаты.";
 	}
 	return null;
 }
@@ -836,7 +835,10 @@ async function maybeForceExchangeOrderReply(input: {
 				});
 				const reqText = forcedExchangeRequisitesText(reqResult);
 				if (reqText)
-					return { text: `Заявка создана.\n\n${reqText}`, toolCalls };
+					return {
+						text: `Отлично, заявку оформил! 🙌 Вот реквизиты для оплаты:\n\n${reqText}`,
+						toolCalls,
+					};
 			} catch (err) {
 				console.warn("[rag-reply] forced requisites fetch failed:", err);
 			}

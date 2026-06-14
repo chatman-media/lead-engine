@@ -544,7 +544,7 @@ describe("LlmReplyStrategy", () => {
 
 		    expect(result).not.toBeNull();
 		    const text = firstReplyText(result);
-		    expect(text).toContain("Получите 15750 THB.");
+		    expect(text).toContain("получите 15750 THB");
 	    expect(chat.lastCall).toBeNull();
     expect(recorded[0]?.toolCalls[0]).toMatchObject({
       name: "compute_exchange_quote",
@@ -702,7 +702,7 @@ describe("LlmReplyStrategy", () => {
 		});
 
 		const text = firstReplyText(result);
-		expect(text).toContain("Заявка создана");
+		expect(text).toContain("заявку оформил");
 		expect(text).toContain(ADDRESS);
 		expect(chat.lastCall).toBeNull();
 		const names = recorded[0]?.toolCalls.map((t) => t.name) ?? [];
@@ -843,7 +843,7 @@ describe("LlmReplyStrategy", () => {
 	    });
 
 		    expect(result).not.toBeNull();
-		    expect(firstReplyText(result)).toContain("Получите 15750 THB.");
+		    expect(firstReplyText(result)).toContain("получите 15750 THB");
 	    expect(chat.lastCall).toBeNull();
 		expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
 			asset: "USDT",
@@ -886,7 +886,7 @@ describe("LlmReplyStrategy", () => {
 	    });
 
 		    expect(result).not.toBeNull();
-		    expect(firstReplyText(result)).toContain("Получите 15750 THB.");
+		    expect(firstReplyText(result)).toContain("получите 15750 THB");
 			expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
 			asset: "USDT",
 			amount: 500,

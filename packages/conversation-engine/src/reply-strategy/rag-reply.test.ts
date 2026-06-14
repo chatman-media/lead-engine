@@ -627,7 +627,7 @@ describe("RagReplyStrategy.generate", () => {
 			userMessageText: "10к рублей",
 		});
 
-		expect(firstReplyText(r)).toContain("Получите 8126 PHP.");
+		expect(firstReplyText(r)).toContain("получите 8126 PHP");
 		expect(firstReplyText(r).toLowerCase()).not.toContain("курс");
 		expect(chat.lastCall).toBeNull();
 		expect(seenArgs).toMatchObject({
@@ -677,7 +677,7 @@ describe("RagReplyStrategy.generate", () => {
 		});
 
 		expect(seenArgs).toMatchObject({ asset: "RUB", amount: 20000 });
-		expect(firstReplyText(r)).toContain("Получите 16220 PHP.");
+		expect(firstReplyText(r)).toContain("получите 16220 PHP");
 	});
 
 	it("exchange: после котировки спрашивает способ выдачи, если не назван", async () => {
@@ -709,7 +709,7 @@ describe("RagReplyStrategy.generate", () => {
 			...baseInput(),
 			userMessageText: "хочу обменять 20к рублей на песо",
 		});
-		expect(firstReplyText(r1)).toContain("Получите 16220 PHP.");
+		expect(firstReplyText(r1)).toContain("получите 16220 PHP");
 		expect(firstReplyText(r1)).toContain("как удобнее получить деньги");
 
 		// Способ выдачи назван («в банкомате») → доп.вопрос не задаётся.
@@ -726,7 +726,7 @@ describe("RagReplyStrategy.generate", () => {
 			...baseInput(),
 			userMessageText: "хочу обменять 20к рублей на песо, получу в банкомате",
 		});
-		expect(firstReplyText(r2)).toContain("Получите 16220 PHP.");
+		expect(firstReplyText(r2)).toContain("получите 16220 PHP");
 		expect(firstReplyText(r2)).not.toContain("как удобнее получить деньги");
 	});
 
@@ -757,7 +757,7 @@ describe("RagReplyStrategy.generate", () => {
 			{ reflect: false },
 		);
 		const r1 = await s1.generate({ ...baseInput(), userMessageText: "200 usdt" });
-		expect(firstReplyText(r1)).toContain("Получите 11200 PHP.");
+		expect(firstReplyText(r1)).toContain("получите 11200 PHP");
 		expect(firstReplyText(r1)).toContain("в какой сети");
 
 		// Сеть указана (TRC20) → протокол не переспрашиваем.
@@ -774,7 +774,7 @@ describe("RagReplyStrategy.generate", () => {
 			...baseInput(),
 			userMessageText: "200 usdt trc20",
 		});
-		expect(firstReplyText(r2)).toContain("Получите 11200 PHP.");
+		expect(firstReplyText(r2)).toContain("получите 11200 PHP");
 		expect(firstReplyText(r2)).not.toContain("в какой сети");
 	});
 
@@ -1136,7 +1136,7 @@ describe("RagReplyStrategy.generate", () => {
 			amount: 500,
 			network: "TRC20",
 		});
-		expect(firstReplyText(r)).toContain("Получите 29000 PHP.");
+		expect(firstReplyText(r)).toContain("получите 29000 PHP");
 		expect(chat.lastCall).toBeNull();
 	});
 
@@ -1345,7 +1345,7 @@ describe("RagReplyStrategy.generate", () => {
 		expect(orderCalls).toBe(1);
 		expect(reqCalls).toBe(1);
 		const text = firstReplyText(r);
-		expect(text).toContain("Заявка создана");
+		expect(text).toContain("заявку оформил");
 		expect(text).toContain(ADDRESS);
 		expect(chat.lastCall).toBeNull();
 	});

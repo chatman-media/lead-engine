@@ -285,7 +285,7 @@ describe("exchange deterministic fixtures", () => {
 		>;
 		expect(requisites.kind).toBe("fiat");
 		expect(requisites.detailsText).toContain("2200 7000 0000 4888");
-		expect(requisites.instructions).toContain("Реквизиты актуальны");
+		expect(requisites.instructions).toContain("Реквизиты действительны");
 
 		const info = (await tools.get_exchange_business_info?.execute({})) as Record<
 			string,

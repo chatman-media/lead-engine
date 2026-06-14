@@ -851,7 +851,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
             exchangeId: req.exchangeId,
             exchangeName,
             ttlMin,
-            instructions: `${exchangeName} UID/ID для перевода: ${req.exchangeId}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите подтверждение перевода.`,
+            instructions: `${exchangeName} UID/ID для перевода: ${req.exchangeId}\nРеквизиты действительны ${ttlMin} минут. Как переведёте — пришлите, пожалуйста, подтверждение, и я сразу проверю.`,
           };
         }
         const tagLine = req.destTag ? `\nMemo/tag: ${req.destTag}` : "";
@@ -869,8 +869,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
           ttlMin,
           amlNote: true,
           instructions: req.paymentUrl
-            ? `Оплата ${order.assetFrom} (${req.network}) через WestWallet:${paymentUrlLine}\nАдрес: ${req.address}${tagLine}\nРеквизиты актуальны ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите подтверждение перевода.`
-            : `Адрес для ${order.assetFrom} (${req.network}): ${req.address}${tagLine}\nАдрес актуален ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите tx hash или ссылку на транзакцию.`,
+            ? `Оплата ${order.assetFrom} (${req.network}) через WestWallet:${paymentUrlLine}\nАдрес: ${req.address}${tagLine}\nРеквизиты действительны ${ttlMin} минут. Все входящие транзакции проходят AML-проверку — переведите, пожалуйста, точную сумму с учётом сетевой комиссии. Как оплатите, пришлите подтверждение перевода.`
+            : `Адрес для ${order.assetFrom} (${req.network}): ${req.address}${tagLine}\nАдрес действителен ${ttlMin} минут. Все входящие транзакции проходят AML-проверку — переведите, пожалуйста, точную сумму с учётом сетевой комиссии. Как отправите, пришлите tx hash или ссылку на транзакцию.`,
         };
       }
       if (req.detailsText) {
@@ -880,7 +880,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
           paymentMethod: order.paymentMethod,
           detailsText: req.detailsText,
           ttlMin,
-          instructions: `${req.detailsText}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите развёрнутый чек.`,
+          instructions: `${req.detailsText}\nРеквизиты действительны ${ttlMin} минут. Как оплатите — пришлите, пожалуйста, развёрнутый чек, и я сразу всё проверю.`,
         };
       }
       return {
@@ -888,7 +888,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         kind: "fiat",
         paymentUrl: req.paymentUrl,
         ttlMin,
-        instructions: `Оплата по платёжной ссылке (СБП): ${req.paymentUrl}\nСсылка действует ${ttlMin} минут. После оплаты пришлите развёрнутый чек.`,
+        instructions: `Оплатить можно по ссылке (СБП): ${req.paymentUrl}\nСсылка действует ${ttlMin} минут. Как оплатите — пришлите, пожалуйста, развёрнутый чек.`,
       };
     },
   };
