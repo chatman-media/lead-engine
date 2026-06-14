@@ -7,7 +7,9 @@
  *   2. Для каждого — найти leads с stageDefinitionId != null,
  *      где stage.checkinIntervalDays > 0 И
  *      COALESCE(leads.lastCheckinAt, leads.updatedAt) < now - (interval * 86400)
- *      И stage.kind IN ('intake', 'active').
+ *      И stage.kind IN ('intake', 'active')
+ *      И в диалоге не было сообщений за интервал (conversations.lastMessageAt) —
+ *      чтобы не пинговать «как дела» посреди живой переписки.
  *   3. Для каждого такого лида:
  *      a. Найти channel_identities контакта (кроме web-каналов).
  *      b. Найти conversation для этого контакта + source.
@@ -111,6 +113,16 @@ export class CheckinSweeper {
               sql`COALESCE(${leads.lastCheckinAt}, ${leads.updatedAt})`,
               sql`${now} - (${stageDefinitions.checkinIntervalDays} * 86400)`,
             ),
+            // Не пинговать лида, у которого в диалоге была активность за интервал:
+            // checkin keyed off leads.updatedAt, а оно не меняется при простой
+            // переписке — иначе бот шлёт контекст-слепое «Добрый день, как дела»
+            // прямо посреди живого разговора (напр. пока клиент платит).
+            sql`NOT EXISTS (
+              SELECT 1 FROM ${conversations}
+              WHERE ${conversations.tenantId} = ${tenantId}
+                AND ${conversations.userId} = ${leads.userId}
+                AND ${conversations.lastMessageAt} >= ${now} - (${stageDefinitions.checkinIntervalDays} * 86400)
+            )`,
           ),
         );
 

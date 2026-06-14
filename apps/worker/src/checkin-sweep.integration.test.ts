@@ -160,4 +160,48 @@ describe("CheckinSweeper.sweep (интеграция)", () => {
     const q = await db.select().from(outboundQueue).where(eq(outboundQueue.tenantId, t2!.id));
     expect(q.length).toBe(0);
   });
+
+  it("лид overdue по updatedAt, но с активным диалогом → чек-ин пропускается", async () => {
+    if (!enabled) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `chk-active-${now}` })
+      .returning({ id: tenants.id });
+    const tid = t!.id;
+    const [f] = await db
+      .insert(funnels)
+      .values({ tenantId: tid, slug: `f-a-${now}` })
+      .returning({ id: funnels.id });
+    const [st] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId: tid,
+        funnelId: f!.id,
+        slug: "active",
+        displayName: "Active",
+        kind: "active",
+        checkinIntervalDays: 1,
+      })
+      .returning({ id: stageDefinitions.id });
+    const [c] = await db.insert(contacts).values({ tenantId: tid }).returning({ id: contacts.id });
+    await db
+      .insert(leads)
+      .values({ tenantId: tid, userId: c!.id, stageDefinitionId: st!.id, updatedAt: now - 2 * 86400 });
+    const [ch] = await db
+      .insert(channels)
+      .values({ tenantId: tid, kind: "telegram_bot", externalId: `bot-a-${now}`, status: "active" })
+      .returning({ id: channels.id });
+    await db.insert(channelIdentities).values({ contactId: c!.id, channelId: ch!.id, externalUserId: "tg-a" });
+    // Диалог со СВЕЖИМ сообщением — клиент в живой переписке.
+    await db
+      .insert(conversations)
+      .values({ tenantId: tid, userId: c!.id, source: "bot", mode: "ai", lastMessageAt: now });
+
+    const sweeper = new CheckinSweeper(db, { intervalMs: 1, messageText: "ping" });
+    await runSweep(sweeper);
+
+    const q = await db.select().from(outboundQueue).where(eq(outboundQueue.tenantId, tid));
+    expect(q.length).toBe(0);
+  });
 });
