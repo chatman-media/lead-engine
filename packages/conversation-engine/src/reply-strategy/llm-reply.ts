@@ -345,6 +345,17 @@ function assetMentionRe(asset: string): RegExp {
   }
 }
 
+/**
+ * Парсинг суммы с разделителями тысяч: «20.000» / «1.500.000» / «20,000» →
+ * целое (точка/запятая как группировка по 3 цифры), иначе запятая = десятичная.
+ * Без этого Number("20.000") = 20 → «20.000 руб» парсилось как 20 RUB.
+ */
+function parseExchangeAmountToken(raw: string): number {
+  const s = raw.replace(/\s/g, "");
+  if (/^\d{1,3}(?:[.,]\d{3})+$/.test(s)) return Number(s.replace(/[.,]/g, ""));
+  return Number(s.replace(",", "."));
+}
+
 function amountCandidates(text: string, asset: string): AmountCandidate[] {
   const assetRe = assetMentionRe(asset);
 	const matches = [
@@ -358,7 +369,7 @@ function amountCandidates(text: string, asset: string): AmountCandidate[] {
     const before = text.slice(Math.max(0, start - 16), start).toLowerCase();
     if (/trc\s*$|erc\s*$|bep\s*$/i.test(before)) continue;
     const after = text.slice(end, end + 16).toLowerCase();
-    const n = Number(raw.replace(/[ \u00a0]/g, "").replace(",", "."));
+    const n = parseExchangeAmountToken(raw);
     if (!Number.isFinite(n) || n <= 0) continue;
 
     let score = 0;

@@ -640,6 +640,46 @@ describe("RagReplyStrategy.generate", () => {
 		);
 	});
 
+	it("exchange: «20.000 руб» (точка-разделитель тысяч) парсит как 20000", async () => {
+		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
+		let seenArgs: unknown = null;
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				tools: [
+					{
+						name: "compute_exchange_quote",
+						description: "compute quote",
+						parameters: {},
+						execute: async (args: unknown) => {
+							seenArgs = args;
+							return {
+								direction: "RUB->PHP",
+								asset: "RUB",
+								quoteAsset: "PHP",
+								amountMode: "source_amount",
+								amountFrom: 20000,
+								rate: 1.23,
+								amountToThb: 16220,
+							};
+						},
+					},
+				] as never,
+			}),
+			{ reflect: false },
+		);
+
+		const r = await s.generate({
+			...baseInput(),
+			userMessageText: "хочу поменять 20.000 руб на песо",
+		});
+
+		expect(seenArgs).toMatchObject({ asset: "RUB", amount: 20000 });
+		expect(firstReplyText(r)).toBe("Получите 16220 PHP.");
+	});
+
 	it("exchange: «500 USDT … Какой курс» парсит сумму как 500, не 500000", async () => {
 		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
 		let seenArgs: unknown = null;
