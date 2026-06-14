@@ -20,11 +20,15 @@ import { DEFAULT_TX_MAX_AGE_SECONDS, extractTxHash, verifyTronUsdt } from "./cha
 import {
   createOrderIdempotent,
   findActiveOrder,
+  getLatestOrderForConversation,
+  getOrderById,
   getOrderByIdempotencyKey,
   isReusableOrderStatus,
+  isRevivableOrderStatus,
   markOrderPaidWithUniqueTxHash,
   releaseOrderIdempotencyKey,
   resolveConversationParties,
+  reviveExpiredOrder,
   updateOrder,
 } from "./orders.ts";
 import { getPaymentProvider, verifyWestWalletInvoicePayment } from "./providers.ts";
@@ -585,7 +589,32 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ].join(" "),
     parameters: z.object({}),
     execute: async () => {
-      const order = await findActiveOrder(db, tenantId, conversationId);
+      let order = await findActiveOrder(db, tenantId, conversationId);
+      // Авто-восстановление: заявка протухла (TTL), но клиент всё ещё в сделке —
+      // оживляем последнюю под текущий курс вместо дед-энда «Нет активной
+      // заявки» (после которого бот эскалирует generic'ом). См. moveStage в
+      // create/fetch — стадия уже order_created/requisites_sent.
+      if (!order) {
+        const latest = await getLatestOrderForConversation(db, tenantId, conversationId);
+        if (latest && isRevivableOrderStatus(latest.status)) {
+          const q = await computeQuote(db, tenantId, {
+            asset: latest.assetFrom,
+            amount: latest.requestedAmount ?? latest.amountFrom,
+            amountMode: latest.amountMode as "source_amount" | "target_thb" | undefined,
+            network: latest.network || undefined,
+          });
+          if (q.ok) {
+            const ttlMin = isCryptoAsset(latest.assetFrom) ? 15 : 20;
+            await reviveExpiredOrder(db, tenantId, latest.id, {
+              rate: q.rate,
+              amountFrom: q.amountFrom,
+              amountToThb: q.amountToThb,
+              rateExpiresAt: Math.floor(Date.now() / 1000) + ttlMin * 60,
+            });
+            order = await getOrderById(db, tenantId, latest.id);
+          }
+        }
+      }
       if (!order) return { error: "Нет активной заявки. Сначала создай заявку." };
 
       const provider = getPaymentProvider({ db, tenantId, masterKeyHex });
