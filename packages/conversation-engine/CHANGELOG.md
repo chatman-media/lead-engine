@@ -1,3 +1,11 @@
+# [@chatman-media/conversation-engine-v3.16.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.15.0...@chatman-media/conversation-engine-v3.16.0) (2026-06-14)
+
+
+### Features
+
+* **exchange:** для USDT без сети спрашивать протокол (TRC20/ERC20/BEP20) ([4b96f69](https://github.com/chatman-media/lead-engine/commit/4b96f69f8b942460deff26e05e7fb43aa972ade8))
+* **exchange:** после котировки спрашивать способ выдачи (вести к заявке) ([43e4efd](https://github.com/chatman-media/lead-engine/commit/43e4efd5143b8f3f116044162df6f55dea13a2c2))
+
 # [@chatman-media/conversation-engine-v3.15.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.14.0...@chatman-media/conversation-engine-v3.15.0) (2026-06-14)
 
 
