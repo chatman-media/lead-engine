@@ -1,3 +1,15 @@
+# [@chatman-media/conversation-engine-v3.15.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.14.0...@chatman-media/conversation-engine-v3.15.0) (2026-06-14)
+
+
+### Bug Fixes
+
+* **exchange:** «20.000 руб» (точка-разделитель тысяч) парсить как 20000 ([69e51b7](https://github.com/chatman-media/lead-engine/commit/69e51b734bae734b8efa06da1ae42e08c93c0177))
+
+
+### Features
+
+* **bot:** авто-передача по фолбэкам ([#627](https://github.com/chatman-media/lead-engine/issues/627)) + редактируемый текст фолбэка ([#630](https://github.com/chatman-media/lead-engine/issues/630)) ([70e846c](https://github.com/chatman-media/lead-engine/commit/70e846c15050a6e3b06d68c355f499e7e9f19aa7)), closes [#623](https://github.com/chatman-media/lead-engine/issues/623)
+
 # [@chatman-media/conversation-engine-v3.14.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.13.0...@chatman-media/conversation-engine-v3.14.0) (2026-06-14)
 
 
