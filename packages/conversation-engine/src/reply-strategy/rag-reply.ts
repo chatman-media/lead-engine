@@ -128,6 +128,13 @@ export interface RagTurnContext {
 	awaitingOperator?: boolean;
 	/** Снапшот exchange-workflow state для финального policy guard (только exchange_v1). */
 	exchangePolicyState?: ExchangePolicyState | null;
+	/**
+	 * Поля заявки, собранные УНИВЕРСАЛЬНЫМ движком воронки (field-extractor →
+	 * leadFieldValues): что отдаёт клиент/сумма/сеть/выдача/оплата. Источник
+	 * правды для форс-ответов обмена (вместо regex-парсинга реплик). null/absent —
+	 * поля ещё не собраны (форс-слой fallback'нет на парсинг истории — пока).
+	 */
+	exchangeCollected?: ExchangeCollectedInput | null;
 	/** false → exchange response guard bypassed for this tenant. Default: true. */
 	exchangeResponseGuardEnabled?: boolean;
 	/** false → hard handoff stops AI silently without sending fallback to customer. */
@@ -246,6 +253,19 @@ export type ResolvedStyleAssignment = Style & {
 	experimentSlug?: string | null;
 	variantSlug?: string | null;
 };
+
+/**
+ * Сырые значения полей заявки, собранные универсальным движком (apps/api
+ * readExchangeCollectedFields → ctx). asset/network — в формате тулов
+ * (usdt/trc20), payout/payment — enum'ы (atm/card_transfer).
+ */
+export interface ExchangeCollectedInput {
+	asset?: string;
+	amount?: number;
+	network?: string;
+	payoutMethod?: string;
+	paymentMethod?: string;
+}
 
 type ExchangeOrderArgs = {
 	asset: string;
@@ -550,8 +570,12 @@ type ExchangeCollected = {
 function buildExchangeCollected(
 	userMessageText: string,
 	history: MessageRow[],
+	injected?: ExchangeCollectedInput | null,
 ): ExchangeCollected {
-	// Текущее сообщение, затем история от свежих к старым — «последнее слово» клиента.
+	// Универсально собранное (ctx из leadFieldValues) — ПРИОРИТЕТ; regex-парсинг
+	// реплик остаётся per-field fallback'ом, пока не подтверждена надёжность
+	// экстрактора на проде. asset/network приводим к ВЕРХНЕМУ регистру (формат
+	// тулов/меток): инжект приходит как usdt/trc20, regex даёт USDT/TRC20.
 	const userTexts = [
 		userMessageText,
 		...history
@@ -567,12 +591,16 @@ function buildExchangeCollected(
 			break;
 		}
 	}
-	const asset = base?.asset ?? null;
-	const amount = base?.amount ?? null;
+	const injAsset = injected?.asset ? injected.asset.toUpperCase() : null;
+	const injNetwork = injected?.network ? injected.network.toUpperCase() : null;
+	const asset = injAsset ?? base?.asset ?? null;
+	const amount = injected?.amount ?? base?.amount ?? null;
 	const network =
-		base?.network ?? userTexts.map(parseNetwork).find(Boolean) ?? null;
-	const payoutMethod = userTexts.map(parsePayoutMethod).find(Boolean) ?? null;
-	const paymentMethod = userTexts.map(parsePaymentMethod).find(Boolean) ?? null;
+		injNetwork ?? base?.network ?? userTexts.map(parseNetwork).find(Boolean) ?? null;
+	const payoutMethod =
+		injected?.payoutMethod ?? userTexts.map(parsePayoutMethod).find(Boolean) ?? null;
+	const paymentMethod =
+		injected?.paymentMethod ?? userTexts.map(parsePaymentMethod).find(Boolean) ?? null;
 	const missing: string[] = [];
 	if (!asset || !amount) missing.push("amount");
 	if (asset && EXCHANGE_USDT_RE.test(asset) && !network)
@@ -667,6 +695,7 @@ function renderExchangeSummaryLine(
 function maybeForceExchangePaymentMethodQuestion(input: {
 	userMessageText: string;
 	history: MessageRow[];
+	injected?: ExchangeCollectedInput | null;
 }): ExchangeForcedReply | null {
 	// Несерьёзные / длинные сообщения оставляем LLM
 	if (input.userMessageText.trim().length > 300) return null;
@@ -674,6 +703,7 @@ function maybeForceExchangePaymentMethodQuestion(input: {
 	const collected = buildExchangeCollected(
 		input.userMessageText,
 		input.history,
+		input.injected,
 	);
 	if (collected.asset !== "RUB") return null; // крипта → crypto_transfer авто
 	if (collected.paymentMethod) return null; // уже назван
@@ -826,6 +856,7 @@ async function maybeForceExchangeSummaryConfirm(input: {
 	history: MessageRow[];
 	state: ExchangePolicyState | null;
 	tools: AnyRagTool[];
+	injected?: ExchangeCollectedInput | null;
 }): Promise<ExchangeForcedReply | null> {
 	if (input.userMessageText.trim().length > 300) return null;
 	if (
@@ -840,6 +871,7 @@ async function maybeForceExchangeSummaryConfirm(input: {
 	const collected = buildExchangeCollected(
 		input.userMessageText,
 		input.history,
+		input.injected,
 	);
 	if (collected.missing.length > 0) return null;
 	if (!collected.asset || !collected.amount) return null;
@@ -1009,6 +1041,7 @@ export class RagReplyStrategy implements ReplyStrategy {
 		const exchangePolicyState = isExchange
 			? (ctx.exchangePolicyState ?? null)
 			: null;
+		const exchangeCollected = isExchange ? (ctx.exchangeCollected ?? null) : null;
 
 		const forcedExchangeReply = isExchange
 			? ((await maybeForceExchangeOrderReply({
@@ -1025,12 +1058,14 @@ export class RagReplyStrategy implements ReplyStrategy {
 				maybeForceExchangePaymentMethodQuestion({
 					userMessageText: input.userMessageText,
 					history: historyWithoutCurrent,
+					injected: exchangeCollected,
 				}) ??
 				(await maybeForceExchangeSummaryConfirm({
 					userMessageText: input.userMessageText,
 					history: historyWithoutCurrent,
 					state: exchangePolicyState,
 					tools,
+					injected: exchangeCollected,
 				})))
 			: null;
 		if (forcedExchangeReply) {
@@ -1100,7 +1135,11 @@ export class RagReplyStrategy implements ReplyStrategy {
 		// выдача/оплата). Идёт в промпт — LLM не теряет сумму и не переспрашивает.
 		const exchangeGrounding = isExchange
 			? renderExchangeCollectedGrounding(
-					buildExchangeCollected(input.userMessageText, historyWithoutCurrent),
+					buildExchangeCollected(
+						input.userMessageText,
+						historyWithoutCurrent,
+						exchangeCollected,
+					),
 				)
 			: null;
 		const combinedRequestContext =

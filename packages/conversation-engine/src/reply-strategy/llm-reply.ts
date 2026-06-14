@@ -130,6 +130,15 @@ export interface LlmReplyStrategyOpts {
 		conversationId: number;
 		contactId: number;
 	}) => Promise<ExchangePolicyState | null> | ExchangePolicyState | null;
+	/**
+	 * Поля заявки, собранные универсальным движком (leadFieldValues). Источник
+	 * правды для форс-ответов обмена; absent/null → fallback на regex-парсинг.
+	 */
+	resolveExchangeCollected?: (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+	}) => Promise<ExchangeCollectedInput | null> | ExchangeCollectedInput | null;
 	/** false → exchange response guard bypassed for this tenant. Default: true. */
 	resolveExchangeResponseGuardEnabled?: (input: {
 		tenantId: number;
@@ -518,10 +527,21 @@ type ExchangeCollected = {
 	missing: string[];
 };
 
+/** Сырые поля из универсального движка (apps/api → ctx). См. rag-reply. */
+export interface ExchangeCollectedInput {
+	asset?: string;
+	amount?: number;
+	network?: string;
+	payoutMethod?: string;
+	paymentMethod?: string;
+}
+
 function buildExchangeCollected(
 	userMessageText: string,
 	history: MessageRow[],
+	injected?: ExchangeCollectedInput | null,
 ): ExchangeCollected {
+	// Универсально собранное (ctx из leadFieldValues) — ПРИОРИТЕТ; regex — fallback.
 	const userTexts = [
 		userMessageText,
 		...history
@@ -537,12 +557,16 @@ function buildExchangeCollected(
 			break;
 		}
 	}
-	const asset = base?.asset ?? null;
-	const amount = base?.amount ?? null;
+	const injAsset = injected?.asset ? injected.asset.toUpperCase() : null;
+	const injNetwork = injected?.network ? injected.network.toUpperCase() : null;
+	const asset = injAsset ?? base?.asset ?? null;
+	const amount = injected?.amount ?? base?.amount ?? null;
 	const network =
-		base?.network ?? userTexts.map(parseNetwork).find(Boolean) ?? null;
-	const payoutMethod = userTexts.map(parsePayoutMethod).find(Boolean) ?? null;
-	const paymentMethod = userTexts.map(parsePaymentMethod).find(Boolean) ?? null;
+		injNetwork ?? base?.network ?? userTexts.map(parseNetwork).find(Boolean) ?? null;
+	const payoutMethod =
+		injected?.payoutMethod ?? userTexts.map(parsePayoutMethod).find(Boolean) ?? null;
+	const paymentMethod =
+		injected?.paymentMethod ?? userTexts.map(parsePaymentMethod).find(Boolean) ?? null;
 	const missing: string[] = [];
 	if (!asset || !amount) missing.push("amount");
 	if (asset && EXCHANGE_USDT_RE.test(asset) && !network)
@@ -632,11 +656,12 @@ function maybeForceExchangePaymentMethodQuestion(
 	userMessageText: string,
 	history: MessageRow[],
 	state: ExchangePolicyState | null,
+	injected?: ExchangeCollectedInput | null,
 ): ExchangeForcedReply | null {
 	if (state?.stageSlug !== "quote_calculated") return null;
 	// Несерьёзные / длинные сообщения оставляем LLM
 	if (userMessageText.trim().length > 300) return null;
-	const collected = buildExchangeCollected(userMessageText, history);
+	const collected = buildExchangeCollected(userMessageText, history, injected);
 	if (collected.asset !== "RUB") return null; // крипта → crypto_transfer авто
 	if (collected.paymentMethod) return null; // уже назван
 	if (!collected.payoutMethod) return null; // сперва способ выдачи
@@ -841,13 +866,14 @@ async function maybeForceExchangeSummaryConfirm(
 	history: MessageRow[],
 	tools: AnyRagTool[],
 	state: ExchangePolicyState | null,
+	injected?: ExchangeCollectedInput | null,
 ): Promise<ExchangeForcedReply | null> {
 	if (state?.stageSlug !== "quote_calculated") return null;
 	if (userMessageText.trim().length > 300) return null;
 	// «да»/«ок» → дальше создаём заявку (maybeForceExchangeOrderReply), не сводку.
 	if (isExchangeOrderConfirmation(userMessageText)) return null;
 	if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(userMessageText)) return null;
-	const collected = buildExchangeCollected(userMessageText, history);
+	const collected = buildExchangeCollected(userMessageText, history, injected);
 	if (collected.missing.length > 0) return null;
 	if (!collected.asset || !collected.amount) return null;
 	const alreadyShown = history
@@ -1013,6 +1039,22 @@ export class LlmReplyStrategy implements ReplyStrategy {
 						return null;
 					})
 				: null;
+		const exchangeCollected =
+			isExchange && this.opts.resolveExchangeCollected
+				? await Promise.resolve(
+						this.opts.resolveExchangeCollected({
+							tenantId,
+							conversationId: input.conversationId,
+							contactId: input.contactId,
+						}),
+					).catch((err) => {
+						console.warn(
+							"[llm-reply] failed to resolve exchange collected fields:",
+							err,
+						);
+						return null;
+					})
+				: null;
 		const forcedExchangeReply = isExchange
 			? ((await maybeForceExchangeOrderReply(
 					input.userMessageText,
@@ -1025,12 +1067,14 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					input.userMessageText,
 					history,
 					exchangePolicyState,
+					exchangeCollected,
 				) ??
 				(await maybeForceExchangeSummaryConfirm(
 					input.userMessageText,
 					history,
 					tools,
 					exchangePolicyState,
+					exchangeCollected,
 				)) ??
 				maybeForceExchangeKycReply(input.userMessageText))
 			: null;
@@ -1132,7 +1176,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
 		// выдача/оплата). Идёт в промпт — LLM не теряет сумму и не переспрашивает.
 		const exchangeGrounding = isExchange
 			? renderExchangeCollectedGrounding(
-					buildExchangeCollected(input.userMessageText, history),
+					buildExchangeCollected(input.userMessageText, history, exchangeCollected),
 				)
 			: null;
 		const systemPrompt = [

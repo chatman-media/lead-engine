@@ -41,5 +41,14 @@ export const EXCHANGE_INTAKE: QuestionnaireSchema = {
 			options: ["Офис", "Банкомат", "Банковский перевод", "Курьер"],
 			hint: `Предпочтительный способ выдачи ${QUOTE_CURRENCY.code}.`,
 		},
+		{
+			slug: "payment_method",
+			question:
+				"Если отдаёте рубли — как удобнее внести: по СБП/QR или картой/переводом?",
+			kind: "enum",
+			required: false,
+			options: ["СБП / QR", "Карта / перевод"],
+			hint: "Способ внесения рублей (только для RUB).",
+		},
 	],
 };

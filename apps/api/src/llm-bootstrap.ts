@@ -71,6 +71,7 @@ import {
 	isKnownExchangeStage,
 	makeExchangeTools,
 	type RateGuardAlert,
+	readExchangeCollectedFields,
 } from "./lib/exchange/tools.ts";
 import {
 	type ExchangeVerificationStatus,
@@ -607,6 +608,22 @@ export function makeExchangePolicyStateResolver(db: Db) {
 		]);
 		return buildExchangePolicyState({ stageSlug, verification, order });
 	};
+}
+
+/**
+ * Резолвер собранных полей заявки (универсальный движок: field-extractor →
+ * leadFieldValues) для форс-ответов обмена. Делает их источником правды вместо
+ * regex-парсинга реплик. Ошибка/пусто → стратегия fallback'нет на парсинг.
+ */
+export function makeExchangeCollectedResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+	}) =>
+		readExchangeCollectedFields(db, input.tenantId, input.conversationId).catch(
+			() => null,
+		);
 }
 
 export interface ReplyStrategyBundle {
@@ -1198,6 +1215,7 @@ export function makeReplyStrategy(
 		...(notifyRateGuard ? { notifyRateGuard } : {}),
 	});
 	const resolveExchangePolicyState = makeExchangePolicyStateResolver(db);
+	const resolveExchangeCollected = makeExchangeCollectedResolver(db);
 	const resolveExchangeResponseGuardEnabled =
 		makeExchangeResponseGuardFlagResolver(db);
 	const resolveExchangeCustomerNoticeEnabled =
@@ -1221,6 +1239,7 @@ export function makeReplyStrategy(
 					resolveIsSupport: makeSupportModeResolver(db),
 					resolveTools,
 					resolveExchangePolicyState,
+					resolveExchangeCollected,
 					resolveExchangeResponseGuardEnabled,
 					resolveExchangeCustomerNoticeEnabled,
 					resolveHistoryLimit,
@@ -1314,6 +1333,7 @@ export function makeReplyStrategy(
 			requestContext,
 				awaitingOperator,
 				exchangePolicyState,
+				exchangeCollected,
 				exchangeResponseGuardEnabled,
 				leadFunnel,
 				exchangeCustomerNoticeEnabled,
@@ -1339,6 +1359,9 @@ export function makeReplyStrategy(
 						);
 						return null;
 					})
+				: Promise.resolve(null),
+			isExchange
+				? resolveExchangeCollected({ tenantId, conversationId, contactId })
 				: Promise.resolve(null),
 			isExchange
 				? resolveExchangeResponseGuardEnabled({ tenantId })
@@ -1375,6 +1398,7 @@ export function makeReplyStrategy(
 			requestContext,
 				awaitingOperator,
 				exchangePolicyState,
+				exchangeCollected,
 				exchangeResponseGuardEnabled:
 					exchangeResponseGuardEnabled && leadFunnelIsExchange,
 				exchangeCustomerNoticeEnabled,
