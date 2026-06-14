@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.17.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.16.0...@chatman-media/conversation-engine-v3.17.0) (2026-06-14)
+
+
+### Features
+
+* **exchange:** запрашивать метод оплаты (СБП/карта) после способа выдачи ([58c639e](https://github.com/chatman-media/lead-engine/commit/58c639e75ce87b7335ae2c921f92b993dc613f17))
+
 # [@chatman-media/conversation-engine-v3.16.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.15.0...@chatman-media/conversation-engine-v3.16.0) (2026-06-14)
 
 
