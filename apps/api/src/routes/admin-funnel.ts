@@ -787,6 +787,43 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 					aiExtractable: true,
 					position: 2,
 				},
+				// Доп. параметры заявки тоже extract'им на этой стадии: лид авто-уходит
+				// сюда после asset+amount, а сеть/выдачу/оплату клиент часто называет
+				// уже здесь — иначе они не соберутся (экстрактор смотрит поля ТЕКУЩЕЙ
+				// стадии). Опциональны → авто-переход не блокируют.
+				{
+					slug: "network",
+					displayName: "Сеть (для крипты)",
+					fieldType: "select",
+					required: false,
+					aiExtractable: true,
+					hint: "Обязательно для USDT, принимаем TRC20",
+					position: 3,
+					optionsJson:
+						'[{"value":"trc20","label":"TRC20"},{"value":"erc20","label":"ERC20"},{"value":"bep20","label":"BEP20"}]',
+				},
+				{
+					slug: "payout_method",
+					displayName: `Способ получения ${QUOTE_CURRENCY.code}`,
+					fieldType: "select",
+					required: false,
+					aiExtractable: true,
+					hint: "Офис (код) или банкомат (cardless)",
+					position: 4,
+					optionsJson:
+						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"}]',
+				},
+				{
+					slug: "payment_method",
+					displayName: "Способ внесения (для рублей)",
+					fieldType: "select",
+					required: false,
+					aiExtractable: true,
+					hint: "Только для RUB: по СБП/QR или картой/переводом",
+					position: 5,
+					optionsJson:
+						'[{"value":"sbp_qr","label":"СБП / QR"},{"value":"card_transfer","label":"Карта / перевод"}]',
+				},
 			],
 		},
 		{

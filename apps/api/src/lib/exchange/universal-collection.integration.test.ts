@@ -186,4 +186,31 @@ describe("exchange: универсальный сбор данных + авто-
     expect(collected.paymentMethod).toBe("card_transfer");
     expect(collected.payoutMethod).toBe("atm");
   });
+
+  it("мультитёрн: сеть/выдача, названные ПОСЛЕ авто-перехода, всё равно собираются", async () => {
+    if (!sql) return;
+    const { contactId, conversationId } = await freshContactWithConversation();
+
+    // Ход 1: asset+amount → авто-переход на quote_calculated.
+    await makeFieldExtractor(
+      stubRef('{"asset_from":"usdt","amount_from":2000}'),
+    ).extract({ tenantId, contactId, text: "хочу обменять 2000 usdt", db });
+    expect((await leadOf(contactId))?.state).toBe("quote_calculated");
+
+    // Ход 2: клиент называет сеть и выдачу УЖЕ на quote_calculated — поля
+    // продублированы на эту стадию, поэтому экстрактор их соберёт.
+    await makeFieldExtractor(
+      stubRef('{"network":"trc20","payout_method":"atm"}'),
+    ).extract({ tenantId, contactId, text: "trc20, выдача в банкомате", db });
+
+    const collected = await readExchangeCollectedFields(
+      db as never,
+      tenantId,
+      conversationId,
+    );
+    expect(collected.asset).toBe("usdt");
+    expect(collected.amount).toBe(2000);
+    expect(collected.network).toBe("trc20");
+    expect(collected.payoutMethod).toBe("atm");
+  });
 });
