@@ -408,18 +408,33 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 
 const EXCHANGE_PAYOUT_KNOWN_RE =
 	/банкомат|atm|офис|наличны|курьер|тайск|bangkok|kbank|scb|зачисл/iu;
+const EXCHANGE_USDT_RE = /usdt|юсдт/iu;
 
 /**
- * Вопрос о способе выдачи ПОСЛЕ котировки: бот не должен замирать на «Получите
- * X», а вести к заявке. Спрашиваем, как клиент хочет получить деньги (если ещё
- * не назвал). Способ ОПЛАТЫ тут не спрашиваем намеренно: слова «СБП/перевод/
- * карта/оплата» триггерят requisites-guard (текст с числом котировки → unbacked
- * requisites → фоллбэк), а сам способ оплаты определяется на этапе реквизитов.
- * Сканируем только реплики клиента. null — клиент уже назвал способ выдачи.
+ * Вопрос о недостающих параметрах ПОСЛЕ котировки: вести к заявке, а не замирать
+ * на «Получите X». Спрашиваем: (1) сеть USDT, если клиент не указал — иначе
+ * кошелёк уйдёт в дефолтную TRC20, которая может быть не та; (2) способ выдачи.
+ * Способ ОПЛАТЫ тут не спрашиваем намеренно: слова «СБП/перевод/карта/оплата»
+ * (и «card») триггерят requisites-guard (текст с числом котировки → unbacked
+ * requisites → фоллбэк), способ оплаты собирается на этапе реквизитов.
+ * networkKnown — клиент уже назвал сеть. Сканируем только реплики клиента.
  */
-function exchangeMissingFieldsQuestion(userText: string): string | null {
-	if (EXCHANGE_PAYOUT_KNOWN_RE.test(userText)) return null;
-	return "Подскажите, как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на тайский банковский счёт?";
+function exchangeMissingFieldsQuestion(
+	userText: string,
+	asset: string,
+	networkKnown: boolean,
+): string | null {
+	const parts: string[] = [];
+	if (EXCHANGE_USDT_RE.test(asset) && !networkKnown) {
+		parts.push("в какой сети будете отправлять USDT — TRC20, ERC20 или BEP20");
+	}
+	if (!EXCHANGE_PAYOUT_KNOWN_RE.test(userText)) {
+		parts.push(
+			"как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на тайский банковский счёт",
+		);
+	}
+	if (parts.length === 0) return null;
+	return `Подскажите, ${parts.join(", и ")}?`;
 }
 
 async function maybeForceExchangeQuoteReply(input: {
@@ -443,7 +458,11 @@ async function maybeForceExchangeQuoteReply(input: {
 		input.userMessageText,
 		...input.history.filter((m) => m.role === "user").map((m) => m.text),
 	].join("\n");
-	const ask = exchangeMissingFieldsQuestion(userText);
+	const ask = exchangeMissingFieldsQuestion(
+		userText,
+		args.asset,
+		Boolean(args.network),
+	);
 	return {
 		text: ask ? `${text}\n\n${ask}` : text,
 		toolCalls: [{ name: quoteTool.name, args, result, cycle: 0 }],

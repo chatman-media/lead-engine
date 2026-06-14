@@ -730,6 +730,54 @@ describe("RagReplyStrategy.generate", () => {
 		expect(firstReplyText(r2)).not.toContain("как удобнее получить деньги");
 	});
 
+	it("exchange: USDT без сети → спрашивает протокол (TRC20/ERC20/BEP20)", async () => {
+		const quoteTool = {
+			name: "compute_exchange_quote",
+			description: "compute quote",
+			parameters: {},
+			execute: async (args: unknown) => ({
+				direction: "USDT->PHP",
+				asset: "USDT",
+				quoteAsset: "PHP",
+				network: (args as { network?: string }).network ?? "TRC20",
+				amountMode: "source_amount",
+				amountFrom: 200,
+				rate: 56,
+				amountToThb: 11200,
+			}),
+		};
+		// Сеть НЕ указана → спрашиваем протокол.
+		const s1 = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat: new CapturingRagChat("x"),
+				kb: kbWith([HIT]),
+				tools: [quoteTool] as never,
+			}),
+			{ reflect: false },
+		);
+		const r1 = await s1.generate({ ...baseInput(), userMessageText: "200 usdt" });
+		expect(firstReplyText(r1)).toContain("Получите 11200 PHP.");
+		expect(firstReplyText(r1)).toContain("в какой сети");
+
+		// Сеть указана (TRC20) → протокол не переспрашиваем.
+		const s2 = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat: new CapturingRagChat("x"),
+				kb: kbWith([HIT]),
+				tools: [quoteTool] as never,
+			}),
+			{ reflect: false },
+		);
+		const r2 = await s2.generate({
+			...baseInput(),
+			userMessageText: "200 usdt trc20",
+		});
+		expect(firstReplyText(r2)).toContain("Получите 11200 PHP.");
+		expect(firstReplyText(r2)).not.toContain("в какой сети");
+	});
+
 	it("exchange: «500 USDT … Какой курс» парсит сумму как 500, не 500000", async () => {
 		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
 		let seenArgs: unknown = null;
