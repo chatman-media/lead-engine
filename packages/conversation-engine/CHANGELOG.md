@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.13.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.12.0...@chatman-media/conversation-engine-v3.13.0) (2026-06-14)
+
+
+### Features
+
+* **operator-bot:** быстрые действия на generic-хендоффе «разобрать вручную» ([1c59e73](https://github.com/chatman-media/lead-engine/commit/1c59e739610922fd15e84152819daea1310b7411))
+
 # [@chatman-media/conversation-engine-v3.12.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.11.0...@chatman-media/conversation-engine-v3.12.0) (2026-06-14)
 
 
