@@ -610,7 +610,14 @@ export class NotificationService {
 			];
 		}
 		if (reason === "operator_request") {
+			// Generic «разобрать вручную»: даём те же быстрые действия, что и на
+			// payment/payout-хендоффах, чтобы оператор мог двигать сделку прямо из
+			// бота (подтвердить оплату / выдать код), а не уходить в админку.
 			return [
+				row([
+					{ text: "✅ Оплата OK", action: "payment_confirmed" },
+					{ text: "🔐 Выдача", action: "payout_ready" },
+				]),
 				row([{ text: "✍️ Ответить", action: "operator_reply" }]),
 			];
 		}
