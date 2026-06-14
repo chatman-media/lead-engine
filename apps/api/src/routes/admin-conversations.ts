@@ -878,19 +878,21 @@ export function makeAdminConversationsRoutes(
 
     const outcome = await withTenant(opts.db, tenantId, async (tx) => {
       const [existing] = await tx
-        .select({ mode: conversations.mode })
+        .select({ mode: conversations.mode, escalatedAt: conversations.escalatedAt })
         .from(conversations)
         .where(
           and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)),
         );
       if (!existing) return { kind: "not_found" } as const;
-      if (existing.mode === newMode) {
+      // Снять эскалацию нужно даже когда диалог УЖЕ в ai: метка escalatedAt
+      // живёт отдельно от mode, и «Вернуть боту» на уже-AI диалоге обязан её
+      // очистить (иначе noop → метка висит вечно — баг кнопки на странице лида).
+      const needsEscalationClear = newMode === "ai" && existing.escalatedAt != null;
+      if (existing.mode === newMode && !needsEscalationClear) {
         return { kind: "noop", mode: newMode } as const;
       }
       await tx
         .update(conversations)
-        // Возврат боту снимает метку эскалации (иначе «эскалация» висит на
-        // лиде вечно после KYC-/медиа-хендоффа, хотя диалог уже в AI).
         .set({
           mode: newMode,
           lastMessageAt: nowEpoch,
@@ -904,7 +906,7 @@ export function makeAdminConversationsRoutes(
       return c.json({ error: "conversation not found" }, 404);
     }
 
-    if (outcome.kind === "changed") {
+    if (outcome.kind === "changed" && outcome.from !== outcome.to) {
       await recordAudit(opts.db, {
         tenantId,
         adminId,

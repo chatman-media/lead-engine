@@ -790,6 +790,33 @@ describe("PUT /api/admin/conversations/:id/mode", () => {
     expect(conv!.escalatedAt).toBeNull();
   });
 
+  it("PUT { mode: 'ai' } на уже-AI диалоге всё равно снимает escalatedAt", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[2]!;
+    // Диалог уже в ai, но с висящей меткой эскалации (как lead 38 на проде).
+    await db
+      .update(conversations)
+      .set({ mode: "ai", escalatedAt: Math.floor(Date.now() / 1000) })
+      .where(eq(conversations.id, id));
+
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "ai" }),
+    });
+    expect(res.status).toBe(200);
+
+    const [conv] = await db
+      .select({
+        mode: conversations.mode,
+        escalatedAt: conversations.escalatedAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(conv!.mode).toBe("ai");
+    expect(conv!.escalatedAt).toBeNull();
+  });
+
   it("cross-tenant: B пытается изменить A's conv → 404", async () => {
     if (!sql) return;
     const id = conversationIdsA[0]!;
