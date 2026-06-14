@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.11.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.10.0...@chatman-media/conversation-engine-v3.11.0) (2026-06-14)
+
+
+### Features
+
+* **leads:** показывать эскалацию на странице лида + кнопка «вернуть боту»; снимать метку при возврате в AI ([f1d65ef](https://github.com/chatman-media/lead-engine/commit/f1d65ef14a11de3739d04b9d773774d408571bab))
+
 # [@chatman-media/conversation-engine-v3.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.9.1...@chatman-media/conversation-engine-v3.10.0) (2026-06-13)
 
 
