@@ -778,6 +778,135 @@ describe("RagReplyStrategy.generate", () => {
 		expect(firstReplyText(r2)).not.toContain("в какой сети");
 	});
 
+	it("exchange: после ответа о выдаче (банкомат) спрашивает метод оплаты", async () => {
+		const quoteTool = {
+			name: "compute_exchange_quote",
+			description: "compute quote",
+			parameters: {},
+			execute: async () => ({
+				direction: "RUB->PHP",
+				asset: "RUB",
+				quoteAsset: "PHP",
+				amountMode: "source_amount",
+				amountFrom: 20000,
+				rate: 0.81,
+				amountToThb: 16220,
+			}),
+		};
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat: new CapturingRagChat("x"),
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "хочу 20к рублей на песо" },
+						{ role: "assistant", text: "Получите 16220 PHP.\n\nПодскажите, как удобнее получить деньги?" },
+					],
+				}),
+				exchangePolicyState: { stageSlug: "quote_calculated" },
+				tools: [quoteTool] as never,
+			}),
+			{ reflect: false },
+		);
+		const r = await s.generate({
+			...baseInput(),
+			userMessageText: "в банкомате",
+		});
+		const text = firstReplyText(r);
+		expect(text).toContain("QR-коду в банк-приложении");
+		expect(text).toContain("банковским переводом");
+	});
+
+	it("exchange: если QR уже упомянут — вопрос о методе оплаты не задаётся", async () => {
+		const chat = new CapturingRagChat("Принял!");
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "хочу 20к рублей на песо" },
+						{ role: "assistant", text: "Получите 16220 PHP.\n\nПодскажите, как удобнее получить деньги?" },
+						{ role: "user", text: "в банкомате" },
+						{ role: "assistant", text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?" },
+					],
+				}),
+				exchangePolicyState: { stageSlug: "quote_calculated" },
+				tools: [] as never,
+			}),
+			{ reflect: false },
+		);
+		const r = await s.generate({
+			...baseInput(),
+			userMessageText: "через QR",
+		});
+		// Метод оплаты назван — вопрос не повторяется, LLM отвечает
+		expect(firstReplyText(r)).toBe("Принял!");
+		expect(chat.lastCall).not.toBeNull();
+	});
+
+	it("exchange: метод оплаты sbp_qr передаётся в create_exchange_order", async () => {
+		let seenOrderArgs: unknown = null;
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat: new CapturingRagChat("x"),
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "хочу 20к рублей на песо" },
+						{ role: "assistant", text: "Получите 16220 PHP." },
+						{ role: "user", text: "в банкомате" },
+						{ role: "assistant", text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?" },
+						{ role: "user", text: "через QR" },
+						{ role: "assistant", text: "Понял!" },
+					],
+				}),
+				exchangePolicyState: { stageSlug: "quote_calculated" },
+				tools: [
+					{
+						name: "create_exchange_order",
+						description: "create order",
+						parameters: {},
+						execute: async (args: unknown) => {
+							seenOrderArgs = args;
+							return { orderId: 77 };
+						},
+					},
+				] as never,
+			}),
+			{ reflect: false },
+		);
+		await s.generate({ ...baseInput(), userMessageText: "ок" });
+		expect(seenOrderArgs).toMatchObject({ paymentMethod: "sbp_qr" });
+	});
+
+	it("exchange: USDT — вопрос о методе оплаты не задаётся (crypto_transfer)", async () => {
+		const chat = new CapturingRagChat("Понял!");
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "хочу 200 usdt trc20" },
+						{ role: "assistant", text: "Получите 11200 PHP.\n\nПодскажите, как удобнее получить деньги?" },
+					],
+				}),
+				exchangePolicyState: { stageSlug: "quote_calculated" },
+				tools: [] as never,
+			}),
+			{ reflect: false },
+		);
+		const r = await s.generate({ ...baseInput(), userMessageText: "в банкомате" });
+		// USDT → метод оплаты не релевантен, вопрос не задаётся
+		expect(firstReplyText(r)).not.toContain("банк-приложении");
+		expect(chat.lastCall).not.toBeNull();
+	});
+
 	it("exchange: «500 USDT … Какой курс» парсит сумму как 500, не 500000", async () => {
 		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
 		let seenArgs: unknown = null;

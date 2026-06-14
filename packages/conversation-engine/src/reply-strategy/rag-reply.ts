@@ -7,24 +7,24 @@ import {
 	DEFAULT_PERSONA,
 	type DirectorHookForPrompt,
 	generateSoftFallback,
-  type IKbStore,
-  type KbScope,
-  NO_CONTEXT_MARKER,
-  type Persona,
-  type Reranker,
+	type IKbStore,
+	type KbScope,
+	NO_CONTEXT_MARKER,
+	type Persona,
+	type Reranker,
 	type SkillForPrompt,
 	type Style,
 	StyleSchema,
 	type ToolCallRecord,
 } from "@chatman-media/kb";
 import type {
-  ChatClient,
-  EmbeddingClient as RagEmbeddingClient,
+	ChatClient,
+	EmbeddingClient as RagEmbeddingClient,
 } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import {
-  loadRollingConversationContext,
-  messageRowsToChatHistory,
+	loadRollingConversationContext,
+	messageRowsToChatHistory,
 } from "../conversation-summary.ts";
 import type { ConversationsRepo } from "../dal/conversations.ts";
 import { ScopedKbStore } from "../dal/kb-store.ts";
@@ -35,17 +35,17 @@ import {
 	resolveQuoteCurrency,
 } from "../exchange-quote-currency.ts";
 import type {
-  ReplyStrategy,
-  ReplyStrategyOutput,
-  ReplyStrategyResult,
+	ReplyStrategy,
+	ReplyStrategyOutput,
+	ReplyStrategyResult,
 } from "../process-inbound.ts";
 import {
-  buildExchangeGenericOperatorHandoff,
-  buildExchangeOperatorHandoff,
+	buildExchangeGenericOperatorHandoff,
+	buildExchangeOperatorHandoff,
 } from "./exchange-operator-handoff.ts";
 import {
-  type ExchangePolicyState,
-  guardExchangePolicy,
+	type ExchangePolicyState,
+	guardExchangePolicy,
 } from "./exchange-policy-guard.ts";
 import {
 	EXCHANGE_SAFE_FALLBACK,
@@ -73,9 +73,9 @@ import {
 
 /** Идентификаторы хода, передаются в loadTurnContext. */
 export interface RagTurnInput {
-  tenantId: number;
-  conversationId: number;
-  contactId: number;
+	tenantId: number;
+	conversationId: number;
+	contactId: number;
 }
 
 /**
@@ -84,138 +84,142 @@ export interface RagTurnInput {
  * пропускает соответствующий блок (как раньше при отсутствии резолвера).
  */
 export interface RagTurnContext {
-  /** Vertical template тенанта. Используется для exchange-guard'ов (slug). */
-  template: VerticalTemplate;
-  /**
-   * true → стадия лида в support-mode: бот молчит (возвращает null), оператор
-   * ведёт диалог вручную. Loader может вернуть минимальный контекст с этим
-   * флагом и не грузить остальное.
-   */
-  isSupport?: boolean;
-  chat: ChatClient;
-  embedder: RagEmbeddingClient;
-  kb: IKbStore;
-  /**
-   * Scope для retrieval (stage → funnel → global). Также логируется в
-   * kb_suggestions при no-context fallback'е.
-   */
-  kbScope?: KbScope | null;
-  /**
-   * Sales-style: persona, framework, hooks для system-prompt'а. null →
-   * answerWithRag fallback'нет на DEFAULT_PERSONA. Если содержит
-   * styleId/experimentId — assignment сохраняется в conversations для
-   * coach/eval attribution.
-   */
-  style?: ResolvedStyleAssignment | null;
-  /** Включённые навыки убеждения (уже отфильтрованы по is_enabled). */
-  skills?: readonly SkillForPrompt[];
-  /** Активные директорские хуки тенанта (is_active = true). */
-  directorHooks?: readonly DirectorHookForPrompt[];
-  /** Agentic tools. Пусто/absent → один LLM-вызов без tool-loop'а. */
-  tools?: AnyRagTool[];
-  /** Cross-encoder reranker (Jina/Cohere) или null. */
-  reranker?: Reranker | null;
-  /** Per-стадийные инструкции (goal/guidance) из stage_definitions. */
-  stageGuidance?: { goal: string; guidance?: string } | null;
-  /** Динамический контекст запроса (multi-request / concierge). */
-  requestContext?: string | null;
-  /**
-   * Factual brokered-order context текущего клиента. Мёржится в
-   * requestContext и идёт grounding-блоком; не мутирует order state.
-   */
-  serviceOrderContext?: string | null;
-  /** true → в промпт идёт блок «ОЖИДАНИЕ ОПЕРАТОРА» (бот держит, не выдумывает цену). */
-  awaitingOperator?: boolean;
-  /** Снапшот exchange-workflow state для финального policy guard (только exchange_v1). */
-  exchangePolicyState?: ExchangePolicyState | null;
+	/** Vertical template тенанта. Используется для exchange-guard'ов (slug). */
+	template: VerticalTemplate;
+	/**
+	 * true → стадия лида в support-mode: бот молчит (возвращает null), оператор
+	 * ведёт диалог вручную. Loader может вернуть минимальный контекст с этим
+	 * флагом и не грузить остальное.
+	 */
+	isSupport?: boolean;
+	chat: ChatClient;
+	embedder: RagEmbeddingClient;
+	kb: IKbStore;
+	/**
+	 * Scope для retrieval (stage → funnel → global). Также логируется в
+	 * kb_suggestions при no-context fallback'е.
+	 */
+	kbScope?: KbScope | null;
+	/**
+	 * Sales-style: persona, framework, hooks для system-prompt'а. null →
+	 * answerWithRag fallback'нет на DEFAULT_PERSONA. Если содержит
+	 * styleId/experimentId — assignment сохраняется в conversations для
+	 * coach/eval attribution.
+	 */
+	style?: ResolvedStyleAssignment | null;
+	/** Включённые навыки убеждения (уже отфильтрованы по is_enabled). */
+	skills?: readonly SkillForPrompt[];
+	/** Активные директорские хуки тенанта (is_active = true). */
+	directorHooks?: readonly DirectorHookForPrompt[];
+	/** Agentic tools. Пусто/absent → один LLM-вызов без tool-loop'а. */
+	tools?: AnyRagTool[];
+	/** Cross-encoder reranker (Jina/Cohere) или null. */
+	reranker?: Reranker | null;
+	/** Per-стадийные инструкции (goal/guidance) из stage_definitions. */
+	stageGuidance?: { goal: string; guidance?: string } | null;
+	/** Динамический контекст запроса (multi-request / concierge). */
+	requestContext?: string | null;
+	/**
+	 * Factual brokered-order context текущего клиента. Мёржится в
+	 * requestContext и идёт grounding-блоком; не мутирует order state.
+	 */
+	serviceOrderContext?: string | null;
+	/** true → в промпт идёт блок «ОЖИДАНИЕ ОПЕРАТОРА» (бот держит, не выдумывает цену). */
+	awaitingOperator?: boolean;
+	/** Снапшот exchange-workflow state для финального policy guard (только exchange_v1). */
+	exchangePolicyState?: ExchangePolicyState | null;
 	/** false → exchange response guard bypassed for this tenant. Default: true. */
 	exchangeResponseGuardEnabled?: boolean;
-  /** false → hard handoff stops AI silently without sending fallback to customer. */
-  exchangeCustomerNoticeEnabled?: boolean;
-  /** Repo для fire-and-forget логирования незакрытых вопросов (softFallback). */
-  suggestions?: KbSuggestionsRepo | null;
-  /** Repo для compaction summary + style assignment. Absent → ничего не персистится. */
-  conversations?: ConversationsRepo | null;
-  messages: MessagesRepo;
+	/** false → hard handoff stops AI silently without sending fallback to customer. */
+	exchangeCustomerNoticeEnabled?: boolean;
+	/** Repo для fire-and-forget логирования незакрытых вопросов (softFallback). */
+	suggestions?: KbSuggestionsRepo | null;
+	/** Repo для compaction summary + style assignment. Absent → ничего не персистится. */
+	conversations?: ConversationsRepo | null;
+	messages: MessagesRepo;
 }
 
 export interface RagReplyStrategyOpts {
-  /**
-   * Загрузить контекст хода. Вызывается один раз на каждый входящий message.
-   * Сборка (DB-запросы, кеши, метрики-обёртки) — на стороне приложения;
-   * независимые источники стоит грузить параллельно (Promise.all).
-   */
-  loadTurnContext: (
-    input: RagTurnInput,
-  ) => Promise<RagTurnContext> | RagTurnContext;
-  /** Лимит history сообщений (default 12 — answerWithRag сам ужмёт через summary). */
-  historyLimit?: number;
-  /**
-   * Per-tenant override окна истории (заменяет historyLimit). Резолвится из
-   * tenants.reply_history_limit; NULL/ошибка → historyLimit.
-   */
-  resolveHistoryLimit?: (input: {
-    tenantId: number;
-  }) => Promise<number | null | undefined> | number | null | undefined;
-  /**
-   * #623 — per-tenant override параметров генерации из tenants.bot_settings_json
-   * (temperature / maxOutputTokens / compactAfterMessages). null-поля → дефолты.
-   */
-  resolveGenerationParams?: (input: { tenantId: number }) => Promise<{
-    temperature?: number | null;
-    maxOutputTokens?: number | null;
-    compactAfterMessages?: number | null;
-  } | null | undefined>;
-  /**
-   * Включить hybrid retrieval (vector + BM25 RRF). Default true.
-   * False = pure vector — быстрее, но хуже на keyword-questions.
-   */
-  hybridSearch?: boolean;
-  /**
-   * Query rewriting перед retrieval (LLM-вызов до search). Default false (#515):
-   * замер на двух режимах корпуса не показал вклада (hybrid retrieval справляется
-   * с follow-up'ами сам), а шаг стоит +1 LLM-вызов на каждом ходе с историей.
-   * Включать точечно, если у тенанта подтверждена польза на его KB.
-   */
-  rewriteQueryBeforeRetrieval?: boolean;
-  /**
-   * Reflection-guard после генерации (LLM фактчекит chunks vs answer).
-   * Default: только для exchange_v1 — дополнительная LLM-стоимость и latency.
-   */
-  reflect?: boolean;
-  /** topK chunks для контекста. Default 5. */
-  topK?: number;
-  maxOutputTokens?: number;
-  /**
-   * Если true — когда RAG не находит контекста (NO_CONTEXT_MARKER) бот всё
-   * равно отвечает через `generateSoftFallback` (честное «уточню и вернусь»
-   * без выдумывания конкретики). Вопрос при этом логируется в kb_suggestions.
-   *
-   * Если false (по умолчанию) — бот молчит (возвращает null), как раньше.
-   */
-  softFallback?: boolean;
-  /**
-   * Conversation compaction: если кол-во сообщений в диалоге достигает порога —
-   * pipeline генерирует резюме и сохраняет его в conversations.summary_json.
-   * Резюме передаётся в answerWithRag как conversationSummary, сокращая effective
-   * history window и предотвращая overflow LLM context.
-   *
-   * Default: 20. Отключить: 0 или Infinity.
-   */
-  compactAfterMessages?: number;
-  /**
-   * Optional post-generation telemetry sink for agentic tool calls. Called only
-   * after the LLM/tool loop finishes, so it never wraps an LLM call in a DB tx.
-   */
-  recordToolCalls?: (input: {
-    tenantId: number;
-    conversationId: number;
-    contactId: number;
-    userMessageText: string;
-    assistantText: string;
-    telemetry: AnswerTelemetry;
+	/**
+	 * Загрузить контекст хода. Вызывается один раз на каждый входящий message.
+	 * Сборка (DB-запросы, кеши, метрики-обёртки) — на стороне приложения;
+	 * независимые источники стоит грузить параллельно (Promise.all).
+	 */
+	loadTurnContext: (
+		input: RagTurnInput,
+	) => Promise<RagTurnContext> | RagTurnContext;
+	/** Лимит history сообщений (default 12 — answerWithRag сам ужмёт через summary). */
+	historyLimit?: number;
+	/**
+	 * Per-tenant override окна истории (заменяет historyLimit). Резолвится из
+	 * tenants.reply_history_limit; NULL/ошибка → historyLimit.
+	 */
+	resolveHistoryLimit?: (input: {
+		tenantId: number;
+	}) => Promise<number | null | undefined> | number | null | undefined;
+	/**
+	 * #623 — per-tenant override параметров генерации из tenants.bot_settings_json
+	 * (temperature / maxOutputTokens / compactAfterMessages). null-поля → дефолты.
+	 */
+	resolveGenerationParams?: (input: { tenantId: number }) => Promise<
+		| {
+				temperature?: number | null;
+				maxOutputTokens?: number | null;
+				compactAfterMessages?: number | null;
+		  }
+		| null
+		| undefined
+	>;
+	/**
+	 * Включить hybrid retrieval (vector + BM25 RRF). Default true.
+	 * False = pure vector — быстрее, но хуже на keyword-questions.
+	 */
+	hybridSearch?: boolean;
+	/**
+	 * Query rewriting перед retrieval (LLM-вызов до search). Default false (#515):
+	 * замер на двух режимах корпуса не показал вклада (hybrid retrieval справляется
+	 * с follow-up'ами сам), а шаг стоит +1 LLM-вызов на каждом ходе с историей.
+	 * Включать точечно, если у тенанта подтверждена польза на его KB.
+	 */
+	rewriteQueryBeforeRetrieval?: boolean;
+	/**
+	 * Reflection-guard после генерации (LLM фактчекит chunks vs answer).
+	 * Default: только для exchange_v1 — дополнительная LLM-стоимость и latency.
+	 */
+	reflect?: boolean;
+	/** topK chunks для контекста. Default 5. */
+	topK?: number;
+	maxOutputTokens?: number;
+	/**
+	 * Если true — когда RAG не находит контекста (NO_CONTEXT_MARKER) бот всё
+	 * равно отвечает через `generateSoftFallback` (честное «уточню и вернусь»
+	 * без выдумывания конкретики). Вопрос при этом логируется в kb_suggestions.
+	 *
+	 * Если false (по умолчанию) — бот молчит (возвращает null), как раньше.
+	 */
+	softFallback?: boolean;
+	/**
+	 * Conversation compaction: если кол-во сообщений в диалоге достигает порога —
+	 * pipeline генерирует резюме и сохраняет его в conversations.summary_json.
+	 * Резюме передаётся в answerWithRag как conversationSummary, сокращая effective
+	 * history window и предотвращая overflow LLM context.
+	 *
+	 * Default: 20. Отключить: 0 или Infinity.
+	 */
+	compactAfterMessages?: number;
+	/**
+	 * Optional post-generation telemetry sink for agentic tool calls. Called only
+	 * after the LLM/tool loop finishes, so it never wraps an LLM call in a DB tx.
+	 */
+	recordToolCalls?: (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+		userMessageText: string;
+		assistantText: string;
+		telemetry: AnswerTelemetry;
 		guardFindings?: readonly ExchangeResponseGuardFinding[];
-  }) => Promise<void> | void;
+	}) => Promise<void> | void;
 }
 
 /**
@@ -228,19 +232,19 @@ export interface RagReplyStrategyOpts {
  *   return parseStyleConfig(styleRow.configJson);
  */
 export function parseStyleConfig(configJson: string): Style | null {
-  try {
-    const raw = JSON.parse(configJson);
-    return StyleSchema.parse(raw);
-  } catch {
-    return null;
-  }
+	try {
+		const raw = JSON.parse(configJson);
+		return StyleSchema.parse(raw);
+	} catch {
+		return null;
+	}
 }
 
 export type ResolvedStyleAssignment = Style & {
-  styleId?: number | null;
-  experimentId?: number | null;
-  experimentSlug?: string | null;
-  variantSlug?: string | null;
+	styleId?: number | null;
+	experimentId?: number | null;
+	experimentSlug?: string | null;
+	variantSlug?: string | null;
 };
 
 type ExchangeOrderArgs = {
@@ -334,7 +338,9 @@ function parseExchangeSourceArgs(text: string): ExchangeOrderArgs | null {
 		// границе 24 символов слово (напр. «…Какой» → «к») ложно давало ×1000:
 		// «500 USDT … Какой курс» парсилось как 500000.
 		const afterTrimmed = after.trimStart();
-		const multiplier = /^(?:тыс|к(?![а-яёa-z])|k\b)/iu.test(afterTrimmed) ? 1000 : 1;
+		const multiplier = /^(?:тыс|к(?![а-яёa-z])|k\b)/iu.test(afterTrimmed)
+			? 1000
+			: 1;
 		const window = `${before}${raw}${after}`;
 		if (!exchangeAssetMentionRe(asset).test(window)) continue;
 		const network = /trc[\s-]?20|tron/iu.test(text)
@@ -395,7 +401,8 @@ function numberLike(value: unknown): number | null {
 function forcedExchangeQuoteText(result: unknown): string | null {
 	if (!result || typeof result !== "object") return null;
 	const row = result as Record<string, unknown>;
-	if (typeof row.error === "string" && row.error.trim()) return row.error.trim();
+	if (typeof row.error === "string" && row.error.trim())
+		return row.error.trim();
 	const amountToThb = numberLike(row.amountToThb);
 	if (amountToThb === null) return null;
 	const directionQuote =
@@ -409,14 +416,30 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 const EXCHANGE_PAYOUT_KNOWN_RE =
 	/банкомат|atm|офис|наличны|курьер|тайск|bangkok|kbank|scb|зачисл/iu;
 const EXCHANGE_USDT_RE = /usdt|юсдт/iu;
+// Клиент уже упомянул метод оплаты (СБП/QR или карта/перевод).
+// Проверяется по репликам клиента, не по тексту бота — guard здесь не применяется.
+const EXCHANGE_PAYMENT_METHOD_KNOWN_RE =
+	/\bqr\b|сбп|sbp|через\s+(?:банк-?)?приложен|мобильн.*банк|картой|на\s+карт|по\s+карт|\bcard\b|\bперевод\w*\s+(?:со\s+)?(?:счёт|карт)/iu;
+
+function parsePaymentMethod(text: string): string | null {
+	if (/\bqr\b|сбп|sbp|через\s+(?:банк-?)?приложен|мобильн.*банк/iu.test(text))
+		return "sbp_qr";
+	if (
+		/картой|на\s+карт|по\s+карт|\bcard\b|\bперевод\w*\s+(?:со\s+)?(?:счёт|карт)/iu.test(
+			text,
+		)
+	)
+		return "card_transfer";
+	return null;
+}
 
 /**
  * Вопрос о недостающих параметрах ПОСЛЕ котировки: вести к заявке, а не замирать
  * на «Получите X». Спрашиваем: (1) сеть USDT, если клиент не указал — иначе
  * кошелёк уйдёт в дефолтную TRC20, которая может быть не та; (2) способ выдачи.
- * Способ ОПЛАТЫ тут не спрашиваем намеренно: слова «СБП/перевод/карта/оплата»
- * (и «card») триггерят requisites-guard (текст с числом котировки → unbacked
- * requisites → фоллбэк), способ оплаты собирается на этапе реквизитов.
+ * Способ ОПЛАТЫ (СБП/карта) выносим в отдельный шаг (maybeForceExchangePaymentMethodQuestion)
+ * — слова «сбп/qr/карта/перевод» + число котировки в одном тексте триггерят
+ * requisites-guard → фоллбэк. В отдельном ходу числа нет → guard пропускает.
  * networkKnown — клиент уже назвал сеть. Сканируем только реплики клиента.
  */
 function exchangeMissingFieldsQuestion(
@@ -470,22 +493,76 @@ async function maybeForceExchangeQuoteReply(input: {
 }
 
 function hasRecentExchangeQuote(history: MessageRow[]): boolean {
-	return history.slice(-8).some(
-		(item) =>
-			item.role === "assistant" &&
-			/\d/.test(item.text) &&
-			ANY_QUOTE_CURRENCY_MENTION_RE.test(item.text),
-	);
+	return history
+		.slice(-8)
+		.some(
+			(item) =>
+				item.role === "assistant" &&
+				/\d/.test(item.text) &&
+				ANY_QUOTE_CURRENCY_MENTION_RE.test(item.text),
+		);
+}
+
+/**
+ * Запрос метода оплаты (СБП/карта) — отдельный ход после ответа на способ выдачи.
+ * Отдельный ход важен: числа котировки нет → guard пропускает слова qr/сбп/карта.
+ * Стреляет когда: актив=RUB, недавняя котировка, способ выдачи известен,
+ * способ оплаты ещё НЕ назван, текущее сообщение НЕ подтверждение.
+ */
+function maybeForceExchangePaymentMethodQuestion(input: {
+	userMessageText: string;
+	history: MessageRow[];
+}): ExchangeForcedReply | null {
+	// Несерьёзные / длинные сообщения оставляем LLM
+	if (input.userMessageText.trim().length > 300) return null;
+	if (!hasRecentExchangeQuote(input.history)) return null;
+	// Только для RUB — у крипто-ассетов метод оплаты всегда crypto_transfer.
+	// Сканируем историю напрямую (не через latestExchangeQuoteArgs —
+	// текущее сообщение типа «в банкомате» не триггерит quote-followup-RE).
+	const userTextsHistory = [
+		input.userMessageText,
+		...input.history.filter((m) => m.role === "user").map((m) => m.text),
+	];
+	const recentAsset = userTextsHistory
+		.map((t) => parseExchangeQuoteArgs(t)?.asset)
+		.find(Boolean);
+	if (recentAsset !== "RUB") return null;
+	const combinedUserText = [
+		input.userMessageText,
+		...input.history.filter((m) => m.role === "user").map((m) => m.text),
+	].join("\n");
+	if (!EXCHANGE_PAYOUT_KNOWN_RE.test(combinedUserText)) return null;
+	if (EXCHANGE_PAYMENT_METHOD_KNOWN_RE.test(combinedUserText)) return null;
+	if (EXCHANGE_ORDER_CONFIRMATION_RE.test(input.userMessageText)) return null;
+	// Не повторяем, если уже спрашивали в последних 4 сообщениях
+	const alreadyAsked = input.history
+		.slice(-4)
+		.some(
+			(m) => m.role === "assistant" && m.text.includes("банк-приложении или"),
+		);
+	if (alreadyAsked) return null;
+	return {
+		text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
+		toolCalls: [],
+	};
 }
 
 function latestExchangeOrderArgs(
 	history: MessageRow[],
 	userMessageText: string,
 ): ExchangeOrderArgs | null {
-	const joinedText = [userMessageText, ...history.map((m) => m.text)].join("\n");
+	const joinedText = [userMessageText, ...history.map((m) => m.text)].join(
+		"\n",
+	);
 	const fallbackPayoutMethod = /банкомат|atm/iu.test(joinedText)
 		? "atm"
 		: undefined;
+	const userTexts = [
+		userMessageText,
+		...history.filter((m) => m.role === "user").map((m) => m.text),
+	];
+	const detectedPaymentMethod =
+		userTexts.map(parsePaymentMethod).find(Boolean) ?? null;
 	for (const item of [...history].reverse()) {
 		const parsed = parseExchangeSourceArgs(item.text);
 		if (!parsed) continue;
@@ -494,6 +571,9 @@ function latestExchangeOrderArgs(
 			...(parsed.payoutMethod || !fallbackPayoutMethod
 				? {}
 				: { payoutMethod: fallbackPayoutMethod }),
+			...(detectedPaymentMethod
+				? { paymentMethod: detectedPaymentMethod }
+				: {}),
 		};
 	}
 	return null;
@@ -580,7 +660,8 @@ async function maybeForceExchangeOrderReply(input: {
 					cycle: 1,
 				});
 				const reqText = forcedExchangeRequisitesText(reqResult);
-				if (reqText) return { text: `Заявка создана.\n\n${reqText}`, toolCalls };
+				if (reqText)
+					return { text: `Заявка создана.\n\n${reqText}`, toolCalls };
 			} catch (err) {
 				console.warn("[rag-reply] forced requisites fetch failed:", err);
 			}
@@ -590,341 +671,350 @@ async function maybeForceExchangeOrderReply(input: {
 }
 
 function hasAssignmentMetadata(style: ResolvedStyleAssignment | null): boolean {
-  return style?.styleId !== undefined || style?.experimentId !== undefined;
+	return style?.styleId !== undefined || style?.experimentId !== undefined;
 }
 
 function exchangeReplyOutput(input: {
-  channelId: number;
-  externalUserId: string;
-  text: string;
-  operatorHandoff: ReturnType<typeof buildExchangeOperatorHandoff>;
-  customerNoticeEnabled: boolean;
+	channelId: number;
+	externalUserId: string;
+	text: string;
+	operatorHandoff: ReturnType<typeof buildExchangeOperatorHandoff>;
+	customerNoticeEnabled: boolean;
 }): OutboundEnvelope[] | ReplyStrategyOutput {
-  if (!input.operatorHandoff) {
-    return [
-      {
-        channelId: String(input.channelId),
-        externalUserId: input.externalUserId,
-        parts: [{ kind: "text", text: input.text }],
-      },
-    ];
-  }
-  const envelopes = input.customerNoticeEnabled
-    ? [
-        {
-          channelId: String(input.channelId),
-          externalUserId: input.externalUserId,
-          parts: [{ kind: "text" as const, text: input.text }],
-        },
-      ]
-    : [];
-  return {
-    envelopes,
-    operatorHandoffs: [input.operatorHandoff],
-    autoTakeover: true,
-    customerNoticeSent: envelopes.length > 0,
-  };
+	if (!input.operatorHandoff) {
+		return [
+			{
+				channelId: String(input.channelId),
+				externalUserId: input.externalUserId,
+				parts: [{ kind: "text", text: input.text }],
+			},
+		];
+	}
+	const envelopes = input.customerNoticeEnabled
+		? [
+				{
+					channelId: String(input.channelId),
+					externalUserId: input.externalUserId,
+					parts: [{ kind: "text" as const, text: input.text }],
+				},
+			]
+		: [];
+	return {
+		envelopes,
+		operatorHandoffs: [input.operatorHandoff],
+		autoTakeover: true,
+		customerNoticeSent: envelopes.length > 0,
+	};
 }
 
 export class RagReplyStrategy implements ReplyStrategy {
-  constructor(private readonly opts: RagReplyStrategyOpts) {}
+	constructor(private readonly opts: RagReplyStrategyOpts) {}
 
-  async generate(input: {
-    tenant: { tenantId: number };
-    channel: { channelId: number };
-    conversationId: number;
-    contactId: number;
-    inbound: { externalUserId: string };
-    userMessageText: string;
-    userMessageId?: number;
-  }): Promise<ReplyStrategyResult> {
-    if (input.userMessageText.length === 0) return null;
+	async generate(input: {
+		tenant: { tenantId: number };
+		channel: { channelId: number };
+		conversationId: number;
+		contactId: number;
+		inbound: { externalUserId: string };
+		userMessageText: string;
+		userMessageId?: number;
+	}): Promise<ReplyStrategyResult> {
+		if (input.userMessageText.length === 0) return null;
 
-    const tenantId = input.tenant.tenantId;
-    const ctx = await this.opts.loadTurnContext({
-      tenantId,
-      conversationId: input.conversationId,
-      contactId: input.contactId,
-    });
+		const tenantId = input.tenant.tenantId;
+		const ctx = await this.opts.loadTurnContext({
+			tenantId,
+			conversationId: input.conversationId,
+			contactId: input.contactId,
+		});
 
-    if (ctx.isSupport) return null;
+		if (ctx.isSupport) return null;
 
-    const { template, chat, messages: messagesRepo } = ctx;
-    let recentWindow = this.opts.historyLimit ?? 12;
-    if (this.opts.resolveHistoryLimit) {
-      try {
-        const v = await this.opts.resolveHistoryLimit({ tenantId });
-        if (typeof v === "number" && Number.isFinite(v) && v >= 2) recentWindow = v;
-      } catch (err) {
-        console.warn("[rag-reply] failed to resolve history limit:", err);
-      }
-    }
-    // #623 — per-tenant override параметров генерации (rag отдаёт numPredict +
-    // порог сжатия; temperature внутри answerWithRag/style, не трогаем).
-    let genMaxTokens = this.opts.maxOutputTokens ?? 600;
-    let genCompactAfter = this.opts.compactAfterMessages ?? 20;
-    if (this.opts.resolveGenerationParams) {
-      try {
-        const g = await this.opts.resolveGenerationParams({ tenantId });
-        if (g) {
-          if (typeof g.maxOutputTokens === "number" && g.maxOutputTokens > 0)
-            genMaxTokens = g.maxOutputTokens;
-          if (typeof g.compactAfterMessages === "number" && g.compactAfterMessages > 0)
-            genCompactAfter = g.compactAfterMessages;
-        }
-      } catch (err) {
-        console.warn("[rag-reply] failed to resolve generation params:", err);
-      }
-    }
-    const { history: historyWithoutCurrent, conversationSummary } =
-      await loadRollingConversationContext({
-        conversationId: input.conversationId,
-        messages: messagesRepo,
-        conversations: ctx.conversations ?? null,
-        chat,
-        ...(input.userMessageId !== undefined
-          ? { currentMessageId: input.userMessageId }
-          : { currentMessageText: input.userMessageText }),
-        options: {
-          recentWindow,
-          summarizeAfterMessages: genCompactAfter,
-        },
-        onWarn: (_message, err) => {
-          console.warn("[rag-reply] conversation summary failed:", err);
-        },
-      });
-    const history = messageRowsToChatHistory(historyWithoutCurrent);
+		const { template, chat, messages: messagesRepo } = ctx;
+		let recentWindow = this.opts.historyLimit ?? 12;
+		if (this.opts.resolveHistoryLimit) {
+			try {
+				const v = await this.opts.resolveHistoryLimit({ tenantId });
+				if (typeof v === "number" && Number.isFinite(v) && v >= 2)
+					recentWindow = v;
+			} catch (err) {
+				console.warn("[rag-reply] failed to resolve history limit:", err);
+			}
+		}
+		// #623 — per-tenant override параметров генерации (rag отдаёт numPredict +
+		// порог сжатия; temperature внутри answerWithRag/style, не трогаем).
+		let genMaxTokens = this.opts.maxOutputTokens ?? 600;
+		let genCompactAfter = this.opts.compactAfterMessages ?? 20;
+		if (this.opts.resolveGenerationParams) {
+			try {
+				const g = await this.opts.resolveGenerationParams({ tenantId });
+				if (g) {
+					if (typeof g.maxOutputTokens === "number" && g.maxOutputTokens > 0)
+						genMaxTokens = g.maxOutputTokens;
+					if (
+						typeof g.compactAfterMessages === "number" &&
+						g.compactAfterMessages > 0
+					)
+						genCompactAfter = g.compactAfterMessages;
+				}
+			} catch (err) {
+				console.warn("[rag-reply] failed to resolve generation params:", err);
+			}
+		}
+		const { history: historyWithoutCurrent, conversationSummary } =
+			await loadRollingConversationContext({
+				conversationId: input.conversationId,
+				messages: messagesRepo,
+				conversations: ctx.conversations ?? null,
+				chat,
+				...(input.userMessageId !== undefined
+					? { currentMessageId: input.userMessageId }
+					: { currentMessageText: input.userMessageText }),
+				options: {
+					recentWindow,
+					summarizeAfterMessages: genCompactAfter,
+				},
+				onWarn: (_message, err) => {
+					console.warn("[rag-reply] conversation summary failed:", err);
+				},
+			});
+		const history = messageRowsToChatHistory(historyWithoutCurrent);
 
-    const kbScope = ctx.kbScope ?? null;
-    const kb = kbScope ? new ScopedKbStore(ctx.kb, kbScope) : ctx.kb;
-    const style = ctx.style ?? null;
-    if (style && hasAssignmentMetadata(style)) {
-      const convsRepo = ctx.conversations;
-      if (convsRepo) {
-        await convsRepo
-          .setAssignment(input.conversationId, {
-            ...(style.styleId !== undefined ? { styleId: style.styleId } : {}),
+		const kbScope = ctx.kbScope ?? null;
+		const kb = kbScope ? new ScopedKbStore(ctx.kb, kbScope) : ctx.kb;
+		const style = ctx.style ?? null;
+		if (style && hasAssignmentMetadata(style)) {
+			const convsRepo = ctx.conversations;
+			if (convsRepo) {
+				await convsRepo
+					.setAssignment(input.conversationId, {
+						...(style.styleId !== undefined ? { styleId: style.styleId } : {}),
 						...(style.experimentId !== undefined
 							? { experimentId: style.experimentId }
 							: {}),
-          })
+					})
 					.catch((err) =>
 						console.warn("[rag-reply] failed to save style assignment:", err),
 					);
-      }
-    }
+			}
+		}
 
-    const isExchange = template?.slug === "exchange_v1";
+		const isExchange = template?.slug === "exchange_v1";
 
-    const skills = ctx.skills ?? [];
-    const directorHooks = ctx.directorHooks ?? [];
-    const tools = ctx.tools ?? [];
-    const reranker = ctx.reranker ?? null;
-    const stageGuidance = ctx.stageGuidance ?? null;
-    const requestContext = ctx.requestContext ?? null;
-    const serviceOrderContext = ctx.serviceOrderContext ?? null;
-    const awaitingOperator = ctx.awaitingOperator ?? false;
-			const exchangePolicyState = isExchange
-				? (ctx.exchangePolicyState ?? null)
-				: null;
+		const skills = ctx.skills ?? [];
+		const directorHooks = ctx.directorHooks ?? [];
+		const tools = ctx.tools ?? [];
+		const reranker = ctx.reranker ?? null;
+		const stageGuidance = ctx.stageGuidance ?? null;
+		const requestContext = ctx.requestContext ?? null;
+		const serviceOrderContext = ctx.serviceOrderContext ?? null;
+		const awaitingOperator = ctx.awaitingOperator ?? false;
+		const exchangePolicyState = isExchange
+			? (ctx.exchangePolicyState ?? null)
+			: null;
 
-				const forcedExchangeReply = isExchange
-					? ((await maybeForceExchangeOrderReply({
-							userMessageText: input.userMessageText,
+		const forcedExchangeReply = isExchange
+			? ((await maybeForceExchangeOrderReply({
+					userMessageText: input.userMessageText,
+					history: historyWithoutCurrent,
+					state: exchangePolicyState,
+					tools,
+				})) ??
+				(await maybeForceExchangeQuoteReply({
+					userMessageText: input.userMessageText,
+					history: historyWithoutCurrent,
+					tools,
+				})) ??
+				maybeForceExchangePaymentMethodQuestion({
+					userMessageText: input.userMessageText,
+					history: historyWithoutCurrent,
+				}))
+			: null;
+		if (forcedExchangeReply) {
+			const telemetry: AnswerTelemetry = {
+				path: "ok",
+				...buildToolTelemetry(forcedExchangeReply.toolCalls),
+			};
+			const guarded =
+				(ctx.exchangeResponseGuardEnabled ?? true)
+					? guardExchangePolicy({
+							text: forcedExchangeReply.text,
+							telemetry,
 							history: historyWithoutCurrent,
 							state: exchangePolicyState,
-							tools,
-						})) ??
-						(await maybeForceExchangeQuoteReply({
-							userMessageText: input.userMessageText,
-							history: historyWithoutCurrent,
-							tools,
-						})))
-					: null;
-				if (forcedExchangeReply) {
-						const telemetry: AnswerTelemetry = {
-							path: "ok",
-							...buildToolTelemetry(forcedExchangeReply.toolCalls),
-						};
-					const guarded = ctx.exchangeResponseGuardEnabled ?? true
-						? guardExchangePolicy({
-								text: forcedExchangeReply.text,
-								telemetry,
-								history: historyWithoutCurrent,
-								state: exchangePolicyState,
-							})
+						})
 					: {
-								ok: true,
-								action: "pass" as const,
-								text: forcedExchangeReply.text,
-								reasons: [],
-								requiredFixes: [],
-							};
-				const guardFinding =
-					ctx.exchangeResponseGuardEnabled ?? true
-						? exchangeGuardFindingFromResult(guarded)
-						: null;
-				if (this.opts.recordToolCalls) {
-					try {
-						await this.opts.recordToolCalls({
-							tenantId,
-							conversationId: input.conversationId,
-							contactId: input.contactId,
-							userMessageText: input.userMessageText,
-							assistantText: guarded.text,
-							telemetry,
-							...(guardFinding ? { guardFindings: [guardFinding] } : {}),
-						});
-						} catch (err) {
-							console.warn(
-								"[rag-reply] failed to record forced exchange tool call:",
-								err,
-							);
-						}
-				}
-				const operatorHandoff =
-					buildExchangeOperatorHandoff({
-						text: guarded.text,
+							ok: true,
+							action: "pass" as const,
+							text: forcedExchangeReply.text,
+							reasons: [],
+							requiredFixes: [],
+						};
+			const guardFinding =
+				(ctx.exchangeResponseGuardEnabled ?? true)
+					? exchangeGuardFindingFromResult(guarded)
+					: null;
+			if (this.opts.recordToolCalls) {
+				try {
+					await this.opts.recordToolCalls({
+						tenantId,
+						conversationId: input.conversationId,
+						contactId: input.contactId,
+						userMessageText: input.userMessageText,
+						assistantText: guarded.text,
 						telemetry,
-						state: exchangePolicyState,
-					}) ??
-					(guarded.action === "escalate" || guarded.action === "block"
-						? buildExchangeGenericOperatorHandoff({
-								state: exchangePolicyState,
-								context: guarded.reason ?? null,
-							})
-						: null);
-				return exchangeReplyOutput({
-					channelId: input.channel.channelId,
-					externalUserId: input.inbound.externalUserId,
-					text: guarded.text,
-					operatorHandoff,
-					customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
-				});
+						...(guardFinding ? { guardFindings: [guardFinding] } : {}),
+					});
+				} catch (err) {
+					console.warn(
+						"[rag-reply] failed to record forced exchange tool call:",
+						err,
+					);
+				}
 			}
+			const operatorHandoff =
+				buildExchangeOperatorHandoff({
+					text: guarded.text,
+					telemetry,
+					state: exchangePolicyState,
+				}) ??
+				(guarded.action === "escalate" || guarded.action === "block"
+					? buildExchangeGenericOperatorHandoff({
+							state: exchangePolicyState,
+							context: guarded.reason ?? null,
+						})
+					: null);
+			return exchangeReplyOutput({
+				channelId: input.channel.channelId,
+				externalUserId: input.inbound.externalUserId,
+				text: guarded.text,
+				operatorHandoff,
+				customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
+			});
+		}
 
-	    const combinedRequestContext =
-	      [requestContext, serviceOrderContext]
-        .map((value) => value?.trim())
-        .filter(Boolean)
-        .join("\n\n") || null;
-    const serviceOrderGrounding = serviceOrderContext?.trim() || null;
+		const combinedRequestContext =
+			[requestContext, serviceOrderContext]
+				.map((value) => value?.trim())
+				.filter(Boolean)
+				.join("\n\n") || null;
+		const serviceOrderGrounding = serviceOrderContext?.trim() || null;
 
-    // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
-    // наш llm-router'овский ChatClient compatible (rag's ChatMessage.content
-    // допускает null — наш string ужe; complete(messages, opts?) совпадает).
-    // Если TS жалуется на nominal-mismatch — даём structural cast.
-    const result = await answerWithRag({
-      question: input.userMessageText,
-      kb,
-      embedder: ctx.embedder,
-      chat: chat as unknown as Parameters<typeof answerWithRag>[0]["chat"],
+		// answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
+		// наш llm-router'овский ChatClient compatible (rag's ChatMessage.content
+		// допускает null — наш string ужe; complete(messages, opts?) совпадает).
+		// Если TS жалуется на nominal-mismatch — даём structural cast.
+		const result = await answerWithRag({
+			question: input.userMessageText,
+			kb,
+			embedder: ctx.embedder,
+			chat: chat as unknown as Parameters<typeof answerWithRag>[0]["chat"],
 			history: history as unknown as Parameters<
 				typeof answerWithRag
 			>[0]["history"],
-      topK: this.opts.topK ?? 5,
-      hybridSearch: this.opts.hybridSearch ?? true,
+			topK: this.opts.topK ?? 5,
+			hybridSearch: this.opts.hybridSearch ?? true,
 			rewriteQueryBeforeRetrieval:
 				this.opts.rewriteQueryBeforeRetrieval ?? false,
-      reflect: this.opts.reflect ?? isExchange,
-      numPredict: genMaxTokens,
-      // Style: если контекст содержит Style — answerWithRag использует его
-      // persona, sales framework, hooks, skills для построения system prompt.
-      // При null — rag fallback'нет на DEFAULT_PERSONA и базовый промпт.
-      ...(style ? { style } : {}),
-      ...(skills.length > 0 ? { skills } : {}),
-      ...(directorHooks.length > 0 ? { directorHooks } : {}),
-      ...(tools.length > 0 ? { tools } : {}),
-      ...(reranker ? { reranker } : {}),
-      ...(conversationSummary ? { conversationSummary } : {}),
-      ...(stageGuidance ? { stageOverride: stageGuidance } : {}),
+			reflect: this.opts.reflect ?? isExchange,
+			numPredict: genMaxTokens,
+			// Style: если контекст содержит Style — answerWithRag использует его
+			// persona, sales framework, hooks, skills для построения system prompt.
+			// При null — rag fallback'нет на DEFAULT_PERSONA и базовый промпт.
+			...(style ? { style } : {}),
+			...(skills.length > 0 ? { skills } : {}),
+			...(directorHooks.length > 0 ? { directorHooks } : {}),
+			...(tools.length > 0 ? { tools } : {}),
+			...(reranker ? { reranker } : {}),
+			...(conversationSummary ? { conversationSummary } : {}),
+			...(stageGuidance ? { stageOverride: stageGuidance } : {}),
 			...(combinedRequestContext
 				? { requestContext: combinedRequestContext }
 				: {}),
-      ...(serviceOrderGrounding
-        ? { vacanciesBlock: serviceOrderGrounding, vacancyGuard: false }
-        : {}),
-      ...(awaitingOperator ? { awaitingOperator } : {}),
-    });
+			...(serviceOrderGrounding
+				? { vacanciesBlock: serviceOrderGrounding, vacancyGuard: false }
+				: {}),
+			...(awaitingOperator ? { awaitingOperator } : {}),
+		});
 
-    // ── Soft fallback when RAG has no context ────────────────────────────────
+		// ── Soft fallback when RAG has no context ────────────────────────────────
 		if (
 			result.text === NO_CONTEXT_MARKER ||
 			!result.text ||
 			result.text.trim().length === 0
 		) {
-      // Fire-and-forget: log unanswered question for the KB suggestions queue.
-      if (ctx.suggestions) {
-        const nowEpoch = Math.floor(Date.now() / 1000);
-        ctx.suggestions
-          .log({
-            questionText: input.userMessageText,
-            sourceConversationId: input.conversationId,
-            ...(kbScope ? { scope: kbScope } : {}),
-            nowEpoch,
-          })
-          .catch((err) => {
-            console.warn("[rag-reply] failed to log kb_suggestion:", err);
-          });
-      }
+			// Fire-and-forget: log unanswered question for the KB suggestions queue.
+			if (ctx.suggestions) {
+				const nowEpoch = Math.floor(Date.now() / 1000);
+				ctx.suggestions
+					.log({
+						questionText: input.userMessageText,
+						sourceConversationId: input.conversationId,
+						...(kbScope ? { scope: kbScope } : {}),
+						nowEpoch,
+					})
+					.catch((err) => {
+						console.warn("[rag-reply] failed to log kb_suggestion:", err);
+					});
+			}
 
-      if (isExchange) {
-        console.warn(
-          `[exchange-reflect-guard] tenant=${tenantId} conversation=${input.conversationId} path=${result.telemetry.path}`,
-        );
-        return [
-          {
-            channelId: String(input.channel.channelId),
-            externalUserId: input.inbound.externalUserId,
-            parts: [{ kind: "text", text: EXCHANGE_SAFE_FALLBACK }],
-          },
-        ];
-      }
+			if (isExchange) {
+				console.warn(
+					`[exchange-reflect-guard] tenant=${tenantId} conversation=${input.conversationId} path=${result.telemetry.path}`,
+				);
+				return [
+					{
+						channelId: String(input.channel.channelId),
+						externalUserId: input.inbound.externalUserId,
+						parts: [{ kind: "text", text: EXCHANGE_SAFE_FALLBACK }],
+					},
+				];
+			}
 
-      if (!this.opts.softFallback) return null;
+			if (!this.opts.softFallback) return null;
 
-      // Derive persona: from style (if set) or DEFAULT_PERSONA.
-      const persona: Persona = style
-        ? {
-            name: style.persona.name,
-            role: style.persona.role,
+			// Derive persona: from style (if set) or DEFAULT_PERSONA.
+			const persona: Persona = style
+				? {
+						name: style.persona.name,
+						role: style.persona.role,
 						...(style.persona.company?.trim()
 							? { company: style.persona.company.trim() }
 							: {}),
-          }
-        : DEFAULT_PERSONA;
+					}
+				: DEFAULT_PERSONA;
 
-      const fallbackText = await generateSoftFallback({
-        question: input.userMessageText,
+			const fallbackText = await generateSoftFallback({
+				question: input.userMessageText,
 				chat: chat as unknown as Parameters<
 					typeof generateSoftFallback
 				>[0]["chat"],
-        persona,
+				persona,
 				history: history as unknown as Parameters<
 					typeof generateSoftFallback
 				>[0]["history"],
-      });
+			});
 
-      if (!fallbackText || fallbackText.trim().length === 0) return null;
+			if (!fallbackText || fallbackText.trim().length === 0) return null;
 
-      return [
-        {
-          channelId: String(input.channel.channelId),
-          externalUserId: input.inbound.externalUserId,
-          parts: [{ kind: "text", text: fallbackText }],
-        },
-      ];
-    }
+			return [
+				{
+					channelId: String(input.channel.channelId),
+					externalUserId: input.inbound.externalUserId,
+					parts: [{ kind: "text", text: fallbackText }],
+				},
+			];
+		}
 
 		const exchangeGuardEnabled = ctx.exchangeResponseGuardEnabled ?? true;
 		let guarded =
 			isExchange && exchangeGuardEnabled
-      ? guardExchangePolicy({
-          text: result.text,
-          telemetry: result.telemetry,
-          history: historyWithoutCurrent,
-          state: exchangePolicyState,
-        })
+				? guardExchangePolicy({
+						text: result.text,
+						telemetry: result.telemetry,
+						history: historyWithoutCurrent,
+						state: exchangePolicyState,
+					})
 				: {
 						ok: true,
 						action: "pass" as const,
@@ -953,60 +1043,61 @@ export class RagReplyStrategy implements ReplyStrategy {
 			isExchange && exchangeGuardEnabled
 				? exchangeGuardFindingFromResult(guarded)
 				: null;
-    if (!guarded.ok) {
-      console.warn(
-        `[exchange-policy-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
-      );
-    }
+		if (!guarded.ok) {
+			console.warn(
+				`[exchange-policy-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
+			);
+		}
 
-    if (
-      this.opts.recordToolCalls &&
+		if (
+			this.opts.recordToolCalls &&
 			((result.telemetry.toolCalls?.length ?? 0) > 0 ||
 				result.telemetry.toolCall ||
 				guardFinding)
-    ) {
-      try {
-        await this.opts.recordToolCalls({
-          tenantId,
-          conversationId: input.conversationId,
-          contactId: input.contactId,
-          userMessageText: input.userMessageText,
-          assistantText: guarded.text,
-          telemetry: result.telemetry,
+		) {
+			try {
+				await this.opts.recordToolCalls({
+					tenantId,
+					conversationId: input.conversationId,
+					contactId: input.contactId,
+					userMessageText: input.userMessageText,
+					assistantText: guarded.text,
+					telemetry: result.telemetry,
 					...(guardFinding ? { guardFindings: [guardFinding] } : {}),
-        });
-      } catch (err) {
-        console.warn("[rag-reply] failed to record tool calls:", err);
-      }
-    }
+				});
+			} catch (err) {
+				console.warn("[rag-reply] failed to record tool calls:", err);
+			}
+		}
 
-    const operatorHandoff = isExchange
-      ? buildExchangeOperatorHandoff({
-          text: guarded.text,
-          telemetry: result.telemetry,
-          state: exchangePolicyState,
-        }) ?? (guarded.action === "escalate" || guarded.action === "block"
-          ? buildExchangeGenericOperatorHandoff({
-              state: exchangePolicyState,
-              context: guarded.reason ?? null,
-            })
-          : null)
-      : null;
+		const operatorHandoff = isExchange
+			? (buildExchangeOperatorHandoff({
+					text: guarded.text,
+					telemetry: result.telemetry,
+					state: exchangePolicyState,
+				}) ??
+				(guarded.action === "escalate" || guarded.action === "block"
+					? buildExchangeGenericOperatorHandoff({
+							state: exchangePolicyState,
+							context: guarded.reason ?? null,
+						})
+					: null))
+			: null;
 
-    return isExchange
-      ? exchangeReplyOutput({
-          channelId: input.channel.channelId,
-          externalUserId: input.inbound.externalUserId,
-          text: guarded.text,
-          operatorHandoff,
-          customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
-        })
-      : [
-          {
-            channelId: String(input.channel.channelId),
-            externalUserId: input.inbound.externalUserId,
-            parts: [{ kind: "text", text: guarded.text }],
-          },
-        ];
-  }
+		return isExchange
+			? exchangeReplyOutput({
+					channelId: input.channel.channelId,
+					externalUserId: input.inbound.externalUserId,
+					text: guarded.text,
+					operatorHandoff,
+					customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
+				})
+			: [
+					{
+						channelId: String(input.channel.channelId),
+						externalUserId: input.inbound.externalUserId,
+						parts: [{ kind: "text", text: guarded.text }],
+					},
+				];
+	}
 }
