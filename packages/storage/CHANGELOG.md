@@ -1,3 +1,15 @@
+# [@chatman-media/storage-v1.37.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.36.0...@chatman-media/storage-v1.37.0) (2026-06-14)
+
+
+### Bug Fixes
+
+* **exchange:** сиды — payment_method в анкете вертикали, полнее payout, демо RUB ([8058be1](https://github.com/chatman-media/lead-engine/commit/8058be185d8ce7cf283889c791428f31409051e7))
+
+
+### Features
+
+* **exchange:** reply-слой берёт собранные поля из leadFieldValues (ctx) — Фаза 2a ([2a838da](https://github.com/chatman-media/lead-engine/commit/2a838da75a3f33f143718ee37a1baa2df276d18a))
+
 # [@chatman-media/storage-v1.36.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.35.0...@chatman-media/storage-v1.36.0) (2026-06-14)
 
 
