@@ -19,6 +19,14 @@ export function isReusableOrderStatus(status: string): boolean {
 }
 
 /**
+ * Можно ли оживить заявку под текущий курс (протухла/отменена). completed —
+ * нельзя (сделка закрыта), живые (OPEN_STATUSES) — не требуют оживления.
+ */
+export function isRevivableOrderStatus(status: string): boolean {
+  return status === "expired" || status === "cancelled";
+}
+
+/**
  * Освободить idempotency_key мёртвой заявки (NULL), чтобы create мог вставить
  * свежую с тем же ключом. В Postgres NULL-ключи в unique-индексе различны, так
  * что старая заявка остаётся в истории, а ключ переходит к новой.
@@ -196,6 +204,57 @@ export async function getOrderById(
       .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, orderId)))
       .limit(1);
     return row ? coerce(row) : null;
+  });
+}
+
+/** Последняя заявка беседы ЛЮБОГО статуса (для авто-оживления протухшей). */
+export async function getLatestOrderForConversation(
+  db: Db,
+  tenantId: number,
+  conversationId: number,
+): Promise<OrderRow | null> {
+  return withTenant(db, tenantId, async (tx) => {
+    const [row] = await tx
+      .select(ORDER_COLS)
+      .from(exchangeOrders)
+      .where(
+        and(
+          eq(exchangeOrders.tenantId, tenantId),
+          eq(exchangeOrders.conversationId, conversationId),
+        ),
+      )
+      .orderBy(desc(exchangeOrders.id))
+      .limit(1);
+    return row ? coerce(row) : null;
+  });
+}
+
+/**
+ * Оживить протухшую/отменённую заявку под свежий курс: возвращаем в
+ * awaiting_payment, обновляем rate/суммы/TTL, сбрасываем старые реквизиты и
+ * чек. requisitesJson/proofJson обнуляем — реквизиты будут выданы заново.
+ */
+export async function reviveExpiredOrder(
+  db: Db,
+  tenantId: number,
+  orderId: number,
+  patch: { rate: number; amountFrom: number; amountToThb: number; rateExpiresAt: number },
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  await withTenant(db, tenantId, async (tx) => {
+    await tx
+      .update(exchangeOrders)
+      .set({
+        status: "awaiting_payment",
+        rate: patch.rate,
+        amountFrom: patch.amountFrom,
+        amountToThb: patch.amountToThb,
+        rateExpiresAt: patch.rateExpiresAt,
+        requisitesJson: null,
+        proofJson: null,
+        updatedAt: now,
+      })
+      .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, orderId)));
   });
 }
 

@@ -1223,4 +1223,50 @@ describe("Exchange workflow fixtures", () => {
 		expect(req.reason).not.toBe("action_not_allowed_for_stage");
 		expect(req.kind).toBe("crypto");
 	});
+
+	// Авто-восстановление: заявка протухла, но fetch_exchange_requisites оживляет
+	// её под текущий курс и выдаёт реквизиты вместо дед-энда «Нет активной заявки».
+	it("fetch_exchange_requisites оживляет протухшую заявку", async () => {
+		if (!sql) return;
+		const { conversationId } = await makeConversation(
+			{ id: "revive-req", title: "Revive req" } as Parameters<
+				typeof makeConversation
+			>[0],
+			true,
+		);
+		const tools = toTools(conversationId);
+		const created = (await must(
+			tools.create_exchange_order,
+			"create_exchange_order",
+		).execute({
+			asset: "USDT",
+			amount: 100,
+			amountMode: "source_amount",
+			network: "trc20",
+			paymentMethod: "crypto_transfer",
+			paymentRail: "trc20",
+			payoutMethod: "office_cash",
+			payoutLocation: "office",
+		})) as Record<string, unknown>;
+		const orderId = created.orderId as number;
+
+		await updateOrder(db, tenantId, orderId, { status: "expired" });
+
+		const req = (await must(
+			tools.fetch_exchange_requisites,
+			"fetch_exchange_requisites",
+		).execute({})) as Record<string, unknown>;
+		expect(req.error).toBeUndefined();
+		expect(req.kind).toBe("crypto");
+		expect(req.orderId).toBe(orderId);
+
+		// Заявка снова активна.
+		const [row] = await withTenant(db, tenantId, (tx) =>
+			tx
+				.select({ status: exchangeOrders.status })
+				.from(exchangeOrders)
+				.where(eq(exchangeOrders.id, orderId)),
+		);
+		expect(row?.status).not.toBe("expired");
+	});
 });
