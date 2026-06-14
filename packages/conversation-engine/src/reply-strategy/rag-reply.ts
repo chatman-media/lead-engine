@@ -406,6 +406,22 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 	return `Получите ${amountToThb} ${currency.code}.`;
 }
 
+const EXCHANGE_PAYOUT_KNOWN_RE =
+	/банкомат|atm|офис|наличны|курьер|тайск|bangkok|kbank|scb|зачисл/iu;
+
+/**
+ * Вопрос о способе выдачи ПОСЛЕ котировки: бот не должен замирать на «Получите
+ * X», а вести к заявке. Спрашиваем, как клиент хочет получить деньги (если ещё
+ * не назвал). Способ ОПЛАТЫ тут не спрашиваем намеренно: слова «СБП/перевод/
+ * карта/оплата» триггерят requisites-guard (текст с числом котировки → unbacked
+ * requisites → фоллбэк), а сам способ оплаты определяется на этапе реквизитов.
+ * Сканируем только реплики клиента. null — клиент уже назвал способ выдачи.
+ */
+function exchangeMissingFieldsQuestion(userText: string): string | null {
+	if (EXCHANGE_PAYOUT_KNOWN_RE.test(userText)) return null;
+	return "Подскажите, как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на тайский банковский счёт?";
+}
+
 async function maybeForceExchangeQuoteReply(input: {
 	userMessageText: string;
 	history: MessageRow[];
@@ -421,8 +437,15 @@ async function maybeForceExchangeQuoteReply(input: {
 	const result = await quoteTool.execute(args);
 	const text = forcedExchangeQuoteText(result);
 	if (!text) return null;
+	// После котировки дособираем способ выдачи/оплаты (если клиент ещё не назвал),
+	// чтобы вести к заявке, а не замирать на «Получите X».
+	const userText = [
+		input.userMessageText,
+		...input.history.filter((m) => m.role === "user").map((m) => m.text),
+	].join("\n");
+	const ask = exchangeMissingFieldsQuestion(userText);
 	return {
-		text,
+		text: ask ? `${text}\n\n${ask}` : text,
 		toolCalls: [{ name: quoteTool.name, args, result, cycle: 0 }],
 	};
 }

@@ -504,6 +504,19 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 	return `Получите ${amountToThb} ${currency.code}.`;
 }
 
+const EXCHANGE_PAYOUT_KNOWN_RE =
+  /банкомат|atm|офис|наличны|курьер|тайск|bangkok|kbank|scb|зачисл/iu;
+
+/**
+ * Вопрос о способе выдачи ПОСЛЕ котировки (см. rag-reply): не замирать на
+ * «Получите X», а вести к заявке. Способ оплаты тут не спрашиваем — слова
+ * СБП/перевод/карта/оплата триггерят requisites-guard.
+ */
+function exchangeMissingFieldsQuestion(userText: string): string | null {
+  if (EXCHANGE_PAYOUT_KNOWN_RE.test(userText)) return null;
+  return "Подскажите, как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на тайский банковский счёт?";
+}
+
 async function maybeForceExchangeQuoteReply(
   userMessageText: string,
   tools: AnyRagTool[],
@@ -517,8 +530,9 @@ async function maybeForceExchangeQuoteReply(
   const result = await quoteTool.execute(args);
   const text = forcedExchangeQuoteText(result);
   if (!text) return null;
+  const ask = exchangeMissingFieldsQuestion(userMessageText);
   return {
-    text,
+    text: ask ? `${text}\n\n${ask}` : text,
     toolCalls: [{ name: quoteTool.name, args, result, cycle: 0 }],
   };
 	}

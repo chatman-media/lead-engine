@@ -544,7 +544,7 @@ describe("LlmReplyStrategy", () => {
 
 		    expect(result).not.toBeNull();
 		    const text = firstReplyText(result);
-		    expect(text).toBe("Получите 15750 THB.");
+		    expect(text).toContain("Получите 15750 THB.");
 	    expect(chat.lastCall).toBeNull();
     expect(recorded[0]?.toolCalls[0]).toMatchObject({
       name: "compute_exchange_quote",
@@ -776,7 +776,7 @@ describe("LlmReplyStrategy", () => {
 	    });
 
 		    expect(result).not.toBeNull();
-		    expect(firstReplyText(result)).toBe("Получите 15750 THB.");
+		    expect(firstReplyText(result)).toContain("Получите 15750 THB.");
 	    expect(chat.lastCall).toBeNull();
 		expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
 			asset: "USDT",
@@ -819,7 +819,7 @@ describe("LlmReplyStrategy", () => {
 	    });
 
 		    expect(result).not.toBeNull();
-		    expect(firstReplyText(result)).toBe("Получите 15750 THB.");
+		    expect(firstReplyText(result)).toContain("Получите 15750 THB.");
 			expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({
 			asset: "USDT",
 			amount: 500,
