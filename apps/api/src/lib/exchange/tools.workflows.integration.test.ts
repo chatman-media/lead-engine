@@ -1055,4 +1055,172 @@ describe("Exchange workflow fixtures", () => {
 		expect(req.orderId).toBe(secondId);
 		expect(req.error).toBeUndefined();
 	});
+
+	// Хвост воронки: оплата и выдача тоже двигают лида (раньше стадия зависала
+	// на requisites_sent — verify/payout не звали moveExchangeLeadToStage).
+	it("продвигает лида: payment_proof_waiting на чеке, payout_or_completion на выдаче", async () => {
+		if (!sql) return;
+		const { contactId, conversationId } = await makeConversation(
+			{ id: "pay-advance", title: "Pay advance" } as Parameters<
+				typeof makeConversation
+			>[0],
+			true,
+		);
+		const now = Math.floor(Date.now() / 1000);
+		await withTenant(db, tenantId, async (tx) => {
+			const [funnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: "exchange-pay",
+					verticalTemplateId: "exchange_v1",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const funnelId = must(funnel, "funnel").id;
+			const stages = await tx
+				.insert(stageDefinitions)
+				.values([
+					{ tenantId, funnelId, slug: "requisites_sent", displayName: "Реквизиты", position: 6 },
+					{ tenantId, funnelId, slug: "payment_proof_waiting", displayName: "Ждём оплату", position: 7 },
+					{ tenantId, funnelId, slug: "payment_verified", displayName: "Оплата подтверждена", position: 8 },
+					{ tenantId, funnelId, slug: "payout_or_completion", displayName: "Выдача", position: 9 },
+				])
+				.returning({ id: stageDefinitions.id, slug: stageDefinitions.slug });
+			const start = must(
+				stages.find((s) => s.slug === "requisites_sent"),
+				"requisites_sent stage",
+			);
+			await tx.insert(leads).values({
+				tenantId,
+				userId: contactId,
+				stageDefinitionId: start.id,
+				state: "requisites_sent",
+				createdAt: now,
+				updatedAt: now,
+			});
+		});
+
+		const leadState = () =>
+			withTenant(db, tenantId, (tx) =>
+				tx
+					.select({ state: leads.state })
+					.from(leads)
+					.where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)))
+					.limit(1),
+			);
+
+		const tools = toTools(conversationId);
+		const created = (await must(
+			tools.create_exchange_order,
+			"create_exchange_order",
+		).execute({
+			asset: "RUB",
+			amount: 10_000,
+			amountMode: "source_amount",
+			paymentMethod: "sbp_qr",
+			paymentRail: "sbp",
+			payoutMethod: "cardless_atm",
+			payoutLocation: "SCB ATM",
+		})) as Record<string, unknown>;
+		const orderId = created.orderId as number;
+		expect(typeof orderId).toBe("number");
+
+		// Чек по фиату → needsOperator → лид уходит в payment_proof_waiting.
+		const vp = (await must(
+			tools.verify_exchange_payment,
+			"verify_exchange_payment",
+		).execute({ proof: "чек", sourceBank: "Sber" })) as Record<string, unknown>;
+		expect(vp.needsOperator).toBe(true);
+		expect((await leadState())[0]?.state).toBe("payment_proof_waiting");
+
+		// Оператор подтвердил оплату → запускаем выдачу → payout_or_completion.
+		await updateOrder(db, tenantId, orderId, { status: "paid" });
+		await must(
+			tools.issue_exchange_payout,
+			"issue_exchange_payout",
+		).execute({ payoutMethod: "cardless_atm", location: "SCB ATM" });
+		expect((await leadState())[0]?.state).toBe("payout_or_completion");
+	});
+
+	// Стейдж-гейт смотрит ТЕКУЩУЮ стадию, а не снимок на начало хода: после того
+	// как create_order двинул лида в order_created, fetch_requisites не должен
+	// блокироваться, хотя инструменты построены со stageSlug=quote_calculated.
+	it("стейдж-гейт не блокирует инструмент после продвижения стадии в ходе", async () => {
+		if (!sql) return;
+		const { contactId, conversationId } = await makeConversation(
+			{ id: "gate-current", title: "Gate current" } as Parameters<
+				typeof makeConversation
+			>[0],
+			true,
+		);
+		const now = Math.floor(Date.now() / 1000);
+		await withTenant(db, tenantId, async (tx) => {
+			const [funnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: "exchange-gate",
+					verticalTemplateId: "exchange_v1",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const funnelId = must(funnel, "funnel").id;
+			const stages = await tx
+				.insert(stageDefinitions)
+				.values([
+					{ tenantId, funnelId, slug: "quote_calculated", displayName: "Курс", position: 1 },
+					{ tenantId, funnelId, slug: "order_created", displayName: "Заявка", position: 5 },
+					{ tenantId, funnelId, slug: "requisites_sent", displayName: "Реквизиты", position: 6 },
+				])
+				.returning({ id: stageDefinitions.id, slug: stageDefinitions.slug });
+			const orderStage = must(
+				stages.find((s) => s.slug === "order_created"),
+				"order_created stage",
+			);
+			await tx.insert(leads).values({
+				tenantId,
+				userId: contactId,
+				stageDefinitionId: orderStage.id,
+				state: "order_created",
+				createdAt: now,
+				updatedAt: now,
+			});
+		});
+
+		// Инструменты построены со снимком на начало хода = quote_calculated.
+		const stale = Object.fromEntries(
+			makeExchangeTools({
+				db,
+				tenantId,
+				conversationId,
+				masterKeyHex: MASTER_KEY,
+				stageSlug: "quote_calculated",
+			}).map((t) => [t.name, t]),
+		) as ToolMap;
+
+		// Заведём активную заявку, чтобы fetch вернул реквизиты, а не «нет заявки».
+		await must(stale.create_exchange_order, "create_exchange_order").execute({
+			asset: "USDT",
+			amount: 100,
+			amountMode: "source_amount",
+			network: "trc20",
+			paymentMethod: "crypto_transfer",
+			paymentRail: "trc20",
+			payoutMethod: "office_cash",
+			payoutLocation: "office",
+		});
+
+		const req = (await must(
+			stale.fetch_exchange_requisites,
+			"fetch_exchange_requisites",
+		).execute({})) as Record<string, unknown>;
+		// Гейт пропустил (текущая стадия order_created), а не вернул отказ по снимку.
+		expect(req.reason).not.toBe("action_not_allowed_for_stage");
+		expect(req.kind).toBe("crypto");
+	});
 });

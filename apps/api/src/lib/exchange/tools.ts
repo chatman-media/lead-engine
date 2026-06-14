@@ -156,6 +156,34 @@ async function moveExchangeLeadToStage(opts: {
   });
 }
 
+/**
+ * Текущий slug стадии лида беседы (на момент вызова). Нужен стейдж-гейту:
+ * инструменты двигают стадию ВНУТРИ хода (create_order → order_created), а
+ * захваченный на начало хода stageSlug устаревает и ложно блокирует
+ * зацепленные следом инструменты (fetch_requisites и т.п.). undefined — лида
+ * нет или стадия не определена (вызывающий откатится на stageSlug хода).
+ */
+async function resolveLeadStageSlug(
+  db: Db,
+  tenantId: number,
+  conversationId: number,
+): Promise<string | undefined> {
+  return withTenant(db, tenantId, async (tx) => {
+    const [row] = await tx
+      .select({ slug: stageDefinitions.slug })
+      .from(conversations)
+      .innerJoin(
+        leads,
+        and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)),
+      )
+      .leftJoin(stageDefinitions, eq(stageDefinitions.id, leads.stageDefinitionId))
+      .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
+      .orderBy(desc(leads.updatedAt), desc(leads.id))
+      .limit(1);
+    return row?.slug ?? undefined;
+  });
+}
+
 function resolveTxMaxAgeSeconds(): number {
   const raw = process.env.EXCHANGE_TX_MAX_AGE_SECONDS;
   const parsed = raw ? Number(raw) : Number.NaN;
@@ -275,16 +303,59 @@ export function guardExchangeToolForStage(toolName: string, stageSlug: string | 
   };
 }
 
-function withExchangeStagePolicy(tool: AnyRagTool, stageSlug: string | undefined): AnyRagTool {
+function withExchangeStagePolicy(
+  tool: AnyRagTool,
+  stageSlug: string | undefined,
+  getCurrentStage?: () => Promise<string | undefined>,
+): AnyRagTool {
   const block = exchangeAllowedActionsBlock(stageSlug);
   if (!block) return tool;
   return {
     ...tool,
     description: `${tool.description} ${block}`,
     execute: async (args) => {
-      const denied = guardExchangeToolForStage(tool.name, stageSlug);
+      // Гейт проверяем по ТЕКУЩЕЙ стадии (на момент вызова), а не по снимку на
+      // начало хода: иначе инструмент, зацепленный после стадия-двигающего
+      // (create_order → order_created → fetch_requisites), ложно блокируется.
+      let current = stageSlug;
+      if (getCurrentStage) {
+        try {
+          current = (await getCurrentStage()) ?? stageSlug;
+        } catch {
+          current = stageSlug;
+        }
+      }
+      const denied = guardExchangeToolForStage(tool.name, current);
       if (denied) return denied;
       return tool.execute(args);
+    },
+  };
+}
+
+/**
+ * Обёртка: после успешного выполнения инструмента двигает лида по воронке.
+ * verify_exchange_payment / issue_exchange_payout сами стадию не двигали —
+ * воронка зависала на requisites_sent. pick(result) → целевой slug или null.
+ */
+function withStageAdvance(
+  tool: AnyRagTool,
+  db: Db,
+  tenantId: number,
+  conversationId: number,
+  pick: (result: Record<string, unknown>) => string | null,
+): AnyRagTool {
+  return {
+    ...tool,
+    execute: async (args) => {
+      const result = await tool.execute(args);
+      const slug =
+        result && typeof result === "object"
+          ? pick(result as Record<string, unknown>)
+          : null;
+      if (slug) {
+        await moveExchangeLeadToStage({ db, tenantId, conversationId, stageSlug: slug });
+      }
+      return result;
     },
   };
 }
@@ -920,15 +991,26 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     },
   };
 
+  const resolveCurrentStage = () => resolveLeadStageSlug(db, tenantId, conversationId);
   return [
     computeQuoteTool,
     checkVerificationTool,
     createOrderTool,
     fetchRequisitesTool,
-    verifyPaymentTool,
-    issuePayoutTool,
+    // Оплата: ok → payment_verified; чек принят (needsOperator) → ждём оператора.
+    withStageAdvance(verifyPaymentTool, db, tenantId, conversationId, (r) =>
+      r.ok === true
+        ? "payment_verified"
+        : r.needsOperator === true && typeof r.orderId === "number"
+          ? "payment_proof_waiting"
+          : null,
+    ),
+    // Выдача запущена (статус payout проставлен) → финальная стадия.
+    withStageAdvance(issuePayoutTool, db, tenantId, conversationId, (r) =>
+      typeof r.orderId === "number" && !r.error ? "payout_or_completion" : null,
+    ),
     businessInfoTool,
-  ].map((tool) => withExchangeStagePolicy(tool, stageSlug));
+  ].map((tool) => withExchangeStagePolicy(tool, stageSlug, resolveCurrentStage));
 }
 
 /** Есть ли у тенанта хоть один активный курс (гейт для включения exchange-tools). */
