@@ -132,4 +132,8 @@ export interface TgInlineKeyboardButton {
 
 export interface TgReplyMarkup {
   inline_keyboard?: TgInlineKeyboardButton[][];
+  /** Открыть у оператора окно ответа (reply) на это сообщение. */
+  force_reply?: boolean;
+  /** Плейсхолдер в поле ввода при force_reply. */
+  input_field_placeholder?: string;
 }

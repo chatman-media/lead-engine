@@ -534,22 +534,36 @@ export class OperatorBotHandler {
 			});
 			return true;
 		}
+		if (!this.actions.db) {
+			await this.client.sendMessage({
+				chatId,
+				text: "Отправка из operator bot не настроена.",
+			});
+			return true;
+		}
 
+		// Своё сообщение оператора уходит клиенту НАПРЯМУЮ — без превью и
+		// подтверждения (быстрый ответ из чата). Канны/коды (Оплата OK, Выдача)
+		// по-прежнему через превью — там деньги/коды. dbId не задаём → отправка
+		// без claim'а черновика.
 		const now = this.actions.nowEpoch?.() ?? Math.floor(Date.now() / 1000);
-		const draftId = this.createDraftId();
-		const draft = await this.createPendingDraft({
-			draftId,
+		const draft: PendingOperatorDraft = {
+			draftId: this.createDraftId(),
 			tenantId: settings.tenantId,
 			adminId: settings.adminId,
 			chatId,
 			conversationId,
 			text: draftText,
-			metadata: { source: "telegram_reply_preview" },
+			metadata: { source: "operator_bot_reply_direct" },
 			createdAt: now,
 			expiresAt: now + PREVIEW_TTL_SEC,
+		};
+		const result = await this.sendDraftToClient(draft);
+		await this.client.sendMessage({
+			chatId,
+			parseMode: "HTML",
+			text: result.messageHtml,
 		});
-
-		await this.sendDraftPreview(chatId, draft, "Preview сообщения клиенту");
 		return true;
 	}
 
@@ -564,6 +578,28 @@ export class OperatorBotHandler {
 	): Promise<void> {
 		if (!this.client) return;
 		const chatId = String(cq.message?.chat.id ?? cq.from.id);
+
+		// «Ответить» — не канна, а приглашение написать СВОЁ: open force-reply,
+		// текст оператора уйдёт клиенту напрямую (handlePotentialDraftReply).
+		if (input.action === "operator_reply") {
+			await this.client.answerCallbackQuery({
+				callbackQueryId: cq.id,
+				text: "Напишите ответ — уйдёт клиенту",
+			});
+			await this.client.sendMessage({
+				chatId,
+				parseMode: "HTML",
+				text:
+					`✍️ <b>Ответ клиенту — диалог #${input.conversationId}</b>\n\n` +
+					"Напишите сообщение ответом на это — оно сразу уйдёт клиенту (диалог перейдёт в работу оператора).",
+				replyMarkup: {
+					force_reply: true,
+					input_field_placeholder: "Ваш ответ клиенту…",
+				},
+			});
+			return;
+		}
+
 		const quickReply = EXCHANGE_QUICK_REPLIES[input.action];
 		if (!quickReply) {
 			await this.client.answerCallbackQuery({
