@@ -894,6 +894,10 @@ export const tenants = pgTable("tenants", {
   // сообщение/правка сбрасывают таймер, затем один ответ. NULL/0 = выкл.
   // (отвечает сразу). Правится из админки. См. conversations.reply_due_at.
   replyDelaySeconds: integer("reply_delay_seconds"),
+  // Расширенные настройки поведения бота (эпик #623) одним JSON-блоком: рабочие
+  // часы, стоп-слова, авто-передача, параметры генерации, фолбэк/приветствие,
+  // авто-закрытие, STT/медиа, дробление ответа. Парсится parseBotSettings.
+  botSettingsJson: text("bot_settings_json"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [

@@ -18,6 +18,7 @@ import {
 	loadExperimentVariants,
 	type MemoryExtractor,
 	MessagesRepo,
+	parseBotSettings,
 	parseStyleConfig,
 	RagReplyStrategy,
 	type RagTurnContext,
@@ -1138,6 +1139,37 @@ function makeHistoryLimitResolver(db: Db) {
 	};
 }
 
+// #623 — per-tenant override параметров генерации (temperature / maxOutputTokens /
+// compactAfterMessages) из tenants.bot_settings_json. null-поля → дефолт стратегии.
+function makeGenerationParamsResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+	}): Promise<{
+		temperature: number | null;
+		maxOutputTokens: number | null;
+		compactAfterMessages: number | null;
+	} | null> => {
+		try {
+			return await withTenant(db, input.tenantId, async (tx) => {
+				const [row] = await tx
+					.select({ json: tenants.botSettingsJson })
+					.from(tenants)
+					.where(eq(tenants.id, input.tenantId))
+					.limit(1);
+				const s = parseBotSettings(row?.json ?? null);
+				return {
+					temperature: s.temperature,
+					maxOutputTokens: s.maxOutputTokens,
+					compactAfterMessages: s.compactAfterMessages,
+				};
+			});
+		} catch (err) {
+			console.warn("[llm-bootstrap] failed to resolve generation params:", err);
+			return null;
+		}
+	};
+}
+
 export function makeReplyStrategy(
 	ref: LoadedRef,
 	cfg: ApiConfig,
@@ -1171,6 +1203,7 @@ export function makeReplyStrategy(
 	const resolveExchangeCustomerNoticeEnabled =
 		makeExchangeCustomerNoticeResolver(db);
 	const resolveHistoryLimit = makeHistoryLimitResolver(db);
+	const resolveGenerationParams = makeGenerationParamsResolver(db);
 
 	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
 	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
@@ -1191,6 +1224,7 @@ export function makeReplyStrategy(
 					resolveExchangeResponseGuardEnabled,
 					resolveExchangeCustomerNoticeEnabled,
 					resolveHistoryLimit,
+					resolveGenerationParams,
 					recordToolCalls: makeToolCallRecorder(db, "llm_reply"),
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
@@ -1350,6 +1384,7 @@ export function makeReplyStrategy(
 	const strategy = new RagReplyStrategy({
 		loadTurnContext,
 		resolveHistoryLimit,
+		resolveGenerationParams,
 		recordToolCalls: makeToolCallRecorder(db, "rag_reply"),
 		// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
 		// генерируем мягкий ответ в персоне, а не молчим.

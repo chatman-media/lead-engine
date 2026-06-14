@@ -34,6 +34,7 @@ import { SaasQuality } from "./pages/SaasQuality.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
 import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { SaasServiceCatalog } from "./pages/SaasServiceCatalog.tsx";
+import { SaasBotSettings } from "./pages/SaasBotSettings.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSkills } from "./pages/SaasSkills.tsx";
 import { SaasStyles } from "./pages/SaasStyles.tsx";
@@ -190,6 +191,7 @@ export function App() {
                     <Route path="/channels" element={<SaasChannels />} />
                     <Route path="/billing" element={<SaasBilling />} />
                     <Route path="/settings" element={<SaasSettings />} />
+                    <Route path="/settings/bot" element={<SaasBotSettings />} />
                     <Route
                       path="/settings/channels"
                       element={<Navigate to="/channels" replace />}

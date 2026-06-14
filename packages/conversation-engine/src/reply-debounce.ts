@@ -38,6 +38,8 @@ export interface GenerateReplyForConversationDeps {
   notifications?: NotificationService | null;
   sink?: PipelineSink;
   clock?: { nowEpoch: () => number };
+  /** #628 — дробить длинный ответ на несколько сообщений (из botSettings). */
+  splitReplies?: boolean;
 }
 
 function partsFromMetaJson(metaJson: string | null, fallbackText: string): InboundPart[] {
@@ -136,6 +138,7 @@ export async function generateReplyForConversation(
     replyStrategy: deps.replyStrategy,
     notifications: deps.notifications ?? null,
     clock: deps.clock ?? systemClock,
+    ...(deps.splitReplies ? { splitReplies: true } : {}),
     ...(deps.sink ? { sink: deps.sink } : {}),
   });
   return { outboundEnqueued: gen.outboundEnqueued };

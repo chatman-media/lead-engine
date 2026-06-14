@@ -1,10 +1,12 @@
 import type { MediaRef } from "@chatman-media/channel-core";
 import type { TelegramBotAdapter, TgUpdate } from "@chatman-media/channel-telegram";
 import {
+  type BotSettings,
   ChannelIdentitiesRepo,
   ContactsRepo,
   ConversationsRepo,
   type Db,
+  DEFAULT_BOT_SETTINGS,
   generateReplyAndEnqueue,
   type ITranscriber,
   type MemoryExtractor,
@@ -31,6 +33,7 @@ import {
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import type { PhotoProcessor } from "../lib/photo-processor.ts";
 import { resolvePlan } from "../lib/plans.ts";
+import { applyBotBehaviorGates } from "../lib/bot-behavior.ts";
 import { runPostInboundAutomation } from "../lib/post-inbound-automation.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
 import type { ServiceCatalogRuntime } from "../lib/service-catalog-runtime.ts";
@@ -118,6 +121,12 @@ export function makeTelegramWebhookRoutes(opts: {
    * сразу (как раньше). Резолвер собирается в apps/api index.ts.
    */
   resolveReplyDelaySeconds?: ((tenantId: number) => Promise<number>) | null;
+  /**
+   * Расширенные настройки поведения бота (эпик #623) per-tenant из
+   * tenants.bot_settings_json: рабочие часы, стоп-слова, приветствие, медиа-ack,
+   * STT, дробление ответа. Резолвер собирается в apps/api index.ts.
+   */
+  resolveBotSettings?: ((tenantId: number) => Promise<BotSettings>) | null;
 }): Hono {
   const app = new Hono();
 
@@ -219,17 +228,25 @@ export function makeTelegramWebhookRoutes(opts: {
       externalId: entry.externalId,
     };
 
+    // Настройки поведения бота (эпик #623) — резолвим один раз на inbound.
+    const botSettings: BotSettings = opts.resolveBotSettings
+      ? await opts.resolveBotSettings(entry.tenantId).catch(() => DEFAULT_BOT_SETTINGS)
+      : DEFAULT_BOT_SETTINGS;
+
     // ── Phase 0: optional voice download + STT (NO tx) ───────────────────
     // `processInbound` ниже остаётся DB-only: media API + transcribe не держат
     // Postgres connection и не расширяют RLS transaction.
-    await transcribeInboundVoice(inbound, {
-      tenantId: entry.tenantId,
-      resolveTranscriber: opts.resolveTranscriber
-        ? () => opts.resolveTranscriber?.(entry.tenantId) ?? null
-        : null,
-      downloadVoice: (mediaRef: MediaRef) => adapter.rawClient.downloadFile(mediaRef.externalRef),
-      ...(opts.sink ? { sink: opts.sink } : {}),
-    });
+    // #633 — транскрипция голосовых отключаема per-tenant (botSettings.voiceStt).
+    if (botSettings.voiceStt) {
+      await transcribeInboundVoice(inbound, {
+        tenantId: entry.tenantId,
+        resolveTranscriber: opts.resolveTranscriber
+          ? () => opts.resolveTranscriber?.(entry.tenantId) ?? null
+          : null,
+        downloadVoice: (mediaRef: MediaRef) => adapter.rawClient.downloadFile(mediaRef.externalRef),
+        ...(opts.sink ? { sink: opts.sink } : {}),
+      });
+    }
 
     // ── Phase 1: persist + cheap DB hooks (одна короткая tx) ─────────────
     // Все DB-операции (Contact / ChannelIdentity / Conversation / Message /
@@ -289,10 +306,29 @@ export function makeTelegramWebhookRoutes(opts: {
       });
     }
 
+    // ── Pre-reply поведенческие гейты (#623): стоп-слова → оператор, вне
+    // рабочих часов → тихо/авто-сообщение, приветствие, медиа-ack. skipReply →
+    // обычный AI-ответ не генерим (и не дебаунсим).
+    let skipReply = false;
+    if (result.persisted) {
+      const gate = await applyBotBehaviorGates({
+        db: opts.db,
+        tenantId: entry.tenantId,
+        channelDbId: entry.channelDbId,
+        settings: botSettings,
+        inbound,
+        result,
+        notifications: opts.notificationService,
+        nowEpoch: Math.floor(Date.now() / 1000),
+        ...(opts.sink ? { sink: opts.sink } : {}),
+      });
+      skipReply = gate.skipReply;
+    }
+
     // ── Phase 4: reply.generate (LLM ВНЕ tx) + enqueue в новой короткой tx ──
     // Освобождает Postgres pool connection на время LLM call'а (~1-2s).
     // Pool=10, под нагрузкой это устраняет typical bottleneck.
-    if (result.replyDeferred && opts.replyStrategy) {
+    if (!skipReply && result.replyDeferred && opts.replyStrategy) {
       // Debounce: если тенант задал паузу и это «обычный» reply-ход (не media,
       // не эскалация, есть текст) — не отвечаем сразу, а ставим reply_due_at =
       // now+delay. Новое сообщение/правка в окне перезапишут → таймер
@@ -320,6 +356,10 @@ export function makeTelegramWebhookRoutes(opts: {
           delaySec,
         });
       } else {
+        // #628 — индикатор «печатает…» на время генерации (best-effort).
+        if (botSettings.typingIndicator) {
+          void adapter.signalTyping(inbound.externalUserId).catch(() => {});
+        }
         const replyStrategyWithButtons = wrapWithConciergeButtons(opts.replyStrategy, opts.db);
         const gen = await generateReplyAndEnqueue({
           db: opts.db,
@@ -330,6 +370,7 @@ export function makeTelegramWebhookRoutes(opts: {
           result,
           replyStrategy: replyStrategyWithButtons,
           notifications: opts.notificationService,
+          splitReplies: botSettings.splitReplies,
           ...(opts.sink ? { sink: opts.sink } : {}),
         });
         result = { ...result, outboundEnqueued: gen.outboundEnqueued };
