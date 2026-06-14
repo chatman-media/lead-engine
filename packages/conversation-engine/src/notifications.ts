@@ -14,6 +14,18 @@ import {
 	type OperatorBotExchangeAction,
 } from "./operator-bot-actions.ts";
 
+/**
+ * Срезает хвостовые слеши без бэктрекящей regex (`/\/+$/` даёт полиномиальный
+ * ReDoS на строках вида "////…/x"). Один обратный проход — линейно по длине.
+ */
+function trimTrailingSlashes(value: string): string {
+	let end = value.length;
+	while (end > 0 && value.charCodeAt(end - 1) === 47 /* "/" */) {
+		end--;
+	}
+	return value.slice(0, end);
+}
+
 export interface NotificationEvent {
 	tenantId: number;
 	eventType: string;
@@ -625,7 +637,7 @@ export class NotificationService {
 	}
 
 	private conversationUrl(conversationId: number): string {
-		return `${this.appUrl.replace(/\/+$/, "")}/conversations/${conversationId}`;
+		return `${trimTrailingSlashes(this.appUrl)}/conversations/${conversationId}`;
 	}
 
 	private getEventEmoji(type: string): string {
