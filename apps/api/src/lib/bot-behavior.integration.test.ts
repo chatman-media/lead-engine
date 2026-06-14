@@ -6,6 +6,7 @@ import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
 import {
   type BotSettings,
   DEFAULT_BOT_SETTINGS,
+  EXCHANGE_SAFE_FALLBACK,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import {
@@ -42,6 +43,8 @@ let channelDbId = 0;
 let entry: Record<string, unknown> | null = null;
 // Текущие настройки, которые отдаёт resolveBotSettings (мутируем в тестах).
 let botSettings: BotSettings = { ...DEFAULT_BOT_SETTINGS };
+// Текст, который возвращает fake-стратегия (мутируем для fallback-тестов).
+let botReplyText = "AI ответ";
 
 const echoStrategy = {
   // biome-ignore lint/suspicious/noExplicitAny: тестовый fake ReplyStrategy
@@ -49,7 +52,7 @@ const echoStrategy = {
     {
       channelId: String(channelDbId),
       externalUserId: o.inbound.externalUserId as string,
-      parts: [{ kind: "text" as const, text: "AI ответ" }],
+      parts: [{ kind: "text" as const, text: botReplyText }],
     },
   ],
 };
@@ -251,6 +254,7 @@ describe("bot behavior gates", () => {
   it("#632 — свежий диалог не закрывается", async () => {
     if (!sql) return;
     botSettings = { ...DEFAULT_BOT_SETTINGS };
+    botReplyText = "AI ответ";
     await post("demo", tgText("свежий", 8106, 1), TG_SECRET);
     const conv = await convFor(8106);
     await autoCloseTick(db, {
@@ -262,5 +266,40 @@ describe("bot behavior gates", () => {
       .from(conversations)
       .where(eq(conversations.id, conv!.id));
     expect(after?.status).not.toBe("resolved");
+  });
+
+  it("#630 — стандартный фолбэк заменяется кастомным текстом", async () => {
+    if (!sql) return;
+    botSettings = { ...DEFAULT_BOT_SETTINGS, fallbackText: "Передаю менеджеру, секунду." };
+    botReplyText = EXCHANGE_SAFE_FALLBACK; // бот «не смог ответить»
+    await post("demo", tgText("сложный вопрос", 8107, 1), TG_SECRET);
+    const conv = await convFor(8107);
+    const texts = await outboundTexts(conv!.id);
+    expect(texts).toContain("Передаю менеджеру, секунду.");
+    expect(texts).not.toContain(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("#627 — N фолбэков подряд → передача оператору (mode=human)", async () => {
+    if (!sql) return;
+    botSettings = { ...DEFAULT_BOT_SETTINGS, handoffAfterFallbacks: 2 };
+    botReplyText = EXCHANGE_SAFE_FALLBACK;
+    // Первый фолбэк — streak=1, ещё не передаём.
+    await post("demo", tgText("вопрос 1", 8108, 1), TG_SECRET);
+    expect((await convFor(8108))?.mode).toBe("ai");
+    // Второй подряд — streak=2 ≥ порога → оператор.
+    await post("demo", tgText("вопрос 2", 8108, 2), TG_SECRET);
+    expect((await convFor(8108))?.mode).toBe("human");
+  });
+
+  it("#627 — не-фолбэк сбрасывает счётчик", async () => {
+    if (!sql) return;
+    botSettings = { ...DEFAULT_BOT_SETTINGS, handoffAfterFallbacks: 2 };
+    botReplyText = EXCHANGE_SAFE_FALLBACK;
+    await post("demo", tgText("q1", 8109, 1), TG_SECRET); // фолбэк, streak=1
+    botReplyText = "Нормальный ответ"; // обычный ответ → сброс
+    await post("demo", tgText("q2", 8109, 2), TG_SECRET);
+    botReplyText = EXCHANGE_SAFE_FALLBACK;
+    await post("demo", tgText("q3", 8109, 3), TG_SECRET); // фолбэк, streak=1 (не 2)
+    expect((await convFor(8109))?.mode).toBe("ai"); // не передан
   });
 });

@@ -4,6 +4,7 @@ import { MessagesRepo } from "./dal/messages.ts";
 import { OutboundQueueRepo } from "./dal/outbound.ts";
 import type { Db } from "./dal/types.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
+import { EXCHANGE_SAFE_FALLBACK } from "./reply-strategy/exchange-reply-guard.ts";
 import { normalizeReplyStrategyResult, type ReplyStrategy } from "./process-inbound.ts";
 import type { NotificationService } from "./notifications.ts";
 import {
@@ -58,6 +59,16 @@ export interface GenerateReplyAndEnqueueDeps {
    * envelope'ам без кнопок/медиа; остальные не трогаем.
    */
   splitReplies?: boolean;
+  /**
+   * #630 — кастомный текст фолбэка «уточню у оператора». Если бот эмитит
+   * стандартный EXCHANGE_SAFE_FALLBACK — заменяем его на этот текст.
+   */
+  fallbackText?: string | null;
+  /**
+   * #627 — после N ПОДРЯД фолбэков бота передаём диалог оператору (mode=human).
+   * 0/undefined — выключено. Счётчик в conversations.meta_json.fallbackStreak.
+   */
+  handoffAfterFallbacks?: number | null;
 }
 
 export interface GenerateReplyResult {
@@ -99,6 +110,28 @@ function splitReplyEnvelopes(envelopes: OutboundEnvelope[]): OutboundEnvelope[] 
     }
   }
   return out;
+}
+
+/** #627/#630 — реплай является стандартным фолбэком «уточню у оператора»? */
+function isFallbackReply(envelopes: OutboundEnvelope[]): boolean {
+  return envelopes.some((env) =>
+    env.parts.some((p) => p.kind === "text" && p.text.trim() === EXCHANGE_SAFE_FALLBACK),
+  );
+}
+
+/** #630 — заменить стандартный фолбэк-текст на кастомный (per-tenant). */
+function replaceFallbackText(
+  envelopes: OutboundEnvelope[],
+  customText: string,
+): OutboundEnvelope[] {
+  return envelopes.map((env) => ({
+    ...env,
+    parts: env.parts.map((p) =>
+      p.kind === "text" && p.text.trim() === EXCHANGE_SAFE_FALLBACK
+        ? { ...p, text: customText }
+        : p,
+    ),
+  }));
 }
 
 function envelopeText(envelope: OutboundEnvelope): string | null {
@@ -156,6 +189,13 @@ export async function generateReplyAndEnqueue(
     return { outboundEnqueued: 0 };
   }
 
+  // #627/#630 — фолбэк ли это («уточню у оператора»)? Детектим ДО замены текста.
+  const replyIsFallback = isFallbackReply(replyOutput.envelopes as OutboundEnvelope[]);
+  let baseEnvelopes = replyOutput.envelopes as OutboundEnvelope[];
+  if (replyIsFallback && deps.fallbackText) {
+    baseEnvelopes = replaceFallbackText(baseEnvelopes, deps.fallbackText); // #630
+  }
+
   // ── Phase 2B: enqueue в новой короткой tx ────────────────────────────
   const now = clock.nowEpoch();
   let count = 0;
@@ -166,8 +206,8 @@ export async function generateReplyAndEnqueue(
     const messages = new MessagesRepo(repoCtx);
     const outbound = new OutboundQueueRepo({ db: tx, tenantId: tenant.tenantId });
     const envelopesToSend = deps.splitReplies
-      ? splitReplyEnvelopes(replyOutput.envelopes as OutboundEnvelope[])
-      : (replyOutput.envelopes as OutboundEnvelope[]);
+      ? splitReplyEnvelopes(baseEnvelopes)
+      : baseEnvelopes;
     for (const env of envelopesToSend) {
       const aiText = envelopeText(env);
       if (aiText) {
@@ -219,6 +259,26 @@ export async function generateReplyAndEnqueue(
         escalatedReason = handoff.reason;
       }
     }
+
+    // #627 — серия подряд-фолбэков: считаем (сброс на не-фолбэке) и при
+    // достижении порога передаём диалог оператору.
+    if (count > 0 && !escalatedReason) {
+      const streak = await conversations.bumpFallbackStreak(
+        result.conversationId,
+        replyIsFallback,
+        now,
+      );
+      const threshold = deps.handoffAfterFallbacks ?? 0;
+      if (replyIsFallback && threshold > 0 && streak >= threshold) {
+        await conversations.applyAutoHandoff({
+          conversationId: result.conversationId,
+          reason: "fallback_streak",
+          customerNoticeSent: true,
+          nowEpoch: now,
+        });
+        escalatedReason = "fallback_streak";
+      }
+    }
   });
   await emitOperatorHandoffNotifications({
     tenantId: tenant.tenantId,
@@ -234,6 +294,24 @@ export async function generateReplyAndEnqueue(
     notifications: deps.notifications ?? null,
     ...(deps.sink ? { sink: deps.sink } : {}),
   });
+  // #627 — уведомить оператора о передаче по серии фолбэков.
+  if (escalatedReason === "fallback_streak" && deps.notifications) {
+    try {
+      await deps.notifications.notify({
+        tenantId: tenant.tenantId,
+        eventType: "human_takeover",
+        conversationId: result.conversationId,
+        contactId: result.contactId,
+        data: {
+          displayName: result.contactDisplayName || "Без имени",
+          text: text || "",
+          reason: "fallback_streak",
+        },
+      });
+    } catch {
+      // уведомление не должно ломать reply-loop
+    }
+  }
   return {
     outboundEnqueued: count,
     ...(escalatedReason ? { escalatedReason } : {}),

@@ -176,6 +176,50 @@ export class ConversationsRepo {
   }
 
   /**
+   * #627 — счётчик ПОДРЯД фолбэков бота в диалоге (conversations.meta_json
+   * `fallbackStreak`). isFallback=true → +1, иначе сброс в 0. Возвращает новое
+   * значение. Caller сравнивает с порогом для передачи оператору.
+   */
+  async bumpFallbackStreak(
+    conversationId: number,
+    isFallback: boolean,
+    _nowEpoch: number,
+  ): Promise<number> {
+    const [row] = await this.ctx.db
+      .select({ metaJson: conversationsTable.metaJson })
+      .from(conversationsTable)
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+    let meta: Record<string, unknown> = {};
+    try {
+      const parsed = row?.metaJson ? JSON.parse(row.metaJson) : {};
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        meta = parsed as Record<string, unknown>;
+      }
+    } catch {
+      meta = {};
+    }
+    const prev = typeof meta.fallbackStreak === "number" ? meta.fallbackStreak : 0;
+    const next = isFallback ? prev + 1 : 0;
+    if (next === prev) return next; // не пишем, если 0→0
+    meta.fallbackStreak = next;
+    await this.ctx.db
+      .update(conversationsTable)
+      .set({ metaJson: JSON.stringify(meta) })
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+    return next;
+  }
+
+  /**
    * Debounce: запланировать (или сбросить) отложенный ответ. `dueAtEpoch` =
    * now + пауза; перезапись на каждое входящее/правку в окне «сбрасывает
    * таймер». null — отменить запланированный ответ.

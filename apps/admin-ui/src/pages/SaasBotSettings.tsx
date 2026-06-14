@@ -203,6 +203,48 @@ export function SaasBotSettings() {
         </CardContent>
       </Card>
 
+      {/* Авто-передача по фолбэкам */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Авто-передача оператору</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-xs text-muted-foreground">
+            Если бот N раз подряд отвечает «уточню у оператора» — диалог уходит оператору. Пусто = не
+            передавать автоматически. Диапазон 1–20.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input type="number" min={1} max={20} placeholder="—" value={s.handoffAfterFallbacks ?? ""}
+              onChange={(e) => patch({ handoffAfterFallbacks: numOrNull(e.target.value) })} className="h-8 w-28 text-sm" />
+            <span className="text-xs text-muted-foreground">фолбэков подряд</span>
+            <Button size="sm" disabled={savingKey === "handoff"}
+              onClick={() => saveBot("handoff", { handoffAfterFallbacks: s.handoffAfterFallbacks })}>Сохранить</Button>
+            <SavedMark k="handoff" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Текст фолбэка */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Текст фолбэка</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-xs text-muted-foreground">
+            Что бот пишет, когда не может ответить сам и обещает уточнить у оператора. Пусто = текст по
+            умолчанию.
+          </p>
+          <Textarea placeholder="Сейчас уточню у оператора и вернусь с ответом." rows={2}
+            value={s.fallbackText ?? ""} onChange={(e) => patch({ fallbackText: e.target.value || null })}
+            className="text-sm" />
+          <div className="flex items-center gap-2">
+            <Button size="sm" disabled={savingKey === "fallback"}
+              onClick={() => saveBot("fallback", { fallbackText: s.fallbackText })}>Сохранить</Button>
+            <SavedMark k="fallback" />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Приветствие */}
       <Card>
         <CardHeader className="pb-2">

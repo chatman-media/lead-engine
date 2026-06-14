@@ -55,9 +55,9 @@ export async function replyDebounceTick(db: Db, opts: ReplyDebounceOpts): Promis
         new ConversationsRepo({ db: tx, tenantId: t.id }).claimDueReplies(opts.nowSec),
       );
       if (due.length === 0) continue;
-      const splitReplies = opts.resolveBotSettings
-        ? await opts.resolveBotSettings(t.id).then((s) => s.splitReplies).catch(() => false)
-        : false;
+      const settings = opts.resolveBotSettings
+        ? await opts.resolveBotSettings(t.id).catch(() => null)
+        : null;
       for (const conv of due) {
         // mode != 'ai' — диалог ушёл к оператору за время паузы: due_at уже
         // очищен claim'ом, ответ не генерим.
@@ -69,7 +69,11 @@ export async function replyDebounceTick(db: Db, opts: ReplyDebounceOpts): Promis
             conversation: conv,
             replyStrategy,
             notifications: opts.notifications ?? null,
-            ...(splitReplies ? { splitReplies: true } : {}),
+            ...(settings?.splitReplies ? { splitReplies: true } : {}),
+            ...(settings?.fallbackText ? { fallbackText: settings.fallbackText } : {}),
+            ...(settings?.handoffAfterFallbacks
+              ? { handoffAfterFallbacks: settings.handoffAfterFallbacks }
+              : {}),
             ...(opts.sink ? { sink: opts.sink } : {}),
           });
         } catch (err) {
