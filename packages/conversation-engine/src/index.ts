@@ -157,6 +157,11 @@ export {
   type GenerateReplyResult,
 } from "./dispatch-reply.ts";
 export {
+  type DueConversation,
+  generateReplyForConversation,
+  type GenerateReplyForConversationDeps,
+} from "./reply-debounce.ts";
+export {
   runDeferredInboundPostProcessing,
   type RunDeferredInboundPostProcessingDeps,
 } from "./deferred-post-processing.ts";

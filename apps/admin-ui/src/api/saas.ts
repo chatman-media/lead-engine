@@ -545,6 +545,8 @@ export interface TenantInfo {
   llmBillingMode: "byok" | "managed";
   /** Окно истории диалога (сообщений) в LLM-контексте; null → дефолт (20). */
   replyHistoryLimit: number | null;
+  /** Пауза перед ответом бота (сек., debounce); null/0 → выкл. (отвечает сразу). */
+  replyDelaySeconds: number | null;
   createdAt: number;
 }
 
@@ -2875,6 +2877,12 @@ export const saas = {
     return request<{ ok: boolean; replyHistoryLimit: number | null }>(
       "/api/admin/tenant/reply-history-limit",
       { method: "PUT", body: JSON.stringify({ limit }) },
+    );
+  },
+  setReplyDelaySeconds(seconds: number | null) {
+    return request<{ ok: boolean; replyDelaySeconds: number | null }>(
+      "/api/admin/tenant/reply-delay-seconds",
+      { method: "PUT", body: JSON.stringify({ seconds }) },
     );
   },
 

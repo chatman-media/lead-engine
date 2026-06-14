@@ -218,7 +218,7 @@ describe("parseUpdate", () => {
     expect(parseUpdate(CH, update)?.parts).toEqual([{ kind: "text", text: "stray caption" }]);
   });
 
-  it("edited_message парсится как обычное сообщение", () => {
+  it("edited_message парсится с теми же id/parts и флагом edited=true", () => {
     const update: TgUpdate = {
       update_id: 15,
       edited_message: {
@@ -232,6 +232,21 @@ describe("parseUpdate", () => {
     const inbound = parseUpdate(CH, update);
     expect(inbound?.externalMessageId).toBe("16");
     expect(inbound?.parts).toEqual([{ kind: "text", text: "fixed typo" }]);
+    expect(inbound?.edited).toBe(true);
+  });
+
+  it("обычное message не помечается edited", () => {
+    const update: TgUpdate = {
+      update_id: 18,
+      message: {
+        message_id: 19,
+        chat: { id: 901, type: "private" },
+        from: { id: 901 },
+        date: 1700000002,
+        text: "hi",
+      },
+    };
+    expect(parseUpdate(CH, update)?.edited).toBeUndefined();
   });
 
   it("callback_query без data → null", () => {

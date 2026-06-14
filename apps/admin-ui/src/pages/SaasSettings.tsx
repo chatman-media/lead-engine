@@ -447,6 +447,10 @@ export function SaasSettings() {
   const [historyLimit, setHistoryLimit] = useState<string>("");
   const [savingHistory, setSavingHistory] = useState(false);
   const [historyMsg, setHistoryMsg] = useState("");
+  // Пауза перед ответом бота (сек., debounce); пусто/0 = выкл. (отвечает сразу).
+  const [replyDelay, setReplyDelay] = useState<string>("");
+  const [savingDelay, setSavingDelay] = useState(false);
+  const [delayMsg, setDelayMsg] = useState("");
 
   // Ключи по провайдерам (вводятся один раз)
   const [providerKeys, setProviderKeys] = useState<Record<LlmProvider, string>>({
@@ -505,6 +509,7 @@ export function SaasSettings() {
       try {
         const { tenant } = await saas.getTenantInfo();
         setHistoryLimit(tenant.replyHistoryLimit == null ? "" : String(tenant.replyHistoryLimit));
+        setReplyDelay(tenant.replyDelaySeconds == null ? "" : String(tenant.replyDelaySeconds));
       } catch {
         // tenant info необязателен для основной страницы
       }
@@ -544,6 +549,20 @@ export function SaasSettings() {
       setHistoryMsg(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingHistory(false);
+    }
+  }
+
+  async function saveReplyDelay() {
+    setSavingDelay(true);
+    setDelayMsg("");
+    try {
+      const trimmed = replyDelay.trim();
+      await saas.setReplyDelaySeconds(trimmed === "" ? null : Number(trimmed));
+      setDelayMsg("✓ Сохранено");
+    } catch (err) {
+      setDelayMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingDelay(false);
     }
   }
 
@@ -739,6 +758,34 @@ export function SaasSettings() {
             {historyMsg && (
               <span className="text-xs text-muted-foreground">{historyMsg}</span>
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Пауза перед ответом</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-xs text-muted-foreground">
+            Сколько секунд бот ждёт перед ответом. Если за это время клиент пришлёт ещё
+            сообщение или отредактирует прежнее — таймер сбрасывается, и бот ответит один
+            раз по всей переписке. 0 или пусто = отвечать сразу. Диапазон 0–120.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={0}
+              max={120}
+              value={replyDelay}
+              onChange={(e) => setReplyDelay(e.target.value)}
+              placeholder="0"
+              className="h-8 w-28 text-sm"
+            />
+            <Button size="sm" onClick={saveReplyDelay} disabled={savingDelay}>
+              Сохранить
+            </Button>
+            {delayMsg && <span className="text-xs text-muted-foreground">{delayMsg}</span>}
           </div>
         </CardContent>
       </Card>

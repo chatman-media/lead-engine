@@ -173,6 +173,74 @@ describe("processInbound", () => {
 		expect(deps._fakes.messages.all()).toHaveLength(1);
 	});
 
+	it("правка (edited) с изменённым текстом обновляет строку, метит editedAt и переотвечает", async () => {
+		let replyCalls = 0;
+		const reply: ReplyStrategy = {
+			generate: async () => {
+				replyCalls += 1;
+				return [
+					{
+						channelId: "tg-1",
+						externalUserId: "u1",
+						parts: [{ kind: "text" as const, text: "ответ" }],
+					},
+				];
+			},
+		};
+		deps = makeDeps(reply);
+
+		await processInbound(
+			textInbound({ extUserId: "u1", extMessageId: "100", text: "превед" }),
+			deps,
+		);
+		expect(replyCalls).toBe(1);
+
+		const edited: Inbound = {
+			...textInbound({ extUserId: "u1", extMessageId: "100", text: "привет" }),
+			edited: true,
+		};
+		const res = await processInbound(edited, deps);
+
+		expect(res.persisted).toBe(true);
+		const userMsgs = deps._fakes.messages.all().filter((m) => m.role === "user");
+		// Правку пишем in-place — новая строка НЕ создаётся.
+		expect(userMsgs).toHaveLength(1);
+		expect(userMsgs[0]?.text).toBe("привет");
+		expect(JSON.parse(userMsgs[0]?.metaJson ?? "{}").editedAt).toBe(1700000000);
+		// Бот переотвечает на исправленный текст.
+		expect(replyCalls).toBe(2);
+	});
+
+	it("правка (edited) с тем же текстом — no-op (идемпотентность ретрая edited_message)", async () => {
+		let replyCalls = 0;
+		const reply: ReplyStrategy = {
+			generate: async () => {
+				replyCalls += 1;
+				return [];
+			},
+		};
+		deps = makeDeps(reply);
+
+		await processInbound(
+			textInbound({ extUserId: "u1", extMessageId: "100", text: "hi" }),
+			deps,
+		);
+		expect(replyCalls).toBe(1);
+
+		const edited: Inbound = {
+			...textInbound({ extUserId: "u1", extMessageId: "100", text: "hi" }),
+			edited: true,
+		};
+		const res = await processInbound(edited, deps);
+
+		expect(res.persisted).toBe(false);
+		// Текст не менялся → ни апдейта строки, ни повторного reply.
+		expect(replyCalls).toBe(1);
+		const userMsgs = deps._fakes.messages.all().filter((m) => m.role === "user");
+		expect(userMsgs).toHaveLength(1);
+		expect(userMsgs[0]?.metaJson).toBeNull();
+	});
+
 	it("в conversation.mode='queued' / 'human' не зовёт reply-strategy", async () => {
 		const reply: ReplyStrategy = {
 			generate: async () => {

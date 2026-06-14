@@ -14,7 +14,7 @@ import {
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
@@ -172,6 +172,73 @@ describe("webhook-telegram", () => {
 
     const rows = await db.select({ id: messages.id }).from(messages).where(eq(messages.tenantId, tenantId));
     expect(rows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("edited_message (правка) обновляет текст сообщения in-place + метит editedAt", async () => {
+    if (!sql) return;
+    const messageId = 555111;
+    const fromId = 8;
+    const sent = await post(
+      "demo",
+      {
+        update_id: Math.floor(Math.random() * 1e9),
+        message: {
+          message_id: messageId,
+          chat: { id: fromId, type: "private" },
+          from: { id: fromId, username: "edituser" },
+          date: 1700000000,
+          text: "оригинальный текст",
+        },
+      },
+      TG_SECRET,
+    );
+    expect(sent.status).toBe(200);
+    expect(((await sent.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(true);
+
+    const editedUpdate = {
+      update_id: Math.floor(Math.random() * 1e9),
+      edited_message: {
+        message_id: messageId,
+        chat: { id: fromId, type: "private" },
+        from: { id: fromId, username: "edituser" },
+        date: 1700000050,
+        text: "исправленный текст",
+      },
+    };
+    const editRes = await post("demo", editedUpdate, TG_SECRET);
+    expect(editRes.status).toBe(200);
+    expect(((await editRes.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(true);
+
+    const userRows = await db
+      .select({ id: messages.id, text: messages.text, metaJson: messages.metaJson })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.tenantId, tenantId),
+          eq(messages.tgMessageId, messageId),
+          eq(messages.role, "user"),
+        ),
+      );
+    // In-place: ровно одна строка с обновлённым текстом и меткой editedAt.
+    expect(userRows).toHaveLength(1);
+    expect(userRows[0]?.text).toBe("исправленный текст");
+    expect(JSON.parse(userRows[0]?.metaJson ?? "{}").editedAt).toBeGreaterThan(0);
+
+    // Ретрай той же правки (тот же текст) — идемпотентно: persisted=false, без дублей.
+    const retry = await post("demo", editedUpdate, TG_SECRET);
+    expect(retry.status).toBe(200);
+    expect(((await retry.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(false);
+    const after = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.tenantId, tenantId),
+          eq(messages.tgMessageId, messageId),
+          eq(messages.role, "user"),
+        ),
+      );
+    expect(after).toHaveLength(1);
   });
 
   it("rate-limit deny → 429", async () => {

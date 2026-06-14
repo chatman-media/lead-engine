@@ -21,6 +21,7 @@ export interface ConversationRow {
   currentStage: string | null;
   summaryJson: string | null;
   metaJson: string | null;
+  replyDueAt: number | null;
 }
 
 /**
@@ -122,6 +123,65 @@ export class ConversationsRepo {
           eq(conversationsTable.tenantId, this.ctx.tenantId),
         ),
       );
+  }
+
+  /**
+   * Debounce: запланировать (или сбросить) отложенный ответ. `dueAtEpoch` =
+   * now + пауза; перезапись на каждое входящее/правку в окне «сбрасывает
+   * таймер». null — отменить запланированный ответ.
+   */
+  async setReplyDueAt(conversationId: number, dueAtEpoch: number | null): Promise<void> {
+    await this.ctx.db
+      .update(conversationsTable)
+      .set({ replyDueAt: dueAtEpoch })
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+  }
+
+  /**
+   * Атомарно «забирает» диалоги с наступившим дедлайном отложенного ответа
+   * (reply_due_at <= now): сбрасывает reply_due_at → NULL и возвращает
+   * id/userId/channelId/mode/currentStage. UPDATE…RETURNING гарантирует, что
+   * пересекающиеся тики поллера не подхватят строку дважды. Строки mode≠'ai'
+   * (диалог ушёл к оператору) тоже очищаются — caller просто не генерит ответ.
+   */
+  async claimDueReplies(nowEpoch: number): Promise<
+    Array<{
+      id: number;
+      userId: number;
+      channelId: number | null;
+      mode: "ai" | "queued" | "human";
+      currentStage: string | null;
+    }>
+  > {
+    const rows = await this.ctx.db
+      .update(conversationsTable)
+      .set({ replyDueAt: null })
+      .where(
+        and(
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+          sql`${conversationsTable.replyDueAt} IS NOT NULL`,
+          sql`${conversationsTable.replyDueAt} <= ${nowEpoch}`,
+        ),
+      )
+      .returning({
+        id: conversationsTable.id,
+        userId: conversationsTable.userId,
+        channelId: conversationsTable.channelId,
+        mode: conversationsTable.mode,
+        currentStage: conversationsTable.currentStage,
+      });
+    return rows as Array<{
+      id: number;
+      userId: number;
+      channelId: number | null;
+      mode: "ai" | "queued" | "human";
+      currentStage: string | null;
+    }>;
   }
 
   async updateInboxMetadata(

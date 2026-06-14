@@ -403,10 +403,44 @@ export async function processInbound(
     conversation.id,
     inbound.externalMessageId,
   );
+  // Правка ранее сохранённого сообщения (Telegram edited_message): обрабатываем,
+  // только если текст реально изменился. Это идемпотентно к ретраям самого
+  // edited_message и к «техническим» правкам (превью ссылки и т.п.), не
+  // меняющим наш текст — иначе бот переотвечал бы на каждый дубль.
+  const isRealEdit =
+    Boolean(inbound.edited) && existingMsg !== null && existingMsg.text !== text;
+  // «Новый ход» диалога: либо первое появление сообщения, либо значимая правка.
+  // Заменяет смысл `!existingMsg` для downstream-шагов (инбокс, уведомления,
+  // extractFields, stage, memory, persisted, reply).
+  const isNewTurn = !existingMsg || isRealEdit;
+
   const postProcessingDeferred =
-    Boolean(deps.deferPostProcessing) && !existingMsg && text.length > 0;
+    Boolean(deps.deferPostProcessing) && isNewTurn && text.length > 0;
+  const hasNonTextPart = inbound.parts.some((p) => p.kind !== "text");
   let messageId: number;
-  if (existingMsg) {
+  if (existingMsg && isRealEdit) {
+    // metaJson пересобираем как при insert (для медиа) + маркер editedAt,
+    // чтобы админка показала «изменено». created_at не трогаем — сообщение
+    // остаётся на своём месте в истории.
+    const metaJson = JSON.stringify({
+      ...(hasNonTextPart ? { parts: inbound.parts } : {}),
+      editedAt: now,
+    });
+    const updated = await deps.messages.updateUserText(existingMsg.id, { text, metaJson });
+    messageId = updated?.id ?? existingMsg.id;
+    deps.sink?.log?.("info", "inbound edited", {
+      conversationId: conversation.id,
+      externalMessageId: inbound.externalMessageId,
+      messageId,
+    });
+    deps.sink?.emit?.({
+      type: "message-persisted",
+      tenantId: deps.tenant.tenantId,
+      conversationId: conversation.id,
+      messageId,
+      role: "user",
+    });
+  } else if (existingMsg) {
     deps.sink?.log?.("debug", "inbound dedup hit", {
       conversationId: conversation.id,
       externalMessageId: inbound.externalMessageId,
@@ -418,9 +452,7 @@ export async function processInbound(
       role: "user",
       text,
       externalMessageId: inbound.externalMessageId,
-      ...(inbound.parts.some((p) => p.kind !== "text")
-        ? { metaJson: JSON.stringify({ parts: inbound.parts }) }
-        : {}),
+      ...(hasNonTextPart ? { metaJson: JSON.stringify({ parts: inbound.parts }) } : {}),
       nowEpoch: now,
     });
     messageId = inserted.id;
@@ -447,14 +479,14 @@ export async function processInbound(
       contactId: contact.id,
       contactDisplayName: contact.displayName,
       conversationId: conversation.id,
-      persisted: !existingMsg,
+      persisted: isNewTurn,
       outboundEnqueued: 0,
       escalatedReason: "contact_banned",
     };
   }
 
   // 4. Update inbox state (touch TS, set preview, inc unread).
-  if (!existingMsg) {
+  if (isNewTurn) {
     await deps.conversations.updateInboxMetadata(conversation.id, {
       lastMessageAt: now,
       lastMessageText: text.slice(0, 200) || "(Медиа)",
@@ -471,7 +503,7 @@ export async function processInbound(
   const hasVideoNote = inbound.parts.some((p) => p.kind === "video_note");
   let escalatedReason: string | undefined;
   if (
-    !existingMsg &&
+    isNewTurn &&
     conversation.mode === "ai" &&
     deps.template?.slug === "exchange_v1" &&
     hasMedia
@@ -502,7 +534,7 @@ export async function processInbound(
       notifications: deps.notifications ?? null,
       ...(deps.sink ? { sink: deps.sink } : {}),
     });
-  } else if (deps.notifications && !existingMsg) {
+  } else if (deps.notifications && isNewTurn) {
     if (conversation.mode === "human" || conversation.mode === "queued") {
       await deps.notifications.notify({
         tenantId: deps.tenant.tenantId,
@@ -559,7 +591,7 @@ export async function processInbound(
   // Hook резолвит structured fields из текста (имя/возраст/паспорт/etc.)
   // и сохраняет их в contact.attributes_json. Дублям hook не зовётся —
   // повторный extract на retry'е webhook'а не должен переписывать данные.
-  if (deps.template?.hooks?.extractFields && !existingMsg && text.length > 0) {
+  if (deps.template?.hooks?.extractFields && isNewTurn && text.length > 0) {
     try {
       const extracted = await deps.template.hooks.extractFields(
         { tenantId: deps.tenant.tenantId, contactId: contact.id, conversationId: conversation.id },
@@ -586,7 +618,7 @@ export async function processInbound(
     !postProcessingDeferred &&
     deps.stageClassifier &&
     deps.db &&
-    !existingMsg &&
+    isNewTurn &&
     text.length > 0
   ) {
     try {
@@ -654,7 +686,7 @@ export async function processInbound(
   // 5b. LLM-based memory extraction (если extractor задан и не dedup).
   // Дополняет vertical-template extractFields: тот — regex (узкие шаблоны),
   // этот — LLM (русский NER, импликации). Exception → log, продолжаем.
-  if (!postProcessingDeferred && deps.memoryExtractor && !existingMsg && text.length > 0) {
+  if (!postProcessingDeferred && deps.memoryExtractor && isNewTurn && text.length > 0) {
     try {
       const extracted = await runMemoryExtraction({
         extractor: deps.memoryExtractor,
@@ -691,7 +723,7 @@ export async function processInbound(
       contactId: contact.id,
       contactDisplayName: contact.displayName,
       conversationId: conversation.id,
-      persisted: !existingMsg,
+      persisted: isNewTurn,
       outboundEnqueued: 0,
       userMessageText: text,
       userMessageId: messageId,
@@ -700,12 +732,14 @@ export async function processInbound(
       previousStage: conversation.currentStage,
       conversationCreated,
       ...(escalatedReason ? { escalatedReason } : {}),
-      replyDeferred: true,
+      // Дубль/незначимая правка (isNewTurn=false) — reply НЕ генерируем повторно
+      // (иначе ретрай webhook'а или ретрай edited_message давал бы двойной ответ).
+      replyDeferred: isNewTurn,
     };
   }
 
   let outboundCount = 0;
-  if (conversation.mode === "ai" && !escalatedReason && deps.reply && !mediaOnly) {
+  if (isNewTurn && conversation.mode === "ai" && !escalatedReason && deps.reply && !mediaOnly) {
     const replyOutput = normalizeReplyStrategyResult(
       await deps.reply.generate({
         tenant: deps.tenant,
@@ -803,7 +837,7 @@ export async function processInbound(
     contactId: contact.id,
     contactDisplayName: contact.displayName,
     conversationId: conversation.id,
-    persisted: !existingMsg,
+    persisted: isNewTurn,
     outboundEnqueued: outboundCount,
     ...(deps.deferPostProcessing
       ? {
