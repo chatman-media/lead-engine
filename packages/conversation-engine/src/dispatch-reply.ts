@@ -52,6 +52,12 @@ export interface GenerateReplyAndEnqueueDeps {
   notifications?: NotificationService | null;
   sink?: PipelineSink;
   clock?: { nowEpoch: () => number };
+  /**
+   * #628 — резать длинный текстовый ответ по «пустой строке» (двойной \n) на
+   * несколько отдельных сообщений (человечнее). Применяется к чисто-текстовым
+   * envelope'ам без кнопок/медиа; остальные не трогаем.
+   */
+  splitReplies?: boolean;
 }
 
 export interface GenerateReplyResult {
@@ -60,6 +66,39 @@ export interface GenerateReplyResult {
    *  делается тут — caller сам решает по результату processInbound). */
   outboundEnqueued: number;
   escalatedReason?: string;
+}
+
+/**
+ * #628 — дробит чисто-текстовые envelope'ы на несколько по пустой строке.
+ * Envelope с reply_markup/медиа/несколькими частями не трогаем (кнопки должны
+ * остаться под одним сообщением). Текст без двойного \n остаётся как есть.
+ */
+function splitReplyEnvelopes(envelopes: OutboundEnvelope[]): OutboundEnvelope[] {
+  const out: OutboundEnvelope[] = [];
+  for (const env of envelopes) {
+    const onlyText =
+      env.parts.length === 1 &&
+      env.parts[0]?.kind === "text" &&
+      !env.replyMarkup &&
+      env.replyToExternalMessageId === undefined;
+    if (!onlyText) {
+      out.push(env);
+      continue;
+    }
+    const text = (env.parts[0] as { kind: "text"; text: string }).text;
+    const chunks = text
+      .split(/\n\s*\n/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    if (chunks.length <= 1) {
+      out.push(env);
+      continue;
+    }
+    for (const chunk of chunks) {
+      out.push({ ...env, parts: [{ kind: "text", text: chunk }] });
+    }
+  }
+  return out;
 }
 
 function envelopeText(envelope: OutboundEnvelope): string | null {
@@ -126,7 +165,10 @@ export async function generateReplyAndEnqueue(
     const conversations = new ConversationsRepo(repoCtx);
     const messages = new MessagesRepo(repoCtx);
     const outbound = new OutboundQueueRepo({ db: tx, tenantId: tenant.tenantId });
-    for (const env of replyOutput.envelopes as OutboundEnvelope[]) {
+    const envelopesToSend = deps.splitReplies
+      ? splitReplyEnvelopes(replyOutput.envelopes as OutboundEnvelope[])
+      : (replyOutput.envelopes as OutboundEnvelope[]);
+    for (const env of envelopesToSend) {
       const aiText = envelopeText(env);
       if (aiText) {
         const inserted = await messages.insert({

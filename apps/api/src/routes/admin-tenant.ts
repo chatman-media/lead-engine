@@ -1,7 +1,10 @@
 import {
   type Db,
 	EXCHANGE_RESPONSE_GUARD_FEATURE_KEY,
+  mergeBotSettings,
+  parseBotSettings,
   PROVIDER_RELAY_FEATURE_KEY,
+  serializeBotSettings,
   TenantFeatureFlagRepo,
   withTenant,
 } from "@chatman-media/conversation-engine";
@@ -58,6 +61,7 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
           llmBillingMode: tenants.llmBillingMode,
           replyHistoryLimit: tenants.replyHistoryLimit,
           replyDelaySeconds: tenants.replyDelaySeconds,
+          botSettingsJson: tenants.botSettingsJson,
           createdAt: tenants.createdAt,
         })
         .from(tenants)
@@ -65,7 +69,40 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
       return r ?? null;
     });
     if (!row) return c.json({ error: "tenant not found" }, 404);
-    return c.json({ tenant: row });
+    const { botSettingsJson, ...rest } = row;
+    return c.json({ tenant: { ...rest, botSettings: parseBotSettings(botSettingsJson) } });
+  });
+
+  /**
+   * PUT /api/admin/tenant/bot-settings
+   * Body: частичный patch настроек поведения бота (эпик #623). Мёрджится поверх
+   * текущих и нормализуется (parseBotSettings). Возвращает нормализованный объект.
+   */
+  app.put("/api/admin/tenant/bot-settings", async (c) => {
+    const tenantId = c.var.tenantId;
+    let patch: Record<string, unknown>;
+    try {
+      const body = (await c.req.json()) as unknown;
+      patch = body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const merged = await withTenant(opts.db, tenantId, async (tx) => {
+      const [r] = await tx
+        .select({ botSettingsJson: tenants.botSettingsJson })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId));
+      const next = mergeBotSettings(parseBotSettings(r?.botSettingsJson ?? null), patch);
+      await tx
+        .update(tenants)
+        .set({ botSettingsJson: serializeBotSettings(next), updatedAt: nowEpoch })
+        .where(eq(tenants.id, tenantId));
+      return next;
+    });
+    return c.json({ ok: true, botSettings: merged });
   });
 
   /**
