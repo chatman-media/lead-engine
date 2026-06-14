@@ -363,6 +363,12 @@ export function SaasLeadDetail() {
   async function handleReturnToAi() {
     if (conversationId == null) return;
     setUnescalating(true);
+    // Оптимистично прячем баннер сразу: иначе он «мигает» — пока летит запрос,
+    // фоновый 5-секундный поллинг успевает подтянуть ещё-эскалированное
+    // состояние и баннер на миг всплывает обратно.
+    setConversation((prev) =>
+      prev ? { ...prev, mode: "ai", escalatedAt: null } : prev,
+    );
     try {
       await saas.setConversationMode(conversationId, "ai");
       const cid = data?.contact?.id;
