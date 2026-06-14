@@ -92,6 +92,8 @@ import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
 import { makeAdminConciergeRoutes } from "./routes/admin-concierge.ts";
 import { refreshDueTenants } from "./lib/exchange/rate-feed.ts";
+import { autoCloseTick } from "./lib/auto-close.ts";
+import { makeResolveBotSettings } from "./lib/bot-behavior.ts";
 import { dripDispatchTick } from "./lib/drip-dispatcher.ts";
 import { replyDebounceTick } from "./lib/reply-debounce.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
@@ -884,6 +886,9 @@ async function main() {
     }
   };
 
+  // Настройки поведения бота (эпик #623) per-tenant из tenants.bot_settings_json.
+  const resolveBotSettings = makeResolveBotSettings(db);
+
   app.route(
     "/",
     makeTelegramWebhookRoutes({
@@ -901,6 +906,7 @@ async function main() {
       sink,
       metrics,
       resolveReplyDelaySeconds,
+      resolveBotSettings,
       ...(rateLimiter ? { rateLimiter } : {}),
       ...(resolveTranscriber ? { resolveTranscriber } : {}),
     }),
@@ -1201,6 +1207,7 @@ async function main() {
     if (rateFeedInterval) clearInterval(rateFeedInterval);
     if (dripDispatchInterval) clearInterval(dripDispatchInterval);
     if (replyDebounceInterval) clearInterval(replyDebounceInterval);
+    if (autoCloseInterval) clearInterval(autoCloseInterval);
     shadowEvalRunner.stop();
     server.stop();
     webAbort.abort();
@@ -1244,6 +1251,7 @@ async function main() {
   let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
   let dripDispatchInterval: ReturnType<typeof setInterval> | null = null;
   let replyDebounceInterval: ReturnType<typeof setInterval> | null = null;
+  let autoCloseInterval: ReturnType<typeof setInterval> | null = null;
   if (rateFeedMs > 0) {
     const defaultRefreshSec = Math.max(60, Math.floor(rateFeedMs / 1000));
     const tickMs = Math.min(rateFeedMs, 60_000);
@@ -1316,6 +1324,7 @@ async function main() {
         replyStrategy,
         notifications: notificationService,
         sink,
+        resolveBotSettings,
         log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
       }).catch((e) =>
         log.warn("reply-debounce tick failed", {
@@ -1325,6 +1334,25 @@ async function main() {
     replyDebounceInterval = setInterval(runReplyDebounce, replyDebounceMs);
     setTimeout(runReplyDebounce, 10_000);
     log.info("reply-debounce poller enabled", { replyDebounceMs });
+  }
+
+  // #632 — авто-закрытие диалогов после N часов тишины (botSettings.autocloseHours).
+  // Тик редкий (раз в 10 мин). AUTO_CLOSE_MS=0 отключает.
+  const autoCloseMs = Number.parseInt(process.env.AUTO_CLOSE_MS ?? "600000", 10);
+  if (autoCloseMs > 0) {
+    const runAutoClose = () =>
+      autoCloseTick(db, {
+        nowSec: Math.floor(Date.now() / 1000),
+        resolveBotSettings,
+        log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
+      }).catch((e) =>
+        log.warn("auto-close tick failed", {
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    autoCloseInterval = setInterval(runAutoClose, autoCloseMs);
+    setTimeout(runAutoClose, 20_000);
+    log.info("auto-close poller enabled", { autoCloseMs });
   }
 
   process.on("SIGTERM", () => void shutdown());

@@ -15,6 +15,7 @@
  * Атомарный claim исключает двойной ответ пересекающимися тиками.
  */
 import {
+  type BotSettings,
   ConversationsRepo,
   type Db,
   generateReplyForConversation,
@@ -32,6 +33,8 @@ export interface ReplyDebounceOpts {
   replyStrategy: ReplyStrategy;
   notifications?: NotificationService | null;
   sink?: PipelineSink;
+  /** #628 — резолвер настроек бота, чтобы отложенный ответ тоже дробился. */
+  resolveBotSettings?: ((tenantId: number) => Promise<BotSettings>) | null;
   log?: { warn?: (msg: string) => void; info?: (msg: string) => void };
 }
 
@@ -51,6 +54,10 @@ export async function replyDebounceTick(db: Db, opts: ReplyDebounceOpts): Promis
       const due = await withTenant(db, t.id, async (tx) =>
         new ConversationsRepo({ db: tx, tenantId: t.id }).claimDueReplies(opts.nowSec),
       );
+      if (due.length === 0) continue;
+      const splitReplies = opts.resolveBotSettings
+        ? await opts.resolveBotSettings(t.id).then((s) => s.splitReplies).catch(() => false)
+        : false;
       for (const conv of due) {
         // mode != 'ai' — диалог ушёл к оператору за время паузы: due_at уже
         // очищен claim'ом, ответ не генерим.
@@ -62,6 +69,7 @@ export async function replyDebounceTick(db: Db, opts: ReplyDebounceOpts): Promis
             conversation: conv,
             replyStrategy,
             notifications: opts.notifications ?? null,
+            ...(splitReplies ? { splitReplies: true } : {}),
             ...(opts.sink ? { sink: opts.sink } : {}),
           });
         } catch (err) {

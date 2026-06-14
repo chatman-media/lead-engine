@@ -137,6 +137,44 @@ describe("admin-tenant", () => {
     expect(body.tenant.replyHistoryLimit).toBe(8);
   });
 
+  it("PUT /bot-settings → мёрджит patch, нормализует, GET отдаёт", async () => {
+    if (!sql) return;
+    // Частичный patch: только стоп-слова + клампинг температуры.
+    const put1 = await authReq("/api/admin/tenant/bot-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stopWords: "Оператор, человек", temperature: 5, voiceStt: false }),
+    });
+    expect(put1.status).toBe(200);
+    const b1 = (await put1.json()) as {
+      ok: boolean;
+      botSettings: { stopWords: string[]; temperature: number; voiceStt: boolean };
+    };
+    expect(b1.ok).toBe(true);
+    expect(b1.botSettings.stopWords).toEqual(["оператор", "человек"]);
+    expect(b1.botSettings.temperature).toBe(1.5); // клампинг
+    expect(b1.botSettings.voiceStt).toBe(false);
+
+    // Второй patch не затирает прежние поля (merge).
+    const put2 = await authReq("/api/admin/tenant/bot-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ autocloseHours: 48 }),
+    });
+    const b2 = (await put2.json()) as {
+      botSettings: { stopWords: string[]; autocloseHours: number };
+    };
+    expect(b2.botSettings.stopWords).toEqual(["оператор", "человек"]); // сохранилось
+    expect(b2.botSettings.autocloseHours).toBe(48);
+
+    const get = await authReq("/api/admin/tenant");
+    const body = (await get.json()) as {
+      tenant: { botSettings: { autocloseHours: number; voiceStt: boolean } };
+    };
+    expect(body.tenant.botSettings.autocloseHours).toBe(48);
+    expect(body.tenant.botSettings.voiceStt).toBe(false);
+  });
+
   it("PUT /reply-history-limit { limit: null } → сброс в дефолт", async () => {
     if (!sql) return;
     const put = await authReq("/api/admin/tenant/reply-history-limit", {

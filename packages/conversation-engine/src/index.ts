@@ -162,6 +162,16 @@ export {
   type GenerateReplyForConversationDeps,
 } from "./reply-debounce.ts";
 export {
+  type BotSettings,
+  DEFAULT_BOT_SETTINGS,
+  isWithinBotHours,
+  matchStopWord,
+  mergeBotSettings,
+  parseBotSettings,
+  serializeBotSettings,
+} from "./bot-settings.ts";
+export { enqueueFixedReply, type EnqueueFixedReplyDeps } from "./fixed-reply.ts";
+export {
   runDeferredInboundPostProcessing,
   type RunDeferredInboundPostProcessingDeps,
 } from "./deferred-post-processing.ts";

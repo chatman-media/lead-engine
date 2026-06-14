@@ -547,7 +547,30 @@ export interface TenantInfo {
   replyHistoryLimit: number | null;
   /** Пауза перед ответом бота (сек., debounce); null/0 → выкл. (отвечает сразу). */
   replyDelaySeconds: number | null;
+  /** Расширенные настройки поведения бота (эпик #623). */
+  botSettings: BotSettings;
   createdAt: number;
+}
+
+/** Настройки поведения бота по сообщениям (эпик #623). Зеркало backend BotSettings. */
+export interface BotSettings {
+  temperature: number | null;
+  maxOutputTokens: number | null;
+  compactAfterMessages: number | null;
+  fallbackText: string | null;
+  greetingText: string | null;
+  hoursEnabled: boolean;
+  hoursStartMin: number | null;
+  hoursEndMin: number | null;
+  hoursTz: string | null;
+  offhoursMessage: string | null;
+  stopWords: string[];
+  handoffAfterFallbacks: number | null;
+  splitReplies: boolean;
+  typingIndicator: boolean;
+  autocloseHours: number | null;
+  voiceStt: boolean;
+  mediaAckText: string | null;
 }
 
 export interface AuditEntry {
@@ -2883,6 +2906,13 @@ export const saas = {
     return request<{ ok: boolean; replyDelaySeconds: number | null }>(
       "/api/admin/tenant/reply-delay-seconds",
       { method: "PUT", body: JSON.stringify({ seconds }) },
+    );
+  },
+  /** Частичный patch настроек поведения бота (#623). Возвращает нормализованный объект. */
+  updateBotSettings(patch: Partial<BotSettings>) {
+    return request<{ ok: boolean; botSettings: BotSettings }>(
+      "/api/admin/tenant/bot-settings",
+      { method: "PUT", body: JSON.stringify(patch) },
     );
   },
 

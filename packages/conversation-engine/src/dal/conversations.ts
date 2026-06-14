@@ -126,6 +126,56 @@ export class ConversationsRepo {
   }
 
   /**
+   * Дедуп системных авто-сообщений (вне рабочих часов и т.п.): возвращает true
+   * и помечает время, если с прошлого авто-сообщения с этим `key` прошло ≥
+   * `minGapSec`; иначе false. Хранит метки в conversations.meta_json под
+   * `autoMsg.<key>`. Read+write в одной (внешней) tx.
+   */
+  async shouldSendAutoMessage(
+    conversationId: number,
+    key: string,
+    minGapSec: number,
+    nowEpoch: number,
+  ): Promise<boolean> {
+    const [row] = await this.ctx.db
+      .select({ metaJson: conversationsTable.metaJson })
+      .from(conversationsTable)
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+    let meta: Record<string, unknown> = {};
+    try {
+      const parsed = row?.metaJson ? JSON.parse(row.metaJson) : {};
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        meta = parsed as Record<string, unknown>;
+      }
+    } catch {
+      meta = {};
+    }
+    const autoMsg =
+      meta.autoMsg && typeof meta.autoMsg === "object" && !Array.isArray(meta.autoMsg)
+        ? (meta.autoMsg as Record<string, number>)
+        : {};
+    const last = typeof autoMsg[key] === "number" ? autoMsg[key] : 0;
+    if (nowEpoch - last < minGapSec) return false;
+    autoMsg[key] = nowEpoch;
+    meta.autoMsg = autoMsg;
+    await this.ctx.db
+      .update(conversationsTable)
+      .set({ metaJson: JSON.stringify(meta) })
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+    return true;
+  }
+
+  /**
    * Debounce: запланировать (или сбросить) отложенный ответ. `dueAtEpoch` =
    * now + пауза; перезапись на каждое входящее/правку в окне «сбрасывает
    * таймер». null — отменить запланированный ответ.
@@ -212,6 +262,27 @@ export class ConversationsRepo {
           eq(conversationsTable.tenantId, this.ctx.tenantId),
         ),
       );
+  }
+
+  /**
+   * #632 — авто-закрытие: переводит в status='resolved' все не-resolved диалоги
+   * тенанта, у которых последнее сообщение раньше cutoff (epoch). Возвращает
+   * число закрытых. Оператор может переоткрыть вручную.
+   */
+  async autoCloseIdle(cutoffEpoch: number): Promise<number> {
+    const rows = await this.ctx.db
+      .update(conversationsTable)
+      .set({ status: "resolved" })
+      .where(
+        and(
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+          sql`status <> 'resolved'`,
+          sql`${conversationsTable.lastMessageAt} IS NOT NULL`,
+          sql`${conversationsTable.lastMessageAt} < ${cutoffEpoch}`,
+        ),
+      )
+      .returning({ id: conversationsTable.id });
+    return rows.length;
   }
 
   async markAsRead(conversationId: number): Promise<void> {

@@ -158,6 +158,15 @@ export interface RagReplyStrategyOpts {
     tenantId: number;
   }) => Promise<number | null | undefined> | number | null | undefined;
   /**
+   * #623 — per-tenant override параметров генерации из tenants.bot_settings_json
+   * (temperature / maxOutputTokens / compactAfterMessages). null-поля → дефолты.
+   */
+  resolveGenerationParams?: (input: { tenantId: number }) => Promise<{
+    temperature?: number | null;
+    maxOutputTokens?: number | null;
+    compactAfterMessages?: number | null;
+  } | null | undefined>;
+  /**
    * Включить hybrid retrieval (vector + BM25 RRF). Default true.
    * False = pure vector — быстрее, но хуже на keyword-questions.
    */
@@ -554,6 +563,23 @@ export class RagReplyStrategy implements ReplyStrategy {
         console.warn("[rag-reply] failed to resolve history limit:", err);
       }
     }
+    // #623 — per-tenant override параметров генерации (rag отдаёт numPredict +
+    // порог сжатия; temperature внутри answerWithRag/style, не трогаем).
+    let genMaxTokens = this.opts.maxOutputTokens ?? 600;
+    let genCompactAfter = this.opts.compactAfterMessages ?? 20;
+    if (this.opts.resolveGenerationParams) {
+      try {
+        const g = await this.opts.resolveGenerationParams({ tenantId });
+        if (g) {
+          if (typeof g.maxOutputTokens === "number" && g.maxOutputTokens > 0)
+            genMaxTokens = g.maxOutputTokens;
+          if (typeof g.compactAfterMessages === "number" && g.compactAfterMessages > 0)
+            genCompactAfter = g.compactAfterMessages;
+        }
+      } catch (err) {
+        console.warn("[rag-reply] failed to resolve generation params:", err);
+      }
+    }
     const { history: historyWithoutCurrent, conversationSummary } =
       await loadRollingConversationContext({
         conversationId: input.conversationId,
@@ -565,7 +591,7 @@ export class RagReplyStrategy implements ReplyStrategy {
           : { currentMessageText: input.userMessageText }),
         options: {
           recentWindow,
-          summarizeAfterMessages: this.opts.compactAfterMessages ?? 20,
+          summarizeAfterMessages: genCompactAfter,
         },
         onWarn: (_message, err) => {
           console.warn("[rag-reply] conversation summary failed:", err);
@@ -705,7 +731,7 @@ export class RagReplyStrategy implements ReplyStrategy {
 			rewriteQueryBeforeRetrieval:
 				this.opts.rewriteQueryBeforeRetrieval ?? false,
       reflect: this.opts.reflect ?? isExchange,
-      numPredict: this.opts.maxOutputTokens ?? 600,
+      numPredict: genMaxTokens,
       // Style: если контекст содержит Style — answerWithRag использует его
       // persona, sales framework, hooks, skills для построения system prompt.
       // При null — rag fallback'нет на DEFAULT_PERSONA и базовый промпт.
