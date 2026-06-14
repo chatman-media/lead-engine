@@ -1,3 +1,15 @@
+# [@chatman-media/conversation-engine-v3.14.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.13.0...@chatman-media/conversation-engine-v3.14.0) (2026-06-14)
+
+
+### Bug Fixes
+
+* **security:** устранение polynomial ReDoS в conversationUrl (CodeQL js/polynomial-redos) ([65abb90](https://github.com/chatman-media/lead-engine/commit/65abb9097fe0cd3e68915904871bf43a78590195))
+
+
+### Features
+
+* **bot:** раздел настроек поведения бота + 8 настроек (эпик [#623](https://github.com/chatman-media/lead-engine/issues/623)) ([56895b6](https://github.com/chatman-media/lead-engine/commit/56895b659b44db4d0a9861e805669ffcb2989bd7)), closes [#624](https://github.com/chatman-media/lead-engine/issues/624) [#625](https://github.com/chatman-media/lead-engine/issues/625) [#626](https://github.com/chatman-media/lead-engine/issues/626) [#628](https://github.com/chatman-media/lead-engine/issues/628) [#629](https://github.com/chatman-media/lead-engine/issues/629) [#631](https://github.com/chatman-media/lead-engine/issues/631) [#632](https://github.com/chatman-media/lead-engine/issues/632) [#633](https://github.com/chatman-media/lead-engine/issues/633) [#627](https://github.com/chatman-media/lead-engine/issues/627) [#630](https://github.com/chatman-media/lead-engine/issues/630)
+
 # [@chatman-media/conversation-engine-v3.13.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.12.0...@chatman-media/conversation-engine-v3.13.0) (2026-06-14)
 
 
