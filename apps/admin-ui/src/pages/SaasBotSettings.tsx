@@ -31,9 +31,8 @@ export function SaasBotSettings() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  // Две «легаси»-настройки на отдельных колонках tenants.
+  // «Контекст бота» на отдельной колонке tenants.reply_history_limit (legacy).
   const [historyLimit, setHistoryLimit] = useState("");
-  const [replyDelay, setReplyDelay] = useState("");
   // Остальное — единый JSON-блок bot_settings_json.
   const [s, setS] = useState<BotSettings | null>(null);
   const [savingKey, setSavingKey] = useState<string>("");
@@ -46,7 +45,6 @@ export function SaasBotSettings() {
         const { tenant } = await saas.getTenantInfo();
         if (cancelled) return;
         setHistoryLimit(tenant.replyHistoryLimit == null ? "" : String(tenant.replyHistoryLimit));
-        setReplyDelay(tenant.replyDelaySeconds == null ? "" : String(tenant.replyDelaySeconds));
         setS(tenant.botSettings);
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -121,7 +119,7 @@ export function SaasBotSettings() {
         </CardContent>
       </Card>
 
-      {/* Пауза перед ответом (legacy) */}
+      {/* Пауза перед ответом */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Пауза перед ответом</CardTitle>
@@ -132,12 +130,14 @@ export function SaasBotSettings() {
             бот ответит один раз по всей переписке. 0/пусто = сразу. Диапазон 0–120.
           </p>
           <div className="flex items-center gap-2">
-            <Input type="number" min={0} max={120} value={replyDelay}
-              onChange={(e) => setReplyDelay(e.target.value)} placeholder="0" className="h-8 w-28 text-sm" />
+            <Input type="number" min={0} max={120}
+              value={s.replyDelaySeconds == null ? "" : String(s.replyDelaySeconds)}
+              onChange={(e) => patch({ replyDelaySeconds: numOrNull(e.target.value) })}
+              placeholder="0" className="h-8 w-28 text-sm" />
             <Button size="sm" disabled={savingKey === "delay"}
-              onClick={() => flash("delay", async () => {
-                await saas.setReplyDelaySeconds(numOrNull(replyDelay));
-              })}>Сохранить</Button>
+              onClick={() => saveBot("delay", { replyDelaySeconds: s.replyDelaySeconds })}>
+              Сохранить
+            </Button>
             <SavedMark k="delay" />
           </div>
         </CardContent>
