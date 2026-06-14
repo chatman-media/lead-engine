@@ -504,6 +504,33 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 	return `Получите ${amountToThb} ${currency.code}.`;
 }
 
+const EXCHANGE_PAYOUT_KNOWN_RE =
+  /банкомат|atm|офис|наличны|курьер|тайск|bangkok|kbank|scb|зачисл/iu;
+const EXCHANGE_USDT_RE = /usdt|юсдт/iu;
+
+/**
+ * Вопрос о недостающих параметрах ПОСЛЕ котировки (см. rag-reply): сеть USDT
+ * (если не указана) + способ выдачи. Способ оплаты не спрашиваем — слова
+ * СБП/перевод/карта/оплата (и «card») триггерят requisites-guard.
+ */
+function exchangeMissingFieldsQuestion(
+  userText: string,
+  asset: string,
+  networkKnown: boolean,
+): string | null {
+  const parts: string[] = [];
+  if (EXCHANGE_USDT_RE.test(asset) && !networkKnown) {
+    parts.push("в какой сети будете отправлять USDT — TRC20, ERC20 или BEP20");
+  }
+  if (!EXCHANGE_PAYOUT_KNOWN_RE.test(userText)) {
+    parts.push(
+      "как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на тайский банковский счёт",
+    );
+  }
+  if (parts.length === 0) return null;
+  return `Подскажите, ${parts.join(", и ")}?`;
+}
+
 async function maybeForceExchangeQuoteReply(
   userMessageText: string,
   tools: AnyRagTool[],
@@ -517,8 +544,13 @@ async function maybeForceExchangeQuoteReply(
   const result = await quoteTool.execute(args);
   const text = forcedExchangeQuoteText(result);
   if (!text) return null;
+  const ask = exchangeMissingFieldsQuestion(
+    userMessageText,
+    args.asset,
+    Boolean(args.network),
+  );
   return {
-    text,
+    text: ask ? `${text}\n\n${ask}` : text,
     toolCalls: [{ name: quoteTool.name, args, result, cycle: 0 }],
   };
 	}
