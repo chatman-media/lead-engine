@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.17.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.17.0...@chatman-media/conversation-engine-v3.17.1) (2026-06-14)
+
+
+### Bug Fixes
+
+* **exchange:** устойчивый сбор полей → сводка-подтверждение → заявка ([808c1af](https://github.com/chatman-media/lead-engine/commit/808c1af932125eb442d57f313325e142487e5449))
+
 # [@chatman-media/conversation-engine-v3.17.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.16.0...@chatman-media/conversation-engine-v3.17.0) (2026-06-14)
 
 
