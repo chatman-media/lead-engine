@@ -255,6 +255,8 @@ export function SaasLeadDetail() {
     import("@/api/saas").ConversationDetail | null
   >(null);
   const [unescalating, setUnescalating] = useState(false);
+  const [orderBusy, setOrderBusy] = useState<"pay" | "code" | null>(null);
+  const [orderMsg, setOrderMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -377,6 +379,39 @@ export function SaasLeadDetail() {
       onAuthError(err);
     } finally {
       setUnescalating(false);
+    }
+  }
+
+  // Операторские действия по заявке обмена (эндпоинты уже есть в API).
+  async function handleConfirmPayment(orderId: number) {
+    setOrderBusy("pay");
+    setOrderMsg("");
+    try {
+      const r = await saas.confirmExchangePayment(orderId);
+      setOrderMsg(
+        r.delivered ? "Оплата подтверждена, клиент уведомлён" : "Оплата подтверждена",
+      );
+      reload();
+    } catch (err) {
+      if (!onAuthError(err)) setOrderMsg("Не удалось подтвердить оплату");
+    } finally {
+      setOrderBusy(null);
+    }
+  }
+
+  async function handleIssueCode(orderId: number) {
+    setOrderBusy("code");
+    setOrderMsg("");
+    try {
+      const r = await saas.issueExchangePayoutCode(orderId, { generate: true });
+      setOrderMsg(
+        `Код выдачи: ${r.payoutCode}${r.delivered ? " — отправлен клиенту" : ""}`,
+      );
+      reload();
+    } catch (err) {
+      if (!onAuthError(err)) setOrderMsg("Не удалось выдать код");
+    } finally {
+      setOrderBusy(null);
     }
   }
 
@@ -700,6 +735,56 @@ export function SaasLeadDetail() {
                 )}
               </div>
             )}
+
+            {/* Операторские действия по последней заявке: подтвердить оплату /
+                выдать код выдачи — чтобы двигать сделку вручную прямо с лида. */}
+            {(() => {
+              const orders = data.orders ?? [];
+              if (orders.length === 0) return null;
+              const latest = orders.reduce((a, b) => (a.id > b.id ? a : b));
+              const done =
+                latest.status === "completed" || latest.status === "cancelled";
+              return (
+                <div className="mt-1 space-y-1.5 border-t pt-2">
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Заявка #{latest.id} · оператор
+                  </p>
+                  {latest.payoutCode && (
+                    <p className="text-[11px]">
+                      Код:{" "}
+                      <span className="font-mono font-semibold">
+                        {latest.payoutCode}
+                      </span>
+                    </p>
+                  )}
+                  {!done && (
+                    <div className="flex flex-col gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={orderBusy !== null}
+                        onClick={() => handleConfirmPayment(latest.id)}
+                      >
+                        {orderBusy === "pay" ? "…" : "✅ Подтвердить оплату"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={orderBusy !== null}
+                        onClick={() => handleIssueCode(latest.id)}
+                      >
+                        {orderBusy === "code" ? "…" : "🔐 Выдать код выдачи"}
+                      </Button>
+                    </div>
+                  )}
+                  {orderMsg && (
+                    <p className="text-[10px] text-muted-foreground">{orderMsg}</p>
+                  )}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 
