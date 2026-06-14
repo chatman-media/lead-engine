@@ -684,8 +684,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 		{
 			slug: "exchange_request",
 			displayName: "Параметры обмена",
-			goal: `Собрать параметры обмена: что отдаёт клиент, сумму, сеть для крипты и способ получения ${QUOTE_CURRENCY.code}.`,
-			guidance: `Спокойно уточни актив-источник и сумму. Для USDT обязательно спроси сеть (принимаем TRC20). Узнай, как клиент хочет получить ${QUOTE_CURRENCY.tabloWord.toLowerCase()} — наличными в офисе по коду или через банкомат без карты. Курс пока не называй.`,
+			goal: `Собрать параметры обмена: что отдаёт клиент, сумму, сеть для крипты, способ получения ${QUOTE_CURRENCY.code} и (для рублей) способ внесения.`,
+			guidance: `Спокойно уточни актив-источник и сумму. Для USDT обязательно спроси сеть (принимаем TRC20). Узнай, как клиент хочет получить ${QUOTE_CURRENCY.tabloWord.toLowerCase()} — наличными в офисе по коду или через банкомат без карты. Если клиент отдаёт рубли — уточни, как удобнее внести: по СБП/QR или картой/переводом. Курс пока не называй.`,
 			kind: "intake",
 			stageType: "form_fill",
 			checkinIntervalDays: 1,
@@ -735,6 +735,17 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 					position: 3,
 					optionsJson:
 						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"}]',
+				},
+				{
+					slug: "payment_method",
+					displayName: "Способ внесения (для рублей)",
+					fieldType: "select",
+					required: false,
+					aiExtractable: true,
+					hint: "Только для RUB: по СБП/QR или картой/переводом",
+					position: 4,
+					optionsJson:
+						'[{"value":"sbp_qr","label":"СБП / QR"},{"value":"card_transfer","label":"Карта / перевод"}]',
 				},
 			],
 		},
