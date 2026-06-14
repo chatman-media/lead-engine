@@ -130,6 +130,10 @@ export const conversations = pgTable("conversations", {
   currentStage: text("current_stage"),
   summaryJson: text("summary_json"),
   metaJson: text("meta_json"),
+  // Debounce: epoch «когда сгенерировать отложенный ответ». NULL = нет
+  // запланированного ответа. Входящее/правка в окне перезаписывает (now+delay);
+  // поллер apps/api claim'ит due-строки (reply_due_at <= now). См. tenants.reply_delay_seconds.
+  replyDueAt: integer("reply_due_at"),
 }, (t) => [
   check("conversations_source_check", sql`${t.source} IN ('bot', 'userbot', 'self_play')`),
   check("conversations_mode_check", sql`${t.mode} IN ('ai', 'queued', 'human')`),
@@ -137,6 +141,7 @@ export const conversations = pgTable("conversations", {
   uniqueIndex("uniq_conversations_user_source").on(t.userId, t.source).where(sql`${t.channelId} IS NULL`),
   uniqueIndex("uniq_conversations_user_channel").on(t.userId, t.channelId).where(sql`${t.channelId} IS NOT NULL`),
   index("idx_conversations_channel").on(t.channelId).where(sql`${t.channelId} IS NOT NULL`),
+  index("idx_conv_reply_due").on(t.replyDueAt).where(sql`${t.replyDueAt} IS NOT NULL`),
   index("idx_conv_mode_last").on(t.mode, sql`${t.lastMessageAt} DESC NULLS LAST`),
   index("idx_conv_status_last").on(t.status, sql`${t.lastMessageAt} DESC NULLS LAST`),
   index("idx_conv_assignee_last").on(t.assignedAdminId, sql`${t.lastMessageAt} DESC NULLS LAST`),
@@ -885,12 +890,17 @@ export const tenants = pgTable("tenants", {
   // Размер окна истории диалога (сообщений), которое бот шлёт в LLM как контекст.
   // NULL → дефолт стратегии (20). Правится из админки «Общие».
   replyHistoryLimit: integer("reply_history_limit"),
+  // Пауза перед ответом бота (сек.) — debounce: бот ждёт N сек., новое
+  // сообщение/правка сбрасывают таймер, затем один ответ. NULL/0 = выкл.
+  // (отвечает сразу). Правится из админки. См. conversations.reply_due_at.
+  replyDelaySeconds: integer("reply_delay_seconds"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   check("tenants_status_check", sql`${t.status} IN ('active','suspended','deleted')`),
   check("tenants_llm_billing_check", sql`${t.llmBillingMode} IN ('byok','managed')`),
   check("tenants_reply_history_limit_check", sql`${t.replyHistoryLimit} IS NULL OR (${t.replyHistoryLimit} >= 2 AND ${t.replyHistoryLimit} <= 100)`),
+  check("tenants_reply_delay_seconds_check", sql`${t.replyDelaySeconds} IS NULL OR (${t.replyDelaySeconds} >= 0 AND ${t.replyDelaySeconds} <= 120)`),
 ]);
 
 // Per-tenant feature flags for gradual rollout of high-risk flows.

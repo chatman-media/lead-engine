@@ -68,6 +68,14 @@ export interface Inbound {
   parts: InboundPart[];
   receivedAt: number;
   /**
+   * Сообщение — это правка ранее отправленного (Telegram `edited_message`,
+   * WhatsApp edited, и т.д.), а не новое. externalMessageId совпадает с
+   * исходным. Conversation-engine на правку обновляет уже сохранённое
+   * сообщение (а не дедупит как ретрай). Каналы без edit-семантики флаг не
+   * ставят. См. processInbound.
+   */
+  edited?: boolean;
+  /**
    * Escape-hatch: канал-специфичный raw payload. Conversation-engine не
    * должен на это смотреть — нужно только для audit/debug и адаптер-специфичных
    * расширений (например, MTProto reply-to-resolve).

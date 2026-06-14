@@ -129,6 +129,7 @@ export class FakeConversationsRepo {
       currentStage: null,
       summaryJson: null,
       metaJson: null,
+      replyDueAt: null,
     };
     this.rows.push(row);
     return row;
@@ -226,6 +227,16 @@ export class FakeMessagesRepo {
           r.conversationId === conversationId && r.role === "user" && r.tgMessageId === num,
       ) ?? null
     );
+  }
+  async updateUserText(
+    messageId: number,
+    opts: { text: string; metaJson?: string | null },
+  ): Promise<MessageRow | null> {
+    const row = this.rows.find((r) => r.id === messageId && r.role === "user");
+    if (!row) return null;
+    row.text = opts.text;
+    if (opts.metaJson !== undefined) row.metaJson = opts.metaJson;
+    return row;
   }
   all(): MessageRow[] {
     return [...this.rows];

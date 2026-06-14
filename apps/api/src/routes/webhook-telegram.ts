@@ -110,6 +110,14 @@ export function makeTelegramWebhookRoutes(opts: {
   serviceCatalogRuntime?: ServiceCatalogRuntime;
   /** Per-tenant STT factory. Вызывается с tenantId на каждый webhook-запрос. */
   resolveTranscriber?: ((tenantId: number) => ITranscriber | null) | null;
+  /**
+   * Debounce: пауза перед ответом (сек.) per-tenant из tenants.reply_delay_seconds.
+   * >0 → вместо немедленного ответа ставим conversations.reply_due_at = now+delay
+   * (новое сообщение/правка в окне перезапишут → таймер сбрасывается), а
+   * фактический ответ генерит поллер replyDebounceTick. 0/undefined → отвечаем
+   * сразу (как раньше). Резолвер собирается в apps/api index.ts.
+   */
+  resolveReplyDelaySeconds?: ((tenantId: number) => Promise<number>) | null;
 }): Hono {
   const app = new Hono();
 
@@ -285,19 +293,47 @@ export function makeTelegramWebhookRoutes(opts: {
     // Освобождает Postgres pool connection на время LLM call'а (~1-2s).
     // Pool=10, под нагрузкой это устраняет typical bottleneck.
     if (result.replyDeferred && opts.replyStrategy) {
-      const replyStrategyWithButtons = wrapWithConciergeButtons(opts.replyStrategy, opts.db);
-      const gen = await generateReplyAndEnqueue({
-        db: opts.db,
-        tenant,
-        channel,
-        channelDbId: entry.channelDbId,
-        inbound,
-        result,
-        replyStrategy: replyStrategyWithButtons,
-        notifications: opts.notificationService,
-        ...(opts.sink ? { sink: opts.sink } : {}),
-      });
-      result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+      // Debounce: если тенант задал паузу и это «обычный» reply-ход (не media,
+      // не эскалация, есть текст) — не отвечаем сразу, а ставим reply_due_at =
+      // now+delay. Новое сообщение/правка в окне перезапишут → таймер
+      // сбрасывается; поллер replyDebounceTick сгенерит один ответ по тишине.
+      const delaySec = opts.resolveReplyDelaySeconds
+        ? await opts.resolveReplyDelaySeconds(entry.tenantId).catch(() => 0)
+        : 0;
+      const canDebounce =
+        delaySec > 0 &&
+        !result.mediaOnly &&
+        !result.escalatedReason &&
+        Boolean(result.userMessageText && result.userMessageText.length > 0);
+      if (canDebounce) {
+        const dueAt = Math.floor(Date.now() / 1000) + delaySec;
+        await withTenant(opts.db, entry.tenantId, async (tx) => {
+          await new ConversationsRepo({ db: tx, tenantId: entry.tenantId }).setReplyDueAt(
+            result.conversationId,
+            dueAt,
+          );
+        });
+        opts.sink?.log?.("debug", "reply debounced", {
+          tenantId: entry.tenantId,
+          conversationId: result.conversationId,
+          dueAt,
+          delaySec,
+        });
+      } else {
+        const replyStrategyWithButtons = wrapWithConciergeButtons(opts.replyStrategy, opts.db);
+        const gen = await generateReplyAndEnqueue({
+          db: opts.db,
+          tenant,
+          channel,
+          channelDbId: entry.channelDbId,
+          inbound,
+          result,
+          replyStrategy: replyStrategyWithButtons,
+          notifications: opts.notificationService,
+          ...(opts.sink ? { sink: opts.sink } : {}),
+        });
+        result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+      }
     }
 
     // Photo classification + passport OCR (outside tx — LLM + download).

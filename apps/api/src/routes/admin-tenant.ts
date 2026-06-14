@@ -57,6 +57,7 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
           status: tenants.status,
           llmBillingMode: tenants.llmBillingMode,
           replyHistoryLimit: tenants.replyHistoryLimit,
+          replyDelaySeconds: tenants.replyDelaySeconds,
           createdAt: tenants.createdAt,
         })
         .from(tenants)
@@ -98,6 +99,39 @@ export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
         .where(eq(tenants.id, tenantId));
     });
     return c.json({ ok: true, replyHistoryLimit: limit });
+  });
+
+  /**
+   * PUT /api/admin/tenant/reply-delay-seconds
+   * Body: { seconds: number | null } — пауза перед ответом бота (debounce).
+   * null/0 → выключено (отвечает сразу). Допустимый диапазон 0..120.
+   */
+  app.put("/api/admin/tenant/reply-delay-seconds", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: { seconds?: unknown };
+    try {
+      body = (await c.req.json()) as { seconds?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    let seconds: number | null;
+    if (body.seconds === null || body.seconds === undefined || body.seconds === "") {
+      seconds = null;
+    } else {
+      const n = Number(body.seconds);
+      if (!Number.isInteger(n) || n < 0 || n > 120) {
+        return c.json({ error: "seconds must be an integer 0..120 or null" }, 400);
+      }
+      seconds = n;
+    }
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    await withTenant(opts.db, tenantId, async (tx) => {
+      await tx
+        .update(tenants)
+        .set({ replyDelaySeconds: seconds, updatedAt: nowEpoch })
+        .where(eq(tenants.id, tenantId));
+    });
+    return c.json({ ok: true, replyDelaySeconds: seconds });
   });
 
   /**

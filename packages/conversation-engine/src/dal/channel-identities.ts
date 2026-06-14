@@ -33,6 +33,24 @@ export class ChannelIdentitiesRepo {
     return row ?? null;
   }
 
+  /**
+   * Обратный lookup: externalUserId контакта в данном канале. Нужен
+   * debounce-поллеру — восстановить получателя outbound (envelope.externalUserId)
+   * для отложенного ответа из одного conversationId.
+   */
+  async findByContact(contactId: number, channelId: number): Promise<ChannelIdentityRow | null> {
+    const [row] = await this.ctx.db
+      .select()
+      .from(channelIdentities)
+      .where(
+        and(
+          eq(channelIdentities.contactId, contactId),
+          eq(channelIdentities.channelId, channelId),
+        ),
+      );
+    return row ?? null;
+  }
+
   async create(opts: {
     contactId: number;
     channelId: number;

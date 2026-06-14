@@ -5,6 +5,7 @@ import {
   NotificationService,
   OperatorBotHandler,
   OpsAlertRouter,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
@@ -92,6 +93,7 @@ import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
 import { makeAdminConciergeRoutes } from "./routes/admin-concierge.ts";
 import { refreshDueTenants } from "./lib/exchange/rate-feed.ts";
 import { dripDispatchTick } from "./lib/drip-dispatcher.ts";
+import { replyDebounceTick } from "./lib/reply-debounce.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
 import { makeAdminCopilotRoutes } from "./routes/admin-copilot.ts";
@@ -862,6 +864,26 @@ async function main() {
     log.warn("inbound rate-limit disabled — runaway-cost protection off");
   }
 
+  // Debounce: пауза перед ответом (сек.) per-tenant из tenants.reply_delay_seconds.
+  // 0/ошибка → отвечаем сразу (как раньше). Webhook ставит reply_due_at, поллер
+  // replyDebounceTick добивает.
+  const resolveReplyDelaySeconds = async (tenantId: number): Promise<number> => {
+    try {
+      return await withTenant(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ d: tenants.replyDelaySeconds })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId))
+          .limit(1);
+        const v = row?.d ?? 0;
+        return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+      });
+    } catch (err) {
+      log.warn("failed to resolve reply delay", { tenantId, err: String(err) });
+      return 0;
+    }
+  };
+
   app.route(
     "/",
     makeTelegramWebhookRoutes({
@@ -878,6 +900,7 @@ async function main() {
       serviceCatalogRuntime,
       sink,
       metrics,
+      resolveReplyDelaySeconds,
       ...(rateLimiter ? { rateLimiter } : {}),
       ...(resolveTranscriber ? { resolveTranscriber } : {}),
     }),
@@ -1177,6 +1200,7 @@ async function main() {
     clearTimeout(usageAlertFirstRun);
     if (rateFeedInterval) clearInterval(rateFeedInterval);
     if (dripDispatchInterval) clearInterval(dripDispatchInterval);
+    if (replyDebounceInterval) clearInterval(replyDebounceInterval);
     shadowEvalRunner.stop();
     server.stop();
     webAbort.abort();
@@ -1219,6 +1243,7 @@ async function main() {
   const rateFeedMs = Number.parseInt(process.env.RATE_FEED_MS ?? "180000", 10);
   let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
   let dripDispatchInterval: ReturnType<typeof setInterval> | null = null;
+  let replyDebounceInterval: ReturnType<typeof setInterval> | null = null;
   if (rateFeedMs > 0) {
     const defaultRefreshSec = Math.max(60, Math.floor(rateFeedMs / 1000));
     const tickMs = Math.min(rateFeedMs, 60_000);
@@ -1278,6 +1303,28 @@ async function main() {
     dripDispatchInterval = setInterval(runDrip, dripDispatchMs);
     setTimeout(runDrip, 12_000);
     log.info("outreach drip-dispatcher enabled", { dripDispatchMs });
+  }
+
+  // Debounce-поллер ответов: добивает «подошедшие» отложенные ответы
+  // (conversations.reply_due_at <= now). REPLY_DEBOUNCE_MS=0 отключает.
+  // Активен только если есть replyStrategy (иначе отвечать нечем).
+  const replyDebounceMs = Number.parseInt(process.env.REPLY_DEBOUNCE_MS ?? "1000", 10);
+  if (replyDebounceMs > 0 && replyStrategy) {
+    const runReplyDebounce = () =>
+      replyDebounceTick(db, {
+        nowSec: Math.floor(Date.now() / 1000),
+        replyStrategy,
+        notifications: notificationService,
+        sink,
+        log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
+      }).catch((e) =>
+        log.warn("reply-debounce tick failed", {
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    replyDebounceInterval = setInterval(runReplyDebounce, replyDebounceMs);
+    setTimeout(runReplyDebounce, 10_000);
+    log.info("reply-debounce poller enabled", { replyDebounceMs });
   }
 
   process.on("SIGTERM", () => void shutdown());

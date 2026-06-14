@@ -76,6 +76,8 @@ const STATE_RU: Record<string, string> = {
 
 type MessageMeta = {
   adminId?: number;
+  /** Клиент отредактировал сообщение (epoch сек.) — рендерим метку «изменено». */
+  editedAt?: number;
   exchangeAction?: string;
   orderId?: number | string;
   parts?: Array<{
@@ -1363,6 +1365,9 @@ export function SaasConversations() {
                             {showLabel ? (ROLE_RU[m.role] ?? m.role) : ""}
                           </span>
                           <div className="flex items-center gap-1.5">
+                            {meta?.editedAt && (
+                              <span className="text-[10px] italic text-muted-foreground/70">изменено</span>
+                            )}
                             {m.role === "human" && !m.deletedAt && (
                               <button
                                 type="button"

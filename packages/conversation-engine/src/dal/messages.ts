@@ -47,6 +47,34 @@ export class MessagesRepo {
   }
 
   /**
+   * Обновляет текст (и meta_json) уже сохранённого пользовательского
+   * сообщения. Используется при правке входящего (Telegram `edited_message`):
+   * клиент отредактировал ранее отправленное сообщение — мы перезаписываем
+   * его текст вместо вставки нового. `created_at` НЕ трогаем: сообщение
+   * остаётся на своём месте в истории (как в самом Telegram).
+   */
+  async updateUserText(
+    messageId: number,
+    opts: { text: string; metaJson?: string | null },
+  ): Promise<MessageRow | null> {
+    const [row] = await this.ctx.db
+      .update(messagesTable)
+      .set({
+        text: opts.text,
+        ...(opts.metaJson !== undefined ? { metaJson: opts.metaJson } : {}),
+      })
+      .where(
+        and(
+          eq(messagesTable.tenantId, this.ctx.tenantId),
+          eq(messagesTable.id, messageId),
+          sql`role = 'user'`,
+        ),
+      )
+      .returning();
+    return (row as MessageRow) ?? null;
+  }
+
+  /**
    * Дедупликационный path для пользовательских сообщений: один tg_message_id
    * per (conversation_id, role='user') уже защищён partial UNIQUE
    * uniq_msg_user_tg, но мы делаем явный pre-check чтобы вернуть существующую
@@ -69,6 +97,28 @@ export class MessagesRepo {
           sql`role = 'user'`,
         ),
       );
+    return (row as MessageRow) ?? null;
+  }
+
+  /**
+   * Последнее (по времени) не-удалённое пользовательское сообщение в диалоге.
+   * Нужен debounce-поллеру: восстановить userMessageText/tgMessageId/parts для
+   * отложенной генерации ответа из одного conversationId.
+   */
+  async latestUser(conversationId: number): Promise<MessageRow | null> {
+    const [row] = await this.ctx.db
+      .select()
+      .from(messagesTable)
+      .where(
+        and(
+          eq(messagesTable.tenantId, this.ctx.tenantId),
+          eq(messagesTable.conversationId, conversationId),
+          isNull(messagesTable.deletedAt),
+          sql`role = 'user'`,
+        ),
+      )
+      .orderBy(desc(messagesTable.createdAt), desc(messagesTable.id))
+      .limit(1);
     return (row as MessageRow) ?? null;
   }
 

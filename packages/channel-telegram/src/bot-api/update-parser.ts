@@ -97,6 +97,11 @@ export function parseUpdate(channelId: string, update: TgUpdate): Inbound | null
   if (!msg) return null;
   if (!msg.from) return null;
 
+  // Правка ранее отправленного сообщения (message_id совпадает с исходным).
+  // conversation-engine на edited обновит сохранённое сообщение и переответит,
+  // а не дедупит как ретрай.
+  const isEdit = !update.message && Boolean(update.edited_message);
+
   const parts = partsFromMessage(channelId, msg);
   if (parts.length === 0) return null;
 
@@ -107,6 +112,7 @@ export function parseUpdate(channelId: string, update: TgUpdate): Inbound | null
     ...(msg.from.username ? { externalUsername: msg.from.username } : {}),
     parts,
     receivedAt: msg.date,
+    ...(isEdit ? { edited: true } : {}),
     raw: update,
   };
 }
