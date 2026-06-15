@@ -137,6 +137,10 @@ export const conversations = pgTable("conversations", {
   // #arch-fix: выделенные колонки вместо meta_json (атомарный UPDATE без SELECT).
   fallbackStreak: integer("fallback_streak").notNull().default(0),
   offhoursLastAutoSent: integer("offhours_last_auto_sent"),
+  // Топик в форум-группе оператора (Telegram message_thread_id): один тред на
+  // диалог, чтобы заявки разных клиентов не сыпались в один поток и оператор
+  // понимал, кому отвечает. NULL = топик ещё не создан / группа не форум.
+  operatorThreadId: integer("operator_thread_id"),
 }, (t) => [
   check("conversations_source_check", sql`${t.source} IN ('bot', 'userbot', 'self_play')`),
   check("conversations_mode_check", sql`${t.mode} IN ('ai', 'queued', 'human')`),

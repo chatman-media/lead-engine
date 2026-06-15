@@ -153,6 +153,8 @@ export class TelegramClient {
     replyMarkup?: TgReplyMarkup;
     disableWebPagePreview?: boolean;
     replyToMessageId?: number;
+    /** Топик форум-группы (operator bot): сообщение уходит в конкретный тред. */
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
     const params: Record<string, unknown> = {
       chat_id: input.chatId,
@@ -162,7 +164,29 @@ export class TelegramClient {
     if (input.replyMarkup) params.reply_markup = input.replyMarkup;
     if (input.disableWebPagePreview) params.disable_web_page_preview = input.disableWebPagePreview;
     if (input.replyToMessageId !== undefined) params.reply_to_message_id = input.replyToMessageId;
+    if (input.messageThreadId !== undefined) params.message_thread_id = input.messageThreadId;
     return this.call<TgSendMessageResult>("sendMessage", params);
+  }
+
+  /**
+   * Создать топик в форум-группе (operator bot). Требует: группа = форум, бот —
+   * админ с правом Manage Topics. Возвращает message_thread_id топика, который
+   * мы сохраняем на диалоге и используем для маршрутизации карточек/ответов.
+   */
+  createForumTopic(input: {
+    chatId: number | string;
+    name: string;
+    iconColor?: number;
+  }): Promise<{ message_thread_id: number; name: string }> {
+    const params: Record<string, unknown> = {
+      chat_id: input.chatId,
+      name: input.name,
+    };
+    if (input.iconColor !== undefined) params.icon_color = input.iconColor;
+    return this.call<{ message_thread_id: number; name: string }>(
+      "createForumTopic",
+      params,
+    );
   }
 
   /**
