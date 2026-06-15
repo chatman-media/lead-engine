@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.13.3](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.13.2...@chatman-media/kb-v1.13.3) (2026-06-15)
+
+
+### Performance Improvements
+
+* **prompt:** обрезка stage-неактуального — few-shot по стадии + дедуп tool-policy ([7f59d5c](https://github.com/chatman-media/lead-engine/commit/7f59d5c7e26633e5e73018eaefc6fa4a80cf72e3)), closes [663/#670](https://github.com/chatman-media/lead-engine/issues/670) [615/#634](https://github.com/chatman-media/lead-engine/issues/634) [#674](https://github.com/chatman-media/lead-engine/issues/674)
+
 # [@chatman-media/kb-v1.13.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.13.1...@chatman-media/kb-v1.13.2) (2026-06-15)
 
 
