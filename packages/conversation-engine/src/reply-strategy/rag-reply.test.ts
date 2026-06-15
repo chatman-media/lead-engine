@@ -778,6 +778,56 @@ describe("RagReplyStrategy.generate", () => {
 		expect(firstReplyText(r2)).not.toContain("в какой сети");
 	});
 
+	it("exchange: неподдерживаемая сеть (TON) → явный отказ с TRC20/ERC20/BEP20", async () => {
+		const quoteTool = {
+			name: "compute_exchange_quote",
+			description: "compute quote",
+			parameters: {},
+			execute: async () => ({
+				direction: "USDT->PHP",
+				asset: "USDT",
+				quoteAsset: "PHP",
+				amountMode: "source_amount",
+				amountFrom: 200,
+				rate: 56,
+				amountToThb: 11200,
+			}),
+		};
+		const mkExchange = () =>
+			mk(
+				ctxWith({
+					template: EXCHANGE_TEMPLATE,
+					chat: new CapturingRagChat("x"),
+					kb: kbWith([HIT]),
+					exchangePolicyState: { stageSlug: "quote_calculated" },
+					tools: [quoteTool] as never,
+				}),
+				{ reflect: false },
+			);
+		// Латиница: «сеть TON» → отказ, без молчаливого переспроса.
+		const r1 = await mkExchange().generate({
+			...baseInput(),
+			userMessageText: "сеть TON",
+		});
+		const t1 = firstReplyText(r1);
+		expect(t1).toContain("TON");
+		expect(t1).toContain("не поддерживаем");
+		expect(t1).toContain("TRC20");
+		// Кириллица: ответ одним словом «тон».
+		const r2 = await mkExchange().generate({
+			...baseInput(),
+			userMessageText: "тон",
+		});
+		expect(firstReplyText(r2)).toContain("не поддерживаем");
+		// Поддерживаемая сеть рядом с амаунтом — НЕ отказываем, считаем котировку.
+		const r3 = await mkExchange().generate({
+			...baseInput(),
+			userMessageText: "200 usdt trc20",
+		});
+		expect(firstReplyText(r3)).not.toContain("не поддерживаем");
+		expect(firstReplyText(r3)).toContain("получите 11200 PHP");
+	});
+
 	it("exchange: после ответа о выдаче (банкомат) спрашивает метод оплаты", async () => {
 		const quoteTool = {
 			name: "compute_exchange_quote",
