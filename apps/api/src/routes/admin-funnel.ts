@@ -964,6 +964,29 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 					aiExtractable: false,
 					position: 0,
 				},
+				// Перекотировка разрешена и после создания заявки (до оплаты) —
+				// дублируем сделку, иначе смена суммы/актива здесь не переизвлекается
+				// (экстрактор смотрит только текущую стадию). Опциональны.
+				{
+					slug: "asset_from",
+					displayName: "Что отдаёт клиент",
+					fieldType: "select",
+					required: false,
+					aiExtractable: true,
+					hint: "Смена актива при пересчёте до оплаты",
+					position: 6,
+					optionsJson:
+						'[{"value":"usdt","label":"USDT"},{"value":"btc","label":"BTC"},{"value":"eth","label":"ETH"},{"value":"rub","label":"Рубли (RUB)"},{"value":"eur","label":"EUR"},{"value":"usd","label":"USD"}]',
+				},
+				{
+					slug: "amount_from",
+					displayName: "Сумма (в источнике)",
+					fieldType: "number",
+					required: false,
+					aiExtractable: true,
+					hint: "Смена суммы при пересчёте до оплаты",
+					position: 7,
+				},
 			],
 		},
 		{
@@ -995,6 +1018,29 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 					required: false,
 					aiExtractable: false,
 					position: 1,
+				},
+				// Перекотировка до оплаты разрешена и здесь — дублируем сделку,
+				// иначе смена суммы/актива не переизвлекается (экстрактор смотрит
+				// только текущую стадию). Опциональны.
+				{
+					slug: "asset_from",
+					displayName: "Что отдаёт клиент",
+					fieldType: "select",
+					required: false,
+					aiExtractable: true,
+					hint: "Смена актива при пересчёте до оплаты",
+					position: 6,
+					optionsJson:
+						'[{"value":"usdt","label":"USDT"},{"value":"btc","label":"BTC"},{"value":"eth","label":"ETH"},{"value":"rub","label":"Рубли (RUB)"},{"value":"eur","label":"EUR"},{"value":"usd","label":"USD"}]',
+				},
+				{
+					slug: "amount_from",
+					displayName: "Сумма (в источнике)",
+					fieldType: "number",
+					required: false,
+					aiExtractable: true,
+					hint: "Смена суммы при пересчёте до оплаты",
+					position: 7,
 				},
 			],
 		},
