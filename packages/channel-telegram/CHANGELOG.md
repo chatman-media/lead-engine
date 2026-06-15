@@ -1,3 +1,10 @@
+# [@chatman-media/channel-telegram-v1.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.6.0...@chatman-media/channel-telegram-v1.7.0) (2026-06-15)
+
+
+### Features
+
+* **operator-bot:** свой ответ клиенту сразу из чата (без канны-заготовки) ([aafe318](https://github.com/chatman-media/lead-engine/commit/aafe3182cb4958fd70272e1083025ff8144c1c15))
+
 # [@chatman-media/channel-telegram-v1.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.5.0...@chatman-media/channel-telegram-v1.6.0) (2026-06-14)
 
 
