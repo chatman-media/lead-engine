@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.37.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.37.0...@chatman-media/storage-v1.37.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **exchange:** re-quote обновляет сделку (asset/amount на quote_calculated) — фикс «устаревшей сделки» ([50d1807](https://github.com/chatman-media/lead-engine/commit/50d1807bfe532be98ac21fe032d9a3511c61b2ce)), closes [#2](https://github.com/chatman-media/lead-engine/issues/2)
+
 # [@chatman-media/storage-v1.37.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.36.0...@chatman-media/storage-v1.37.0) (2026-06-14)
 
 
