@@ -107,14 +107,19 @@ export interface SkillForPrompt {
 
 /**
  * A director-level persuasion hook — tenant-specific scripted mini-technique.
- * Unlike universal skills (from the catalogue), hooks are always injected for
- * this tenant regardless of which style or stage is active.
+ * Injected for this tenant; фильтруется по стадии так же, как universal skills
+ * (см. `applicableStages`).
  */
 export interface DirectorHookForPrompt {
   name: string;
   body: string;
   /** Optional natural-language hint for when to apply this hook. */
   triggerHint?: string | null;
+  /**
+   * Стадии воронки, на которых хук применяется. Пустой массив / undefined = на
+   * всех стадиях (дефолт). Сравнение строкой с текущей стадией — как у SkillForPrompt.
+   */
+  applicableStages?: readonly string[];
 }
 
 export interface ComposeOptions {

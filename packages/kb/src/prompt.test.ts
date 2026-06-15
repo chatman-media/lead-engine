@@ -85,6 +85,29 @@ describe("composeSystemPrompt — hooks / director hooks / skills", () => {
     expect(p).toContain("Когда: колеблется");
   });
 
+  it("directorHooks фильтруются по стадии (applicableStages)", () => {
+    const p = composeSystemPrompt(baseStyle, "qualify", null, {
+      directorHooks: [
+        { name: "OnlyQualify", body: "b1", applicableStages: ["qualify"] },
+        { name: "OnlyClose", body: "b2", applicableStages: ["close"] },
+        { name: "Always", body: "b3", applicableStages: [] },
+      ],
+    });
+    expect(p).toContain("OnlyQualify");
+    expect(p).toContain("Always");
+    expect(p).not.toContain("OnlyClose");
+  });
+
+  it("directorHooks без applicableStages → на всех стадиях (обратная совместимость)", () => {
+    const hooks = [{ name: "Legacy", body: "b" }];
+    expect(composeSystemPrompt(baseStyle, "qualify", null, { directorHooks: hooks })).toContain(
+      "Legacy",
+    );
+    expect(composeSystemPrompt(baseStyle, "close", null, { directorHooks: hooks })).toContain(
+      "Legacy",
+    );
+  });
+
   it("skills фильтруются по стадии", () => {
     const p = composeSystemPrompt(baseStyle, "qualify", null, {
       skills: [

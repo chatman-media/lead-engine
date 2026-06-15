@@ -16,10 +16,37 @@ interface HookFormState {
   name: string;
   body: string;
   triggerHint: string;
+  applicableStages: string[];
   isActive: boolean;
 }
 
-const EMPTY_FORM: HookFormState = { name: "", body: "", triggerHint: "", isActive: true };
+const EMPTY_FORM: HookFormState = {
+  name: "",
+  body: "",
+  triggerHint: "",
+  applicableStages: [],
+  isActive: true,
+};
+
+// Стадии воронки для стадийной фильтрации хука (FUNNEL_STAGES в packages/kb).
+const STAGE_OPTIONS: { value: string; label: string }[] = [
+  { value: "opener", label: "Открытие" },
+  { value: "qualify", label: "Квалификация" },
+  { value: "pitch", label: "Презентация" },
+  { value: "objection", label: "Возражения" },
+  { value: "close", label: "Закрытие" },
+];
+
+/** Парсит applicable_stages_json в массив (битый JSON → []). */
+function parseStages(json: string | undefined): string[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json) as unknown;
+    return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 export function SaasHooks() {
   const navigate = useNavigate();
@@ -68,9 +95,19 @@ export function SaasHooks() {
       name: hook.name,
       body: hook.body,
       triggerHint: hook.triggerHint ?? "",
+      applicableStages: parseStages(hook.applicableStagesJson),
       isActive: hook.isActive,
     });
     setEditingId(hook.id);
+  }
+
+  function toggleStage(value: string) {
+    setForm((f) => ({
+      ...f,
+      applicableStages: f.applicableStages.includes(value)
+        ? f.applicableStages.filter((v) => v !== value)
+        : [...f.applicableStages, value],
+    }));
   }
 
   function closeForm() {
@@ -90,6 +127,7 @@ export function SaasHooks() {
           name: form.name.trim(),
           body: form.body.trim(),
           triggerHint: form.triggerHint.trim() || undefined,
+          applicableStages: form.applicableStages,
           isActive: form.isActive,
         });
         toast.success("Хук создан");
@@ -98,6 +136,7 @@ export function SaasHooks() {
           name: form.name.trim(),
           body: form.body.trim(),
           triggerHint: form.triggerHint.trim() || null,
+          applicableStages: form.applicableStages,
           isActive: form.isActive,
         });
         toast.success("Хук обновлён");
@@ -206,6 +245,28 @@ export function SaasHooks() {
                 value={form.triggerHint}
                 onChange={(e) => setForm((f) => ({ ...f, triggerHint: e.target.value }))}
               />
+            </div>
+            <div className="space-y-1">
+              <Label>Стадии воронки</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {STAGE_OPTIONS.map((s) => {
+                  const on = form.applicableStages.includes(s.value);
+                  return (
+                    <Button
+                      key={s.value}
+                      type="button"
+                      size="sm"
+                      variant={on ? "default" : "outline"}
+                      onClick={() => toggleStage(s.value)}
+                    >
+                      {s.label}
+                    </Button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Если ничего не выбрано — хук применяется на всех стадиях.
+              </p>
             </div>
             <div className="space-y-1">
               <Label htmlFor="hook-body">Инструкция боту</Label>
