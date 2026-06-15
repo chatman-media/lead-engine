@@ -27,6 +27,76 @@ export function isRevivableOrderStatus(status: string): boolean {
 }
 
 /**
+ * Статусы заявки ДО поступления оплаты — их безопасно отменять автоматически
+ * (по просьбе клиента / при пересоздании). paid/payout — деньги уже в движении,
+ * авто-отмена запрещена (нужен оператор).
+ */
+const PRE_PAYMENT_STATUSES = ["quote", "awaiting_payment"] as const;
+
+export function isPrePaymentStatus(status: string): boolean {
+  return (PRE_PAYMENT_STATUSES as readonly string[]).includes(status);
+}
+
+/** Есть ли по заявке присланный (ещё не отклонённый) чек/пруф оплаты. */
+function hasPaymentProof(proofJson: string | null): boolean {
+  if (!proofJson) return false;
+  try {
+    const parsed = JSON.parse(proofJson) as { verifiedOk?: unknown };
+    return parsed.verifiedOk !== false; // есть пруф и он не помечен невалидным
+  } catch {
+    return true; // непустой proofJson — считаем, что оплата заявлена
+  }
+}
+
+/**
+ * Отменяет открытые ДО-оплатные заявки беседы (status quote/awaiting_payment без
+ * присланного чека). Заявки с поступившей оплатой (paid/payout или есть proofJson)
+ * НЕ трогает — деньги в движении, их разруливает оператор. Освобождает
+ * idempotency_key отменённых, чтобы свежую заявку с тем же ключом можно было создать.
+ * exceptOrderId — пропустить эту заявку (напр. идемпотентно переиспользуемую).
+ * Возвращает { cancelled, blockedByPayment } (списки id).
+ */
+export async function cancelOpenExchangeOrders(
+  db: Db,
+  tenantId: number,
+  conversationId: number,
+  opts?: { exceptOrderId?: number },
+): Promise<{ cancelled: number[]; blockedByPayment: number[] }> {
+  const now = Math.floor(Date.now() / 1000);
+  return withTenant(db, tenantId, async (tx) => {
+    const rows = await tx
+      .select({
+        id: exchangeOrders.id,
+        status: exchangeOrders.status,
+        proofJson: exchangeOrders.proofJson,
+      })
+      .from(exchangeOrders)
+      .where(
+        and(
+          eq(exchangeOrders.tenantId, tenantId),
+          eq(exchangeOrders.conversationId, conversationId),
+          inArray(exchangeOrders.status, OPEN_STATUSES as unknown as string[]),
+        ),
+      );
+    const cancelled: number[] = [];
+    const blockedByPayment: number[] = [];
+    for (const row of rows) {
+      if (opts?.exceptOrderId != null && row.id === opts.exceptOrderId) continue;
+      if (!isPrePaymentStatus(row.status) || hasPaymentProof(row.proofJson)) {
+        blockedByPayment.push(row.id);
+        continue;
+      }
+      await tx
+        .update(exchangeOrders)
+        .set({ status: "cancelled", idempotencyKey: null, updatedAt: now })
+        .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, row.id)));
+      cancelled.push(row.id);
+    }
+    return { cancelled, blockedByPayment };
+  });
+}
+
+/**
  * Освободить idempotency_key мёртвой заявки (NULL), чтобы create мог вставить
  * свежую с тем же ключом. В Postgres NULL-ключи в unique-индексе различны, так
  * что старая заявка остаётся в истории, а ключ переходит к новой.

@@ -1020,6 +1020,46 @@ function maybeForceExchangeUnsupportedNetworkReply(
 	return { text: EXCHANGE_SUPPORTED_NETWORKS_REPLY, toolCalls: [] };
 }
 
+// Явная просьба отменить заявку. «отмен…»/«аннул…»/«убери|сними заявку».
+// \w под /u НЕ матчит кириллицу → продолжение слова через [а-яёa-z]*.
+const EXCHANGE_CANCEL_INTENT_RE =
+	/(?<![a-zа-яё])(?:отмен[а-яёa-z]*|аннул[а-яёa-z]*)(?![a-zа-яё])|(?:убери|сними|удали)\s+заявк/iu;
+
+function forcedExchangeCancelText(result: unknown): string | null {
+	const row = (result ?? {}) as Record<string, unknown>;
+	if (row.needsOperator === true) {
+		return "По заявке уже поступила оплата — передаю оператору, он подтвердит отмену.";
+	}
+	const cancelled = Array.isArray(row.cancelled) ? row.cancelled : [];
+	if (cancelled.length === 0) {
+		return "Сейчас активных заявок нет. Если хотите оформить обмен — назовите сумму и направление.";
+	}
+	return "Заявку отменил. Если хотите оформить заново — назовите сумму и направление, пересчитаю по актуальному курсу.";
+}
+
+/**
+ * Явная отмена заявки клиентом («отмени заявку»). Детерминированно зовёт
+ * cancel_exchange_order (отменяет до-оплатные заявки беседы; с поступившей оплатой
+ * → оператор) — иначе LLM «отмену» не исполняет надёжно. Для смены суммы НЕ
+ * годится (это перекотировка), поэтому интент узкий: отмен/аннул/убери-сними-заявку.
+ */
+async function maybeForceExchangeCancelReply(
+	userMessageText: string,
+	tools: AnyRagTool[],
+): Promise<ExchangeForcedReply | null> {
+	if (userMessageText.trim().length > 200) return null;
+	if (!EXCHANGE_CANCEL_INTENT_RE.test(userMessageText)) return null;
+	const cancelTool = tools.find((tool) => tool.name === "cancel_exchange_order");
+	if (!cancelTool) return null;
+	const result = await cancelTool.execute({});
+	const text = forcedExchangeCancelText(result);
+	if (!text) return null;
+	return {
+		text,
+		toolCalls: [{ name: cancelTool.name, args: {}, result, cycle: 0 }],
+	};
+}
+
 export class LlmReplyStrategy implements ReplyStrategy {
 	constructor(
 		private readonly opts: LlmReplyStrategyOpts,
@@ -1170,6 +1210,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
 				: null;
 		const forcedExchangeReply = isExchange
 			? (maybeForceExchangeUnsupportedNetworkReply(input.userMessageText) ??
+				(await maybeForceExchangeCancelReply(input.userMessageText, tools)) ??
 				(await maybeForceExchangeOrderReply(
 					input.userMessageText,
 					history,
