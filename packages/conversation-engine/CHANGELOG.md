@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.21.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.0...@chatman-media/conversation-engine-v3.21.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **exchange:** rag перегенерирует плохой ответ (до 3 раз), потом оператор ([373a45a](https://github.com/chatman-media/lead-engine/commit/373a45afd74d5995611c396f446fd3db11a5adbf)), closes [#662](https://github.com/chatman-media/lead-engine/issues/662) [#666](https://github.com/chatman-media/lead-engine/issues/666) [#666](https://github.com/chatman-media/lead-engine/issues/666) [#616](https://github.com/chatman-media/lead-engine/issues/616)
+
 # [@chatman-media/conversation-engine-v3.21.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.20.1...@chatman-media/conversation-engine-v3.21.0) (2026-06-15)
 
 
