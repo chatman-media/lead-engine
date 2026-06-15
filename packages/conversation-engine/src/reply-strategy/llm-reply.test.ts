@@ -29,8 +29,10 @@ function firstReplyText(result: Awaited<ReturnType<LlmReplyStrategy["generate"]>
 
 class CapturingChat implements ChatClient {
   lastCall: { messages: ChatMessage[]; opts: unknown } | null = null;
+  calls = 0;
   constructor(public readonly reply: string) {}
   async complete(messages: ChatMessage[], opts?: unknown): Promise<string> {
+    this.calls += 1;
     this.lastCall = { messages, opts };
     return this.reply;
   }
@@ -552,56 +554,6 @@ describe("LlmReplyStrategy", () => {
       cycle: 0,
     });
 	  });
-
-	it("exchange: неподдерживаемая сеть (TON) → явный отказ с TRC20/ERC20/BEP20", async () => {
-		const mkStrategy = (msg: string) => {
-			const chat = new CapturingChat("Сейчас уточню у оператора.");
-			const repo = fakeMessagesRepo([row(1, "user", msg)]);
-			const strategy = new LlmReplyStrategy(
-				{
-					template: EXCHANGE_TEMPLATE,
-					resolveChat: () => chat,
-					resolveTools: () => [exchangeQuoteTool()],
-					resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
-				},
-				() => repo,
-			);
-			return { chat, strategy };
-		};
-		const base = {
-			tenant: { tenantId: 1 },
-			channel: { channelId: 10 },
-			conversationId: 100,
-			contactId: 1,
-			inbound: { externalUserId: "u" },
-		};
-		// Латиница «сеть TON» → отказ, LLM не дёргаем.
-		const a = mkStrategy("сеть TON");
-		const t1 = firstReplyText(
-			await a.strategy.generate({ ...base, userMessageText: "сеть TON" }),
-		);
-		expect(t1).toContain("TON");
-		expect(t1).toContain("не поддерживаем");
-		expect(t1).toContain("TRC20");
-		expect(a.chat.lastCall).toBeNull();
-		// Кириллица одним словом «тон».
-		const b = mkStrategy("тон");
-		expect(
-			firstReplyText(
-				await b.strategy.generate({ ...base, userMessageText: "тон" }),
-			),
-		).toContain("не поддерживаем");
-		// Поддерживаемая сеть → НЕ отказываем, считаем котировку.
-		const c = mkStrategy("500 USDT TRC20 на баты, какой курс?");
-		const t3 = firstReplyText(
-			await c.strategy.generate({
-				...base,
-				userMessageText: "500 USDT TRC20 на баты, какой курс?",
-			}),
-		);
-		expect(t3).not.toContain("не поддерживаем");
-		expect(t3).toContain("получите 15750 THB");
-	});
 
 	it("exchange: подтверждение на quote_calculated принудительно ведёт в create_exchange_order/KYC", async () => {
 		const chat = new CapturingChat("Повторно считаю сумму.");
@@ -1156,14 +1108,14 @@ describe("LlmReplyStrategy", () => {
 		});
 	});
 
-	it("exchange: safe-fallback «уточню у оператора» эскалирует на оператора", async () => {
-		// Вопрос вне сценария (другая сеть) — forced-пути не срабатывают, LLM
-		// выдаёт обещание оператора. Без эскалации обещание повисает: оператора
-		// не уведомили, лид не помечен. Должен быть auto-handoff + хэндофф.
+	it("exchange: бот сам ушёл в отписку — после 3 ретраев оператору", async () => {
+		// Вопрос вне сценария — forced-пути не срабатывают, LLM каждый раз выдаёт
+		// отписку «уточню у оператора» (стаб). Перегенерация не помогает → после 3
+		// попыток передаём оператору (auto-handoff), иначе обещание повисает.
 		const chat = new CapturingChat(EXCHANGE_SAFE_FALLBACK);
 		const repo = fakeMessagesRepo([
-			row(1, "assistant", "Итак: меняем 20000 RUB (TRC20) → получите 16185 PHP."),
-			row(2, "user", "а через TON сеть нельзя?"),
+			row(1, "assistant", "Итак: меняем 20000 RUB → получите 16185 PHP."),
+			row(2, "user", "а вы давно на рынке?"),
 		]);
 		const strategy = new LlmReplyStrategy(
 			{
@@ -1193,10 +1145,11 @@ describe("LlmReplyStrategy", () => {
 			conversationId: 100,
 			contactId: 1,
 			inbound: { externalUserId: "u" },
-			userMessageText: "а через TON сеть нельзя?",
+			userMessageText: "а вы давно на рынке?",
 		});
 
 		expect(firstReplyText(result)).toBe(EXCHANGE_SAFE_FALLBACK);
+		expect(chat.calls).toBe(3);
 		const normalized = normalizeReplyStrategyResult(result);
 		expect(normalized).toMatchObject({
 			autoTakeover: true,
@@ -1208,9 +1161,9 @@ describe("LlmReplyStrategy", () => {
 		});
 	});
 
-	it("exchange: safe-fallback эскалирует и без notice (молча отдаёт оператору)", async () => {
+	it("exchange: отписка бота эскалирует и без notice (молча отдаёт оператору)", async () => {
 		const chat = new CapturingChat(EXCHANGE_SAFE_FALLBACK);
-		const repo = fakeMessagesRepo([row(1, "user", "а через TON сеть нельзя?")]);
+		const repo = fakeMessagesRepo([row(1, "user", "а вы давно на рынке?")]);
 		const strategy = new LlmReplyStrategy(
 			{
 				template: EXCHANGE_TEMPLATE,
@@ -1226,7 +1179,7 @@ describe("LlmReplyStrategy", () => {
 			conversationId: 100,
 			contactId: 1,
 			inbound: { externalUserId: "u" },
-			userMessageText: "а через TON сеть нельзя?",
+			userMessageText: "а вы давно на рынке?",
 		});
 
 		const normalized = normalizeReplyStrategyResult(result);
@@ -1236,6 +1189,104 @@ describe("LlmReplyStrategy", () => {
 			customerNoticeSent: false,
 		});
 		expect(normalized?.operatorHandoffs?.[0]?.reason).toBe("operator_request");
+	});
+
+	it("exchange: плохой ответ перегенерируется — нормальный со 2-й попытки, без эскалации", async () => {
+		// 1-я попытка — выдуманный курс (гард блокирует), 2-я — ответ по существу.
+		// Должны молча перегенерировать и отдать нормальный ответ, БЕЗ оператора.
+		const chat = new SequencedChat([
+			"Курс 31.5, получите 10553 THB.",
+			"Назовите сумму и направление обмена — посчитаю точно.",
+		]);
+		const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
+		const strategy = new LlmReplyStrategy(
+			{ template: EXCHANGE_TEMPLATE, resolveChat: () => chat },
+			() => repo,
+		);
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "сколько за 335 usdt?",
+		});
+		expect(firstReplyText(result)).toBe(
+			"Назовите сумму и направление обмена — посчитаю точно.",
+		);
+		expect(chat.calls.length).toBe(2);
+		const normalized = normalizeReplyStrategyResult(result);
+		expect(normalized?.autoTakeover).toBe(false);
+		expect(normalized?.operatorHandoffs).toHaveLength(0);
+	});
+
+	it("exchange: 3 неудачные попытки подряд → эскалация на оператора", async () => {
+		// Бот каждый раз выдаёт выдуманный курс (гард блокирует) — после 3 попыток
+		// в этом же ходу передаём диалог оператору. Эскалация по счётчику попыток.
+		const chat = new CapturingChat("Курс 31.5, получите 10553 THB.");
+		const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveExchangePolicyState: () => ({
+					stageSlug: "quote_calculated",
+					order: {
+						id: 7,
+						status: "awaiting_payment",
+						direction: "RUB->PHP",
+						requisitesIssued: false,
+						paymentProofReceived: false,
+						paymentVerified: false,
+						payoutReady: false,
+						payoutCompleted: false,
+						payoutCodeIssued: false,
+					},
+				}),
+			},
+			() => repo,
+		);
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "сколько за 335 usdt?",
+		});
+		expect(chat.calls).toBe(3);
+		const normalized = normalizeReplyStrategyResult(result);
+		expect(normalized).toMatchObject({ autoTakeover: true });
+		expect(normalized?.operatorHandoffs?.[0]).toMatchObject({
+			reason: "operator_request",
+			orderId: 7,
+		});
+	});
+
+	it("exchange: вопрос про неподдерживаемую сеть (TON) — сразу называет доступные, без ретраев", async () => {
+		const chat = new CapturingChat("Сейчас уточню у оператора.");
+		const repo = fakeMessagesRepo([row(1, "user", "а через TON сеть нельзя?")]);
+		const strategy = new LlmReplyStrategy(
+			{ template: EXCHANGE_TEMPLATE, resolveChat: () => chat },
+			() => repo,
+		);
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "а через TON сеть нельзя?",
+		});
+		const text = firstReplyText(result);
+		expect(text).toContain("TRC20");
+		expect(text).toContain("ERC20");
+		expect(text).toContain("BEP20");
+		// forced-ответ: LLM не вызывался, эскалации нет.
+		expect(chat.calls).toBe(0);
+		const normalized = normalizeReplyStrategyResult(result);
+		expect(normalized?.autoTakeover).toBe(false);
+		expect(normalized?.operatorHandoffs).toHaveLength(0);
 	});
 
   it("пишет telemetry hook после generic tool-loop", async () => {

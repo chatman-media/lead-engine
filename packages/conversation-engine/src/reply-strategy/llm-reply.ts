@@ -42,7 +42,6 @@ import {
 	type ExchangeResponseGuardAction,
 	type ExchangeResponseGuardFinding,
 	exchangeGuardFindingFromResult,
-	rewriteUnbackedQuoteReply,
 } from "./exchange-reply-guard.ts";
 
 /**
@@ -304,15 +303,42 @@ function exchangeReplyOutput(input: {
 	};
 }
 
+/** Максимум попыток перегенерации exchange-ответа за один ход (см. цикл в generate). */
+const MAX_EXCHANGE_REPLY_ATTEMPTS = 3;
+
+/**
+ * Корректирующая подсказка для ПЕРЕгенерации exchange-ответа, который не прошёл
+ * (гард переписал выдуманный курс/реквизиты ИЛИ бот ушёл в отписку «уточню у
+ * оператора»). Добавляется системным сообщением к следующей попытке: цель —
+ * заставить модель ответить по существу (посчитать инструментом / спросить
+ * недостающее), а не повторить фабрикацию и не обещать оператора.
+ */
+function buildExchangeRetryHint(guarded: {
+	reason?: string | null;
+	requiredFixes?: readonly string[];
+}): string {
+	const fixes = guarded.requiredFixes?.length
+		? guarded.requiredFixes.join(" ")
+		: "";
+	return [
+		"Твой предыдущий черновик НЕ ГОДИТСЯ и клиенту НЕ отправлен.",
+		guarded.reason ? `Причина отклонения: ${guarded.reason}.` : "",
+		fixes,
+		"Дай корректный ответ прямо сейчас: посчитай курс/сумму через инструмент расчёта или спроси недостающие данные. НЕ выдумывай числа и реквизиты.",
+		"НЕ пиши «уточню у оператора» и не обещай вернуться позже — отвечай по существу.",
+	]
+		.filter(Boolean)
+		.join(" ");
+}
+
 /**
  * Кому-то нужен оператор? Порядок резолва хэндоффа для exchange-ответа:
  *   1) сигнал из tool-результата/состояния (buildExchangeOperatorHandoff);
  *   2) guard потребовал escalate/block — явный generic с причиной guard'а;
- *   3) финальный текст клиенту = safe-fallback «уточню у оператора».
- *      Бот ПООБЕЩАЛ клиенту оператора, но конкретики дать не смог: вопрос вне
- *      сценария («а через TON сеть нельзя?»), провал перезапроса unbacked_quote,
- *      торг по курсу и т.п. Без этой ветки обещание повисает: лид не помечается
- *      escalated, оператор не уведомлён, бот сам «вернуться» не может.
+ *   3) исчерпаны попытки перегенерации (retriesExhausted): бот несколько раз
+ *      подряд не смог дать нормальный ответ (выдумывал курс/реквизиты или уходил
+ *      в отписку «уточню у оператора») → передаём диалог оператору. Триггер по
+ *      СЧЁТЧИКУ неудачных попыток, не по тексту ответа.
  */
 function resolveExchangeOperatorHandoff(input: {
 	text: string;
@@ -320,6 +346,7 @@ function resolveExchangeOperatorHandoff(input: {
 	reason: string | null;
 	telemetry: Parameters<typeof buildExchangeOperatorHandoff>[0]["telemetry"];
 	state: ExchangePolicyState | null;
+	retriesExhausted: boolean;
 }): ReturnType<typeof buildExchangeOperatorHandoff> {
 	const signalled = buildExchangeOperatorHandoff({
 		text: input.text,
@@ -333,10 +360,10 @@ function resolveExchangeOperatorHandoff(input: {
 			context: input.reason,
 		});
 	}
-	if (input.text.trim() === EXCHANGE_SAFE_FALLBACK) {
+	if (input.retriesExhausted) {
 		return buildExchangeGenericOperatorHandoff({
 			state: input.state,
-			context: input.reason ?? "deferred_to_operator",
+			context: "bot_uncertain",
 		});
 	}
 	return null;
@@ -507,72 +534,6 @@ function parseNetwork(text: string): string | undefined {
 			: /bep[\s-]?20|bsc/i.test(text)
 				? "BEP20"
 				: undefined;
-}
-
-// Поддерживаемые сети — для отказа по неподдерживаемым (см. ниже). \b не работает
-// по кириллице, поэтому supported-набор латиницей и матчится свободно.
-const EXCHANGE_SUPPORTED_NETWORK_RE = /trc[\s-]?20|tron|erc[\s-]?20|bep[\s-]?20|\bbsc\b/iu;
-
-// Юникод-границы слова: \b в JS опирается на ASCII \w и не ставит границу вокруг
-// кириллицы (см. #612). Берём явные lookaround'ы по \p{L}\p{N}.
-const NETWORK_NB_L = "(?<![\\p{L}\\p{N}])";
-const NETWORK_NB_R = "(?![\\p{L}\\p{N}])";
-
-/**
- * Известные, но НЕ поддерживаемые нами сети для USDT (TON/Solana/…). Раньше
- * экстрактор молча не извлекал такую сеть → бот переспрашивал в пустоту (#655).
- * Это интент-классификатор отказа, а не сбор поля — переживает выпил regex (#654).
- */
-const EXCHANGE_UNSUPPORTED_NETWORKS: ReadonlyArray<{ re: RegExp; name: string }> =
-	[
-		{
-			re: new RegExp(`${NETWORK_NB_L}(?:ton(?:coin)?|тон|тонкоин)${NETWORK_NB_R}`, "iu"),
-			name: "TON",
-		},
-		{
-			re: new RegExp(`${NETWORK_NB_L}(?:solana|солана|spl|спл)${NETWORK_NB_R}`, "iu"),
-			name: "Solana",
-		},
-		{
-			re: new RegExp(`${NETWORK_NB_L}(?:polygon|полигон|matic|матик)${NETWORK_NB_R}`, "iu"),
-			name: "Polygon",
-		},
-		{
-			re: new RegExp(`${NETWORK_NB_L}(?:avalanche|avax|аваланч)${NETWORK_NB_R}`, "iu"),
-			name: "Avalanche",
-		},
-		{
-			re: new RegExp(`${NETWORK_NB_L}(?:arbitrum|арбитрум)${NETWORK_NB_R}`, "iu"),
-			name: "Arbitrum",
-		},
-		{
-			re: new RegExp(`${NETWORK_NB_L}(?:optimism|оптимизм)${NETWORK_NB_R}`, "iu"),
-			name: "Optimism",
-		},
-	];
-
-/** Каноничное имя неподдерживаемой сети из текста, иначе null. */
-function detectUnsupportedExchangeNetwork(text: string): string | null {
-	if (EXCHANGE_SUPPORTED_NETWORK_RE.test(text)) return null;
-	for (const { re, name } of EXCHANGE_UNSUPPORTED_NETWORKS) {
-		if (re.test(text)) return name;
-	}
-	return null;
-}
-
-/**
- * Явный отказ, когда клиент называет неподдерживаемую сеть (TON и пр.): не молчим
- * и не подставляем дефолт — просим выбрать TRC20/ERC20/BEP20.
- */
-function maybeForceExchangeUnsupportedNetwork(
-	userMessageText: string,
-): ExchangeForcedReply | null {
-	const network = detectUnsupportedExchangeNetwork(userMessageText);
-	if (!network) return null;
-	return {
-		text: `Сеть ${network} мы не поддерживаем — принимаем USDT только в сетях TRC20, ERC20 или BEP20. В какой из них отправите?`,
-		toolCalls: [],
-	};
 }
 
 function parsePayoutMethod(text: string): string | undefined {
@@ -1015,6 +976,30 @@ function maybeForceExchangeKycReply(
 	return { text: EXCHANGE_KYC_HANDOFF_TEXT, toolCalls: [] };
 }
 
+// Числа сетей (TRC20/ERC20/BEP20) — буква перед «20» → не парсятся как сумма
+// (NUMBER_RE требует не-буквы слева); слов оплат/перев/реквизит нет → guard ок.
+const EXCHANGE_SUPPORTED_NETWORKS_REPLY =
+	"Эту сеть, к сожалению, не поддерживаем. Доступны TRC20, ERC20 и BEP20 — в какой из них вам удобно отправить?";
+
+// Сети, про которые часто спрашивают, но мы их НЕ принимаем (поддерживаем только
+// TRC20/ERC20/BEP20, см. parseNetwork). Latin \b ненадёжен для кириллицы → lookaround.
+const EXCHANGE_UNSUPPORTED_NETWORK_RE =
+	/(?<![a-zа-яё])(?:ton|тон|solana|солана|polygon|полигон|matic|матик|avalanche|avax|arbitrum|арбитрум|optimism)(?![a-zа-яё])/iu;
+
+/**
+ * Клиент спрашивает про неподдерживаемую сеть (TON/Solana/Polygon/…). Сразу
+ * называем доступные сети, без перегенерации и эскалации — иначе бот молотит 3
+ * попытки и уходит к оператору на простой вопрос. Если в сообщении упомянута И
+ * поддерживаемая сеть — пропускаем (её обработает обычный поток).
+ */
+function maybeForceExchangeUnsupportedNetworkReply(
+	userMessageText: string,
+): ExchangeForcedReply | null {
+	if (!EXCHANGE_UNSUPPORTED_NETWORK_RE.test(userMessageText)) return null;
+	if (parseNetwork(userMessageText)) return null;
+	return { text: EXCHANGE_SUPPORTED_NETWORKS_REPLY, toolCalls: [] };
+}
+
 export class LlmReplyStrategy implements ReplyStrategy {
 	constructor(
 		private readonly opts: LlmReplyStrategyOpts,
@@ -1164,13 +1149,13 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					})
 				: null;
 		const forcedExchangeReply = isExchange
-			? ((await maybeForceExchangeOrderReply(
+			? (maybeForceExchangeUnsupportedNetworkReply(input.userMessageText) ??
+				(await maybeForceExchangeOrderReply(
 					input.userMessageText,
 					history,
 					tools,
 					exchangePolicyState,
 				)) ??
-				maybeForceExchangeUnsupportedNetwork(input.userMessageText) ??
 				(await maybeForceExchangeQuoteReply(input.userMessageText, tools)) ??
 				maybeForceExchangePaymentMethodQuestion(
 					input.userMessageText,
@@ -1260,12 +1245,14 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					);
 				}
 			}
+			// Форс-ответ детерминирован и подкреплён тулами — без перегенерации.
 			const operatorHandoff = resolveExchangeOperatorHandoff({
 				text: guarded.text,
 				action: guarded.action,
 				reason: guarded.reason ?? null,
 				telemetry,
 				state: exchangePolicyState,
+				retriesExhausted: false,
 			});
 			return exchangeReplyOutput({
 				channelId: input.channel.channelId,
@@ -1299,59 +1286,72 @@ export class LlmReplyStrategy implements ReplyStrategy {
 			...historyMessages,
 		];
 
-		let reply: string;
+		// Генерация ответа. Для exchange — цикл «перегенерировать, пока не нормальный
+		// ответ» (выбор владельца): если гард заблокировал выдуманный курс/реквизиты
+		// ЛИБО бот сам ушёл в отписку «уточню у оператора» — НЕ отправляем это, а
+		// молча перегенерируем с корректирующей подсказкой, до
+		// MAX_EXCHANGE_REPLY_ATTEMPTS попыток. Все попытки мимо → передаём оператору
+		// (эскалация по СЧЁТЧИКУ неудач, не по тексту). Жёсткие политические блоки
+		// (escalate/block: KYC/оплата/выдача) НЕ ретраим — сразу оператор. Не-exchange
+		// или выключенный guard — одна генерация, как раньше.
+		const maxAttempts =
+			isExchange && exchangeGuardEnabled ? MAX_EXCHANGE_REPLY_ATTEMPTS : 1;
+		let reply = "";
 		let toolCalls: ToolCallRecord[] = [];
-		if (toolsActive) {
-			const loop = await runToolLoop({
-				chat,
-				messages: msgs,
-				tools,
-				llmOpts,
-				maxCycles: DEFAULT_MAX_TOOL_CYCLES,
-			});
-			toolCalls = loop.toolCalls;
-			// loop.content — финальный текст; если null (исчерпал циклы) — добиваем
-			// обычным complete по messages с уже вложенными tool-результатами.
-			reply = loop.content ?? (await chat.complete(msgs, llmOpts));
-		} else {
-			reply = await chat.complete(msgs, llmOpts);
+		let guarded: ReturnType<typeof guardExchangePolicy> = {
+			ok: true,
+			action: "pass",
+			text: "",
+			reasons: [],
+			requiredFixes: [],
+		};
+		let correctiveHint: string | null = null;
+		let retriesExhausted = false;
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			const attemptMsgs = correctiveHint
+				? [...msgs, { role: "system" as const, content: correctiveHint }]
+				: msgs;
+			if (toolsActive) {
+				const loop = await runToolLoop({
+					chat,
+					messages: attemptMsgs,
+					tools,
+					llmOpts,
+					maxCycles: DEFAULT_MAX_TOOL_CYCLES,
+				});
+				toolCalls = loop.toolCalls;
+				// loop.content — финальный текст; если null (исчерпал циклы) — добиваем
+				// обычным complete по messages с уже вложенными tool-результатами.
+				reply = loop.content ?? (await chat.complete(attemptMsgs, llmOpts));
+			} else {
+				reply = await chat.complete(attemptMsgs, llmOpts);
+				toolCalls = [];
+			}
+			guarded =
+				isExchange && exchangeGuardEnabled
+					? guardExchangePolicy({
+							text: reply,
+							telemetry: buildToolTelemetry(toolCalls),
+							history,
+							state: exchangePolicyState,
+						})
+					: { ok: true, action: "pass", text: reply, reasons: [], requiredFixes: [] };
+			if (maxAttempts === 1 || reply.trim().length === 0) break;
+			// Жёсткий политический блок — сразу оператор, без перегенерации.
+			if (guarded.action === "escalate" || guarded.action === "block") break;
+			// «Плохой ответ» = гард переписал (выдуманный курс/реквизиты/торг) ЛИБО бот
+			// сам выдал отписку «уточню у оператора». Иначе — нормальный ответ, отдаём.
+			const badAnswer =
+				!guarded.ok || guarded.text.trim() === EXCHANGE_SAFE_FALLBACK;
+			if (!badAnswer) break;
+			if (attempt >= maxAttempts) {
+				retriesExhausted = true;
+				break;
+			}
+			correctiveHint = buildExchangeRetryHint(guarded);
 		}
 
 		if (reply.trim().length === 0) return null;
-		let guarded =
-			isExchange && exchangeGuardEnabled
-				? guardExchangePolicy({
-						text: reply,
-						telemetry: buildToolTelemetry(toolCalls),
-						history,
-						state: exchangePolicyState,
-					})
-				: {
-						ok: true,
-						action: "pass" as const,
-						text: reply,
-						reasons: [],
-						requiredFixes: [],
-					};
-		// unbacked_quote: вместо жёсткой заглушки — один перезапрос, переписываем
-		// ответ без выдуманных чисел (нет суммы → просто спросить направление+сумму).
-		// Заглушку оставляем только если и перезапрос снова не прошёл.
-		if (!guarded.ok && guarded.reason === "unbacked_quote") {
-			const rewritten = await rewriteUnbackedQuoteReply({
-				chat,
-				userMessage: input.userMessageText,
-				draftReply: reply,
-			});
-			if (rewritten) {
-				const reguard = guardExchangePolicy({
-					text: rewritten,
-					telemetry: buildToolTelemetry(toolCalls),
-					history,
-					state: exchangePolicyState,
-				});
-				if (reguard.ok) guarded = reguard;
-			}
-		}
 		const guardFinding =
 			isExchange && exchangeGuardEnabled
 				? exchangeGuardFindingFromResult(guarded)
@@ -1383,6 +1383,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					reason: guarded.reason ?? null,
 					telemetry: buildToolTelemetry(toolCalls),
 					state: exchangePolicyState,
+					retriesExhausted,
 				})
 			: null;
 		return isExchange
