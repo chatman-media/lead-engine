@@ -38,6 +38,8 @@ import {
 	guardExchangePolicy,
 } from "./exchange-policy-guard.ts";
 import {
+	EXCHANGE_SAFE_FALLBACK,
+	type ExchangeResponseGuardAction,
 	type ExchangeResponseGuardFinding,
 	exchangeGuardFindingFromResult,
 	rewriteUnbackedQuoteReply,
@@ -300,6 +302,44 @@ function exchangeReplyOutput(input: {
 		autoTakeover: true,
 		customerNoticeSent: envelopes.length > 0,
 	};
+}
+
+/**
+ * Кому-то нужен оператор? Порядок резолва хэндоффа для exchange-ответа:
+ *   1) сигнал из tool-результата/состояния (buildExchangeOperatorHandoff);
+ *   2) guard потребовал escalate/block — явный generic с причиной guard'а;
+ *   3) финальный текст клиенту = safe-fallback «уточню у оператора».
+ *      Бот ПООБЕЩАЛ клиенту оператора, но конкретики дать не смог: вопрос вне
+ *      сценария («а через TON сеть нельзя?»), провал перезапроса unbacked_quote,
+ *      торг по курсу и т.п. Без этой ветки обещание повисает: лид не помечается
+ *      escalated, оператор не уведомлён, бот сам «вернуться» не может.
+ */
+function resolveExchangeOperatorHandoff(input: {
+	text: string;
+	action: ExchangeResponseGuardAction;
+	reason: string | null;
+	telemetry: Parameters<typeof buildExchangeOperatorHandoff>[0]["telemetry"];
+	state: ExchangePolicyState | null;
+}): ReturnType<typeof buildExchangeOperatorHandoff> {
+	const signalled = buildExchangeOperatorHandoff({
+		text: input.text,
+		telemetry: input.telemetry,
+		state: input.state,
+	});
+	if (signalled) return signalled;
+	if (input.action === "escalate" || input.action === "block") {
+		return buildExchangeGenericOperatorHandoff({
+			state: input.state,
+			context: input.reason,
+		});
+	}
+	if (input.text.trim() === EXCHANGE_SAFE_FALLBACK) {
+		return buildExchangeGenericOperatorHandoff({
+			state: input.state,
+			context: input.reason ?? "deferred_to_operator",
+		});
+	}
+	return null;
 }
 
 function isExchangeOrderConfirmationSeparator(ch: string): boolean {
@@ -1220,18 +1260,13 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					);
 				}
 			}
-			const operatorHandoff =
-				buildExchangeOperatorHandoff({
-					text: guarded.text,
-					telemetry,
-					state: exchangePolicyState,
-				}) ??
-				(guarded.action === "escalate" || guarded.action === "block"
-					? buildExchangeGenericOperatorHandoff({
-							state: exchangePolicyState,
-							context: guarded.reason ?? null,
-						})
-					: null);
+			const operatorHandoff = resolveExchangeOperatorHandoff({
+				text: guarded.text,
+				action: guarded.action,
+				reason: guarded.reason ?? null,
+				telemetry,
+				state: exchangePolicyState,
+			});
 			return exchangeReplyOutput({
 				channelId: input.channel.channelId,
 				externalUserId: input.inbound.externalUserId,
@@ -1342,17 +1377,13 @@ export class LlmReplyStrategy implements ReplyStrategy {
 			}
 		}
 		const operatorHandoff = isExchange
-			? (buildExchangeOperatorHandoff({
+			? resolveExchangeOperatorHandoff({
 					text: guarded.text,
+					action: guarded.action,
+					reason: guarded.reason ?? null,
 					telemetry: buildToolTelemetry(toolCalls),
 					state: exchangePolicyState,
-				}) ??
-				(guarded.action === "escalate" || guarded.action === "block"
-					? buildExchangeGenericOperatorHandoff({
-							state: exchangePolicyState,
-							context: guarded.reason ?? null,
-						})
-					: null))
+				})
 			: null;
 		return isExchange
 			? exchangeReplyOutput({
