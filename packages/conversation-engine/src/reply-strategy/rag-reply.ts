@@ -49,6 +49,7 @@ import {
 } from "./exchange-policy-guard.ts";
 import {
 	EXCHANGE_SAFE_FALLBACK,
+	type ExchangeResponseGuardAction,
 	type ExchangeResponseGuardFinding,
 	exchangeGuardFindingFromResult,
 	rewriteUnbackedQuoteReply,
@@ -1004,6 +1005,71 @@ const EXCHANGE_COMMITTING_TOOLS = new Set([
 	"verify_exchange_payment",
 ]);
 
+/** Максимум попыток перегенерации exchange-ответа за один ход (см. цикл в generate). */
+const MAX_EXCHANGE_REPLY_ATTEMPTS = 3;
+
+/**
+ * Корректирующая подсказка для ПЕРЕгенерации exchange-ответа, который не прошёл
+ * (гард переписал выдуманный курс/реквизиты, бот ушёл в отписку «уточню у
+ * оператора» ИЛИ ответил в пустоту без контекста). Добавляется к requestContext
+ * следующей попытки: цель — заставить ответить по существу (посчитать
+ * инструментом / спросить недостающее), а не повторить фабрикацию.
+ */
+function buildExchangeRetryHint(guarded: {
+	reason?: string | null;
+	requiredFixes?: readonly string[];
+}): string {
+	const fixes = guarded.requiredFixes?.length
+		? guarded.requiredFixes.join(" ")
+		: "";
+	return [
+		"Твой предыдущий черновик НЕ ГОДИТСЯ и клиенту НЕ отправлен.",
+		guarded.reason ? `Причина отклонения: ${guarded.reason}.` : "",
+		fixes,
+		"Дай корректный ответ прямо сейчас: посчитай курс/сумму через инструмент расчёта или спроси недостающие данные. НЕ выдумывай числа и реквизиты.",
+		"НЕ пиши «уточню у оператора» и не обещай вернуться позже — отвечай по существу.",
+	]
+		.filter(Boolean)
+		.join(" ");
+}
+
+/**
+ * Кому нужен оператор? Порядок резолва хэндоффа для exchange-ответа:
+ *   1) сигнал из tool-результата/состояния (buildExchangeOperatorHandoff);
+ *   2) guard потребовал escalate/block — явный generic с причиной guard'а;
+ *   3) исчерпаны попытки перегенерации (retriesExhausted): бот несколько раз
+ *      подряд не дал нормальный ответ → оператор. Триггер по СЧЁТЧИКУ неудач,
+ *      не по тексту ответа (выбор владельца).
+ */
+function resolveExchangeOperatorHandoff(input: {
+	text: string;
+	action: ExchangeResponseGuardAction;
+	reason: string | null;
+	telemetry: Parameters<typeof buildExchangeOperatorHandoff>[0]["telemetry"];
+	state: ExchangePolicyState | null;
+	retriesExhausted: boolean;
+}): ReturnType<typeof buildExchangeOperatorHandoff> {
+	const signalled = buildExchangeOperatorHandoff({
+		text: input.text,
+		telemetry: input.telemetry,
+		state: input.state,
+	});
+	if (signalled) return signalled;
+	if (input.action === "escalate" || input.action === "block") {
+		return buildExchangeGenericOperatorHandoff({
+			state: input.state,
+			context: input.reason,
+		});
+	}
+	if (input.retriesExhausted) {
+		return buildExchangeGenericOperatorHandoff({
+			state: input.state,
+			context: "bot_uncertain",
+		});
+	}
+	return null;
+}
+
 function exchangeReplyOutput(input: {
 	channelId: number;
 	externalUserId: string;
@@ -1267,46 +1333,138 @@ export class RagReplyStrategy implements ReplyStrategy {
 		// наш llm-router'овский ChatClient compatible (rag's ChatMessage.content
 		// допускает null — наш string ужe; complete(messages, opts?) совпадает).
 		// Если TS жалуется на nominal-mismatch — даём structural cast.
-		const result = await answerWithRag({
-			question: input.userMessageText,
-			kb,
-			embedder: ctx.embedder,
-			chat: chat as unknown as Parameters<typeof answerWithRag>[0]["chat"],
-			history: history as unknown as Parameters<
-				typeof answerWithRag
-			>[0]["history"],
-			topK: this.opts.topK ?? 5,
-			hybridSearch: this.opts.hybridSearch ?? true,
-			rewriteQueryBeforeRetrieval:
-				this.opts.rewriteQueryBeforeRetrieval ?? false,
-			reflect: this.opts.reflect ?? isExchange,
-			numPredict: genMaxTokens,
-			// Style: если контекст содержит Style — answerWithRag использует его
-			// persona, sales framework, hooks, skills для построения system prompt.
-			// При null — rag fallback'нет на DEFAULT_PERSONA и базовый промпт.
-			...(style ? { style } : {}),
-			...(skills.length > 0 ? { skills } : {}),
-			...(directorHooks.length > 0 ? { directorHooks } : {}),
-			...(tools.length > 0 ? { tools } : {}),
-			...(reranker ? { reranker } : {}),
-			...(conversationSummary ? { conversationSummary } : {}),
-			...(stageGuidance ? { stageOverride: stageGuidance } : {}),
-			...(combinedRequestContext
-				? { requestContext: combinedRequestContext }
-				: {}),
-			...(serviceOrderGrounding
-				? { vacanciesBlock: serviceOrderGrounding, vacancyGuard: false }
-				: {}),
-			...(awaitingOperator ? { awaitingOperator } : {}),
-		});
+		// Одна попытка генерации; hint (для ретрая) уходит в requestContext.
+		const runAnswer = (hint: string | null) => {
+			const attemptRequestContext = hint
+				? [combinedRequestContext, hint].filter(Boolean).join("\n\n")
+				: combinedRequestContext;
+			return answerWithRag({
+				question: input.userMessageText,
+				kb,
+				embedder: ctx.embedder,
+				chat: chat as unknown as Parameters<typeof answerWithRag>[0]["chat"],
+				history: history as unknown as Parameters<
+					typeof answerWithRag
+				>[0]["history"],
+				topK: this.opts.topK ?? 5,
+				hybridSearch: this.opts.hybridSearch ?? true,
+				rewriteQueryBeforeRetrieval:
+					this.opts.rewriteQueryBeforeRetrieval ?? false,
+				reflect: this.opts.reflect ?? isExchange,
+				numPredict: genMaxTokens,
+				// Style: если контекст содержит Style — answerWithRag использует его
+				// persona, sales framework, hooks, skills для построения system prompt.
+				// При null — rag fallback'нет на DEFAULT_PERSONA и базовый промпт.
+				...(style ? { style } : {}),
+				...(skills.length > 0 ? { skills } : {}),
+				...(directorHooks.length > 0 ? { directorHooks } : {}),
+				...(tools.length > 0 ? { tools } : {}),
+				...(reranker ? { reranker } : {}),
+				...(conversationSummary ? { conversationSummary } : {}),
+				...(stageGuidance ? { stageOverride: stageGuidance } : {}),
+				...(attemptRequestContext
+					? { requestContext: attemptRequestContext }
+					: {}),
+				...(serviceOrderGrounding
+					? { vacanciesBlock: serviceOrderGrounding, vacancyGuard: false }
+					: {}),
+				...(awaitingOperator ? { awaitingOperator } : {}),
+			});
+		};
 
-		// ── Soft fallback when RAG has no context ────────────────────────────────
-		if (
-			result.text === NO_CONTEXT_MARKER ||
-			!result.text ||
-			result.text.trim().length === 0
-		) {
-			// Fire-and-forget: log unanswered question for the KB suggestions queue.
+		const exchangeGuardEnabled = ctx.exchangeResponseGuardEnabled ?? true;
+		// Цикл «перегенерировать, пока не нормальный ответ» (выбор владельца, ср.
+		// llm-reply): для exchange до MAX_EXCHANGE_REPLY_ATTEMPTS попыток. Плохой
+		// ответ — нет контекста / гард переписал выдуманный курс/реквизиты / бот
+		// ушёл в отписку «уточню у оператора» → корректирующая подсказка и
+		// перегенерация. Все попытки мимо → оператор (по СЧЁТЧИКУ неудач, не по
+		// тексту). Жёсткий политблок (escalate/block) НЕ ретраим — сразу оператор.
+		// Не-exchange / выключенный guard — одна попытка, как раньше.
+		const maxAttempts =
+			isExchange && exchangeGuardEnabled ? MAX_EXCHANGE_REPLY_ATTEMPTS : 1;
+		let result = await runAnswer(null);
+		let guarded: ReturnType<typeof guardExchangePolicy> = {
+			ok: true,
+			action: "pass",
+			text: result.text,
+			reasons: [],
+			requiredFixes: [],
+		};
+		let correctiveHint: string | null = null;
+		let retriesExhausted = false;
+		let noContext = false;
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			if (attempt > 1) result = await runAnswer(correctiveHint);
+			noContext =
+				result.text === NO_CONTEXT_MARKER ||
+				!result.text ||
+				result.text.trim().length === 0;
+			if (noContext) {
+				console.warn(
+					`[exchange-reflect-guard] tenant=${tenantId} conversation=${input.conversationId} path=${result.telemetry.path}`,
+				);
+				// Нет контекста = плохой ответ: для exchange ретраим (вдруг по подсказке
+				// бот спросит недостающее), иначе ниже — softFallback/молчание.
+				guarded = {
+					ok: false,
+					action: "rewrite",
+					text: EXCHANGE_SAFE_FALLBACK,
+					reasons: [],
+					requiredFixes: [],
+				};
+			} else {
+				guarded =
+					isExchange && exchangeGuardEnabled
+						? guardExchangePolicy({
+								text: result.text,
+								telemetry: result.telemetry,
+								history: historyWithoutCurrent,
+								state: exchangePolicyState,
+							})
+						: {
+								ok: true,
+								action: "pass",
+								text: result.text,
+								reasons: [],
+								requiredFixes: [],
+							};
+				// unbacked_quote: один перезапрос вместо жёсткой заглушки.
+				if (!guarded.ok && guarded.reason === "unbacked_quote") {
+					const rewritten = await rewriteUnbackedQuoteReply({
+						chat,
+						userMessage: input.userMessageText,
+						draftReply: result.text,
+					});
+					if (rewritten) {
+						const reguard = guardExchangePolicy({
+							text: rewritten,
+							telemetry: result.telemetry,
+							history: historyWithoutCurrent,
+							state: exchangePolicyState,
+						});
+						if (reguard.ok) guarded = reguard;
+					}
+				}
+			}
+			if (maxAttempts === 1) break;
+			// Жёсткий политблок — сразу оператор, без перегенерации.
+			if (guarded.action === "escalate" || guarded.action === "block") break;
+			const badAnswer =
+				noContext ||
+				!guarded.ok ||
+				guarded.text.trim() === EXCHANGE_SAFE_FALLBACK;
+			if (!badAnswer) break;
+			if (attempt >= maxAttempts) {
+				retriesExhausted = true;
+				break;
+			}
+			correctiveHint = buildExchangeRetryHint(guarded);
+		}
+
+		// Нет контекста (итог попыток): лог незакрытого вопроса; для НЕ-exchange —
+		// softFallback/молчание, как раньше. Для exchange guarded уже =
+		// safe-fallback, эскалацию решит retriesExhausted ниже.
+		if (noContext) {
 			if (ctx.suggestions) {
 				const nowEpoch = Math.floor(Date.now() / 1000);
 				ctx.suggestions
@@ -1320,94 +1478,36 @@ export class RagReplyStrategy implements ReplyStrategy {
 						console.warn("[rag-reply] failed to log kb_suggestion:", err);
 					});
 			}
-
-			if (isExchange) {
-				console.warn(
-					`[exchange-reflect-guard] tenant=${tenantId} conversation=${input.conversationId} path=${result.telemetry.path}`,
-				);
-				// Бот выдаёт отписку «уточню у оператора», но без эскалации обещание
-				// повисает: оператора не уведомили, бот сам вернуться не может (ср.
-				// llm-reply #657 — там retriesExhausted → оператор). rag не
-				// перегенерирует, поэтому эскалируем сразу: клиенту уходит обещание,
-				// диалог уходит оператору (autoTakeover → mode=human).
-				return exchangeReplyOutput({
-					channelId: input.channel.channelId,
-					externalUserId: input.inbound.externalUserId,
-					text: EXCHANGE_SAFE_FALLBACK,
-					operatorHandoff: buildExchangeGenericOperatorHandoff({
-						state: exchangePolicyState,
-						context: "bot_no_context",
-					}),
-					customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
+			if (!isExchange) {
+				if (!this.opts.softFallback) return null;
+				// Derive persona: from style (if set) or DEFAULT_PERSONA.
+				const persona: Persona = style
+					? {
+							name: style.persona.name,
+							role: style.persona.role,
+							...(style.persona.company?.trim()
+								? { company: style.persona.company.trim() }
+								: {}),
+						}
+					: DEFAULT_PERSONA;
+				const fallbackText = await generateSoftFallback({
+					question: input.userMessageText,
+					chat: chat as unknown as Parameters<
+						typeof generateSoftFallback
+					>[0]["chat"],
+					persona,
+					history: history as unknown as Parameters<
+						typeof generateSoftFallback
+					>[0]["history"],
 				});
-			}
-
-			if (!this.opts.softFallback) return null;
-
-			// Derive persona: from style (if set) or DEFAULT_PERSONA.
-			const persona: Persona = style
-				? {
-						name: style.persona.name,
-						role: style.persona.role,
-						...(style.persona.company?.trim()
-							? { company: style.persona.company.trim() }
-							: {}),
-					}
-				: DEFAULT_PERSONA;
-
-			const fallbackText = await generateSoftFallback({
-				question: input.userMessageText,
-				chat: chat as unknown as Parameters<
-					typeof generateSoftFallback
-				>[0]["chat"],
-				persona,
-				history: history as unknown as Parameters<
-					typeof generateSoftFallback
-				>[0]["history"],
-			});
-
-			if (!fallbackText || fallbackText.trim().length === 0) return null;
-
-			return [
-				{
-					channelId: String(input.channel.channelId),
-					externalUserId: input.inbound.externalUserId,
-					parts: [{ kind: "text", text: fallbackText }],
-				},
-			];
-		}
-
-		const exchangeGuardEnabled = ctx.exchangeResponseGuardEnabled ?? true;
-		let guarded =
-			isExchange && exchangeGuardEnabled
-				? guardExchangePolicy({
-						text: result.text,
-						telemetry: result.telemetry,
-						history: historyWithoutCurrent,
-						state: exchangePolicyState,
-					})
-				: {
-						ok: true,
-						action: "pass" as const,
-						text: result.text,
-						reasons: [],
-						requiredFixes: [],
-					};
-		// unbacked_quote: один перезапрос вместо жёсткой заглушки (см. llm-reply).
-		if (!guarded.ok && guarded.reason === "unbacked_quote") {
-			const rewritten = await rewriteUnbackedQuoteReply({
-				chat,
-				userMessage: input.userMessageText,
-				draftReply: result.text,
-			});
-			if (rewritten) {
-				const reguard = guardExchangePolicy({
-					text: rewritten,
-					telemetry: result.telemetry,
-					history: historyWithoutCurrent,
-					state: exchangePolicyState,
-				});
-				if (reguard.ok) guarded = reguard;
+				if (!fallbackText || fallbackText.trim().length === 0) return null;
+				return [
+					{
+						channelId: String(input.channel.channelId),
+						externalUserId: input.inbound.externalUserId,
+						parts: [{ kind: "text", text: fallbackText }],
+					},
+				];
 			}
 		}
 		const guardFinding =
@@ -1442,17 +1542,14 @@ export class RagReplyStrategy implements ReplyStrategy {
 		}
 
 		const operatorHandoff = isExchange
-			? (buildExchangeOperatorHandoff({
+			? resolveExchangeOperatorHandoff({
 					text: guarded.text,
+					action: guarded.action,
+					reason: guarded.reason ?? null,
 					telemetry: result.telemetry,
 					state: exchangePolicyState,
-				}) ??
-				(guarded.action === "escalate" || guarded.action === "block"
-					? buildExchangeGenericOperatorHandoff({
-							state: exchangePolicyState,
-							context: guarded.reason ?? null,
-						})
-					: null))
+					retriesExhausted,
+				})
 			: null;
 
 		return isExchange

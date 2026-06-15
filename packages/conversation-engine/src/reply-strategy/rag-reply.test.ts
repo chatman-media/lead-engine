@@ -59,6 +59,14 @@ function chatThenFactCheck(
   } as unknown as ChatClient;
 }
 
+/** Возвращает ответы по порядку вызовов; после конца — повторяет последний. */
+function sequencedChat(replies: string[]): ChatClient {
+  let i = 0;
+  return {
+    complete: async () => replies[Math.min(i++, replies.length - 1)] ?? "",
+  } as unknown as ChatClient;
+}
+
 const embedder: RagTurnContext["embedder"] = {
   embed: async (xs: string[]) => xs.map(() => [1, 0, 0]),
   dim: 3,
@@ -1546,10 +1554,44 @@ describe("RagReplyStrategy.generate", () => {
     const normalized = normalizeReplyStrategyResult(r);
     // Клиенту по-прежнему уходит обещание оператора...
     expect(firstReplyText(r)).toBe(EXCHANGE_SAFE_FALLBACK);
-    // ...но теперь диалог реально эскалируется (autoTakeover → mode=human),
-    // а не повисает обещанием без уведомления оператора.
+    // ...а после исчерпания попыток перегенерации диалог эскалируется
+    // (autoTakeover → mode=human), а не повисает обещанием без оператора.
     expect(normalized?.autoTakeover).toBe(true);
     expect(normalized?.operatorHandoffs?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("exchange: плохой ответ → перегенерация → норм со 2-й попытки, БЕЗ оператора (#662-модель)", async () => {
+    // Попытка 1 — отписка «уточню у оператора» (плохо); попытка 2 — по существу.
+    const chat = sequencedChat([
+      EXCHANGE_SAFE_FALLBACK,
+      "Подскажите, какую сумму хотите обменять?",
+    ]);
+    const s = mk(
+      ctxWith({ template: EXCHANGE_TEMPLATE, chat, kb: kbWith([HIT]) }),
+      { reflect: false },
+    );
+    const r = await s.generate(baseInput());
+    const normalized = normalizeReplyStrategyResult(r);
+    expect(firstReplyText(r)).toContain("какую сумму");
+    expect(firstReplyText(r)).not.toBe(EXCHANGE_SAFE_FALLBACK);
+    expect(normalized?.autoTakeover ?? false).toBe(false); // оператора НЕ зовём
+  });
+
+  it("exchange: 3 плохих ответа подряд → передача оператору (#662-модель)", async () => {
+    const chat = sequencedChat([
+      EXCHANGE_SAFE_FALLBACK,
+      EXCHANGE_SAFE_FALLBACK,
+      EXCHANGE_SAFE_FALLBACK,
+    ]);
+    const s = mk(
+      ctxWith({ template: EXCHANGE_TEMPLATE, chat, kb: kbWith([HIT]) }),
+      { reflect: false },
+    );
+    const r = await s.generate(baseInput());
+    const normalized = normalizeReplyStrategyResult(r);
+    expect(normalized?.autoTakeover).toBe(true); // исчерпали 3 попытки → оператор
+    expect(normalized?.operatorHandoffs?.length ?? 0).toBeGreaterThan(0);
+    expect(firstReplyText(r)).toBe(EXCHANGE_SAFE_FALLBACK); // клиенту — обещание
   });
 
   it("exchange: reflect срезает неподкреплённый статус и возвращает safe fallback", async () => {
