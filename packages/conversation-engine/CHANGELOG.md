@@ -1,3 +1,16 @@
+# [@chatman-media/conversation-engine-v3.20.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.19.0...@chatman-media/conversation-engine-v3.20.0) (2026-06-15)
+
+
+### Bug Fixes
+
+* **exchange:** safe-fallback «уточню у оператора» эскалирует на оператора ([61b3f44](https://github.com/chatman-media/lead-engine/commit/61b3f4497648d254a8f7a0ffcdc1a1b325f932ab))
+* **exchange:** перегенерировать заблокированный ответ + сразу отвечать про неподдерживаемые сети ([fb3a370](https://github.com/chatman-media/lead-engine/commit/fb3a370b05f5c53c594d5c13100509f282a8a5d8)), closes [#657](https://github.com/chatman-media/lead-engine/issues/657)
+
+
+### Features
+
+* **exchange:** явный отказ по неподдерживаемой сети (TON и пр.) ([#655](https://github.com/chatman-media/lead-engine/issues/655)) ([b295829](https://github.com/chatman-media/lead-engine/commit/b2958296b57c8020e724fc86e7cc8458ed6759f1)), closes [#612](https://github.com/chatman-media/lead-engine/issues/612)
+
 # [@chatman-media/conversation-engine-v3.19.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.18.0...@chatman-media/conversation-engine-v3.19.0) (2026-06-15)
 
 
