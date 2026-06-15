@@ -489,20 +489,22 @@ export function guardExchangeToolForStage(toolName: string, stageSlug: string | 
   };
 }
 
-function withExchangeStagePolicy(
+// Рантайм-гейт на КАЖДЫЙ инструмент: проверяет стадию по ТЕКУЩЕМУ значению (на
+// момент вызова), а не по снимку на начало хода — иначе инструмент, зацепленный
+// после стадия-двигающего (create_order → order_created → fetch_requisites одним
+// ходом), ложно блокируется. Поэтому это per-tool обёртка execute, а НЕ отрезание
+// из списка тулзов. Текст «какие инструменты сейчас разрешены»
+// (exchangeAllowedActionsBlock) сюда НЕ добавляем — он дублировался бы в каждое из
+// ~7 описаний; его эмитим ОДИН раз в makeExchangeTools.
+function withExchangeStageGuard(
   tool: AnyRagTool,
   stageSlug: string | undefined,
   getCurrentStage?: () => Promise<string | undefined>,
 ): AnyRagTool {
-  const block = exchangeAllowedActionsBlock(stageSlug);
-  if (!block) return tool;
+  if (!isKnownExchangeStage(stageSlug)) return tool;
   return {
     ...tool,
-    description: `${tool.description} ${block}`,
     execute: async (args) => {
-      // Гейт проверяем по ТЕКУЩЕЙ стадии (на момент вызова), а не по снимку на
-      // начало хода: иначе инструмент, зацепленный после стадия-двигающего
-      // (create_order → order_created → fetch_requisites), ложно блокируется.
       let current = stageSlug;
       if (getCurrentStage) {
         try {
@@ -1304,7 +1306,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
   };
 
   const resolveCurrentStage = () => resolveLeadStageSlug(db, tenantId, conversationId);
-  return [
+  const guarded = [
     computeQuoteTool,
     checkVerificationTool,
     createOrderTool,
@@ -1323,7 +1325,16 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       typeof r.orderId === "number" && !r.error ? "payout_or_completion" : null,
     ),
     businessInfoTool,
-  ].map((tool) => withExchangeStagePolicy(tool, stageSlug, resolveCurrentStage));
+  ].map((tool) => withExchangeStageGuard(tool, stageSlug, resolveCurrentStage));
+
+  // Policy-текст (текущая стадия + разрешённые инструменты) добавляем ОДИН раз —
+  // в описание первого инструмента, а не дублируем во все ~7. Модель видит его как
+  // глобальную подсказку; корректность всё равно держит per-tool guard выше.
+  const policyBlock = exchangeAllowedActionsBlock(stageSlug);
+  if (policyBlock && guarded[0]) {
+    guarded[0] = { ...guarded[0], description: `${guarded[0].description} ${policyBlock}` };
+  }
+  return guarded;
 }
 
 /** Есть ли у тенанта хоть один активный курс (гейт для включения exchange-tools). */

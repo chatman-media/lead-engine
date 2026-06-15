@@ -218,6 +218,42 @@ describe("composeSystemPrompt — awaitingOperator (R5)", () => {
   });
 });
 
+describe("composeSystemPrompt — few-shot фильтр по стадии", () => {
+  it("берёт примеры текущей стадии + неразмеченные, чужие отбрасывает", () => {
+    const s: Style = {
+      ...baseStyle,
+      fewShot: [
+        { user: "q1", assistant: "a-qualify", stage: "qualify" },
+        { user: "q2", assistant: "a-pitch", stage: "pitch" },
+        { user: "q3", assistant: "a-general" }, // без stage → общий
+      ],
+    };
+    const p = composeSystemPrompt(s, "qualify");
+    expect(p).toContain("a-qualify");
+    expect(p).toContain("a-general");
+    expect(p).not.toContain("a-pitch");
+  });
+
+  it("неразмеченные примеры не зависят от стадии (без регресса для старых стилей)", () => {
+    const s: Style = { ...baseStyle, fewShot: [{ user: "q", assistant: "a-gen" }] };
+    expect(composeSystemPrompt(s, "qualify")).toContain("a-gen");
+    expect(composeSystemPrompt(s, "close")).toContain("a-gen");
+  });
+
+  it("fallback: если под стадию ничего не подошло — показываем все примеры", () => {
+    const s: Style = {
+      ...baseStyle,
+      fewShot: [
+        { user: "q1", assistant: "a-pitch", stage: "pitch" },
+        { user: "q2", assistant: "a-close", stage: "close" },
+      ],
+    };
+    const p = composeSystemPrompt(s, "qualify"); // нет qualify- и нет общих примеров
+    expect(p).toContain("a-pitch");
+    expect(p).toContain("a-close");
+  });
+});
+
 describe("composeSystemPrompt — порядок под prompt-cache (стабильное раньше волатильного)", () => {
   // Стиль со всеми блоками сразу: few-shot + guardrails(noMinors) + KB + userFacts + summary.
   const richStyle: Style = {

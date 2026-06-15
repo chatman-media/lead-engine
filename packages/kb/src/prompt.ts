@@ -139,10 +139,18 @@ export function composeSystemPrompt(
       : `- Пиши коротко: 1-3 предложения. Без markdown-заголовков и нумерованных списков.`;
   const guardrailBlock = `ЖЁСТКИЕ ПРАВИЛА:\n${[minorRule, topicsRule, brevityRule].filter(Boolean).join("\n")}`;
 
+  // Few-shot фильтруем по текущей стадии: примеры с ярлыком `stage` берём только
+  // для этой стадии, неразмеченные (общие) — всегда. Так в промпт не уходят
+  // примеры чужих стадий (экономия токенов + релевантнее). Fallback: если под
+  // стадию ничего не нашлось (все примеры размечены под другие стадии) — показываем
+  // все, чтобы стиль-демо не пропали совсем (без регресса к прежнему поведению).
+  // Стили с неразмеченными примерами не меняются — у них matched === fewShot.
+  const fewShotMatched = fewShot.filter((ex) => !ex.stage || ex.stage === stage);
+  const fewShotForStage = fewShotMatched.length > 0 ? fewShotMatched : fewShot;
   const fewShotBlock =
-    includeFewShot && fewShot.length
+    includeFewShot && fewShotForStage.length
       ? `ПРИМЕРЫ ДИАЛОГА (стиль и регистр):\n` +
-        fewShot
+        fewShotForStage
           .map(
             (ex, i) =>
               `[${i + 1}]${ex.stage ? ` (этап: ${ex.stage})` : ""}\n` +
