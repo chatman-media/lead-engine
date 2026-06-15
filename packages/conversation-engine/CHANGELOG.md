@@ -1,3 +1,16 @@
+# [@chatman-media/conversation-engine-v3.21.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.20.1...@chatman-media/conversation-engine-v3.21.0) (2026-06-15)
+
+
+### Bug Fixes
+
+* **exchange:** rag-стратегия эскалирует safe-fallback на оператора (порт [#657](https://github.com/chatman-media/lead-engine/issues/657)) ([d56a248](https://github.com/chatman-media/lead-engine/commit/d56a24827c1f07a9ba8d1e8770fb8999704f376c))
+* **exchange:** отмена заявки, вытеснение зависших заявок, приоритет активной заявки над собранными полями ([579c8e5](https://github.com/chatman-media/lead-engine/commit/579c8e56fc0084d0529884a5f6712b81e9d2b24b)), closes [#662](https://github.com/chatman-media/lead-engine/issues/662)
+
+
+### Features
+
+* **operator-bot:** форум-топики — 1 топик на диалог ([#651](https://github.com/chatman-media/lead-engine/issues/651)) ([c075120](https://github.com/chatman-media/lead-engine/commit/c075120fa2cdbb14949f542c52cc3678811f5d0a)), closes [#32](https://github.com/chatman-media/lead-engine/issues/32) [#649](https://github.com/chatman-media/lead-engine/issues/649)
+
 # [@chatman-media/conversation-engine-v3.20.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.20.0...@chatman-media/conversation-engine-v3.20.1) (2026-06-15)
 
 
