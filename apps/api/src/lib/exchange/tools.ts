@@ -296,12 +296,16 @@ export async function readExchangeCollectedFields(
     if (!lead) return {};
 
     // Один slug может быть заведён на нескольких стадиях (разные fieldId) —
-    // берём САМОЕ СВЕЖЕЕ значение (updatedAt desc → первое вхождение выигрывает).
+    // берём САМОЕ СВЕЖЕЕ значение. updatedAt секундный, поэтому при re-quote в
+    // пределах секунды добавляем тай-брейк по leadFieldValues.id desc (позже
+    // созданная запись = позже-созданная стадия = актуальнее). Иначе re-quote
+    // («передумал, 500 USDT» на quote_calculated) мог отдать СТАРОЕ значение.
     const rows = await tx
       .select({
         slug: stageFields.slug,
         valueJson: leadFieldValues.valueJson,
         updatedAt: leadFieldValues.updatedAt,
+        id: leadFieldValues.id,
       })
       .from(leadFieldValues)
       .innerJoin(stageFields, eq(stageFields.id, leadFieldValues.fieldId))
@@ -311,7 +315,7 @@ export async function readExchangeCollectedFields(
           eq(leadFieldValues.tenantId, tenantId),
         ),
       )
-      .orderBy(desc(leadFieldValues.updatedAt));
+      .orderBy(desc(leadFieldValues.updatedAt), desc(leadFieldValues.id));
 
     const bySlug: Record<string, unknown> = {};
     for (const row of rows) {
@@ -851,7 +855,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
             exchangeId: req.exchangeId,
             exchangeName,
             ttlMin,
-            instructions: `${exchangeName} UID/ID для перевода: ${req.exchangeId}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите подтверждение перевода.`,
+            instructions: `${exchangeName} UID/ID для перевода: ${req.exchangeId}\nРеквизиты действительны ${ttlMin} минут. Как переведёте — пришлите, пожалуйста, подтверждение, и я сразу проверю.`,
           };
         }
         const tagLine = req.destTag ? `\nMemo/tag: ${req.destTag}` : "";
@@ -869,8 +873,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
           ttlMin,
           amlNote: true,
           instructions: req.paymentUrl
-            ? `Оплата ${order.assetFrom} (${req.network}) через WestWallet:${paymentUrlLine}\nАдрес: ${req.address}${tagLine}\nРеквизиты актуальны ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите подтверждение перевода.`
-            : `Адрес для ${order.assetFrom} (${req.network}): ${req.address}${tagLine}\nАдрес актуален ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите tx hash или ссылку на транзакцию.`,
+            ? `Оплата ${order.assetFrom} (${req.network}) через WestWallet:${paymentUrlLine}\nАдрес: ${req.address}${tagLine}\nРеквизиты действительны ${ttlMin} минут. Все входящие транзакции проходят AML-проверку — переведите, пожалуйста, точную сумму с учётом сетевой комиссии. Как оплатите, пришлите подтверждение перевода.`
+            : `Адрес для ${order.assetFrom} (${req.network}): ${req.address}${tagLine}\nАдрес действителен ${ttlMin} минут. Все входящие транзакции проходят AML-проверку — переведите, пожалуйста, точную сумму с учётом сетевой комиссии. Как отправите, пришлите tx hash или ссылку на транзакцию.`,
         };
       }
       if (req.detailsText) {
@@ -880,7 +884,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
           paymentMethod: order.paymentMethod,
           detailsText: req.detailsText,
           ttlMin,
-          instructions: `${req.detailsText}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите развёрнутый чек.`,
+          instructions: `${req.detailsText}\nРеквизиты действительны ${ttlMin} минут. Как оплатите — пришлите, пожалуйста, развёрнутый чек, и я сразу всё проверю.`,
         };
       }
       return {
@@ -888,7 +892,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         kind: "fiat",
         paymentUrl: req.paymentUrl,
         ttlMin,
-        instructions: `Оплата по платёжной ссылке (СБП): ${req.paymentUrl}\nСсылка действует ${ttlMin} минут. После оплаты пришлите развёрнутый чек.`,
+        instructions: `Оплатить можно по ссылке (СБП): ${req.paymentUrl}\nСсылка действует ${ttlMin} минут. Как оплатите — пришлите, пожалуйста, развёрнутый чек.`,
       };
     },
   };

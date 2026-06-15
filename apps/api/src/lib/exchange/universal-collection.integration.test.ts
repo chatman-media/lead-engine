@@ -213,4 +213,31 @@ describe("exchange: универсальный сбор данных + авто-
     expect(collected.network).toBe("trc20");
     expect(collected.payoutMethod).toBe("atm");
   });
+
+  it("re-quote: смена сделки на quote_calculated обновляет asset/amount (не старое)", async () => {
+    if (!sql) return;
+    const { contactId, conversationId } = await freshContactWithConversation();
+
+    // Ход 1: RUB 20000 → авто-переход на quote_calculated.
+    await makeFieldExtractor(
+      stubRef('{"asset_from":"rub","amount_from":20000,"payout_method":"office"}'),
+    ).extract({ tenantId, contactId, text: "хочу 20000 рублей", db });
+    expect((await leadOf(contactId))?.state).toBe("quote_calculated");
+
+    // Ход 2: клиент ПЕРЕДУМАЛ уже на quote_calculated — 500 USDT. asset_from/
+    // amount_from продублированы на эту стадию → re-extract обновляет сделку.
+    await makeFieldExtractor(
+      stubRef('{"asset_from":"usdt","amount_from":500,"network":"trc20"}'),
+    ).extract({ tenantId, contactId, text: "передумал, 500 usdt", db });
+
+    const collected = await readExchangeCollectedFields(
+      db as never,
+      tenantId,
+      conversationId,
+    );
+    // Должна быть НОВАЯ сделка (USDT 500), а не старая (RUB 20000).
+    expect(collected.asset).toBe("usdt");
+    expect(collected.amount).toBe(500);
+    expect(collected.network).toBe("trc20");
+  });
 });
