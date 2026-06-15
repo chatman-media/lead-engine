@@ -787,10 +787,32 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 					aiExtractable: true,
 					position: 2,
 				},
-				// Доп. параметры заявки тоже extract'им на этой стадии: лид авто-уходит
-				// сюда после asset+amount, а сеть/выдачу/оплату клиент часто называет
-				// уже здесь — иначе они не соберутся (экстрактор смотрит поля ТЕКУЩЕЙ
-				// стадии). Опциональны → авто-переход не блокируют.
+				// Параметры заявки тоже extract'им на этой стадии: лид авто-уходит сюда
+				// после asset+amount, а сеть/выдачу/оплату — И смену самой сделки
+				// (re-quote: «передумал, 500 USDT») — клиент часто называет уже здесь.
+				// Экстрактор смотрит поля ТЕКУЩЕЙ стадии, поэтому дублируем сюда
+				// asset_from/amount_from — иначе при re-quote состояние остаётся СТАРЫМ
+				// (бот выдаёт не тот актив/реквизиты). Опциональны → авто-переход не трогают.
+				{
+					slug: "asset_from",
+					displayName: "Что отдаёт клиент",
+					fieldType: "select",
+					required: false,
+					aiExtractable: true,
+					hint: "Смена актива при пересчёте",
+					position: 6,
+					optionsJson:
+						'[{"value":"usdt","label":"USDT"},{"value":"btc","label":"BTC"},{"value":"eth","label":"ETH"},{"value":"rub","label":"Рубли (RUB)"},{"value":"eur","label":"EUR"},{"value":"usd","label":"USD"}]',
+				},
+				{
+					slug: "amount_from",
+					displayName: "Сумма (в источнике)",
+					fieldType: "number",
+					required: false,
+					aiExtractable: true,
+					hint: "Смена суммы при пересчёте",
+					position: 7,
+				},
 				{
 					slug: "network",
 					displayName: "Сеть (для крипты)",

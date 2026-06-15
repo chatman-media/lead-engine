@@ -296,12 +296,16 @@ export async function readExchangeCollectedFields(
     if (!lead) return {};
 
     // Один slug может быть заведён на нескольких стадиях (разные fieldId) —
-    // берём САМОЕ СВЕЖЕЕ значение (updatedAt desc → первое вхождение выигрывает).
+    // берём САМОЕ СВЕЖЕЕ значение. updatedAt секундный, поэтому при re-quote в
+    // пределах секунды добавляем тай-брейк по leadFieldValues.id desc (позже
+    // созданная запись = позже-созданная стадия = актуальнее). Иначе re-quote
+    // («передумал, 500 USDT» на quote_calculated) мог отдать СТАРОЕ значение.
     const rows = await tx
       .select({
         slug: stageFields.slug,
         valueJson: leadFieldValues.valueJson,
         updatedAt: leadFieldValues.updatedAt,
+        id: leadFieldValues.id,
       })
       .from(leadFieldValues)
       .innerJoin(stageFields, eq(stageFields.id, leadFieldValues.fieldId))
@@ -311,7 +315,7 @@ export async function readExchangeCollectedFields(
           eq(leadFieldValues.tenantId, tenantId),
         ),
       )
-      .orderBy(desc(leadFieldValues.updatedAt));
+      .orderBy(desc(leadFieldValues.updatedAt), desc(leadFieldValues.id));
 
     const bySlug: Record<string, unknown> = {};
     for (const row of rows) {

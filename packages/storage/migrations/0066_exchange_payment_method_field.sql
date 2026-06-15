@@ -53,6 +53,35 @@ WHERE sd.slug = 'quote_calculated'
     WHERE ex.stage_id = sd.id AND ex.slug = v.slug
   );
 
+-- Сама СДЕЛКА (asset_from/amount_from) тоже дублируется на quote_calculated —
+-- иначе re-quote («передумал, 500 USDT») после ухода со exchange_request не
+-- переизвлекается и состояние остаётся СТАРЫМ (бот выдаёт не тот актив/реквизиты).
+-- Опциональны → авто-переход quote_calculated не трогают.
+INSERT INTO stage_fields
+  (stage_id, tenant_id, slug, display_name, field_type, required, position, options_json, hint, ai_extractable)
+SELECT sd.id, sd.tenant_id, 'asset_from', 'Что отдаёт клиент', 'select', false, 6,
+  '[{"value":"usdt","label":"USDT"},{"value":"btc","label":"BTC"},{"value":"eth","label":"ETH"},{"value":"rub","label":"Рубли (RUB)"},{"value":"eur","label":"EUR"},{"value":"usd","label":"USD"}]',
+  'Смена актива при пересчёте', true
+FROM stage_definitions sd
+JOIN funnels f ON f.id = sd.funnel_id
+WHERE sd.slug = 'quote_calculated'
+  AND (f.vertical_template_id = 'exchange_v1' OR f.slug = 'exchange')
+  AND NOT EXISTS (
+    SELECT 1 FROM stage_fields ex WHERE ex.stage_id = sd.id AND ex.slug = 'asset_from'
+  );
+
+INSERT INTO stage_fields
+  (stage_id, tenant_id, slug, display_name, field_type, required, position, hint, ai_extractable)
+SELECT sd.id, sd.tenant_id, 'amount_from', 'Сумма (в источнике)', 'number', false, 7,
+  'Смена суммы при пересчёте', true
+FROM stage_definitions sd
+JOIN funnels f ON f.id = sd.funnel_id
+WHERE sd.slug = 'quote_calculated'
+  AND (f.vertical_template_id = 'exchange_v1' OR f.slug = 'exchange')
+  AND NOT EXISTS (
+    SELECT 1 FROM stage_fields ex WHERE ex.stage_id = sd.id AND ex.slug = 'amount_from'
+  );
+
 -- Расширяем варианты способа выдачи у УЖЕ заведённых полей payout_method
 -- (раньше только office/atm) — добавляем курьера и тайский банк, которые бот/тул
 -- и так поддерживают (PayoutMethodEnum). Идемпотентно: ставим полный набор
