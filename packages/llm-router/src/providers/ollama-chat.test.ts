@@ -51,6 +51,33 @@ describe("OllamaChatClient.complete", () => {
     const { fn } = capture(() => jsonResponse({ done: true }));
     await expect(client(fn).complete(MSGS)).rejects.toThrow("no message.content");
   });
+  it("onUsage: маппит prompt_eval_count/eval_count → prompt/completion токены", async () => {
+    const { fn } = capture(() =>
+      jsonResponse({
+        message: { role: "assistant", content: "ок" },
+        done: true,
+        prompt_eval_count: 130,
+        eval_count: 25,
+      }),
+    );
+    let got: { promptTokens?: number; completionTokens?: number } | undefined;
+    await client(fn).complete(MSGS, {
+      onUsage: (u) => {
+        got = u;
+      },
+    });
+    expect(got).toEqual({ promptTokens: 130, completionTokens: 25 });
+  });
+  it("onUsage не зовётся когда counts отсутствуют", async () => {
+    const { fn } = capture(() => jsonResponse({ message: { role: "assistant", content: "ок" }, done: true }));
+    let called = false;
+    await client(fn).complete(MSGS, {
+      onUsage: () => {
+        called = true;
+      },
+    });
+    expect(called).toBe(false);
+  });
 });
 
 describe("OllamaChatClient injectNoThinkHint (через body)", () => {

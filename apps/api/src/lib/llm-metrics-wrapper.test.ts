@@ -1,4 +1,9 @@
-import type { ChatClient, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
+import type {
+  ChatClient,
+  ChatMessage,
+  EmbeddingClient,
+  TokenUsage,
+} from "@chatman-media/llm-router";
 import { makePlatformMetrics } from "@chatman-media/observability";
 import { describe, expect, it } from "bun:test";
 import { wrapChatClient, wrapEmbeddingClient } from "./llm-metrics-wrapper.ts";
@@ -285,5 +290,86 @@ describe("wrapChatClient — optional methods forwarded", () => {
     await expect(w.complete([{ role: "user", content: "x" }])).rejects.toThrow();
     expect(calls).toHaveLength(1);
     expect(calls[0]!.success).toBe(false);
+  });
+});
+
+// ── token usage capture ──────────────────────────────────────────────────────
+describe("wrapChatClient — token usage capture", () => {
+  function chatWithUsage(usage: TokenUsage): ChatClient {
+    return {
+      async complete(_m, opts) {
+        opts?.onUsage?.(usage);
+        return "ok";
+      },
+      async completeWithTools(_m, _t, opts) {
+        opts?.onUsage?.(usage);
+        return { content: "ok", toolCalls: [] };
+      },
+    };
+  }
+
+  it("complete: provider onUsage → onComplete получает токены", async () => {
+    const metrics = makePlatformMetrics();
+    const calls: Array<{ promptTokens?: number; completionTokens?: number }> = [];
+    const w = wrapChatClient(
+      chatWithUsage({ promptTokens: 100, completionTokens: 20 }),
+      metrics,
+      { provider: "openai", purpose: "chat" },
+      (info) =>
+        calls.push({
+          promptTokens: info.promptTokens,
+          completionTokens: info.completionTokens,
+        }),
+    );
+    await w.complete([{ role: "user", content: "x" }]);
+    expect(calls).toEqual([{ promptTokens: 100, completionTokens: 20 }]);
+  });
+
+  it("completeWithTools: provider onUsage → onComplete получает токены", async () => {
+    const metrics = makePlatformMetrics();
+    const calls: Array<{ promptTokens?: number; completionTokens?: number }> = [];
+    const w = wrapChatClient(
+      chatWithUsage({ promptTokens: 7, completionTokens: 3 }),
+      metrics,
+      { provider: "openai", purpose: "chat" },
+      (info) =>
+        calls.push({
+          promptTokens: info.promptTokens,
+          completionTokens: info.completionTokens,
+        }),
+    );
+    await w.completeWithTools!([], [], {});
+    expect(calls).toEqual([{ promptTokens: 7, completionTokens: 3 }]);
+  });
+
+  it("provider без usage → onComplete без token-полей", async () => {
+    const metrics = makePlatformMetrics();
+    const calls: Array<Record<string, unknown>> = [];
+    const w = wrapChatClient(
+      fakeChat({ reply: "ok" }),
+      metrics,
+      { provider: "openai", purpose: "chat" },
+      (info) => calls.push(info as unknown as Record<string, unknown>),
+    );
+    await w.complete([{ role: "user", content: "x" }]);
+    expect("promptTokens" in calls[0]!).toBe(false);
+    expect("completionTokens" in calls[0]!).toBe(false);
+  });
+
+  it("сохраняет onUsage вызывающего (chaining, не затирает)", async () => {
+    const metrics = makePlatformMetrics();
+    const callerSeen: TokenUsage[] = [];
+    const recorded: Array<{ promptTokens?: number }> = [];
+    const w = wrapChatClient(
+      chatWithUsage({ promptTokens: 5 }),
+      metrics,
+      { provider: "openai", purpose: "chat" },
+      (info) => recorded.push({ promptTokens: info.promptTokens }),
+    );
+    await w.complete([{ role: "user", content: "x" }], {
+      onUsage: (u) => callerSeen.push(u),
+    });
+    expect(recorded).toEqual([{ promptTokens: 5 }]);
+    expect(callerSeen).toEqual([{ promptTokens: 5 }]);
   });
 });

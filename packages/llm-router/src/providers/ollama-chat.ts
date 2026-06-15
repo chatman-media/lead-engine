@@ -32,6 +32,10 @@ export interface OllamaChatOptions {
 interface OllamaChatResponse {
   message?: { role: string; content: string };
   done?: boolean;
+  /** Input-токены (prompt). Ollama зовёт их иначе, чем OpenAI. */
+  prompt_eval_count?: number;
+  /** Output-токены (generated). */
+  eval_count?: number;
   error?: string;
 }
 
@@ -96,6 +100,12 @@ export class OllamaChatClient implements ChatClient {
     const content = payload.message?.content;
     if (!content) {
       throw new ChatApiError(res.status, "no message.content in ollama response");
+    }
+    if (opts.onUsage && (payload.prompt_eval_count != null || payload.eval_count != null)) {
+      opts.onUsage({
+        ...(payload.prompt_eval_count != null ? { promptTokens: payload.prompt_eval_count } : {}),
+        ...(payload.eval_count != null ? { completionTokens: payload.eval_count } : {}),
+      });
     }
     return content;
   }
