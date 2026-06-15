@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.39.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.39.0...@chatman-media/storage-v1.39.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **exchange:** дублировать поля сделки на order_created/requisites_sent для re-quote ([d2673d1](https://github.com/chatman-media/lead-engine/commit/d2673d17c1bd01e25973544660a505a37637490d))
+
 # [@chatman-media/storage-v1.39.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.38.0...@chatman-media/storage-v1.39.0) (2026-06-15)
 
 
