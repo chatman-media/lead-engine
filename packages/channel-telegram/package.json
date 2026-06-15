@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/channel-telegram",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Telegram-каналы (BotAPI + MTProto userbot) как реализация ChannelAdapter из @chatman-media/channel-core.",
   "type": "module",
   "main": "./dist/index.js",

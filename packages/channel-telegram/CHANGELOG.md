@@ -1,3 +1,10 @@
+# [@chatman-media/channel-telegram-v1.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.8.0...@chatman-media/channel-telegram-v1.9.0) (2026-06-15)
+
+
+### Features
+
+* **operator-bot:** форум-топики — 1 топик на диалог ([#651](https://github.com/chatman-media/lead-engine/issues/651)) ([c075120](https://github.com/chatman-media/lead-engine/commit/c075120fa2cdbb14949f542c52cc3678811f5d0a)), closes [#32](https://github.com/chatman-media/lead-engine/issues/32) [#649](https://github.com/chatman-media/lead-engine/issues/649)
+
 # [@chatman-media/channel-telegram-v1.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.7.0...@chatman-media/channel-telegram-v1.8.0) (2026-06-15)
 
 
