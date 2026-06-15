@@ -1,3 +1,11 @@
+# [@chatman-media/conversation-engine-v3.20.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.20.0...@chatman-media/conversation-engine-v3.20.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **exchange:** не даём AI коммитить заявку, пока лид на operator-гейте ([#652](https://github.com/chatman-media/lead-engine/issues/652)) ([cb62138](https://github.com/chatman-media/lead-engine/commit/cb621385a73bf4a4b7ea60f09decd04ad28ea563)), closes [#619](https://github.com/chatman-media/lead-engine/issues/619)
+* **exchange:** убираем дубль сводки «Оформляю заявку?» ([#653](https://github.com/chatman-media/lead-engine/issues/653)) ([419ac7a](https://github.com/chatman-media/lead-engine/commit/419ac7ab7a37c2fd6418a32b47588f1b35308494)), closes [#627](https://github.com/chatman-media/lead-engine/issues/627)
+
 # [@chatman-media/conversation-engine-v3.20.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.19.0...@chatman-media/conversation-engine-v3.20.0) (2026-06-15)
 
 
