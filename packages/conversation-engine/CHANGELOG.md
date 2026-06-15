@@ -1,3 +1,15 @@
+# [@chatman-media/conversation-engine-v3.19.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.18.0...@chatman-media/conversation-engine-v3.19.0) (2026-06-15)
+
+
+### Bug Fixes
+
+* **exchange:** живые формулировки форс-ответов (не «сухо») ([f0ca0a1](https://github.com/chatman-media/lead-engine/commit/f0ca0a1b6f607f86eb712d8463a1e4950f6ff695))
+
+
+### Features
+
+* **operator-bot:** свой ответ клиенту сразу из чата (без канны-заготовки) ([aafe318](https://github.com/chatman-media/lead-engine/commit/aafe3182cb4958fd70272e1083025ff8144c1c15))
+
 # [@chatman-media/conversation-engine-v3.18.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.17.1...@chatman-media/conversation-engine-v3.18.0) (2026-06-14)
 
 
