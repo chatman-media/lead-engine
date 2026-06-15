@@ -156,6 +156,18 @@ function exchangeCreateOrderTool(): AnyRagTool {
 	};
 }
 
+function exchangeCancelTool(result: unknown, calls: { n: number }): AnyRagTool {
+	return {
+		name: "cancel_exchange_order",
+		description: "Cancel exchange order",
+		parameters: {} as AnyRagTool["parameters"],
+		execute: async () => {
+			calls.n += 1;
+			return result;
+		},
+	};
+}
+
 describe("LlmReplyStrategy", () => {
   it("отправляет system + history + текущее в ChatClient, возвращает text envelope", async () => {
     const chat = new CapturingChat("Привет! Чем помочь?");
@@ -1287,6 +1299,81 @@ describe("LlmReplyStrategy", () => {
 		const normalized = normalizeReplyStrategyResult(result);
 		expect(normalized?.autoTakeover).toBe(false);
 		expect(normalized?.operatorHandoffs).toHaveLength(0);
+	});
+
+	it("exchange: «отмени заявку» детерминированно отменяет, без LLM", async () => {
+		const chat = new CapturingChat("Сейчас уточню у оператора.");
+		const repo = fakeMessagesRepo([row(1, "user", "отмени заявку")]);
+		const calls = { n: 0 };
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveTools: () => [exchangeCancelTool({ cancelled: [1] }, calls)],
+			},
+			() => repo,
+		);
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "отмени заявку",
+		});
+		expect(calls.n).toBe(1);
+		expect(firstReplyText(result)).toContain("отменил");
+		expect(chat.calls).toBe(0); // forced — LLM не вызывали
+		const normalized = normalizeReplyStrategyResult(result);
+		expect(normalized?.autoTakeover).toBe(false);
+	});
+
+	it("exchange: отмена при поступившей оплате → передаёт оператору", async () => {
+		const chat = new CapturingChat("Сейчас уточню у оператора.");
+		const repo = fakeMessagesRepo([row(1, "user", "отмени заявку")]);
+		const calls = { n: 0 };
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveTools: () => [
+					exchangeCancelTool(
+						{ ok: false, needsOperator: true, blockedByPayment: [7] },
+						calls,
+					),
+				],
+				resolveExchangePolicyState: () => ({
+					stageSlug: "requisites_sent",
+					order: {
+						id: 7,
+						status: "awaiting_payment",
+						direction: "RUB->PHP",
+						requisitesIssued: true,
+						paymentProofReceived: true,
+						paymentVerified: false,
+						payoutReady: false,
+						payoutCompleted: false,
+						payoutCodeIssued: false,
+					},
+				}),
+			},
+			() => repo,
+		);
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "отмени заявку",
+		});
+		expect(calls.n).toBe(1);
+		expect(firstReplyText(result)).toContain("оператору");
+		const normalized = normalizeReplyStrategyResult(result);
+		// Оплата в движении → диалог уходит оператору (точный reason — деталь
+		// эвристики buildExchangeOperatorHandoff; важно, что это эскалация).
+		expect(normalized).toMatchObject({ autoTakeover: true });
+		expect(normalized?.operatorHandoffs?.length).toBeGreaterThan(0);
 	});
 
   it("пишет telemetry hook после generic tool-loop", async () => {

@@ -18,6 +18,7 @@ import { and, asc, desc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_TX_MAX_AGE_SECONDS, extractTxHash, verifyTronUsdt } from "./chain.ts";
 import {
+  cancelOpenExchangeOrders,
   createOrderIdempotent,
   findActiveOrder,
   getLatestOrderForConversation,
@@ -409,6 +410,8 @@ const TOOL_STAGE_MATRIX: Record<string, Set<string> | "any"> = {
     "order_created",
   ]),
   create_exchange_order: new Set(["quote_calculated", "risk_review", "order_created"]),
+  // Отмена доступна на любой стадии до завершения — клиент может передумать когда угодно.
+  cancel_exchange_order: "any",
   fetch_exchange_requisites: new Set(["order_created", "requisites_sent"]),
   verify_exchange_payment: new Set(["requisites_sent", "payment_proof_waiting"]),
   issue_exchange_payout: new Set(["payment_verified"]),
@@ -548,12 +551,16 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         .describe("Сеть для крипты: TRC20/ERC20/BEP20. Для USDT по умолчанию TRC20."),
     }),
     execute: async (args) => {
-      // Источник правды — универсально собранные поля (field-extractor →
-      // leadFieldValues); явный аргумент LLM переопределяет.
+      // Источник правды для НЕзаданных аргументов: сначала АКТИВНАЯ заявка
+      // (подтверждённая сделка), затем универсально собранные поля. Чинит «компьют
+      // берёт протухшее значение из leadFieldValues, хотя заявка про другую сумму»:
+      // пока есть открытая заявка, считаем по ней, если LLM не передал явно новое.
       const collected = await readExchangeCollectedFields(db, tenantId, conversationId);
-      const asset = args.asset ?? collected.asset;
-      const amount = args.amount ?? collected.amount;
-      const network = args.network ?? collected.network;
+      const active = await findActiveOrder(db, tenantId, conversationId);
+      const asset = args.asset ?? active?.assetFrom ?? collected.asset;
+      const amount =
+        args.amount ?? active?.requestedAmount ?? active?.amountFrom ?? collected.amount;
+      const network = args.network ?? active?.network ?? collected.network;
       if (!asset || amount === undefined) {
         return { error: "Не хватает данных для расчёта: уточните, что меняете и на какую сумму." };
       }
@@ -568,21 +575,19 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         return { error: q.error };
       }
 
-      // Перекотировка до оплаты: если клиент назвал ДРУГУЮ сумму/актив/режим, чем
-      // в активной заявке — отменяем старую заявку и откатываем лида на
-      // quote_calculated, чтобы воронка пошла под новую сумму (подтверждение →
-      // новая заявка → новые реквизиты). Совпадающая перекотировка — без побочек.
-      const activeForRequote = await findActiveOrder(db, tenantId, conversationId);
-      if (activeForRequote) {
-        const reqAmount =
-          activeForRequote.requestedAmount ?? activeForRequote.amountFrom;
+      // Перекотировка до оплаты: клиент назвал ДРУГУЮ сумму/актив/режим, чем в
+      // активной заявке → отменяем ВСЕ открытые до-оплатные заявки (не только
+      // последнюю) и откатываем лида на quote_calculated, чтобы воронка пошла под
+      // новую сумму. Совпадающая перекотировка — без побочек. Заявки с оплатой
+      // cancelOpenExchangeOrders не трогает (их разрулит оператор).
+      if (active) {
+        const reqAmount = active.requestedAmount ?? active.amountFrom;
         const sameDeal =
-          activeForRequote.assetFrom === normAsset(asset) &&
+          active.assetFrom === normAsset(asset) &&
           Number(reqAmount) === Number(amount) &&
-          (activeForRequote.amountMode ?? "source_amount") ===
-            (args.amountMode ?? "source_amount");
+          (active.amountMode ?? "source_amount") === (args.amountMode ?? "source_amount");
         if (!sameDeal) {
-          await updateOrder(db, tenantId, activeForRequote.id, { status: "cancelled" });
+          await cancelOpenExchangeOrders(db, tenantId, conversationId);
           await moveExchangeLeadToStage({
             db,
             tenantId,
@@ -642,14 +647,17 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         .describe("Структурированные данные выдачи: hotel/location, atmBank, thaiBankName, thaiAccountLast4 и т.д."),
     }),
     execute: async (args) => {
-      // Собранные универсально поля — fallback к аргументам LLM (источник правды
-      // для asset/amount/network/payout/payment, если LLM их не передал).
+      // Источник правды для незаданных аргументов: АКТИВНАЯ заявка (подтверждённая
+      // сделка), затем собранные поля. Иначе создание брало протухшее значение из
+      // leadFieldValues, хотя активная заявка про другую сумму.
       const collected = await readExchangeCollectedFields(db, tenantId, conversationId);
-      const assetArg = args.asset ?? collected.asset;
-      const amountArg = args.amount ?? collected.amount;
-      const networkArg = args.network ?? collected.network;
-      const paymentMethodArg = args.paymentMethod ?? collected.paymentMethod;
-      const payoutMethodArg = args.payoutMethod ?? collected.payoutMethod;
+      const active = await findActiveOrder(db, tenantId, conversationId);
+      const assetArg = args.asset ?? active?.assetFrom ?? collected.asset;
+      const amountArg =
+        args.amount ?? active?.requestedAmount ?? active?.amountFrom ?? collected.amount;
+      const networkArg = args.network ?? active?.network ?? collected.network;
+      const paymentMethodArg = args.paymentMethod ?? active?.paymentMethod ?? collected.paymentMethod;
+      const payoutMethodArg = args.payoutMethod ?? active?.payoutMethod ?? collected.payoutMethod;
       if (!assetArg || amountArg === undefined) {
         return { error: "Не хватает данных для заявки: уточните, что меняете и на какую сумму." };
       }
@@ -712,6 +720,13 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         await releaseOrderIdempotencyKey(db, tenantId, existing.id);
       }
 
+      // Вытесняем зависшие до-оплатные заявки (другой/протухший расчёт), чтобы блок
+      // «уже есть незавершённая заявка» не стопорил ПОДТВЕРЖДЁННОЕ создание.
+      // Идемпотентно переиспользуемую заявку уже вернули выше; заявки с поступившей
+      // оплатой cancelOpenExchangeOrders НЕ трогает → assessOrderRisk ниже корректно
+      // остановит (деньги в движении → оператор).
+      await cancelOpenExchangeOrders(db, tenantId, conversationId);
+
       const parties = await resolveConversationParties(db, tenantId, conversationId);
       const risk = await assessOrderRisk(db, tenantId, {
         conversationId,
@@ -772,6 +787,49 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         payoutMethod: order.payoutMethod,
         rate: order.rate,
         ttlMin,
+      };
+    },
+  };
+
+  const cancelOrderTool: AnyRagTool = {
+    name: "cancel_exchange_order",
+    description: [
+      "Отменить заявку по ЯВНОЙ просьбе клиента ('отмени заявку', 'не хочу', 'передумал').",
+      "Отменяет незавершённые ДО-оплатные заявки беседы. Если по заявке уже пришла оплата —",
+      "НЕ отменяет, а передаёт оператору (needsOperator). Для смены суммы используй",
+      "compute_exchange_quote, не этот инструмент.",
+    ].join(" "),
+    parameters: z.object({}),
+    execute: async () => {
+      const active = await findActiveOrder(db, tenantId, conversationId);
+      const { cancelled, blockedByPayment } = await cancelOpenExchangeOrders(
+        db,
+        tenantId,
+        conversationId,
+      );
+      if (blockedByPayment.length > 0) {
+        return {
+          ok: false,
+          needsOperator: true,
+          blockedByPayment,
+          note: "По заявке уже поступила оплата — отмену подтверждает оператор.",
+        };
+      }
+      if (cancelled.length === 0) {
+        return { cancelled: [], note: "Активных заявок нет." };
+      }
+      await moveExchangeLeadToStage({
+        db,
+        tenantId,
+        conversationId,
+        stageSlug: "quote_calculated",
+        allowBackward: true,
+      });
+      return {
+        cancelled,
+        ...(active
+          ? { lastDeal: { asset: active.assetFrom, amount: active.requestedAmount ?? active.amountFrom, network: active.network } }
+          : {}),
       };
     },
   };
@@ -1221,6 +1279,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     computeQuoteTool,
     checkVerificationTool,
     createOrderTool,
+    cancelOrderTool,
     fetchRequisitesTool,
     // Оплата: ok → payment_verified; чек принят (needsOperator) → ждём оператора.
     withStageAdvance(verifyPaymentTool, db, tenantId, conversationId, (r) =>
