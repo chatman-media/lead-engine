@@ -1,3 +1,10 @@
+# [@chatman-media/llm-router-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/llm-router-v1.2.1...@chatman-media/llm-router-v1.3.0) (2026-06-15)
+
+
+### Features
+
+* **llm:** захват и отображение реального расхода токенов ([e4e8713](https://github.com/chatman-media/lead-engine/commit/e4e871306a9e8cf3d1b98769445339d0bf7956f0)), closes [#663](https://github.com/chatman-media/lead-engine/issues/663)
+
 # [@chatman-media/llm-router-v1.2.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/llm-router-v1.2.0...@chatman-media/llm-router-v1.2.1) (2026-06-12)
 
 
