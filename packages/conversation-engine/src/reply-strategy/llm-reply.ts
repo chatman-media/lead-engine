@@ -469,6 +469,72 @@ function parseNetwork(text: string): string | undefined {
 				: undefined;
 }
 
+// Поддерживаемые сети — для отказа по неподдерживаемым (см. ниже). \b не работает
+// по кириллице, поэтому supported-набор латиницей и матчится свободно.
+const EXCHANGE_SUPPORTED_NETWORK_RE = /trc[\s-]?20|tron|erc[\s-]?20|bep[\s-]?20|\bbsc\b/iu;
+
+// Юникод-границы слова: \b в JS опирается на ASCII \w и не ставит границу вокруг
+// кириллицы (см. #612). Берём явные lookaround'ы по \p{L}\p{N}.
+const NETWORK_NB_L = "(?<![\\p{L}\\p{N}])";
+const NETWORK_NB_R = "(?![\\p{L}\\p{N}])";
+
+/**
+ * Известные, но НЕ поддерживаемые нами сети для USDT (TON/Solana/…). Раньше
+ * экстрактор молча не извлекал такую сеть → бот переспрашивал в пустоту (#655).
+ * Это интент-классификатор отказа, а не сбор поля — переживает выпил regex (#654).
+ */
+const EXCHANGE_UNSUPPORTED_NETWORKS: ReadonlyArray<{ re: RegExp; name: string }> =
+	[
+		{
+			re: new RegExp(`${NETWORK_NB_L}(?:ton(?:coin)?|тон|тонкоин)${NETWORK_NB_R}`, "iu"),
+			name: "TON",
+		},
+		{
+			re: new RegExp(`${NETWORK_NB_L}(?:solana|солана|spl|спл)${NETWORK_NB_R}`, "iu"),
+			name: "Solana",
+		},
+		{
+			re: new RegExp(`${NETWORK_NB_L}(?:polygon|полигон|matic|матик)${NETWORK_NB_R}`, "iu"),
+			name: "Polygon",
+		},
+		{
+			re: new RegExp(`${NETWORK_NB_L}(?:avalanche|avax|аваланч)${NETWORK_NB_R}`, "iu"),
+			name: "Avalanche",
+		},
+		{
+			re: new RegExp(`${NETWORK_NB_L}(?:arbitrum|арбитрум)${NETWORK_NB_R}`, "iu"),
+			name: "Arbitrum",
+		},
+		{
+			re: new RegExp(`${NETWORK_NB_L}(?:optimism|оптимизм)${NETWORK_NB_R}`, "iu"),
+			name: "Optimism",
+		},
+	];
+
+/** Каноничное имя неподдерживаемой сети из текста, иначе null. */
+function detectUnsupportedExchangeNetwork(text: string): string | null {
+	if (EXCHANGE_SUPPORTED_NETWORK_RE.test(text)) return null;
+	for (const { re, name } of EXCHANGE_UNSUPPORTED_NETWORKS) {
+		if (re.test(text)) return name;
+	}
+	return null;
+}
+
+/**
+ * Явный отказ, когда клиент называет неподдерживаемую сеть (TON и пр.): не молчим
+ * и не подставляем дефолт — просим выбрать TRC20/ERC20/BEP20.
+ */
+function maybeForceExchangeUnsupportedNetwork(
+	userMessageText: string,
+): ExchangeForcedReply | null {
+	const network = detectUnsupportedExchangeNetwork(userMessageText);
+	if (!network) return null;
+	return {
+		text: `Сеть ${network} мы не поддерживаем — принимаем USDT только в сетях TRC20, ERC20 или BEP20. В какой из них отправите?`,
+		toolCalls: [],
+	};
+}
+
 function parsePayoutMethod(text: string): string | undefined {
 	if (/банкомат|atm/i.test(text)) return "atm";
 	if (/офис/i.test(text)) return "office_cash";
@@ -1064,6 +1130,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					tools,
 					exchangePolicyState,
 				)) ??
+				maybeForceExchangeUnsupportedNetwork(input.userMessageText) ??
 				(await maybeForceExchangeQuoteReply(input.userMessageText, tools)) ??
 				maybeForceExchangePaymentMethodQuestion(
 					input.userMessageText,

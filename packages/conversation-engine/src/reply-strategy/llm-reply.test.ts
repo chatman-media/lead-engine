@@ -553,6 +553,56 @@ describe("LlmReplyStrategy", () => {
     });
 	  });
 
+	it("exchange: неподдерживаемая сеть (TON) → явный отказ с TRC20/ERC20/BEP20", async () => {
+		const mkStrategy = (msg: string) => {
+			const chat = new CapturingChat("Сейчас уточню у оператора.");
+			const repo = fakeMessagesRepo([row(1, "user", msg)]);
+			const strategy = new LlmReplyStrategy(
+				{
+					template: EXCHANGE_TEMPLATE,
+					resolveChat: () => chat,
+					resolveTools: () => [exchangeQuoteTool()],
+					resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+				},
+				() => repo,
+			);
+			return { chat, strategy };
+		};
+		const base = {
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+		};
+		// Латиница «сеть TON» → отказ, LLM не дёргаем.
+		const a = mkStrategy("сеть TON");
+		const t1 = firstReplyText(
+			await a.strategy.generate({ ...base, userMessageText: "сеть TON" }),
+		);
+		expect(t1).toContain("TON");
+		expect(t1).toContain("не поддерживаем");
+		expect(t1).toContain("TRC20");
+		expect(a.chat.lastCall).toBeNull();
+		// Кириллица одним словом «тон».
+		const b = mkStrategy("тон");
+		expect(
+			firstReplyText(
+				await b.strategy.generate({ ...base, userMessageText: "тон" }),
+			),
+		).toContain("не поддерживаем");
+		// Поддерживаемая сеть → НЕ отказываем, считаем котировку.
+		const c = mkStrategy("500 USDT TRC20 на баты, какой курс?");
+		const t3 = firstReplyText(
+			await c.strategy.generate({
+				...base,
+				userMessageText: "500 USDT TRC20 на баты, какой курс?",
+			}),
+		);
+		expect(t3).not.toContain("не поддерживаем");
+		expect(t3).toContain("получите 15750 THB");
+	});
+
 	it("exchange: подтверждение на quote_calculated принудительно ведёт в create_exchange_order/KYC", async () => {
 		const chat = new CapturingChat("Повторно считаю сумму.");
 		const repo = fakeMessagesRepo([
