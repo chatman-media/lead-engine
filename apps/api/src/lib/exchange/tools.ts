@@ -203,6 +203,16 @@ export interface ExchangeCollectedFields {
   network?: string;
   payoutMethod?: string;
   paymentMethod?: string;
+  /**
+   * Per-turn сигнал: сумму (amount_from) на ЭТОМ ходе (пере)задал
+   * field-extractor — её leadFieldValues.updatedAt не старше turnStartedAt.
+   * Нужен форс-котировке: «посчитай 500 usdt» (свежая сумма → считаем) vs
+   * «TRC20 в банкомате» (все поля есть, суммы этого хода нет → сводка/оплата).
+   * Без turnStartedAt не вычисляется (остаётся undefined).
+   */
+  amountSetThisTurn?: boolean;
+  /** Аналогично amountSetThisTurn, но для актива (asset_from). */
+  assetSetThisTurn?: boolean;
 }
 
 // stageField option `value` → enum тулов. Актив/сеть нормализует сам тул
@@ -271,11 +281,19 @@ export function mapExchangeCollectedValues(
  * Читает универсально собранные значения (asset_from/amount_from/network/
  * payout_method/payment_method) из leadFieldValues лида беседы. Пусто — поля
  * ещё не собраны (тул тогда полагается на явные аргументы LLM).
+ *
+ * turnStartedAt (epoch сек) — якорь «этого хода» (createdAt текущего входящего
+ * сообщения). Если задан, выставляем amountSetThisTurn/assetSetThisTurn по
+ * updatedAt поля amount_from/asset_from: field-extractor перезаписывает поле
+ * на ходе, где клиент назвал свежую сумму/актив → updatedAt >= turnStartedAt.
+ * Иначе поле осталось от прошлого хода (updatedAt < turnStartedAt). Это
+ * заменяет «свежая сумма этого хода» из выпиленного regex (#654).
  */
 export async function readExchangeCollectedFields(
   db: Db,
   tenantId: number,
   conversationId: number,
+  turnStartedAt?: number,
 ): Promise<ExchangeCollectedFields> {
   return withTenant(db, tenantId, async (tx) => {
     const [lead] = await tx
@@ -318,15 +336,26 @@ export async function readExchangeCollectedFields(
       .orderBy(desc(leadFieldValues.updatedAt), desc(leadFieldValues.id));
 
     const bySlug: Record<string, unknown> = {};
+    const updatedBySlug: Record<string, number> = {};
     for (const row of rows) {
       if (row.slug in bySlug) continue; // свежее уже взято
       try {
         bySlug[row.slug] = JSON.parse(row.valueJson);
+        updatedBySlug[row.slug] = row.updatedAt;
       } catch {
         // невалидный JSON — пропускаем
       }
     }
-    return mapExchangeCollectedValues(bySlug);
+    const collected = mapExchangeCollectedValues(bySlug);
+    if (turnStartedAt !== undefined) {
+      collected.amountSetThisTurn =
+        collected.amount !== undefined &&
+        (updatedBySlug.amount_from ?? -1) >= turnStartedAt;
+      collected.assetSetThisTurn =
+        collected.asset !== undefined &&
+        (updatedBySlug.asset_from ?? -1) >= turnStartedAt;
+    }
+    return collected;
   });
 }
 

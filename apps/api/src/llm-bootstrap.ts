@@ -52,11 +52,13 @@ import type {
 import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import {
+	conversations,
 	directorHooks,
 	funnels,
 	exchangeSettings,
 	leads,
 	llmProviderConfigs,
+	messages,
 	skills,
 	stageDefinitions,
 	tenantFeatureFlags,
@@ -620,10 +622,36 @@ export function makeExchangeCollectedResolver(db: Db) {
 		tenantId: number;
 		conversationId: number;
 		contactId: number;
-	}) =>
-		readExchangeCollectedFields(db, input.tenantId, input.conversationId).catch(
-			() => null,
-		);
+	}) => {
+		// Якорь «этого хода» — createdAt самого свежего входящего сообщения беседы.
+		// field-extractor пишет leadFieldValues ПЕРЕД ответом (post-inbound
+		// automation awaited до reply), поэтому поле, (пере)заданное на этом ходе,
+		// имеет updatedAt >= createdAt текущего сообщения. По этому порогу
+		// readExchangeCollectedFields отличает «свежую сумму этого хода» (форс-
+		// котировка) от накопленной сделки. Нет сообщения → без сигнала.
+		const turnStartedAt = await withTenant(db, input.tenantId, async (tx) => {
+			const [row] = await tx
+				.select({ createdAt: messages.createdAt })
+				.from(messages)
+				.innerJoin(conversations, eq(conversations.id, messages.conversationId))
+				.where(
+					and(
+						eq(messages.tenantId, input.tenantId),
+						eq(messages.conversationId, input.conversationId),
+						eq(messages.role, "user"),
+					),
+				)
+				.orderBy(desc(messages.createdAt), desc(messages.id))
+				.limit(1);
+			return row?.createdAt;
+		}).catch(() => undefined);
+		return readExchangeCollectedFields(
+			db,
+			input.tenantId,
+			input.conversationId,
+			turnStartedAt,
+		).catch(() => null);
+	};
 }
 
 export interface ReplyStrategyBundle {
