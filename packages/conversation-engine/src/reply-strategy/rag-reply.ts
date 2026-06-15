@@ -991,6 +991,19 @@ function hasAssignmentMetadata(style: ResolvedStyleAssignment | null): boolean {
 	return style?.styleId !== undefined || style?.experimentId !== undefined;
 }
 
+/**
+ * #652 — committing-тулзы обмена, которыми AI НЕ должен пользоваться, пока лид
+ * припаркован на operator-гейте (awaiting_operator): оформление заявки, выдача
+ * реквизитов/выплаты, подтверждение оплаты. Котировку (read-only) оставляем.
+ * Forced order/requisites-шаги ищут тул по имени → снятие тула их авто-отключает.
+ */
+const EXCHANGE_COMMITTING_TOOLS = new Set([
+	"create_exchange_order",
+	"fetch_exchange_requisites",
+	"issue_exchange_payout",
+	"verify_exchange_payment",
+]);
+
 function exchangeReplyOutput(input: {
 	channelId: number;
 	externalUserId: string;
@@ -1120,7 +1133,7 @@ export class RagReplyStrategy implements ReplyStrategy {
 
 		const skills = ctx.skills ?? [];
 		const directorHooks = ctx.directorHooks ?? [];
-		const tools = ctx.tools ?? [];
+		const allTools = ctx.tools ?? [];
 		const reranker = ctx.reranker ?? null;
 		const stageGuidance = ctx.stageGuidance ?? null;
 		const requestContext = ctx.requestContext ?? null;
@@ -1130,6 +1143,16 @@ export class RagReplyStrategy implements ReplyStrategy {
 			? (ctx.exchangePolicyState ?? null)
 			: null;
 		const exchangeCollected = isExchange ? (ctx.exchangeCollected ?? null) : null;
+		// #652 — лид припаркован на operator-гейте (awaiting_operator): в денежном
+		// флоу обмена AI НЕ должен сам коммитить заявку/реквизиты/выплату, пока
+		// решает оператор (раньше бот сам оформлял заявку, оператора лишь
+		// «уведомляли»). Снимаем committing-тулзы — forced-шаги ищут тул по имени и
+		// авто-отключаются, котировка/ответы остаются. Mode здесь не трогаем, чтобы
+		// «вернуть боту» (#619) не зациклил повторную эскалацию.
+		const exchangeOperatorPending = isExchange && awaitingOperator;
+		const tools = exchangeOperatorPending
+			? allTools.filter((t) => !EXCHANGE_COMMITTING_TOOLS.has(t.name))
+			: allTools;
 
 		const forcedExchangeReply = isExchange
 			? ((await maybeForceExchangeOrderReply({
