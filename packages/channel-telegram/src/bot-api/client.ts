@@ -200,12 +200,15 @@ export class TelegramClient {
     chatId: number | string;
     photoFileId: string;
     caption?: string;
+    /** Топик форум-группы (operator bot): медиа уходит в конкретный тред. */
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
     const params: Record<string, unknown> = {
       chat_id: input.chatId,
       photo: input.photoFileId,
     };
     if (input.caption) params.caption = input.caption;
+    if (input.messageThreadId !== undefined) params.message_thread_id = input.messageThreadId;
     return this.call<TgSendMessageResult>("sendPhoto", params);
   }
 
@@ -213,23 +216,28 @@ export class TelegramClient {
     chatId: number | string;
     videoFileId: string;
     caption?: string;
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
     const params: Record<string, unknown> = {
       chat_id: input.chatId,
       video: input.videoFileId,
     };
     if (input.caption) params.caption = input.caption;
+    if (input.messageThreadId !== undefined) params.message_thread_id = input.messageThreadId;
     return this.call<TgSendMessageResult>("sendVideo", params);
   }
 
   sendVideoNote(input: {
     chatId: number | string;
     videoNoteFileId: string;
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
-    return this.call<TgSendMessageResult>("sendVideoNote", {
+    const params: Record<string, unknown> = {
       chat_id: input.chatId,
       video_note: input.videoNoteFileId,
-    });
+    };
+    if (input.messageThreadId !== undefined) params.message_thread_id = input.messageThreadId;
+    return this.call<TgSendMessageResult>("sendVideoNote", params);
   }
 
   sendPhotoUpload(input: {
@@ -238,10 +246,15 @@ export class TelegramClient {
     filename: string;
     contentType?: string;
     caption?: string;
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
     return this.callMultipart<TgSendMessageResult>(
       "sendPhoto",
-      { chat_id: input.chatId, caption: input.caption },
+      {
+        chat_id: input.chatId,
+        caption: input.caption,
+        message_thread_id: input.messageThreadId,
+      },
       {
         field: "photo",
         bytes: input.bytes,
@@ -257,10 +270,15 @@ export class TelegramClient {
     filename: string;
     contentType?: string;
     caption?: string;
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
     return this.callMultipart<TgSendMessageResult>(
       "sendVideo",
-      { chat_id: input.chatId, caption: input.caption },
+      {
+        chat_id: input.chatId,
+        caption: input.caption,
+        message_thread_id: input.messageThreadId,
+      },
       {
         field: "video",
         bytes: input.bytes,
@@ -275,10 +293,11 @@ export class TelegramClient {
     bytes: ArrayBuffer | Uint8Array;
     filename: string;
     contentType?: string;
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
     return this.callMultipart<TgSendMessageResult>(
       "sendVideoNote",
-      { chat_id: input.chatId },
+      { chat_id: input.chatId, message_thread_id: input.messageThreadId },
       {
         field: "video_note",
         bytes: input.bytes,
@@ -307,12 +326,14 @@ export class TelegramClient {
     chatId: number | string;
     documentFileId: string;
     caption?: string;
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
     const params: Record<string, unknown> = {
       chat_id: input.chatId,
       document: input.documentFileId,
     };
     if (input.caption) params.caption = input.caption;
+    if (input.messageThreadId !== undefined) params.message_thread_id = input.messageThreadId;
     return this.call<TgSendMessageResult>("sendDocument", params);
   }
 
@@ -322,10 +343,15 @@ export class TelegramClient {
     filename: string;
     contentType?: string;
     caption?: string;
+    messageThreadId?: number;
   }): Promise<TgSendMessageResult> {
     return this.callMultipart<TgSendMessageResult>(
       "sendDocument",
-      { chat_id: input.chatId, caption: input.caption },
+      {
+        chat_id: input.chatId,
+        caption: input.caption,
+        message_thread_id: input.messageThreadId,
+      },
       {
         field: "document",
         bytes: input.bytes,

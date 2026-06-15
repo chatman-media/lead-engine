@@ -68,6 +68,9 @@ async function main() {
     cfg.operatorBotToken,
     cfg.appUrl,
     adminInformer,
+    undefined,
+    // #651 — db для форум-топиков (operator_thread_id + least-busy ассайн).
+    db as never,
   );
   if (cfg.operatorBotToken) {
     log.info("operator notification bot enabled");

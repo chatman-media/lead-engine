@@ -4,6 +4,7 @@
  */
 import { applyAllMigrations, createIsolatedDb, schema, tryConnectToPg } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -173,6 +174,28 @@ describe("ConversationsRepo", () => {
     const row = await repo().findById(conv.id);
     expect(row?.styleId).toBe(style.id);
     expect(row?.experimentId).toBe(experiment.id);
+  });
+
+  it("findConversationByOperatorThread: находит по треду, tenant-scoped (#651)", async () => {
+    if (!enabled) return;
+    const conv = await repo().create({ contactId: await freshContact(), source: "bot", nowEpoch: n });
+    // Привязываем топик форум-группы к диалогу (нет публичного сеттера — пишем
+    // напрямую, как и другие интеграционные тесты делают со схемой).
+    await db
+      .update(schema.conversations)
+      .set({ operatorThreadId: 4242 })
+      .where(and(eq(schema.conversations.id, conv.id), eq(schema.conversations.tenantId, t1)));
+
+    const found = await repo().findConversationByOperatorThread(4242);
+    expect(found?.id).toBe(conv.id);
+    expect(found?.operatorThreadId).toBe(4242);
+
+    // Несуществующий тред → null.
+    expect(await repo().findConversationByOperatorThread(999999)).toBeNull();
+    // Чужой tenant не видит тред.
+    expect(
+      await new ConversationsRepo({ db, tenantId: t2 }).findConversationByOperatorThread(4242),
+    ).toBeNull();
   });
 
   it("recent → DESC by last_message_at, ограничено limit", async () => {

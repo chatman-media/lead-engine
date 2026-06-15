@@ -101,11 +101,11 @@ describe("NotificationsRepo: rules", () => {
     if (!enabled) return;
     const active = await repo.createRule({
       tenantId, eventType: "stage_changed", conditionJson: "{}",
-      channelType: "telegram_group", targetId: "g1", priority: "normal", isActive: true,
+      channelType: "telegram_group", targetId: "g1", targetIsForum: false, priority: "normal", isActive: true,
     });
     await repo.createRule({
       tenantId, eventType: "stage_changed", conditionJson: "{}",
-      channelType: "telegram_group", targetId: "g2", priority: "normal", isActive: false,
+      channelType: "telegram_group", targetId: "g2", targetIsForum: false, priority: "normal", isActive: false,
     });
     const byEvent = await repo.findRulesByEvent(tenantId, "stage_changed");
     expect(byEvent.map((r) => r.targetId)).toEqual(["g1"]); // inactive отфильтрован

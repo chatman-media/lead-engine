@@ -152,6 +152,7 @@ export class FakeConversationsRepo {
 			replyDueAt: null,
 			fallbackStreak: 0,
 			offhoursLastAutoSent: null,
+			operatorThreadId: null,
 		};
 		this.rows.push(row);
 		return row;

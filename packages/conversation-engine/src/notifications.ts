@@ -7,12 +7,14 @@ import type {
 	NotificationRule,
 	NotificationsRepo,
 } from "./dal/notifications.ts";
+import type { Db } from "./dal/types.ts";
 import {
 	buildOperatorActionCallbackData,
 	isOperatorHandoffEvent,
-	operatorExchangeActionCallbackData,
 	type OperatorBotExchangeAction,
+	operatorExchangeActionCallbackData,
 } from "./operator-bot-actions.ts";
+import { ensureOperatorTopic } from "./operator-forum-topic.ts";
 
 /**
  * Срезает хвостовые слеши без бэктрекящей regex (`/\/+$/` даёт полиномиальный
@@ -37,7 +39,12 @@ export interface NotificationEvent {
 	data: Record<string, unknown>;
 }
 
-type NotificationMediaKind = "photo" | "video" | "video_note" | "document" | "voice";
+type NotificationMediaKind =
+	| "photo"
+	| "video"
+	| "video_note"
+	| "document"
+	| "voice";
 
 export interface NotificationMediaRef {
 	kind: NotificationMediaKind;
@@ -147,6 +154,12 @@ export class NotificationService {
 		 */
 		private readonly informer?: AdminInformer,
 		private readonly mediaDownloader?: NotificationMediaDownloader,
+		/**
+		 * #651 — нужен для форум-топиков: чтение/запись
+		 * conversations.operator_thread_id + least-busy ассайн оператора. Без db
+		 * фича выключена (поведение прежнее, единый чат без топиков).
+		 */
+		private readonly db?: Db,
 	) {
 		if (botToken) {
 			this.client = new TelegramClient({ token: botToken });
@@ -185,7 +198,17 @@ export class NotificationService {
 		);
 		for (const rule of matchedRules) {
 			try {
-				await this.sendNotificationTarget(client, rule.targetId, event, text, buttons);
+				// #651: форум-группа → заводим/находим топик диалога и шлём карточку
+				// в этот тред. Не форум (или нет db/conversationId) → как раньше.
+				const threadId = await this.resolveForumThreadId(rule, event);
+				await this.sendNotificationTarget(
+					client,
+					rule.targetId,
+					event,
+					text,
+					buttons,
+					threadId,
+				);
 			} catch (err) {
 				console.error(
 					`[NotificationService] rule ${rule.id} send failed:`,
@@ -228,8 +251,7 @@ export class NotificationService {
 		chatId: string,
 	): Promise<{ ok: boolean; error?: string }> {
 		const client = this.client;
-		if (!client)
-			return { ok: false, error: "Бот не настроен (нет токена)" };
+		if (!client) return { ok: false, error: "Бот не настроен (нет токена)" };
 		try {
 			await client.sendMessage({
 				chatId,
@@ -250,8 +272,7 @@ export class NotificationService {
 		htmlText: string,
 	): Promise<{ ok: boolean; error?: string }> {
 		const client = this.client;
-		if (!client)
-			return { ok: false, error: "Бот не настроен (нет токена)" };
+		if (!client) return { ok: false, error: "Бот не настроен (нет токена)" };
 		try {
 			await this.sendMessage(client, chatId, htmlText, null);
 			return { ok: true };
@@ -263,17 +284,62 @@ export class NotificationService {
 		}
 	}
 
+	/**
+	 * #651 — message_thread_id топика для этого правила, если: db настроена,
+	 * правило ведёт в форум-группу (target_is_forum), а событие — операторский
+	 * хендофф с conversationId. Заводит топик при первом хендоффе диалога и
+	 * (минимальный пул) назначает least-busy оператора. Любая ошибка/не-форум →
+	 * undefined: шлём в общий чат, как раньше (фича строго ADDITIVE).
+	 */
+	private async resolveForumThreadId(
+		rule: NotificationRule,
+		event: NotificationEvent,
+	): Promise<number | undefined> {
+		if (!this.db || !rule.targetIsForum) return undefined;
+		if (!isOperatorHandoffEvent(event) || !event.conversationId)
+			return undefined;
+		try {
+			const ensured = await ensureOperatorTopic({
+				db: this.db,
+				client: this.client as TelegramClient,
+				tenantId: event.tenantId,
+				chatId: rule.targetId,
+				context: {
+					conversationId: event.conversationId,
+					displayName:
+						typeof event.data.displayName === "string"
+							? event.data.displayName
+							: null,
+					amountLabel:
+						typeof event.data.amount === "string" && event.data.amount
+							? event.data.amount
+							: null,
+				},
+				nowEpoch: Math.floor(Date.now() / 1000),
+			});
+			return ensured?.threadId;
+		} catch (err) {
+			console.error(
+				`[NotificationService] ensure forum topic failed (conv ${event.conversationId}):`,
+				err,
+			);
+			return undefined;
+		}
+	}
+
 	private async sendMessage(
 		client: TelegramClient,
 		chatId: string,
 		text: string,
 		buttons: TelegramButtonRows | null,
+		messageThreadId?: number,
 	): Promise<void> {
 		await client.sendMessage({
 			chatId,
 			text,
 			parseMode: "HTML",
 			replyMarkup: buttons ? { inline_keyboard: buttons } : undefined,
+			...(messageThreadId !== undefined ? { messageThreadId } : {}),
 		});
 	}
 
@@ -283,21 +349,31 @@ export class NotificationService {
 		event: NotificationEvent,
 		text: string,
 		buttons: TelegramButtonRows | null,
+		messageThreadId?: number,
 	): Promise<void> {
-		await this.sendMediaPreviews(client, chatId, event);
-		await this.sendMessage(client, chatId, text, buttons);
+		await this.sendMediaPreviews(client, chatId, event, messageThreadId);
+		await this.sendMessage(client, chatId, text, buttons, messageThreadId);
 	}
 
 	private async sendMediaPreviews(
 		client: TelegramClient,
 		chatId: string,
 		event: NotificationEvent,
+		messageThreadId?: number,
 	): Promise<void> {
 		if (!isOperatorHandoffEvent(event)) return;
 		const refs = parseMediaRefsJson(event.data.mediaRefsJson);
 		for (const [i, ref] of refs.entries()) {
 			try {
-				await this.sendMediaPreview(client, chatId, event, ref, i, refs.length);
+				await this.sendMediaPreview(
+					client,
+					chatId,
+					event,
+					ref,
+					i,
+					refs.length,
+					messageThreadId,
+				);
 			} catch (err) {
 				console.error("[NotificationService] media preview send failed:", err);
 			}
@@ -311,25 +387,41 @@ export class NotificationService {
 		ref: NotificationMediaRef,
 		index: number,
 		total: number,
+		messageThreadId?: number,
 	): Promise<void> {
 		const caption =
 			ref.kind === "video_note"
 				? undefined
 				: this.mediaPreviewCaption(event, ref, index, total);
 		const upload = await this.downloadPreviewMedia(ref).catch((err) => {
-			console.error("[NotificationService] media preview download failed:", err);
+			console.error(
+				"[NotificationService] media preview download failed:",
+				err,
+			);
 			return null;
 		});
 		if (upload) {
-			await this.sendUploadedMedia(client, chatId, ref, index, upload, caption);
+			await this.sendUploadedMedia(
+				client,
+				chatId,
+				ref,
+				index,
+				upload,
+				caption,
+				messageThreadId,
+			);
 			return;
 		}
-		await this.sendReferencedMedia(client, chatId, ref, caption);
+		await this.sendReferencedMedia(
+			client,
+			chatId,
+			ref,
+			caption,
+			messageThreadId,
+		);
 	}
 
-	private async downloadPreviewMedia(
-		ref: NotificationMediaRef,
-	): Promise<{
+	private async downloadPreviewMedia(ref: NotificationMediaRef): Promise<{
 		bytes: ArrayBuffer;
 		contentType: string;
 		filename: string;
@@ -357,7 +449,9 @@ export class NotificationService {
 		index: number,
 		upload: { bytes: ArrayBuffer; contentType: string; filename: string },
 		caption: string | undefined,
+		messageThreadId?: number,
 	): Promise<void> {
+		const thread = messageThreadId !== undefined ? { messageThreadId } : {};
 		if (ref.kind === "photo") {
 			await client.sendPhotoUpload({
 				chatId,
@@ -365,6 +459,7 @@ export class NotificationService {
 				filename: defaultFileName(ref, index),
 				contentType: upload.contentType,
 				...(caption ? { caption } : {}),
+				...thread,
 			});
 			return;
 		}
@@ -375,6 +470,7 @@ export class NotificationService {
 				filename: defaultFileName(ref, index),
 				contentType: upload.contentType,
 				...(caption ? { caption } : {}),
+				...thread,
 			});
 			return;
 		}
@@ -384,6 +480,7 @@ export class NotificationService {
 				bytes: upload.bytes,
 				filename: defaultFileName(ref, index),
 				contentType: upload.contentType,
+				...thread,
 			});
 			return;
 		}
@@ -393,6 +490,7 @@ export class NotificationService {
 			filename: defaultFileName(ref, index),
 			contentType: upload.contentType,
 			...(caption ? { caption } : {}),
+			...thread,
 		});
 	}
 
@@ -401,12 +499,15 @@ export class NotificationService {
 		chatId: string,
 		ref: NotificationMediaRef,
 		caption: string | undefined,
+		messageThreadId?: number,
 	): Promise<void> {
+		const thread = messageThreadId !== undefined ? { messageThreadId } : {};
 		if (ref.kind === "photo") {
 			await client.sendPhoto({
 				chatId,
 				photoFileId: ref.externalRef,
 				...(caption ? { caption } : {}),
+				...thread,
 			});
 			return;
 		}
@@ -415,6 +516,7 @@ export class NotificationService {
 				chatId,
 				videoFileId: ref.externalRef,
 				...(caption ? { caption } : {}),
+				...thread,
 			});
 			return;
 		}
@@ -422,6 +524,7 @@ export class NotificationService {
 			await client.sendVideoNote({
 				chatId,
 				videoNoteFileId: ref.externalRef,
+				...thread,
 			});
 			return;
 		}
@@ -429,6 +532,7 @@ export class NotificationService {
 			chatId,
 			documentFileId: ref.externalRef,
 			...(caption ? { caption } : {}),
+			...thread,
 		});
 	}
 
@@ -519,9 +623,7 @@ export class NotificationService {
 		return msg;
 	}
 
-	private formatButtons(
-		event: NotificationEvent,
-	): TelegramButtonRows | null {
+	private formatButtons(event: NotificationEvent): TelegramButtonRows | null {
 		if (isOperatorHandoffEvent(event)) {
 			const conversationId = event.conversationId as number;
 			const baseRows: TelegramButtonRows = [
@@ -680,23 +782,23 @@ export class NotificationService {
 	}
 
 	private formatKey(key: string): string {
-			const map: Record<string, string> = {
-				amount: "Сумма",
-				action: "Действие",
-				asset: "Актив",
-				accepted: "Принято",
-				contractId: "Contract",
-				context: "Контекст",
-				network: "Сеть",
-				pending: "Ожидает",
-				phone: "Телефон",
-				priority: "Приоритет",
-				rail: "Платёжный канал",
-				reviewPath: "Путь проверки",
-				email: "Email",
-				text: "Сообщение",
-				urgency: "Срочность",
-			};
+		const map: Record<string, string> = {
+			amount: "Сумма",
+			action: "Действие",
+			asset: "Актив",
+			accepted: "Принято",
+			contractId: "Contract",
+			context: "Контекст",
+			network: "Сеть",
+			pending: "Ожидает",
+			phone: "Телефон",
+			priority: "Приоритет",
+			rail: "Платёжный канал",
+			reviewPath: "Путь проверки",
+			email: "Email",
+			text: "Сообщение",
+			urgency: "Срочность",
+		};
 		return map[key] ?? key;
 	}
 }

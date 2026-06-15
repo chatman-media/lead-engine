@@ -14,6 +14,10 @@ export interface TgChat {
   type: "private" | "group" | "supergroup" | "channel";
   title?: string;
   username?: string;
+  /** true для супергрупп с включёнными топиками (форум). Telegram отдаёт это
+   *  поле в `message.chat` — используется как opt-in сигнал «оператор-чат —
+   *  форум» при /setup (#651): 1 топик на диалог. */
+  is_forum?: boolean;
 }
 
 /**

@@ -280,6 +280,30 @@ export class NotificationsRepo {
   }
 
   /**
+   * #651 — найти активное форум-правило по chat_id целевой группы. Нужно, чтобы
+   * по сообщению оператора в ТОПИКЕ форум-группы (chat_id группы, не личный)
+   * определить tenant, а дальше — диалог по треду. Возвращает первое активное
+   * правило с этим target_id и target_is_forum = true.
+   */
+  async findForumRuleByTargetId(
+    chatId: string,
+  ): Promise<{ tenantId: number; ruleId: number } | undefined> {
+    const rows = await this.db
+      .select({ tenantId: notificationRules.tenantId, ruleId: notificationRules.id })
+      .from(notificationRules)
+      .where(
+        and(
+          eq(notificationRules.targetId, chatId),
+          eq(notificationRules.targetIsForum, true),
+          eq(notificationRules.isActive, true),
+        ),
+      )
+      .orderBy(notificationRules.id)
+      .limit(1);
+    return rows[0];
+  }
+
+  /**
    * Частичное обновление informer-настроек владельца по adminId. С tenantId —
    * upsert (создаёт строку, если её ещё нет — путь из UI до привязки Telegram);
    * без tenantId — plain update (путь из бота, где строка уже есть).
