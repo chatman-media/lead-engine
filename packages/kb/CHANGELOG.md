@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.13.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.13.1...@chatman-media/kb-v1.13.2) (2026-06-15)
+
+
+### Performance Improvements
+
+* **prompt:** переупорядочить системный промпт под prompt-caching ([4cc769e](https://github.com/chatman-media/lead-engine/commit/4cc769ea04198a2d293af147940bae305e08f932)), closes [#665](https://github.com/chatman-media/lead-engine/issues/665) [#670](https://github.com/chatman-media/lead-engine/issues/670)
+
 # [@chatman-media/kb-v1.13.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.13.0...@chatman-media/kb-v1.13.1) (2026-06-13)
 
 
