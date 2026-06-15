@@ -1409,6 +1409,10 @@ export const notificationRules = pgTable("notification_rules", {
   channelType: text("channel_type").notNull().default("telegram_group"),
   // ID чата, группы или канала
   targetId: text("target_id").notNull(),
+  // Opt-in: целевой чат — форум-группа (#651). При true operator bot заводит
+  // отдельный топик на каждый диалог (conversations.operator_thread_id) и шлёт
+  // карточку/ответы в этот тред. false (дефолт) = единый чат, как раньше.
+  targetIsForum: boolean("target_is_forum").notNull().default(false),
   // low | normal | high (определяет звук уведомления или приоритет в UI)
   priority: text("priority").notNull().default("normal"),
   isActive: boolean("is_active").notNull().default(true),

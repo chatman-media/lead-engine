@@ -22,6 +22,7 @@ import {
 	stageDefinitions,
 } from "@chatman-media/storage";
 import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { ConversationsRepo } from "./dal/conversations.ts";
 import type { NotificationsRepo } from "./dal/notifications.ts";
 import type { Db } from "./dal/types.ts";
 import { QUOTE_CURRENCY } from "./exchange-quote-currency.ts";
@@ -253,6 +254,22 @@ export class OperatorBotHandler {
 			if (handled) return;
 		}
 
+		// #651 — оператор пишет в топике форум-группы (без reply_to_message):
+		// маршрутизируем его текст клиенту, чей диалог привязан к этому треду.
+		if (
+			text &&
+			!text.startsWith("/") &&
+			!message.reply_to_message &&
+			message.message_thread_id !== undefined
+		) {
+			const handled = await this.handleTopicReply(
+				chatId,
+				message.message_thread_id,
+				text,
+			);
+			if (handled) return;
+		}
+
 		// 1. Личная привязка по /start <token>
 		if (text.startsWith("/start ")) {
 			const token = text.split(" ")[1];
@@ -270,6 +287,9 @@ export class OperatorBotHandler {
 					token,
 					message.chat.id,
 					message.chat.title || "группа",
+					// #651: форум-группа (топики включены) → правило получает
+					// target_is_forum, дальше 1 топик на диалог.
+					message.chat.is_forum === true,
 				);
 				return;
 			}
@@ -567,6 +587,94 @@ export class OperatorBotHandler {
 		return true;
 	}
 
+	/**
+	 * #651 — ответ оператора в ТОПИКЕ форум-группы. Сообщение приходит из чата
+	 * группы (не из личного), поэтому tenant резолвим по форум-правилу
+	 * (target_id = chat группы), а диалог — по треду
+	 * (conversations.operator_thread_id). Дальше уходит клиенту тем же путём, что
+	 * и быстрый reply (#649): sendDraftToClient, без превью.
+	 *
+	 * Возвращает true, если сообщение обработано как топик-ответ (даже при
+	 * ошибке доставки — мы ответили оператору). false → это не форум-топик,
+	 * caller продолжает обычную обработку.
+	 */
+	private async handleTopicReply(
+		chatId: string,
+		threadId: number,
+		text: string,
+	): Promise<boolean> {
+		if (!this.client) return false;
+		if (!this.actions.db) return false;
+
+		// 1. tenant по форум-правилу группы. Нет правила → не наш форум-чат.
+		const rule = await this.repo.findForumRuleByTargetId(chatId);
+		if (!rule) return false;
+
+		// 2. диалог по треду (tenant-scoped).
+		const conversations = new ConversationsRepo({
+			db: this.actions.db,
+			tenantId: rule.tenantId,
+		});
+		const conversation =
+			await conversations.findConversationByOperatorThread(threadId);
+		if (!conversation) return false;
+
+		const draftText = text.trim();
+		if (!draftText) return false;
+		if (draftText.length > 4000) {
+			await this.client.sendMessage({
+				chatId,
+				messageThreadId: threadId,
+				text: "Сообщение слишком длинное. Максимум 4000 символов.",
+			});
+			return true;
+		}
+
+		// adminId для аудита/ассайна: назначенный оператор диалога, иначе owner.
+		const adminId =
+			conversation.assignedAdminId ??
+			(await this.resolveOwnerAdminId(rule.tenantId));
+		if (adminId == null) {
+			await this.client.sendMessage({
+				chatId,
+				messageThreadId: threadId,
+				text: "Не удалось определить оператора для отправки. Привяжите аккаунт в админке.",
+			});
+			return true;
+		}
+
+		const now = this.actions.nowEpoch?.() ?? Math.floor(Date.now() / 1000);
+		const draft: PendingOperatorDraft = {
+			draftId: this.createDraftId(),
+			tenantId: rule.tenantId,
+			adminId,
+			chatId,
+			conversationId: conversation.id,
+			text: draftText,
+			metadata: {
+				source: "operator_bot_topic_reply",
+				operatorThreadId: threadId,
+			},
+			createdAt: now,
+			expiresAt: now + PREVIEW_TTL_SEC,
+		};
+		const result = await this.sendDraftToClient(draft);
+		// Ответ оператору — В ТОТ ЖЕ топик, чтобы статус был рядом с диалогом.
+		await this.client.sendMessage({
+			chatId,
+			messageThreadId: threadId,
+			parseMode: "HTML",
+			text: result.messageHtml,
+		});
+		return true;
+	}
+
+	/** Owner (superadmin) tenant'а — fallback-оператор для топик-ответа. */
+	private async resolveOwnerAdminId(tenantId: number): Promise<number | null> {
+		const owner = await this.repo.resolveOwnerSettings(tenantId);
+		return owner?.adminId ?? null;
+	}
+
 	private async handleExchangeAction(
 		cq: TgCallbackQuery,
 		settings: { adminId: number; tenantId: number },
@@ -725,7 +833,13 @@ export class OperatorBotHandler {
 				.limit(1);
 			if (!conv) return { kind: "not_found" } as const;
 
-			await this.applyKycDecisionSideEffect(tx, draft, now, conv.contactId, "kyc_approved");
+			await this.applyKycDecisionSideEffect(
+				tx,
+				draft,
+				now,
+				conv.contactId,
+				"kyc_approved",
+			);
 
 			// Возвращаем диалог боту, чтобы он продолжил обмен. Снимаем метку
 			// эскалации — KYC одобрен, оператор больше не нужен.
@@ -762,7 +876,12 @@ export class OperatorBotHandler {
 			text: `✅ <b>KYC подтверждён</b>\nДиалог #${input.conversationId}: верификация засчитана, диалог вернулся в AI — бот продолжит обмен сам.`,
 			replyMarkup: {
 				inline_keyboard: [
-					[{ text: "👁 Открыть чат", url: this.conversationUrl(input.conversationId) }],
+					[
+						{
+							text: "👁 Открыть чат",
+							url: this.conversationUrl(input.conversationId),
+						},
+					],
 				],
 			},
 		});
@@ -2237,6 +2356,7 @@ export class OperatorBotHandler {
 		token: string,
 		chatId: number,
 		title: string,
+		isForum = false,
 	): Promise<void> {
 		if (!this.client) return;
 		const isGroup = chatId < 0;
@@ -2261,13 +2381,20 @@ export class OperatorBotHandler {
 			conditionJson: "{}",
 			channelType: "telegram_group",
 			targetId: String(chatId),
+			// #651: форум-группа → 1 топик на диалог (см. NotificationService).
+			targetIsForum: isForum,
 			priority: "normal",
 			isActive: true,
 		});
 		await this.repo.deleteGroupLinkToken(token);
 		await this.client.sendMessage({
 			chatId: String(chatId),
-			text: `✅ Группа <b>${title}</b> подключена к Lead Engine!\n\nОтсюда вы будете получать уведомления о событиях: <b>${groupToken.eventType}</b>.`,
+			text:
+				`✅ Группа <b>${title}</b> подключена к Lead Engine!\n\n` +
+				`Отсюда вы будете получать уведомления о событиях: <b>${groupToken.eventType}</b>.` +
+				(isForum
+					? "\n\n🧵 Это форум-группа: каждый диалог получит свой топик, а ваш ответ в топике уйдёт тому клиенту."
+					: ""),
 			parseMode: "HTML",
 		});
 	}

@@ -27,6 +27,8 @@ export interface ConversationRow {
 	replyDueAt: number | null;
 	fallbackStreak: number;
 	offhoursLastAutoSent: number | null;
+	/** #651 — топик форум-группы оператора (Telegram message_thread_id). */
+	operatorThreadId: number | null;
 }
 
 /**
@@ -387,6 +389,28 @@ export class ConversationsRepo {
 					eq(conversationsTable.tenantId, this.ctx.tenantId),
 				),
 			);
+		return (row as ConversationRow) ?? null;
+	}
+
+	/**
+	 * #651 — найти диалог по топику форум-группы оператора (Telegram
+	 * message_thread_id ↔ conversations.operator_thread_id). Используется, когда
+	 * оператор пишет в топике: маршрутизируем его текст ТОМУ клиенту, чей диалог
+	 * привязан к треду. Tenant-scoped — чужой тенант не вернёт строку.
+	 */
+	async findConversationByOperatorThread(
+		threadId: number,
+	): Promise<ConversationRow | null> {
+		const [row] = await this.ctx.db
+			.select()
+			.from(conversationsTable)
+			.where(
+				and(
+					eq(conversationsTable.tenantId, this.ctx.tenantId),
+					eq(conversationsTable.operatorThreadId, threadId),
+				),
+			)
+			.limit(1);
 		return (row as ConversationRow) ?? null;
 	}
 

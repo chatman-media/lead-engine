@@ -425,6 +425,8 @@ async function main() {
 				externalRef: ref.externalRef,
 			});
 		},
+		// #651 — db для форум-топиков (operator_thread_id + least-busy ассайн).
+		db as never,
 	);
 	const operatorBotHandler = new OperatorBotHandler(
 		notificationsRepo,

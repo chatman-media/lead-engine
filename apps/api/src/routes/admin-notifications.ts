@@ -38,6 +38,9 @@ export function makeAdminNotificationsRoutes(opts: {
       conditionJson: JSON.stringify(body.condition || {}),
       channelType: body.channelType || "telegram_group",
       targetId: body.targetId,
+      // #651: форум-группа — opt-in флаг (по умолчанию обычный чат). Обычно
+      // выставляется автоматически при /setup в форум-группе.
+      targetIsForum: body.targetIsForum === true,
       priority: body.priority || "normal",
       isActive: true,
     });

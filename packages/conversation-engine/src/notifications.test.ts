@@ -25,6 +25,7 @@ function makeRule(overrides: Partial<NotificationRule> = {}): NotificationRule {
 		conditionJson: "{}",
 		channelType: "telegram_group",
 		targetId: "group-100",
+		targetIsForum: false,
 		priority: "normal",
 		isActive: true,
 		createdAt: 0,
@@ -110,8 +111,12 @@ type SendDocumentInput = Parameters<TelegramClient["sendDocument"]>[0];
 type SendVideoNoteInput = Parameters<TelegramClient["sendVideoNote"]>[0];
 type SendPhotoUploadInput = Parameters<TelegramClient["sendPhotoUpload"]>[0];
 type SendVideoUploadInput = Parameters<TelegramClient["sendVideoUpload"]>[0];
-type SendDocumentUploadInput = Parameters<TelegramClient["sendDocumentUpload"]>[0];
-type SendVideoNoteUploadInput = Parameters<TelegramClient["sendVideoNoteUpload"]>[0];
+type SendDocumentUploadInput = Parameters<
+	TelegramClient["sendDocumentUpload"]
+>[0];
+type SendVideoNoteUploadInput = Parameters<
+	TelegramClient["sendVideoNoteUpload"]
+>[0];
 
 type TelegramCall =
 	| { method: "sendMessage"; input: SendMessageInput }
@@ -480,7 +485,9 @@ describe("NotificationService.notify", () => {
 			async (ref) => {
 				downloaded.push(ref.externalRef);
 				return new Response(`bytes:${ref.externalRef}`, {
-					headers: { "content-type": ref.kind === "photo" ? "image/jpeg" : "video/mp4" },
+					headers: {
+						"content-type": ref.kind === "photo" ? "image/jpeg" : "video/mp4",
+					},
 				});
 			},
 		);
@@ -518,14 +525,17 @@ describe("NotificationService.notify", () => {
 			"sendMessage",
 		]);
 		expect(calls[0]?.input.chatId).toBe("operator-chat");
-		expect(calls[0]?.method === "sendPhotoUpload" && calls[0].input.caption).toContain(
-			"Клиент: Сергей",
-		);
+		expect(
+			calls[0]?.method === "sendPhotoUpload" && calls[0].input.caption,
+		).toContain("Клиент: Сергей");
 		const cardCall = calls[3];
 		expect(cardCall?.method).toBe("sendMessage");
-		if (cardCall?.method !== "sendMessage") throw new Error("expected sendMessage");
+		if (cardCall?.method !== "sendMessage")
+			throw new Error("expected sendMessage");
 		expect(cardCall.input.replyMarkup).toBeDefined();
-		expect(JSON.stringify(cardCall.input.replyMarkup)).toContain("opx:kycok:109");
+		expect(JSON.stringify(cardCall.input.replyMarkup)).toContain(
+			"opx:kycok:109",
+		);
 	});
 
 	it("operator handoff still sends the decision card when media preview fails", async () => {
@@ -535,12 +545,14 @@ describe("NotificationService.notify", () => {
 			"fake-token",
 			"https://app.example",
 			undefined,
-			async () => new Response("photo", { headers: { "content-type": "image/jpeg" } }),
+			async () =>
+				new Response("photo", { headers: { "content-type": "image/jpeg" } }),
 		);
 		// @ts-expect-error patch private client
 		svc.client = fakeTelegramMediaClient((call) => {
 			calls.push(call);
-			if (call.method === "sendPhotoUpload") throw new Error("telegram media down");
+			if (call.method === "sendPhotoUpload")
+				throw new Error("telegram media down");
 		});
 
 		const originalError = console.error;
@@ -565,8 +577,13 @@ describe("NotificationService.notify", () => {
 			console.error = originalError;
 		}
 
-		expect(calls.map((call) => call.method)).toEqual(["sendPhotoUpload", "sendMessage"]);
-		expect(calls[1]?.method === "sendMessage" && calls[1].input.replyMarkup).toBeDefined();
+		expect(calls.map((call) => call.method)).toEqual([
+			"sendPhotoUpload",
+			"sendMessage",
+		]);
+		expect(
+			calls[1]?.method === "sendMessage" && calls[1].input.replyMarkup,
+		).toBeDefined();
 	});
 
 	it("payment handoff notification includes payment quick actions", async () => {
@@ -754,5 +771,277 @@ describe("NotificationService.notify", () => {
 		expect(emitted).toBe(1); // владелец обслужен информером
 		expect(sent).toContain("other-chat"); // не-владельцу шлём как раньше
 		expect(sent).not.toContain("owner-chat"); // владельца пропустили (без дублей)
+	});
+});
+
+// ── notify — форум-топики (#651) ─────────────────────────────────────────────
+
+import {
+	conversations as conversationsTable,
+	operatorSettings as operatorSettingsTable,
+} from "@chatman-media/storage";
+
+type ForumDbState = {
+	operatorThreadId: number | null;
+	assignedAdminId: number | null;
+	hasOperator: boolean;
+};
+
+/**
+ * Минимальная фейковая db для ensureOperatorTopic / pickLeastBusyOperator.
+ * Драйвит withTenant(transaction) + select(conversations/operatorSettings) +
+ * update(conversations).returning.
+ */
+function makeForumDb(initial: Partial<ForumDbState> = {}) {
+	const state: ForumDbState = {
+		operatorThreadId: initial.operatorThreadId ?? null,
+		assignedAdminId: initial.assignedAdminId ?? null,
+		hasOperator: initial.hasOperator ?? true,
+	};
+	const updates: Array<Record<string, unknown>> = [];
+
+	const tx = {
+		execute: async () => {},
+		select: (_fields?: Record<string, unknown>) => ({
+			from: (table: unknown) => {
+				if (table === conversationsTable) {
+					return {
+						where: () => ({
+							// ensureOperatorTopic: select operator_thread_id/assignee
+							limit: async () => [
+								{
+									operatorThreadId: state.operatorThreadId,
+									assignedAdminId: state.assignedAdminId,
+								},
+							],
+							// pickLeastBusyOperator: load groupBy по assignee
+							groupBy: async () =>
+								state.assignedAdminId != null
+									? [{ adminId: state.assignedAdminId, open: 1 }]
+									: [],
+						}),
+					};
+				}
+				if (table === operatorSettingsTable) {
+					return {
+						innerJoin: () => ({
+							where: async () =>
+								state.hasOperator
+									? [{ adminId: 10, name: null, email: "op@demo.io" }]
+									: [],
+						}),
+					};
+				}
+				return { where: () => ({ limit: async () => [] }) };
+			},
+		}),
+		update: (table: unknown) => ({
+			set: (values: Record<string, unknown>) => {
+				if (table === conversationsTable) updates.push(values);
+				return {
+					where: () => ({
+						returning: async () => {
+							// Пишем тред только если ещё пуст (isNull-гард).
+							if (
+								table === conversationsTable &&
+								state.operatorThreadId == null
+							) {
+								state.operatorThreadId =
+									(values.operatorThreadId as number) ?? null;
+								if (typeof values.assignedAdminId === "number") {
+									state.assignedAdminId = values.assignedAdminId;
+								}
+								return [{ operatorThreadId: state.operatorThreadId }];
+							}
+							return [];
+						},
+					}),
+				};
+			},
+		}),
+	};
+	const db = {
+		transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx),
+	};
+	return { db, state, updates };
+}
+
+const FORUM_HANDOFF: NotificationEvent = {
+	tenantId: 1,
+	eventType: "operator_handoff_required",
+	conversationId: 32,
+	contactId: 7,
+	data: {
+		displayName: "Иван",
+		amount: "500 USDT",
+		reason: "operator_request",
+		title: "Разобрать вручную",
+		action: "Проверить заявку.",
+	},
+};
+
+describe("NotificationService forum topics (#651)", () => {
+	function forumService(
+		dbObj: unknown,
+		onSend: (input: SendMessageInput) => void,
+		createForumTopic?: (input: {
+			chatId: number | string;
+			name: string;
+		}) => Promise<{ message_thread_id: number; name: string }>,
+	) {
+		const rule = makeRule({
+			eventType: "operator_handoff_required",
+			targetId: "group-forum",
+			targetIsForum: true,
+		});
+		const svc = new NotificationService(
+			makeRepo([rule]),
+			"fake-token",
+			"http://app",
+			undefined,
+			undefined,
+			dbObj as never,
+		);
+		const client = {
+			sendMessage: async (input: SendMessageInput) => {
+				onSend(input);
+				return telegramResult(input);
+			},
+			createForumTopic:
+				createForumTopic ??
+				(async ({ name }: { name: string }) => ({
+					message_thread_id: 777,
+					name,
+				})),
+		} as unknown as TelegramClient;
+		// @ts-expect-error patch private client
+		svc.client = client;
+		return svc;
+	}
+
+	it("forum group → creates topic and sends card with messageThreadId", async () => {
+		const sent: SendMessageInput[] = [];
+		const topicNames: string[] = [];
+		const { db, state } = makeForumDb({ operatorThreadId: null });
+		const svc = forumService(
+			db,
+			(input) => sent.push(input),
+			async ({ name }) => {
+				topicNames.push(name);
+				return { message_thread_id: 777, name };
+			},
+		);
+		await svc.notify(FORUM_HANDOFF);
+
+		// Топик создан и его id записан на диалог.
+		expect(state.operatorThreadId).toBe(777);
+		// Карточка ушла В ТРЕД.
+		expect(sent[0]?.chatId).toBe("group-forum");
+		expect(sent[0]?.messageThreadId).toBe(777);
+		// Имя топика — контекст диалога + «занято: @operator» (пул).
+		expect(topicNames[0]).toContain("Иван");
+		expect(topicNames[0]).toContain("500 USDT");
+		expect(topicNames[0]).toContain("#32");
+		expect(topicNames[0]).toContain("занято: @op");
+		// Оператор назначен (least-busy).
+		expect(state.assignedAdminId).toBe(10);
+	});
+
+	it("forum group → reuses existing topic, does NOT re-create", async () => {
+		const sent: SendMessageInput[] = [];
+		let created = 0;
+		const { db } = makeForumDb({ operatorThreadId: 555 });
+		const svc = forumService(
+			db,
+			(input) => sent.push(input),
+			async ({ name }) => {
+				created++;
+				return { message_thread_id: 999, name };
+			},
+		);
+		await svc.notify(FORUM_HANDOFF);
+
+		expect(created).toBe(0); // тред уже есть — не пересоздаём
+		expect(sent[0]?.messageThreadId).toBe(555);
+	});
+
+	it("non-forum group → unchanged: no topic, no thread id", async () => {
+		const sent: SendMessageInput[] = [];
+		let created = 0;
+		const { db } = makeForumDb({ operatorThreadId: null });
+		const rule = makeRule({
+			eventType: "operator_handoff_required",
+			targetId: "group-plain",
+			targetIsForum: false,
+		});
+		const svc = new NotificationService(
+			makeRepo([rule]),
+			"fake-token",
+			"http://app",
+			undefined,
+			undefined,
+			db as never,
+		);
+		const client = {
+			sendMessage: async (input: SendMessageInput) => {
+				sent.push(input);
+				return telegramResult(input);
+			},
+			createForumTopic: async ({ name }: { name: string }) => {
+				created++;
+				return { message_thread_id: 1, name };
+			},
+		} as unknown as TelegramClient;
+		// @ts-expect-error patch private client
+		svc.client = client;
+		await svc.notify(FORUM_HANDOFF);
+
+		expect(created).toBe(0);
+		expect(sent[0]?.chatId).toBe("group-plain");
+		expect(sent[0]?.messageThreadId).toBeUndefined();
+	});
+
+	it("no db → forum flag ignored (byte-for-byte unchanged)", async () => {
+		const sent: SendMessageInput[] = [];
+		const rule = makeRule({
+			eventType: "operator_handoff_required",
+			targetId: "group-forum",
+			targetIsForum: true,
+		});
+		const svc = new NotificationService(
+			makeRepo([rule]),
+			"fake-token",
+			"http://app",
+		);
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramClient((input) => sent.push(input));
+		await svc.notify(FORUM_HANDOFF);
+
+		expect(sent[0]?.chatId).toBe("group-forum");
+		expect(sent[0]?.messageThreadId).toBeUndefined();
+	});
+
+	it("createForumTopic failure → falls back to general chat (no thread id)", async () => {
+		const sent: SendMessageInput[] = [];
+		const { db, state } = makeForumDb({ operatorThreadId: null });
+		const svc = forumService(
+			db,
+			(input) => sent.push(input),
+			async () => {
+				throw new Error("not a forum / bot lacks rights");
+			},
+		);
+		const originalError = console.error;
+		console.error = () => {};
+		try {
+			await svc.notify(FORUM_HANDOFF);
+		} finally {
+			console.error = originalError;
+		}
+
+		// Карточка всё равно ушла — в общий чат, без треда.
+		expect(state.operatorThreadId).toBeNull();
+		expect(sent[0]?.chatId).toBe("group-forum");
+		expect(sent[0]?.messageThreadId).toBeUndefined();
 	});
 });

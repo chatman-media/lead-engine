@@ -85,6 +85,9 @@ class FakeRepo implements Partial<NotificationsRepo> {
 	>();
 	createdRules: Array<Record<string, unknown>> = [];
 	deletedGroupTokens: string[] = [];
+	// #651: форум-правила по chat_id группы + owner-fallback для топик-ответа.
+	forumRules = new Map<string, { tenantId: number; ruleId: number }>();
+	ownerByTenant = new Map<number, { adminId: number; email: string }>();
 	private settings: OperatorSettings[];
 
 	constructor(settings?: OperatorSettings | OperatorSettings[]) {
@@ -129,6 +132,14 @@ class FakeRepo implements Partial<NotificationsRepo> {
 	async findGroupLinkToken(token: string) {
 		return this.groupTokens.get(token);
 	}
+	async findForumRuleByTargetId(chatId: string) {
+		return this.forumRules.get(chatId);
+	}
+	async resolveOwnerSettings(tenantId: number) {
+		const owner = this.ownerByTenant.get(tenantId);
+		if (!owner) return null;
+		return { adminId: owner.adminId, email: owner.email, settings: undefined };
+	}
 	async createRule(
 		rule: Omit<
 			Parameters<NotificationsRepo["createRule"]>[0],
@@ -164,8 +175,12 @@ class FakeRepo implements Partial<NotificationsRepo> {
 }
 
 class FakeClient {
-	sent: Array<{ chatId: string; text: string; replyMarkup?: FakeReplyMarkup }> =
-		[];
+	sent: Array<{
+		chatId: string;
+		text: string;
+		replyMarkup?: FakeReplyMarkup;
+		messageThreadId?: number;
+	}> = [];
 	edits: Array<{ messageId: number; text: string }> = [];
 	answered: Array<{
 		callbackQueryId: string;
@@ -177,6 +192,7 @@ class FakeClient {
 		chatId: string;
 		text: string;
 		replyMarkup?: FakeReplyMarkup;
+		messageThreadId?: number;
 	}) {
 		this.sent.push(opts);
 	}
@@ -1162,6 +1178,126 @@ describe("operator action callbacks", () => {
 			assignedAdminId: 10,
 			lastMessageAt: 123,
 		});
+	});
+
+	it("topic reply (#651): сообщение в треде уходит клиенту по operator_thread_id", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			// Личного chat_id нет — оператор пишет из чата ГРУППЫ, tenant резолвим
+			// по форум-правилу (target_id группы), а не по personal chat.
+			telegramChatId: null,
+		});
+		const repo = new FakeRepo(settings);
+		// Группа -700 = форум-правило tenant 3; диалог 109 привязан к треду 4242.
+		repo.forumRules.set("-700", { tenantId: 3, ruleId: 5 });
+		const inserts: Array<Record<string, unknown>> = [];
+		const updates: Array<Record<string, unknown>> = [];
+		const txQuery = makeSendDraftDb({ conversationId: 109, contactId: 55 });
+		// Прямой select репо ConversationsRepo.findConversationByOperatorThread:
+		// возвращаем строку диалога с assignedAdminId (назначен пулом).
+		const db = {
+			select: () => ({
+				from: () => ({
+					where: () => ({
+						limit: async () => [
+							{
+								id: 109,
+								tenantId: 3,
+								userId: 55,
+								operatorThreadId: 4242,
+								assignedAdminId: 10,
+							},
+						],
+					}),
+				}),
+			}),
+			transaction: txQuery.db.transaction,
+		};
+		// Прокидываем наблюдаемые inserts/updates из makeSendDraftDb.
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				appUrl: "https://app.example",
+				nowEpoch: () => 123,
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 50,
+			message: {
+				message_id: 60,
+				date: 0,
+				message_thread_id: 4242,
+				chat: { id: -700, type: "supergroup", title: "Ops Forum" },
+				from: { id: 5, is_bot: false, first_name: "Operator" },
+				text: "Реквизиты на оплату придут через минуту.",
+			},
+		} as unknown as TgUpdate);
+
+		// Подтверждение оператору — в ТОТ ЖЕ топик.
+		expect(client.sent[0]?.text).toContain("Отправлено клиенту");
+		expect(client.sent[0]?.messageThreadId).toBe(4242);
+		// Сообщение оператора записано в историю (role human) и поставлено в очередь.
+		expect(
+			txQuery.inserts.some(
+				(row) =>
+					row.table === "messages" &&
+					row.values.role === "human" &&
+					row.values.text === "Реквизиты на оплату придут через минуту.",
+			),
+		).toBe(true);
+		expect(txQuery.inserts.some((row) => row.table === "outbound_queue")).toBe(
+			true,
+		);
+		// Диалог переведён в human mode на назначенного оператора.
+		expect(txQuery.updates.at(-1)).toMatchObject({
+			table: "conversations",
+			values: expect.objectContaining({ mode: "human", assignedAdminId: 10 }),
+		});
+		void inserts;
+		void updates;
+	});
+
+	it("topic reply (#651): нет форум-правила для группы → не обрабатываем как топик", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: null,
+		});
+		const repo = new FakeRepo(settings);
+		// forumRules пуст → группа неизвестна.
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: { select: () => ({}), transaction: async () => {} } as never,
+				nowEpoch: () => 123,
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 51,
+			message: {
+				message_id: 61,
+				date: 0,
+				message_thread_id: 4242,
+				chat: { id: -701, type: "supergroup", title: "Unknown" },
+				from: { id: 5, is_bot: false, first_name: "Operator" },
+				text: "ping",
+			},
+		} as unknown as TgUpdate);
+
+		// Ничего не отправили: не наш форум-чат.
+		expect(client.sent).toEqual([]);
 	});
 
 	it("«Ответить» открывает окно ответа (force-reply), без канны-заготовки", async () => {
