@@ -1,3 +1,10 @@
+# [@chatman-media/channel-telegram-v1.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.7.0...@chatman-media/channel-telegram-v1.8.0) (2026-06-15)
+
+
+### Features
+
+* **operator-bot:** фундамент форум-топиков — bot-api + колонка диалога ([d06ae78](https://github.com/chatman-media/lead-engine/commit/d06ae7833de8b4dd9c5386b3cf3c1997e0b238a7))
+
 # [@chatman-media/channel-telegram-v1.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.6.0...@chatman-media/channel-telegram-v1.7.0) (2026-06-15)
 
 
