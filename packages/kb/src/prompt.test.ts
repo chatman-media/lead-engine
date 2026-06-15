@@ -217,3 +217,36 @@ describe("composeSystemPrompt — awaitingOperator (R5)", () => {
     expect(p).not.toContain("ОЖИДАНИЕ ОПЕРАТОРА");
   });
 });
+
+describe("composeSystemPrompt — порядок под prompt-cache (стабильное раньше волатильного)", () => {
+  // Стиль со всеми блоками сразу: few-shot + guardrails(noMinors) + KB + userFacts + summary.
+  const richStyle: Style = {
+    ...baseStyle,
+    fewShot: [{ user: "сколько?", assistant: "уточню", stage: "qualify" }],
+  };
+  const p = composeSystemPrompt(richStyle, "qualify", "факт: зарплата 1500", {
+    userFacts: { city: "Москва" },
+    conversationSummary: "обсудили вакансию",
+  });
+  const idx = (s: string) => p.indexOf(s);
+  const STABLE = ["ЖЁСТКИЕ ПРАВИЛА", "ПРИМЕРЫ ДИАЛОГА"];
+  // KB header — «KB CONTEXT (актуальные…», чтобы не путать с упоминаниями «KB»/«CONTEXT» в других блоках.
+  const VOLATILE = ["ИЗ РАННЕЙ ПЕРЕПИСКИ", "ЗНАЕМ О КАНДИДАТЕ", "KB CONTEXT (актуальные"];
+
+  it("все блоки присутствуют", () => {
+    for (const m of [...STABLE, ...VOLATILE]) expect(idx(m)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("каждый стабильный блок стоит ПЕРЕД каждым волатильным", () => {
+    for (const stable of STABLE) {
+      for (const volatile of VOLATILE) {
+        expect(idx(stable)).toBeLessThan(idx(volatile));
+      }
+    }
+  });
+
+  it("KB CONTEXT — последний (самый волатильный, меняется каждый ход)", () => {
+    expect(idx("KB CONTEXT (актуальные")).toBeGreaterThan(idx("ЗНАЕМ О КАНДИДАТЕ"));
+    expect(idx("KB CONTEXT (актуальные")).toBeGreaterThan(idx("ИЗ РАННЕЙ ПЕРЕПИСКИ"));
+  });
+});

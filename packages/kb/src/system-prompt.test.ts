@@ -78,4 +78,24 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain("ЗНАЕМ О КАНДИДАТЕ");
     expect(p).toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
   });
+
+  it("порядок под prompt-cache: СТРОГИЕ ПРАВИЛА перед summary/userFacts, CONTEXT — последний", () => {
+    const p = buildSystemPrompt(
+      { name: "x", role: "human", company: "Acme" },
+      "CTX",
+      { age: "30" },
+      "ранее обсудили",
+    );
+    const rules = p.indexOf("СТРОГИЕ ПРАВИЛА");
+    const summary = p.indexOf("ИЗ РАННЕЙ ПЕРЕПИСКИ");
+    const facts = p.indexOf("ЗНАЕМ О КАНДИДАТЕ");
+    const ctx = p.indexOf("CONTEXT:"); // финальная секция; «CONTEXT ниже» в правилах без двоеточия
+    expect(rules).toBeGreaterThanOrEqual(0);
+    // стабильные правила раньше волатильного хвоста
+    expect(rules).toBeLessThan(summary);
+    expect(rules).toBeLessThan(facts);
+    // CONTEXT остаётся последним
+    expect(ctx).toBeGreaterThan(summary);
+    expect(ctx).toBeGreaterThan(facts);
+  });
 });
