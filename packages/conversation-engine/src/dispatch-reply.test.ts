@@ -61,6 +61,8 @@ function makeAutoHandoffDb() {
       from: () => ({
         where: () => ({
           limit: async () => [conversation],
+          // MessagesRepo.recent (#653 анти-дубль): .where().orderBy().limit()
+          orderBy: () => ({ limit: async () => [] }),
         }),
       }),
     }),
@@ -317,7 +319,10 @@ describe("generateReplyAndEnqueue", () => {
         const out = await fn({
           insert: () => ({ values: () => ({ returning: async () => [{ id: 99 }] }) }),
           update: () => ({ set: () => ({ where: () => ({ returning: async () => [] }) }) }),
-          select: () => ({ from: () => ({ where: async () => [] }) }),
+          // MessagesRepo.recent (#653 анти-дубль): .where().orderBy().limit()
+          select: () => ({
+            from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }) }) }),
+          }),
           execute: async () => [],
         } as unknown as Db);
         events.push("tx-commit");
@@ -353,5 +358,67 @@ describe("generateReplyAndEnqueue", () => {
     expect(events.filter((e) => e === "tx-open")).toHaveLength(1);
     // outboundEnqueued = 1 (n envelopes отправлено)
     expect(out.outboundEnqueued).toBe(1);
+  });
+
+  it("dedup (#653): ответ, совпадающий со свежим сообщением бота, не шлётся", async () => {
+    const dupText = "Меняем 2000 USDT.\n\nОформляю заявку?";
+    const seeded = { role: "assistant", text: dupText, createdAt: 1000 };
+    const inserted: Record<string, unknown>[] = [];
+    const outbound: Record<string, unknown>[] = [];
+    const tx = {
+      execute: async () => undefined,
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [{ mode: "ai", status: "open", escalatedAt: null }],
+            // MessagesRepo.recent → свежее сообщение бота с тем же текстом.
+            orderBy: () => ({ limit: async () => [seeded] }),
+          }),
+        }),
+      }),
+      update: () => ({ set: () => ({ where: () => ({ returning: async () => [{}] }) }) }),
+      insert: () => ({
+        values: (row: Record<string, unknown>) => {
+          if ("payloadJson" in row) outbound.push(row);
+          else if (!("action" in row)) inserted.push(row);
+          return { returning: async () => [{ id: inserted.length + outbound.length }] };
+        },
+      }),
+    };
+    const db = {
+      transaction: async <T>(fn: (inner: Db) => Promise<T>) =>
+        fn(tx as unknown as Db),
+      execute: async () => undefined,
+    } as unknown as Db;
+    const out = await generateReplyAndEnqueue({
+      db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      clock: { nowEpoch: () => 1000 }, // == seeded.createdAt → в окне дедупа
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "ну ок",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return [
+            {
+              channelId: "100",
+              externalUserId: "u1",
+              parts: [{ kind: "text", text: dupText }],
+            },
+          ];
+        },
+      },
+    });
+    expect(out.outboundEnqueued).toBe(0); // дубль не отправлен
+    expect(inserted).toHaveLength(0); // и не записан в историю
   });
 });

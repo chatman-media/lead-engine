@@ -1009,6 +1009,127 @@ describe("RagReplyStrategy.generate", () => {
 		expect(chat.lastCall).toBeNull(); // forced — LLM не вызывали
 	});
 
+	it("exchange: сводку НЕ повторяем, если уже была в эпизоде (Q&A вытолкнул её за окно -4) (#653)", async () => {
+		const chat = new CapturingRagChat("Уточняю по комиссии.");
+		const quoteTool = {
+			name: "compute_exchange_quote",
+			description: "compute quote",
+			parameters: {},
+			execute: async () => ({
+				direction: "USDT->PHP",
+				asset: "USDT",
+				quoteAsset: "PHP",
+				amountMode: "source_amount",
+				amountFrom: 2000,
+				rate: 58.36,
+				amountToThb: 116710,
+			}),
+		};
+		const s = mk(
+			ctxWith({
+				template: EXCHANGE_TEMPLATE,
+				chat,
+				kb: kbWith([HIT]),
+				messages: fakeMessages({
+					recent: [
+						{ role: "user", text: "2000 usdt trc20 в банкомате" },
+						// Сводка S1 — теперь ДАЛЬШЕ 4 сообщений от конца.
+						{
+							role: "assistant",
+							text: "Меняем 2000 USDT (TRC20), снятие в банкомате.\n\nОформляю заявку?",
+						},
+						{ role: "user", text: "а комиссия есть?" },
+						{ role: "assistant", text: "Комиссия 0%." },
+						{ role: "user", text: "а сколько по времени?" },
+						{ role: "assistant", text: "Обычно 15 минут." },
+					],
+				}),
+				exchangePolicyState: { stageSlug: "quote_calculated" },
+				// Все поля собраны (универсальный движок).
+				exchangeCollected: {
+					asset: "USDT",
+					amount: 2000,
+					network: "TRC20",
+					payoutMethod: "atm",
+				},
+				tools: [quoteTool] as never,
+			}),
+			{ reflect: false },
+		);
+		const r = await s.generate({ ...baseInput(), userMessageText: "ну ок" });
+		const text = firstReplyText(r);
+		// Старое окно slice(-4) не видело S1 → дубль. Теперь сводку не повторяем.
+		expect(text).not.toContain("Оформляю заявку?");
+		expect(chat.lastCall).not.toBeNull(); // ушли в LLM, не форс-сводку
+	});
+
+	it("exchange: лид на operator-гейте → AI не оформляет заявку, committing-тулзы сняты (#652)", async () => {
+		const makeOrderTool = () => {
+			let called = false;
+			return {
+				tool: {
+					name: "create_exchange_order",
+					description: "create order",
+					parameters: {},
+					execute: async () => {
+						called = true;
+						return { orderId: 123, instructions: "Реквизиты для оплаты: ..." };
+					},
+				},
+				wasCalled: () => called,
+			};
+		};
+		const quoteTool = {
+			name: "compute_exchange_quote",
+			description: "compute quote",
+			parameters: {},
+			execute: async () => ({
+				direction: "USDT->PHP",
+				asset: "USDT",
+				quoteAsset: "PHP",
+				amountMode: "source_amount",
+				amountFrom: 2000,
+				rate: 58.36,
+				amountToThb: 116710,
+			}),
+		};
+		const history = [
+			{ role: "user" as const, text: "2000 usdt trc20 в банкомате" },
+			{
+				role: "assistant" as const,
+				text: "Меняем 2000 USDT (TRC20). Получите 116710 PHP.\n\nОформляю заявку?",
+			},
+		];
+		const mkS = (awaitingOperator: boolean, order: { tool: unknown }) =>
+			mk(
+				ctxWith({
+					template: EXCHANGE_TEMPLATE,
+					chat: new CapturingRagChat("Передаю заявку оператору."),
+					kb: kbWith([HIT]),
+					messages: fakeMessages({ recent: history }),
+					exchangePolicyState: { stageSlug: "quote_calculated" },
+					awaitingOperator,
+					tools: [order.tool, quoteTool] as never,
+				}),
+				{ reflect: false },
+			);
+		// На operator-гейте: committing-тул снят → forced order не срабатывает.
+		const onGate = makeOrderTool();
+		const rGate = await mkS(true, onGate).generate({
+			...baseInput(),
+			userMessageText: "да, оформляй",
+		});
+		expect(onGate.wasCalled()).toBe(false);
+		expect(firstReplyText(rGate)).not.toContain("заявку оформил");
+		// Контраст: без гейта тот же ввод оформляет заявку (тул доступен).
+		const offGate = makeOrderTool();
+		await mkS(false, offGate).generate({
+			...baseInput(),
+			userMessageText: "да, оформляй",
+		});
+		expect(offGate.wasCalled()).toBe(true);
+	});
+
 	it("exchange: RUB — «на счёт, сбер» после выдачи даёт сводку (не «уточните сумму»)", async () => {
 		const chat = new CapturingRagChat("уточните сумму");
 		const quoteTool = {

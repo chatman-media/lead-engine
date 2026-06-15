@@ -913,6 +913,29 @@ async function maybeForceExchangeOrderReply(input: {
 	return { text, toolCalls };
 }
 
+const EXCHANGE_SUMMARY_MARKER = "Оформляю заявку?";
+
+/**
+ * Сводку «Оформляю заявку?» показываем один раз за эпизод заявки: сканируем
+ * историю назад до границы эпизода (заявка оформлена / выданы реквизиты). Раньше
+ * было окно slice(-4) — пара уточняющих Q&A выталкивала сводку из окна → дубль
+ * (#653). Окно истории ограничено (~historyLimit, дефолт 20), скан дёшев.
+ */
+function exchangeSummaryAlreadyShown(
+	history: Array<Pick<MessageRow, "role" | "text">>,
+): boolean {
+	for (let i = history.length - 1; i >= 0; i--) {
+		const m = history[i];
+		if (!m) continue;
+		if (m.role !== "assistant" && m.role !== "human") continue;
+		// Граница нового эпизода: заявка уже оформлялась / выдавались реквизиты —
+		// дальше назад не смотрим, новую сводку показать можно.
+		if (/заявку оформил|реквизиты для оплаты/iu.test(m.text)) return false;
+		if (m.text.includes(EXCHANGE_SUMMARY_MARKER)) return true;
+	}
+	return false;
+}
+
 /**
  * Сводка + «Оформляю заявку?» когда ВСЕ обязательные поля собраны, но клиент ещё
  * не подтвердил. Закрывает тупик: раньше после «на счёт, сбер» ни один forced-шаг
@@ -943,11 +966,8 @@ async function maybeForceExchangeSummaryConfirm(input: {
 	);
 	if (collected.missing.length > 0) return null;
 	if (!collected.asset || !collected.amount) return null;
-	// Сводку не повторяем, если уже показали в последних сообщениях.
-	const alreadyShown = input.history
-		.slice(-4)
-		.some((m) => m.role === "assistant" && m.text.includes("Оформляю заявку?"));
-	if (alreadyShown) return null;
+	// Сводку не повторяем, если уже показали в текущем эпизоде заявки.
+	if (exchangeSummaryAlreadyShown(input.history)) return null;
 	const quoteTool = input.tools.find(
 		(tool) => tool.name === "compute_exchange_quote",
 	);
@@ -962,7 +982,7 @@ async function maybeForceExchangeSummaryConfirm(input: {
 	const summary = renderExchangeSummaryLine(collected, result);
 	if (!summary) return null;
 	return {
-		text: `${summary}\n\nОформляю заявку?`,
+		text: `${summary}\n\n${EXCHANGE_SUMMARY_MARKER}`,
 		toolCalls: [{ name: quoteTool.name, args: quoteArgs, result, cycle: 0 }],
 	};
 }
@@ -970,6 +990,19 @@ async function maybeForceExchangeSummaryConfirm(input: {
 function hasAssignmentMetadata(style: ResolvedStyleAssignment | null): boolean {
 	return style?.styleId !== undefined || style?.experimentId !== undefined;
 }
+
+/**
+ * #652 — committing-тулзы обмена, которыми AI НЕ должен пользоваться, пока лид
+ * припаркован на operator-гейте (awaiting_operator): оформление заявки, выдача
+ * реквизитов/выплаты, подтверждение оплаты. Котировку (read-only) оставляем.
+ * Forced order/requisites-шаги ищут тул по имени → снятие тула их авто-отключает.
+ */
+const EXCHANGE_COMMITTING_TOOLS = new Set([
+	"create_exchange_order",
+	"fetch_exchange_requisites",
+	"issue_exchange_payout",
+	"verify_exchange_payment",
+]);
 
 function exchangeReplyOutput(input: {
 	channelId: number;
@@ -1100,7 +1133,7 @@ export class RagReplyStrategy implements ReplyStrategy {
 
 		const skills = ctx.skills ?? [];
 		const directorHooks = ctx.directorHooks ?? [];
-		const tools = ctx.tools ?? [];
+		const allTools = ctx.tools ?? [];
 		const reranker = ctx.reranker ?? null;
 		const stageGuidance = ctx.stageGuidance ?? null;
 		const requestContext = ctx.requestContext ?? null;
@@ -1110,6 +1143,16 @@ export class RagReplyStrategy implements ReplyStrategy {
 			? (ctx.exchangePolicyState ?? null)
 			: null;
 		const exchangeCollected = isExchange ? (ctx.exchangeCollected ?? null) : null;
+		// #652 — лид припаркован на operator-гейте (awaiting_operator): в денежном
+		// флоу обмена AI НЕ должен сам коммитить заявку/реквизиты/выплату, пока
+		// решает оператор (раньше бот сам оформлял заявку, оператора лишь
+		// «уведомляли»). Снимаем committing-тулзы — forced-шаги ищут тул по имени и
+		// авто-отключаются, котировка/ответы остаются. Mode здесь не трогаем, чтобы
+		// «вернуть боту» (#619) не зациклил повторную эскалацию.
+		const exchangeOperatorPending = isExchange && awaitingOperator;
+		const tools = exchangeOperatorPending
+			? allTools.filter((t) => !EXCHANGE_COMMITTING_TOOLS.has(t.name))
+			: allTools;
 
 		const forcedExchangeReply = isExchange
 			? ((await maybeForceExchangeOrderReply({
