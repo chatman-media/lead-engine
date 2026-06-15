@@ -1534,6 +1534,24 @@ describe("RagReplyStrategy.generate", () => {
     expect(firstReplyText(r)).toBe(EXCHANGE_SAFE_FALLBACK);
   });
 
+  it("exchange: no-context safe-fallback ЭСКАЛИРУЕТ на оператора (порт #657 в rag)", async () => {
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: chatReturning("ответ"),
+      }),
+      { softFallback: false },
+    );
+    const r = await s.generate(baseInput());
+    const normalized = normalizeReplyStrategyResult(r);
+    // Клиенту по-прежнему уходит обещание оператора...
+    expect(firstReplyText(r)).toBe(EXCHANGE_SAFE_FALLBACK);
+    // ...но теперь диалог реально эскалируется (autoTakeover → mode=human),
+    // а не повисает обещанием без уведомления оператора.
+    expect(normalized?.autoTakeover).toBe(true);
+    expect(normalized?.operatorHandoffs?.length ?? 0).toBeGreaterThan(0);
+  });
+
   it("exchange: reflect срезает неподкреплённый статус и возвращает safe fallback", async () => {
     const s = mk(
       ctxWith({
