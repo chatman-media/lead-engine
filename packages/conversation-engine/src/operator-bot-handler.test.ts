@@ -22,6 +22,7 @@ import type {
 	OperatorSettings,
 } from "./dal/notifications.ts";
 import {
+	operatorExchangeActionCallbackData,
 	parseOperatorActionCallback,
 	parseOperatorExchangeActionCallback,
 	parseOperatorPreviewCallback,
@@ -62,6 +63,8 @@ type FakeReplyMarkup = {
 	inline_keyboard?: Array<
 		Array<{ text?: string; callback_data?: string; url?: string }>
 	>;
+	force_reply?: boolean;
+	input_field_placeholder?: string;
 };
 
 type FakeRecentNotification = {
@@ -1031,7 +1034,7 @@ describe("operator action callbacks", () => {
 		expect(client.sent[0]?.text).toContain("уже под управлением AI");
 	});
 
-	it("reply to an action card creates preview and send confirmation enqueues client message", async () => {
+	it("reply to an action card sends operator text directly to client (no preview)", async () => {
 		const settings = makeSettings({
 			adminId: 10,
 			tenantId: 3,
@@ -1135,84 +1138,67 @@ describe("operator action callbacks", () => {
 			},
 		} as unknown as TgUpdate);
 
-		expect(client.sent[0]?.text).toContain("Preview сообщения клиенту");
-		expect(client.sent[0]?.text).toContain("Проверка пройдена");
-		const sendCallback = client.sent[0]?.replyMarkup?.inline_keyboard?.[0]?.[0]
-			?.callback_data as string;
-		expect(sendCallback).toMatch(/^opm:s:/);
-		expect(inserts).toHaveLength(1);
-		expect(inserts[0]).toMatchObject({
-			tenantId: 3,
-			adminId: 10,
-			conversationId: 109,
-			status: "pending",
-			text: "Проверка пройдена, можете оплатить по реквизитам.",
-			expiresAt: 723,
-		});
-
-		await handler.handleUpdate({
-			update_id: 7,
-			callback_query: {
-				id: "cb-send",
-				from: { id: 5 },
-				data: sendCallback,
-				message: {
-					message_id: 21,
-					date: 0,
-					chat: { id: 777, type: "private" },
-				},
-			},
-		} as unknown as TgUpdate);
-
-		expect(inserts[1]).toMatchObject({
-			tenantId: 3,
-			conversationId: 109,
-			role: "human",
-			text: "Проверка пройдена, можете оплатить по реквизитам.",
-		});
-		expect(JSON.stringify(inserts[2])).toContain("client-telegram-id");
-		expect(JSON.stringify(inserts[2])).toContain("operator-bot-reply-");
-		expect(inserts[3]).toMatchObject({
-			tenantId: 3,
-			adminId: 10,
-			action: "conversation.reply.operator_bot",
-			targetId: "109",
-		});
-		expect(updates.some((row) => row.status === "sent")).toBe(true);
-		expect(updates.some((row) => row.messageId === 501)).toBe(true);
+		// Своё сообщение оператора уходит клиенту НАПРЯМУЮ — без превью/подтверждения.
+		expect(client.sent[0]?.text).toContain("Отправлено клиенту");
+		expect(client.sent[0]?.replyMarkup).toBeUndefined();
+		// В историю записано сообщение оператора (role human).
+		expect(
+			inserts.some(
+				(row) =>
+					row.role === "human" &&
+					row.text === "Проверка пройдена, можете оплатить по реквизитам.",
+			),
+		).toBe(true);
+		// Поставлено в очередь доставки клиенту (idempotencyKey + канал клиента).
+		expect(JSON.stringify(inserts)).toContain("operator-bot-reply-");
+		expect(JSON.stringify(inserts)).toContain("client-telegram-id");
+		// Аудит ответа оператора.
+		expect(
+			inserts.some((row) => row.action === "conversation.reply.operator_bot"),
+		).toBe(true);
+		// Диалог переведён в human mode.
 		expect(updates.at(-1)).toMatchObject({
 			mode: "human",
 			assignedAdminId: 10,
 			lastMessageAt: 123,
 		});
-		expect(client.answered.at(-1)).toMatchObject({
-			callbackQueryId: "cb-send",
-			text: "Отправлено клиенту",
-		});
-		expect(client.sent.at(-1)?.text).toContain("Отправлено клиенту");
+	});
 
-		const insertsAfterFirstConfirm = inserts.length;
+	it("«Ответить» открывает окно ответа (force-reply), без канны-заготовки", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{ nowEpoch: () => 123 },
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
 		await handler.handleUpdate({
-			update_id: 8,
+			update_id: 30,
 			callback_query: {
-				id: "cb-send-again",
+				id: "cb-reply",
 				from: { id: 5 },
-				data: sendCallback,
+				data: operatorExchangeActionCallbackData("operator_reply", 109),
 				message: {
-					message_id: 22,
+					message_id: 40,
 					date: 0,
 					chat: { id: 777, type: "private" },
 				},
 			},
 		} as unknown as TgUpdate);
 
-		expect(inserts).toHaveLength(insertsAfterFirstConfirm);
-		expect(updates.filter((row) => row.status === "sent")).toHaveLength(1);
-		expect(client.answered.at(-1)).toMatchObject({
-			callbackQueryId: "cb-send-again",
-			text: "Preview истёк или уже обработан",
-			showAlert: true,
-		});
+		// Приглашение написать СВОЁ (force-reply), а не канна «Оператор подключился».
+		expect(client.sent[0]?.text).toContain("диалог #109");
+		expect(client.sent[0]?.text).not.toContain("Оператор подключился");
+		expect(client.sent[0]?.replyMarkup?.force_reply).toBe(true);
+		expect(client.answered[0]?.text).toContain("Напишите ответ");
 	});
 
 	it("durable preview send is scoped to original admin and chat", async () => {
@@ -1308,226 +1294,6 @@ describe("operator action callbacks", () => {
 			showAlert: true,
 		});
 		expect(client.sent).toEqual([]);
-	});
-
-	it("reply preview can be cancelled without sending to client", async () => {
-		const settings = makeSettings({
-			adminId: 10,
-			tenantId: 3,
-			telegramChatId: "777",
-		});
-		const repo = new FakeRepo(settings);
-		const handler = new OperatorBotHandler(
-			repo as unknown as NotificationsRepo,
-			"token",
-			{ nowEpoch: () => 123 },
-		);
-		const client = new FakeClient();
-		// @ts-expect-error patch private
-		handler.client = client;
-
-		await handler.handleUpdate({
-			update_id: 8,
-			message: {
-				message_id: 20,
-				date: 0,
-				chat: { id: 777, type: "private" },
-				from: { id: 5, is_bot: false, first_name: "Operator" },
-				text: "Не отправлять.",
-				reply_to_message: {
-					message_id: 9,
-					date: 0,
-					chat: { id: 777, type: "private" },
-					reply_markup: {
-						inline_keyboard: [
-							[{ text: "Взять", callback_data: "op:take:109" }],
-						],
-					},
-				},
-			},
-		} as unknown as TgUpdate);
-		const cancelCallback = client.sent[0]?.replyMarkup
-			?.inline_keyboard?.[1]?.[0]?.callback_data as string;
-		expect(cancelCallback).toMatch(/^opm:c:/);
-
-		await handler.handleUpdate({
-			update_id: 9,
-			callback_query: {
-				id: "cb-cancel",
-				from: { id: 5 },
-				data: cancelCallback,
-				message: {
-					message_id: 21,
-					date: 0,
-					chat: { id: 777, type: "private" },
-				},
-			},
-		} as unknown as TgUpdate);
-
-		expect(client.answered.at(-1)).toMatchObject({
-			callbackQueryId: "cb-cancel",
-			text: "Отменено",
-		});
-		expect(client.sent.at(-1)?.text).toContain("ничего не отправлено");
-	});
-
-	it("preview confirm is scoped to the original operator chat and admin", async () => {
-		const settings = makeSettings({
-			adminId: 10,
-			tenantId: 3,
-			telegramChatId: "777",
-		});
-		const repo = new FakeRepo([
-			settings,
-			makeSettings({
-				adminId: 10,
-				tenantId: 3,
-				telegramChatId: "888",
-			}),
-		]);
-		const handler = new OperatorBotHandler(
-			repo as unknown as NotificationsRepo,
-			"token",
-			{ nowEpoch: () => 123 },
-		);
-		const client = new FakeClient();
-		// @ts-expect-error patch private
-		handler.client = client;
-
-		await handler.handleUpdate({
-			update_id: 10,
-			message: {
-				message_id: 20,
-				date: 0,
-				chat: { id: 777, type: "private" },
-				from: { id: 5, is_bot: false, first_name: "Operator" },
-				text: "Ответить клиенту.",
-				reply_to_message: {
-					message_id: 9,
-					date: 0,
-					chat: { id: 777, type: "private" },
-					reply_markup: {
-						inline_keyboard: [
-							[{ text: "Взять", callback_data: "op:take:109" }],
-						],
-					},
-				},
-			},
-		} as unknown as TgUpdate);
-		const sendCallback = client.sent[0]?.replyMarkup?.inline_keyboard?.[0]?.[0]
-			?.callback_data as string;
-
-		await handler.handleUpdate({
-			update_id: 11,
-			callback_query: {
-				id: "cb-wrong-chat",
-				from: { id: 5 },
-				data: sendCallback,
-				message: {
-					message_id: 21,
-					date: 0,
-					chat: { id: 888, type: "private" },
-				},
-			},
-		} as unknown as TgUpdate);
-
-		expect(client.answered.at(-1)).toMatchObject({
-			callbackQueryId: "cb-wrong-chat",
-			text: "Preview истёк или уже обработан",
-			showAlert: true,
-		});
-		expect(client.sent).toHaveLength(1);
-
-		repo.setSettings(
-			makeSettings({
-				adminId: 11,
-				tenantId: 3,
-				telegramChatId: "777",
-			}),
-		);
-		await handler.handleUpdate({
-			update_id: 12,
-			callback_query: {
-				id: "cb-wrong-admin",
-				from: { id: 5 },
-				data: sendCallback,
-				message: {
-					message_id: 22,
-					date: 0,
-					chat: { id: 777, type: "private" },
-				},
-			},
-		} as unknown as TgUpdate);
-
-		expect(client.answered.at(-1)).toMatchObject({
-			callbackQueryId: "cb-wrong-admin",
-			text: "Preview истёк или уже обработан",
-			showAlert: true,
-		});
-		expect(client.sent).toHaveLength(1);
-	});
-
-	it("expired preview confirm fails safely and sends nothing", async () => {
-		let now = 123;
-		const settings = makeSettings({
-			adminId: 10,
-			tenantId: 3,
-			telegramChatId: "777",
-		});
-		const repo = new FakeRepo(settings);
-		const handler = new OperatorBotHandler(
-			repo as unknown as NotificationsRepo,
-			"token",
-			{ nowEpoch: () => now },
-		);
-		const client = new FakeClient();
-		// @ts-expect-error patch private
-		handler.client = client;
-
-		await handler.handleUpdate({
-			update_id: 13,
-			message: {
-				message_id: 20,
-				date: 0,
-				chat: { id: 777, type: "private" },
-				from: { id: 5, is_bot: false, first_name: "Operator" },
-				text: "Истекающий preview.",
-				reply_to_message: {
-					message_id: 9,
-					date: 0,
-					chat: { id: 777, type: "private" },
-					reply_markup: {
-						inline_keyboard: [
-							[{ text: "Взять", callback_data: "op:take:109" }],
-						],
-					},
-				},
-			},
-		} as unknown as TgUpdate);
-		const sendCallback = client.sent[0]?.replyMarkup?.inline_keyboard?.[0]?.[0]
-			?.callback_data as string;
-		now = 723;
-
-		await handler.handleUpdate({
-			update_id: 14,
-			callback_query: {
-				id: "cb-expired",
-				from: { id: 5 },
-				data: sendCallback,
-				message: {
-					message_id: 21,
-					date: 0,
-					chat: { id: 777, type: "private" },
-				},
-			},
-		} as unknown as TgUpdate);
-
-		expect(client.answered.at(-1)).toMatchObject({
-			callbackQueryId: "cb-expired",
-			text: "Preview истёк или уже обработан",
-			showAlert: true,
-		});
-		expect(client.sent).toHaveLength(1);
 	});
 
 	it("durable draft double confirm sends only one client message and outbound entry", async () => {
