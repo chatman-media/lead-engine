@@ -267,6 +267,11 @@ describe("exchange tools — stage policy wrapper", () => {
 		expect(tools.compute_exchange_quote?.description).toContain(
 			"Текущая стадия exchange: exchange_request",
 		);
+		// Policy-блок дедуплицирован: он только на первом инструменте, не во всех ~8.
+		expect(tools.get_exchange_business_info?.description).not.toContain(
+			"Текущая стадия exchange",
+		);
+		expect(tools.create_exchange_order?.description).not.toContain("Текущая стадия exchange");
 
 		const denied = (await must(
 			tools.issue_exchange_payout,
