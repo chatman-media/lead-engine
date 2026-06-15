@@ -1325,13 +1325,21 @@ export class RagReplyStrategy implements ReplyStrategy {
 				console.warn(
 					`[exchange-reflect-guard] tenant=${tenantId} conversation=${input.conversationId} path=${result.telemetry.path}`,
 				);
-				return [
-					{
-						channelId: String(input.channel.channelId),
-						externalUserId: input.inbound.externalUserId,
-						parts: [{ kind: "text", text: EXCHANGE_SAFE_FALLBACK }],
-					},
-				];
+				// Бот выдаёт отписку «уточню у оператора», но без эскалации обещание
+				// повисает: оператора не уведомили, бот сам вернуться не может (ср.
+				// llm-reply #657 — там retriesExhausted → оператор). rag не
+				// перегенерирует, поэтому эскалируем сразу: клиенту уходит обещание,
+				// диалог уходит оператору (autoTakeover → mode=human).
+				return exchangeReplyOutput({
+					channelId: input.channel.channelId,
+					externalUserId: input.inbound.externalUserId,
+					text: EXCHANGE_SAFE_FALLBACK,
+					operatorHandoff: buildExchangeGenericOperatorHandoff({
+						state: exchangePolicyState,
+						context: "bot_no_context",
+					}),
+					customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
+				});
 			}
 
 			if (!this.opts.softFallback) return null;
