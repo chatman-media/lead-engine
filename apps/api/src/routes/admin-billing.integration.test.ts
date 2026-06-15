@@ -299,6 +299,8 @@ describe("admin-billing", () => {
         model: "gpt-4o-mini",
         latencyMs: 500,
         success: true,
+        promptTokens: 1000,
+        completionTokens: 50,
         createdAt: now,
       })),
       ...Array.from({ length: 2 }, () => ({
@@ -309,6 +311,8 @@ describe("admin-billing", () => {
         latencyMs: 100,
         success: false,
         errorKind: "EmbeddingApiError",
+        // embed = input only → completionTokens остаётся null
+        promptTokens: 200,
         createdAt: now,
       })),
     ];
@@ -317,10 +321,24 @@ describe("admin-billing", () => {
     const res = await authReq("/api/admin/billing/usage");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      totals: { calls: number; errors: number; successRate: number; avgLatencyMs: number };
-      byPurpose: Array<{ purpose: string; calls: number; errors: number }>;
+      totals: {
+        calls: number;
+        errors: number;
+        successRate: number;
+        avgLatencyMs: number;
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+      };
+      byPurpose: Array<{
+        purpose: string;
+        calls: number;
+        errors: number;
+        promptTokens: number;
+        completionTokens: number;
+      }>;
       byProvider: Array<{ provider: string; calls: number }>;
-      thisMonth: { calls: number; errors: number };
+      thisMonth: { calls: number; errors: number; promptTokens: number; completionTokens: number };
     };
     expect(body.totals.calls).toBe(10);
     expect(body.totals.errors).toBe(2);
@@ -328,18 +346,28 @@ describe("admin-billing", () => {
     expect(body.totals.avgLatencyMs).toBeGreaterThan(0);
     // 8 chat * 500 + 2 embed * 100 = 4200, /10 = 420
     expect(body.totals.avgLatencyMs).toBe(420);
+    // tokens: prompt = 8*1000 + 2*200 = 8400; completion = 8*50 = 400.
+    expect(body.totals.promptTokens).toBe(8400);
+    expect(body.totals.completionTokens).toBe(400);
+    expect(body.totals.totalTokens).toBe(8800);
 
     const chat = body.byPurpose.find((p) => p.purpose === "chat");
     expect(chat?.calls).toBe(8);
     expect(chat?.errors).toBe(0);
+    expect(chat?.promptTokens).toBe(8000);
+    expect(chat?.completionTokens).toBe(400);
     const embed = body.byPurpose.find((p) => p.purpose === "embed");
     expect(embed?.calls).toBe(2);
     expect(embed?.errors).toBe(2);
+    expect(embed?.promptTokens).toBe(400);
+    expect(embed?.completionTokens).toBe(0);
 
     expect(body.byProvider[0]?.provider).toBe("openai");
     expect(body.byProvider[0]?.calls).toBe(10);
 
     expect(body.thisMonth.calls).toBe(10);
+    expect(body.thisMonth.promptTokens).toBe(8400);
+    expect(body.thisMonth.completionTokens).toBe(400);
   });
 
   it("GET /billing/usage?days=7 → custom period", async () => {

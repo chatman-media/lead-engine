@@ -107,6 +107,35 @@ describe("LlmUsageWriter", () => {
     expect(rows[0]?.success).toBe(false);
   });
 
+  it("persists prompt/completion tokens when provided", async () => {
+    writer.record(7, {
+      purpose: "chat",
+      provider: "openai",
+      latencyMs: 300,
+      success: true,
+      promptTokens: 1234,
+      completionTokens: 56,
+    });
+    await writer.flush();
+    const rows = tracker.insertCalls[0] as Array<{
+      promptTokens: number | null;
+      completionTokens: number | null;
+    }>;
+    expect(rows[0]?.promptTokens).toBe(1234);
+    expect(rows[0]?.completionTokens).toBe(56);
+  });
+
+  it("token columns default to null when usage absent", async () => {
+    writer.record(8, { purpose: "embed", provider: "openai", latencyMs: 40, success: true });
+    await writer.flush();
+    const rows = tracker.insertCalls[0] as Array<{
+      promptTokens: number | null;
+      completionTokens: number | null;
+    }>;
+    expect(rows[0]?.promptTokens).toBeNull();
+    expect(rows[0]?.completionTokens).toBeNull();
+  });
+
   it("after stop(), record() is no-op", async () => {
     await writer.stop();
     writer.record(1, { purpose: "chat", provider: "openai", latencyMs: 100, success: true });

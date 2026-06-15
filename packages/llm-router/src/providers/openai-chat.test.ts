@@ -135,3 +135,70 @@ describe("OpenAIChatClient.stream", () => {
     await expect(it.next()).rejects.toBeInstanceOf(ChatApiError);
   });
 });
+
+describe("OpenAIChatClient usage reporting", () => {
+  const USAGE = { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 };
+
+  it("complete: onUsage получает распарсенные токены", async () => {
+    const { fn } = capture(() =>
+      jsonResponse({ choices: [{ message: { content: "ok" } }], usage: USAGE }),
+    );
+    let got: unknown;
+    await client(fn).complete(MSGS, {
+      onUsage: (u) => {
+        got = u;
+      },
+    });
+    expect(got).toEqual({ promptTokens: 42, completionTokens: 7, totalTokens: 49 });
+  });
+
+  it("completeWithTools: onUsage вызывается", async () => {
+    const { fn } = capture(() =>
+      jsonResponse({ choices: [{ message: { role: "assistant", content: "t" } }], usage: USAGE }),
+    );
+    let got: { promptTokens?: number; completionTokens?: number } | undefined;
+    await client(fn).completeWithTools(MSGS, [], {
+      onUsage: (u) => {
+        got = u;
+      },
+    });
+    expect(got).toMatchObject({ promptTokens: 42, completionTokens: 7 });
+  });
+
+  it("completeStructured: onUsage вызывается", async () => {
+    const { fn } = capture(() =>
+      jsonResponse({ choices: [{ message: { content: "{}" } }], usage: USAGE }),
+    );
+    let got: { promptTokens?: number } | undefined;
+    await client(fn).completeStructured(MSGS, {}, {
+      onUsage: (u) => {
+        got = u;
+      },
+    });
+    expect(got).toMatchObject({ promptTokens: 42 });
+  });
+
+  it("usage отсутствует → onUsage не зовётся", async () => {
+    const { fn } = capture(() => jsonResponse({ choices: [{ message: { content: "ok" } }] }));
+    let called = false;
+    await client(fn).complete(MSGS, {
+      onUsage: () => {
+        called = true;
+      },
+    });
+    expect(called).toBe(false);
+  });
+
+  it("частичный usage (только prompt_tokens) → только promptTokens", async () => {
+    const { fn } = capture(() =>
+      jsonResponse({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 12 } }),
+    );
+    let got: Record<string, unknown> | undefined;
+    await client(fn).complete(MSGS, {
+      onUsage: (u) => {
+        got = u as Record<string, unknown>;
+      },
+    });
+    expect(got).toEqual({ promptTokens: 12 });
+  });
+});

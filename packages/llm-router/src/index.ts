@@ -25,5 +25,8 @@ export {
   EmbeddingApiError,
   type FetchLike,
   NullEmbeddingClient,
+  type OpenAiUsage,
   parseOpenAiSseStream,
+  reportOpenAiUsage,
+  type TokenUsage,
 } from "./types.ts";

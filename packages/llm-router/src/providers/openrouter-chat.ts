@@ -4,6 +4,8 @@ import {
 	type ChatCompletionOpts,
 	type ChatMessage,
 	type FetchLike,
+	type OpenAiUsage,
+	reportOpenAiUsage,
 } from "../types.ts";
 
 /**
@@ -53,6 +55,7 @@ interface ChatResponse {
 			}>;
 		};
 	}>;
+	usage?: OpenAiUsage;
 	error?: { message?: string; code?: number | string };
 }
 
@@ -147,6 +150,7 @@ export class OpenRouterChatClient implements ChatClient {
 				"no choices[0].message.content in OpenRouter response",
 			);
 		}
+		reportOpenAiUsage(opts, payload.usage);
 		return content.trim();
 	}
 
@@ -228,6 +232,7 @@ export class OpenRouterChatClient implements ChatClient {
 		const msg = payload.choices?.[0]?.message;
 		if (!msg)
 			throw new ChatApiError(res.status, "no choices returned by OpenRouter");
+		reportOpenAiUsage(opts, payload.usage);
 
 		if (msg.tool_calls && msg.tool_calls.length > 0) {
 			const toolCalls = msg.tool_calls.map((tc) => ({
@@ -289,6 +294,7 @@ export class OpenRouterChatClient implements ChatClient {
 		const content = payload.choices?.[0]?.message?.content;
 		if (!content)
 			throw new ChatApiError(res.status, "no content returned by OpenRouter");
+		reportOpenAiUsage(opts, payload.usage);
 		return content;
 	}
 

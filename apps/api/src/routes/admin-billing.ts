@@ -273,6 +273,8 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
           calls: count(),
           errors: sql<number>`SUM(CASE WHEN ${llmUsageEvents.success} = false THEN 1 ELSE 0 END)::int`,
           avgLatencyMs: sql<number>`COALESCE(AVG(${llmUsageEvents.latencyMs}), 0)::int`,
+          promptTokens: sql<number>`COALESCE(SUM(${llmUsageEvents.promptTokens}), 0)::int`,
+          completionTokens: sql<number>`COALESCE(SUM(${llmUsageEvents.completionTokens}), 0)::int`,
         })
         .from(llmUsageEvents)
         .where(
@@ -288,6 +290,8 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
           calls: count(),
           errors: sql<number>`SUM(CASE WHEN ${llmUsageEvents.success} = false THEN 1 ELSE 0 END)::int`,
           avgLatencyMs: sql<number>`COALESCE(AVG(${llmUsageEvents.latencyMs}), 0)::int`,
+          promptTokens: sql<number>`COALESCE(SUM(${llmUsageEvents.promptTokens}), 0)::int`,
+          completionTokens: sql<number>`COALESCE(SUM(${llmUsageEvents.completionTokens}), 0)::int`,
         })
         .from(llmUsageEvents)
         .where(
@@ -316,6 +320,8 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
         .select({
           calls: count(),
           errors: sql<number>`SUM(CASE WHEN ${llmUsageEvents.success} = false THEN 1 ELSE 0 END)::int`,
+          promptTokens: sql<number>`COALESCE(SUM(${llmUsageEvents.promptTokens}), 0)::int`,
+          completionTokens: sql<number>`COALESCE(SUM(${llmUsageEvents.completionTokens}), 0)::int`,
         })
         .from(llmUsageEvents)
         .where(
@@ -328,10 +334,23 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
       return { totalsRows, byPurposeRows, byProviderRows, monthRows };
     });
 
-    const totals = data.totalsRows[0] ?? { calls: 0, errors: 0, avgLatencyMs: 0 };
+    const totals = data.totalsRows[0] ?? {
+      calls: 0,
+      errors: 0,
+      avgLatencyMs: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+    };
     const callsNum = Number(totals.calls);
     const errorsNum = Number(totals.errors ?? 0);
-    const monthData = data.monthRows[0] ?? { calls: 0, errors: 0 };
+    const promptTok = Number(totals.promptTokens ?? 0);
+    const completionTok = Number(totals.completionTokens ?? 0);
+    const monthData = data.monthRows[0] ?? {
+      calls: 0,
+      errors: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+    };
 
     return c.json({
       periodDays: days,
@@ -340,12 +359,17 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
         errors: errorsNum,
         successRate: callsNum > 0 ? Number(((callsNum - errorsNum) / callsNum).toFixed(4)) : 1,
         avgLatencyMs: Number(totals.avgLatencyMs),
+        promptTokens: promptTok,
+        completionTokens: completionTok,
+        totalTokens: promptTok + completionTok,
       },
       byPurpose: data.byPurposeRows.map((r) => ({
         purpose: r.purpose,
         calls: Number(r.calls),
         errors: Number(r.errors ?? 0),
         avgLatencyMs: Number(r.avgLatencyMs),
+        promptTokens: Number(r.promptTokens ?? 0),
+        completionTokens: Number(r.completionTokens ?? 0),
       })),
       byProvider: data.byProviderRows.map((r) => ({
         provider: r.provider,
@@ -354,6 +378,8 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
       thisMonth: {
         calls: Number(monthData.calls),
         errors: Number(monthData.errors ?? 0),
+        promptTokens: Number(monthData.promptTokens ?? 0),
+        completionTokens: Number(monthData.completionTokens ?? 0),
         since: monthStartEpoch,
       },
     });

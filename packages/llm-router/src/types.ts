@@ -28,11 +28,59 @@ export interface ChatMessage {
   tool_call_id?: string;
 }
 
+/**
+ * Provider-reported token counts для одного completion'а. Все поля optional —
+ * провайдер заполняет лишь то, что вернул его API (`usage`-блок). Нормализованная
+ * форма: разные провайдеры зовут поля по-разному (OpenAI `prompt_tokens`, Ollama
+ * `prompt_eval_count`), здесь — единое имя.
+ */
+export interface TokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
 export interface ChatCompletionOpts {
   temperature?: number;
   /** Optional output-token cap (`num_predict` for Ollama, `max_tokens`
    *  for OpenAI). Implementations free to ignore or pick a default. */
   numPredict?: number;
+  /**
+   * Опциональный колбэк — вызывается один раз за completion с токенами из
+   * `usage`-блока ответа (если провайдер его вернул). Метрик-wrapper в apps/api
+   * подсовывает сюда запись в `llm_usage_events`. Провайдер, который не знает
+   * счётчика, просто никогда его не зовёт — обратная совместимость сохранена.
+   */
+  onUsage?: (usage: TokenUsage) => void;
+}
+
+/**
+ * Сырая форма `usage`-блока OpenAI-совместимых API (OpenAI, OpenRouter и любой
+ * `/chat/completions` прокси). Ollama использует другие имена — у него парсинг
+ * inline.
+ */
+export interface OpenAiUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
+/**
+ * Нормализует OpenAI-style `usage` и зовёт `opts.onUsage`, если он задан и в
+ * ответе вообще были числа. No-op без колбэка или без usage — провайдеры могут
+ * звать безусловно после парсинга ответа.
+ */
+export function reportOpenAiUsage(
+  opts: ChatCompletionOpts | undefined,
+  usage: OpenAiUsage | undefined,
+): void {
+  if (!opts?.onUsage || !usage) return;
+  const normalized: TokenUsage = {};
+  if (typeof usage.prompt_tokens === "number") normalized.promptTokens = usage.prompt_tokens;
+  if (typeof usage.completion_tokens === "number")
+    normalized.completionTokens = usage.completion_tokens;
+  if (typeof usage.total_tokens === "number") normalized.totalTokens = usage.total_tokens;
+  if (Object.keys(normalized).length > 0) opts.onUsage(normalized);
 }
 
 export interface ChatClient {

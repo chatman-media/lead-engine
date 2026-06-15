@@ -4,7 +4,9 @@ import {
   type ChatCompletionOpts,
   type ChatMessage,
   type FetchLike,
+  type OpenAiUsage,
   parseOpenAiSseStream,
+  reportOpenAiUsage,
 } from "../types.ts";
 
 export interface OpenAIChatOptions {
@@ -30,6 +32,7 @@ interface ChatResponse {
       }>;
     };
   }>;
+  usage?: OpenAiUsage;
   error?: { message?: string };
 }
 
@@ -92,6 +95,7 @@ export class OpenAIChatClient implements ChatClient {
     if (!first) {
       throw new ChatApiError(res.status, "no choices returned by model");
     }
+    reportOpenAiUsage(opts, payload.usage);
     return first;
   }
 
@@ -132,6 +136,7 @@ export class OpenAIChatClient implements ChatClient {
 
     const msg = payload.choices?.[0]?.message;
     if (!msg) throw new ChatApiError(res.status, "no choices returned by model");
+    reportOpenAiUsage(opts, payload.usage);
 
     if (msg.tool_calls && msg.tool_calls.length > 0) {
       const toolCalls = msg.tool_calls.map((tc) => ({
@@ -178,6 +183,7 @@ export class OpenAIChatClient implements ChatClient {
 
     const content = payload.choices?.[0]?.message?.content;
     if (!content) throw new ChatApiError(res.status, "no content returned by model");
+    reportOpenAiUsage(opts, payload.usage);
     return content;
   }
 

@@ -12,8 +12,10 @@
 
 import type {
 	ChatClient,
+	ChatCompletionOpts,
 	ChatMessage,
 	EmbeddingClient,
+	TokenUsage,
 } from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
 
@@ -26,6 +28,10 @@ export interface UsageEvent {
 	success: boolean;
 	/** Error.name если success=false. */
 	errorKind?: string;
+	/** Provider-reported prompt-токены. Undefined если провайдер не вернул usage. */
+	promptTokens?: number;
+	/** Provider-reported completion-токены. Undefined для embed / если нет usage. */
+	completionTokens?: number;
 }
 
 export type OnUsage = (event: UsageEvent) => void;
@@ -36,7 +42,12 @@ export function wrapChatClient(
 	labels: { provider: string; purpose: string; model?: string },
 	onComplete?: OnUsage,
 ): ChatClient {
-	const record = (start: number, success: boolean, errorKind?: string) => {
+	const record = (
+		start: number,
+		success: boolean,
+		errorKind?: string,
+		usage?: TokenUsage,
+	) => {
 		onComplete?.({
 			purpose: labels.purpose,
 			provider: labels.provider,
@@ -44,22 +55,45 @@ export function wrapChatClient(
 			latencyMs: Math.round(performance.now() - start),
 			success,
 			...(errorKind ? { errorKind } : {}),
+			...(usage?.promptTokens !== undefined
+				? { promptTokens: usage.promptTokens }
+				: {}),
+			...(usage?.completionTokens !== undefined
+				? { completionTokens: usage.completionTokens }
+				: {}),
 		});
+	};
+
+	// Подсовывает в opts.onUsage сборщик токенов, не затирая колбэк вызывающего
+	// (если тот вдруг тоже подписан). Возвращает { opts, getUsage } — usage
+	// доступен после await'а inner-вызова.
+	const withUsageCapture = (opts?: ChatCompletionOpts) => {
+		let captured: TokenUsage | undefined;
+		const callerOnUsage = opts?.onUsage;
+		const merged: ChatCompletionOpts = {
+			...opts,
+			onUsage: (u) => {
+				captured = u;
+				callerOnUsage?.(u);
+			},
+		};
+		return { opts: merged, getUsage: () => captured };
 	};
 
 	const wrapped: ChatClient = {
 		async complete(
 			messages: ChatMessage[],
-			opts?: { temperature?: number; numPredict?: number },
+			opts?: ChatCompletionOpts,
 		): Promise<string> {
 			metrics.llmCalls.inc(1, {
 				provider: labels.provider,
 				purpose: labels.purpose,
 			});
 			const start = performance.now();
+			const cap = withUsageCapture(opts);
 			try {
-				const result = await inner.complete(messages, opts);
-				record(start, true);
+				const result = await inner.complete(messages, cap.opts);
+				record(start, true, undefined, cap.getUsage());
 				return result;
 			} catch (err) {
 				const kind = err instanceof Error ? err.name : "unknown";
@@ -84,10 +118,11 @@ export function wrapChatClient(
 				purpose: labels.purpose,
 			});
 			const start = performance.now();
+			const cap = withUsageCapture(opts);
 			try {
 				// biome-ignore lint/style/noNonNullAssertion: проверили typeof выше
-				const result = await inner.completeWithTools!(messages, tools, opts);
-				record(start, true);
+				const result = await inner.completeWithTools!(messages, tools, cap.opts);
+				record(start, true, undefined, cap.getUsage());
 				return result;
 			} catch (err) {
 				const kind = err instanceof Error ? err.name : "unknown";

@@ -101,8 +101,8 @@ export class LlmUsageWriter {
                 latencyMs: e.latencyMs,
                 success: e.success,
                 errorKind: e.errorKind ?? null,
-                promptTokens: null,
-                completionTokens: null,
+                promptTokens: e.promptTokens ?? null,
+                completionTokens: e.completionTokens ?? null,
                 createdAt: e.createdAt,
               })),
             );
