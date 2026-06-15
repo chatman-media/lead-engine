@@ -913,6 +913,29 @@ async function maybeForceExchangeOrderReply(input: {
 	return { text, toolCalls };
 }
 
+const EXCHANGE_SUMMARY_MARKER = "Оформляю заявку?";
+
+/**
+ * Сводку «Оформляю заявку?» показываем один раз за эпизод заявки: сканируем
+ * историю назад до границы эпизода (заявка оформлена / выданы реквизиты). Раньше
+ * было окно slice(-4) — пара уточняющих Q&A выталкивала сводку из окна → дубль
+ * (#653). Окно истории ограничено (~historyLimit, дефолт 20), скан дёшев.
+ */
+function exchangeSummaryAlreadyShown(
+	history: Array<Pick<MessageRow, "role" | "text">>,
+): boolean {
+	for (let i = history.length - 1; i >= 0; i--) {
+		const m = history[i];
+		if (!m) continue;
+		if (m.role !== "assistant" && m.role !== "human") continue;
+		// Граница нового эпизода: заявка уже оформлялась / выдавались реквизиты —
+		// дальше назад не смотрим, новую сводку показать можно.
+		if (/заявку оформил|реквизиты для оплаты/iu.test(m.text)) return false;
+		if (m.text.includes(EXCHANGE_SUMMARY_MARKER)) return true;
+	}
+	return false;
+}
+
 /**
  * Сводка + «Оформляю заявку?» когда ВСЕ обязательные поля собраны, но клиент ещё
  * не подтвердил. Закрывает тупик: раньше после «на счёт, сбер» ни один forced-шаг
@@ -943,11 +966,8 @@ async function maybeForceExchangeSummaryConfirm(input: {
 	);
 	if (collected.missing.length > 0) return null;
 	if (!collected.asset || !collected.amount) return null;
-	// Сводку не повторяем, если уже показали в последних сообщениях.
-	const alreadyShown = input.history
-		.slice(-4)
-		.some((m) => m.role === "assistant" && m.text.includes("Оформляю заявку?"));
-	if (alreadyShown) return null;
+	// Сводку не повторяем, если уже показали в текущем эпизоде заявки.
+	if (exchangeSummaryAlreadyShown(input.history)) return null;
 	const quoteTool = input.tools.find(
 		(tool) => tool.name === "compute_exchange_quote",
 	);
@@ -962,7 +982,7 @@ async function maybeForceExchangeSummaryConfirm(input: {
 	const summary = renderExchangeSummaryLine(collected, result);
 	if (!summary) return null;
 	return {
-		text: `${summary}\n\nОформляю заявку?`,
+		text: `${summary}\n\n${EXCHANGE_SUMMARY_MARKER}`,
 		toolCalls: [{ name: quoteTool.name, args: quoteArgs, result, cycle: 0 }],
 	};
 }

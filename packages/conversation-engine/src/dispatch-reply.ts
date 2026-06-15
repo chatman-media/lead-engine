@@ -134,6 +134,16 @@ function replaceFallbackText(
   }));
 }
 
+/**
+ * #653 — окно анти-дубля: не шлём текстовый ответ, байт-в-байт совпадающий со
+ * свежим (≤ окна) сообщением бота. Ловит конкурентную двойную генерацию (два
+ * входящих без debounce отвечают почти одновременно — content-гард стратегии не
+ * видит ещё не записанный ответ; гонка укладывается в секунды). Легитимные
+ * повторы дальше окна проходят. Фолбэки (#627) НЕ дедупим — серия одинаковых
+ * фолбэков намеренно копится до порога передачи оператору.
+ */
+const REPLY_DEDUP_WINDOW_SEC = 20;
+
 function envelopeText(envelope: OutboundEnvelope): string | null {
   const text = envelope.parts
     .map((part) => {
@@ -208,8 +218,24 @@ export async function generateReplyAndEnqueue(
     const envelopesToSend = deps.splitReplies
       ? splitReplyEnvelopes(baseEnvelopes)
       : baseEnvelopes;
+    // #653 — анти-дубль: свежие сообщения бота для сверки байт-в-байт.
+    const recentForDedup = await messages.recent(result.conversationId, 5);
+    const isRecentBotDuplicate = (txt: string): boolean =>
+      recentForDedup.some(
+        (m) =>
+          (m.role === "assistant" || m.role === "human") &&
+          m.text === txt &&
+          now - m.createdAt <= REPLY_DEDUP_WINDOW_SEC,
+      );
     for (const env of envelopesToSend) {
       const aiText = envelopeText(env);
+      if (aiText && !replyIsFallback && isRecentBotDuplicate(aiText)) {
+        deps.sink?.log?.("debug", "reply dedup: identical recent bot message skipped", {
+          tenantId: tenant.tenantId,
+          conversationId: result.conversationId,
+        });
+        continue;
+      }
       if (aiText) {
         const inserted = await messages.insert({
           conversationId: result.conversationId,
