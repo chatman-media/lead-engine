@@ -167,7 +167,16 @@ export function composeSystemPrompt(
   // Persona, voice, guardrails, KB grounding + context stay intact.
   const support = options.supportPhase ? supportBlock(options.supportPhase) : "";
 
+  // Порядок блоков оптимизирован под prompt-caching провайдера (OpenAI/OpenRouter
+  // кешируют стабильный ПРЕФИКС системного промпта, −50% за вход; Ollama
+  // переиспользует KV-кеш). Инвариант: всё, что стабильно в рамках диалога
+  // (персона/голос/хуки/скиллы/стадия/ЖЁСТКИЕ ПРАВИЛА/ПРИМЕРЫ), идёт СПЛОШНЫМ
+  // блоком в начале; всё, что меняется по ходу диалога (ожидание оператора,
+  // запрос гостя, саммари, факты о кандидате, KB CONTEXT), — в ХВОСТЕ.
+  // Не меняй этот порядок, не сверившись с инвариантом — иначе кеш-префикс
+  // рвётся раньше и стабильные блоки за разрывом кешируются впустую.
   return [
+    // ── Стабильный префикс (кешируется) ──
     personaBlock,
     telegramShapeBlock,
     voiceBlock,
@@ -176,13 +185,14 @@ export function composeSystemPrompt(
     support ? "" : directorHooksBlock,
     support ? "" : skillsBlock,
     support || stageBlock,
+    guardrailBlock,
+    support ? "" : fewShotBlock,
+    // ── Волатильный хвост (меняется по ходу диалога — не кешируется) ──
     operatorBlock,
     requestBlock,
     summaryBlock,
     userFactsBlock,
     needsGroundingReminder ? kbGroundingReminder(persona.role) : "",
-    guardrailBlock,
-    support ? "" : fewShotBlock,
     kbBlock,
   ]
     .filter((s) => s.length > 0)

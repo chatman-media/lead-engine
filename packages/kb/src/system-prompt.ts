@@ -114,5 +114,9 @@ export function buildSystemPrompt(
   const summaryBlock = renderSummaryBlock(conversationSummary);
   const summarySection = summaryBlock ? `\n\n${summaryBlock}` : "";
 
-  return `${personaLine}${conversational}${factsBlock}${summarySection}${userFactsSection}\n\n${rules}\n\nCONTEXT:\n${context}`;
+  // Порядок под prompt-caching: стабильный префикс (персона + ЛИЧНЫЕ ФАКТЫ +
+  // СТРОГИЕ ПРАВИЛА) идёт сплошным блоком в начале, волатильный хвост (саммари,
+  // факты о кандидате, CONTEXT) — в конце, чтобы провайдер кешировал префикс.
+  // CONTEXT остаётся последним — правила ссылаются на «секцию CONTEXT ниже».
+  return `${personaLine}${conversational}${factsBlock}\n\n${rules}${summarySection}${userFactsSection}\n\nCONTEXT:\n${context}`;
 }
