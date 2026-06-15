@@ -1106,6 +1106,88 @@ describe("LlmReplyStrategy", () => {
 		});
 	});
 
+	it("exchange: safe-fallback «уточню у оператора» эскалирует на оператора", async () => {
+		// Вопрос вне сценария (другая сеть) — forced-пути не срабатывают, LLM
+		// выдаёт обещание оператора. Без эскалации обещание повисает: оператора
+		// не уведомили, лид не помечен. Должен быть auto-handoff + хэндофф.
+		const chat = new CapturingChat(EXCHANGE_SAFE_FALLBACK);
+		const repo = fakeMessagesRepo([
+			row(1, "assistant", "Итак: меняем 20000 RUB (TRC20) → получите 16185 PHP."),
+			row(2, "user", "а через TON сеть нельзя?"),
+		]);
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveExchangePolicyState: () => ({
+					stageSlug: "quote_calculated",
+					order: {
+						id: 42,
+						status: "awaiting_payment",
+						direction: "RUB->PHP",
+						requisitesIssued: false,
+						paymentProofReceived: false,
+						paymentVerified: false,
+						payoutReady: false,
+						payoutCompleted: false,
+						payoutCodeIssued: false,
+					},
+				}),
+			},
+			() => repo,
+		);
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "а через TON сеть нельзя?",
+		});
+
+		expect(firstReplyText(result)).toBe(EXCHANGE_SAFE_FALLBACK);
+		const normalized = normalizeReplyStrategyResult(result);
+		expect(normalized).toMatchObject({
+			autoTakeover: true,
+			customerNoticeSent: true,
+		});
+		expect(normalized?.operatorHandoffs?.[0]).toMatchObject({
+			reason: "operator_request",
+			orderId: 42,
+		});
+	});
+
+	it("exchange: safe-fallback эскалирует и без notice (молча отдаёт оператору)", async () => {
+		const chat = new CapturingChat(EXCHANGE_SAFE_FALLBACK);
+		const repo = fakeMessagesRepo([row(1, "user", "а через TON сеть нельзя?")]);
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveExchangeCustomerNoticeEnabled: () => false,
+			},
+			() => repo,
+		);
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "а через TON сеть нельзя?",
+		});
+
+		const normalized = normalizeReplyStrategyResult(result);
+		expect(normalized?.envelopes).toHaveLength(0);
+		expect(normalized).toMatchObject({
+			autoTakeover: true,
+			customerNoticeSent: false,
+		});
+		expect(normalized?.operatorHandoffs?.[0]?.reason).toBe("operator_request");
+	});
+
   it("пишет telemetry hook после generic tool-loop", async () => {
     const chat = new ToolLoopChat();
     const repo = fakeMessagesRepo([row(1, "user", "сколько за 100 usdt?")]);
