@@ -83,6 +83,9 @@ export interface TgMessage {
   from?: TgUser;
   chat: TgChat;
   date: number;
+  /** Топик форум-группы, в котором пришло сообщение (для маршрутизации ответов
+   *  оператора по диалогу: conversations.operator_thread_id). */
+  message_thread_id?: number;
   text?: string;
   /** Caption that can accompany media uploads (photo / video / document /
    *  voice). Treated as the message's "text" by the persistence layer
