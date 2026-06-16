@@ -27,10 +27,20 @@ function supportBlock(phase: "docs" | "submitted"): string {
 }
 
 /**
+ * Форматирует KB-контекст в блок «KB CONTEXT …». Один источник правды для двух
+ * мест: инлайн в системном промпте (`inlineKbContext`) и отдельным сообщением
+ * после истории (см. answer.ts — выносится в хвост, чтобы стабильный префикс
+ * system+history кешировался провайдером).
+ */
+export function renderKbContextBlock(context: string): string {
+  return `KB CONTEXT (актуальные факты агентства):\n${context}`;
+}
+
+/**
  * Builds the system prompt for one turn of conversation in the given style
  * and stage. Up to 8 sections: persona, voice, framework, hooks, stage,
  * KB-grounding reminder (conditional), guardrails, few-shot (conditional),
- * and KB context (conditional).
+ * and KB context (conditional, when `inlineKbContext` — default true).
  */
 export function composeSystemPrompt(
   style: Style,
@@ -164,9 +174,14 @@ export function composeSystemPrompt(
           .join("\n")
       : "";
 
-  const kbBlock = preFetchedKbContext
-    ? `KB CONTEXT (актуальные факты агентства):\n${preFetchedKbContext}`
-    : "";
+  // KB-контекст инлайнится в системный промпт по умолчанию. answer.ts на стиль-
+  // пути ставит inlineKbContext=false и выносит KB отдельным сообщением ПОСЛЕ
+  // истории — тогда префикс system+history стабилен и кешируется провайдером.
+  // Логика grounding (needsGroundingReminder ниже, GROUNDING-строка в stageBlock)
+  // по-прежнему опирается на ПРИСУТСТВИЕ preFetchedKbContext, а не на инлайн.
+  const inlineKbContext = options.inlineKbContext ?? true;
+  const kbBlock =
+    preFetchedKbContext && inlineKbContext ? renderKbContextBlock(preFetchedKbContext) : "";
 
   const userFactsBlock = renderUserFactsBlock(options.userFacts);
   const summaryBlock = renderSummaryBlock(options.conversationSummary);

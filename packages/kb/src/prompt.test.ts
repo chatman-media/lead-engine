@@ -3,7 +3,7 @@
 // lead's funnel-stage goal/guidance wins over the Style's per-sales-stage cfg).
 
 import { describe, expect, it } from "bun:test";
-import { composeSystemPrompt } from "./prompt.ts";
+import { composeSystemPrompt, renderKbContextBlock } from "./prompt.ts";
 import type { Style } from "./styles.ts";
 
 const baseStyle: Style = {
@@ -156,6 +156,26 @@ describe("composeSystemPrompt — support mode / grounding / few-shot", () => {
     };
     const p = composeSystemPrompt(s, "qualify", "факт: зарплата 1500");
     expect(p).toContain("KB CONTEXT");
+  });
+
+  it("inlineKbContext=false → KB CONTEXT НЕ инлайнится, grounding-логика цела", () => {
+    const s: Style = {
+      ...baseStyle,
+      stages: { qualify: { goal: "G", groundingRequired: true } },
+    };
+    const p = composeSystemPrompt(s, "qualify", "факт: зарплата 1500", { inlineKbContext: false });
+    // KB-блок не в системном промпте (выносится отдельным сообщением в answer.ts)
+    expect(p).not.toContain("KB CONTEXT (актуальные");
+    // но GROUNDING-инструкция остаётся (стадия требует grounding)
+    expect(p).toContain("GROUNDING");
+    // и НЕТ ложного «нет KB»-напоминания — контекст есть, просто вынесен
+    expect(p).not.toContain("Никогда не выдумывай цифры");
+  });
+
+  it("renderKbContextBlock форматирует блок KB CONTEXT", () => {
+    const b = renderKbContextBlock("зарплата 1500");
+    expect(b).toContain("KB CONTEXT (актуальные факты агентства)");
+    expect(b).toContain("зарплата 1500");
   });
 
   it("few-shot включается по умолчанию и выключается флагом", () => {
