@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/storage",
-  "version": "1.39.1",
+  "version": "1.40.0",
   "description": "PostgreSQL storage adapters for @chatman-media/sales — Drizzle ORM implementations of all engine interfaces.",
   "type": "module",
   "main": "./dist/index.js",
