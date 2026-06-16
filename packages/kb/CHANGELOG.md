@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.14.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.13.3...@chatman-media/kb-v1.14.0) (2026-06-16)
+
+
+### Features
+
+* **prompt:** director-хуки по стадии (applicableStages, как у skills) ([d256c96](https://github.com/chatman-media/lead-engine/commit/d256c9686cb9dbf90c9d2b79e443fe5b828bcccd)), closes [#676](https://github.com/chatman-media/lead-engine/issues/676)
+
 # [@chatman-media/kb-v1.13.3](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.13.2...@chatman-media/kb-v1.13.3) (2026-06-15)
 
 
