@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.21.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.1...@chatman-media/conversation-engine-v3.21.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* **notifications:** rate-guard trip доезжает до владельца (in-app колокол + Telegram) ([bec73ff](https://github.com/chatman-media/lead-engine/commit/bec73ff6521b658a43c64c31872b559ff3cc8426))
+
 # [@chatman-media/conversation-engine-v3.21.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.0...@chatman-media/conversation-engine-v3.21.1) (2026-06-15)
 
 
