@@ -602,6 +602,11 @@ describe("RagReplyStrategy.generate", () => {
 				template: EXCHANGE_TEMPLATE,
 				chat,
 				kb: kbWith([HIT]),
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 10000,
+					amountSetThisTurn: true,
+				},
 				tools: [
 					{
 						name: "compute_exchange_quote",
@@ -656,6 +661,11 @@ describe("RagReplyStrategy.generate", () => {
 				template: EXCHANGE_TEMPLATE,
 				chat,
 				kb: kbWith([HIT]),
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 20000,
+					amountSetThisTurn: true,
+				},
 				tools: [
 					{
 						name: "compute_exchange_quote",
@@ -709,6 +719,11 @@ describe("RagReplyStrategy.generate", () => {
 				template: EXCHANGE_TEMPLATE,
 				chat: new CapturingRagChat("x"),
 				kb: kbWith([HIT]),
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 20000,
+					amountSetThisTurn: true,
+				},
 				tools: [quoteTool] as never,
 			}),
 			{ reflect: false },
@@ -726,6 +741,12 @@ describe("RagReplyStrategy.generate", () => {
 				template: EXCHANGE_TEMPLATE,
 				chat: new CapturingRagChat("x"),
 				kb: kbWith([HIT]),
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 20000,
+					payoutMethod: "atm",
+					amountSetThisTurn: true,
+				},
 				tools: [quoteTool] as never,
 			}),
 			{ reflect: false },
@@ -760,6 +781,11 @@ describe("RagReplyStrategy.generate", () => {
 				template: EXCHANGE_TEMPLATE,
 				chat: new CapturingRagChat("x"),
 				kb: kbWith([HIT]),
+				exchangeCollected: {
+					asset: "usdt",
+					amount: 200,
+					amountSetThisTurn: true,
+				},
 				tools: [quoteTool] as never,
 			}),
 			{ reflect: false },
@@ -774,6 +800,12 @@ describe("RagReplyStrategy.generate", () => {
 				template: EXCHANGE_TEMPLATE,
 				chat: new CapturingRagChat("x"),
 				kb: kbWith([HIT]),
+				exchangeCollected: {
+					asset: "usdt",
+					amount: 200,
+					network: "trc20",
+					amountSetThisTurn: true,
+				},
 				tools: [quoteTool] as never,
 			}),
 			{ reflect: false },
@@ -808,6 +840,14 @@ describe("RagReplyStrategy.generate", () => {
 					chat: new CapturingRagChat("x"),
 					kb: kbWith([HIT]),
 					exchangePolicyState: { stageSlug: "quote_calculated" },
+					// Для r3 («200 usdt trc20») форс-котировке нужна свежая сумма; r1/r2
+					// («TON»/«тон») отбиваются unsupported-network ответом раньше неё.
+					exchangeCollected: {
+						asset: "usdt",
+						amount: 200,
+						network: "trc20",
+						amountSetThisTurn: true,
+					},
 					tools: [quoteTool] as never,
 				}),
 				{ reflect: false },
@@ -863,6 +903,11 @@ describe("RagReplyStrategy.generate", () => {
 					],
 				}),
 				exchangePolicyState: { stageSlug: "quote_calculated" },
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 20000,
+					payoutMethod: "atm",
+				},
 				tools: [quoteTool] as never,
 			}),
 			{ reflect: false },
@@ -923,6 +968,12 @@ describe("RagReplyStrategy.generate", () => {
 					],
 				}),
 				exchangePolicyState: { stageSlug: "quote_calculated" },
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 20000,
+					payoutMethod: "atm",
+					paymentMethod: "sbp_qr",
+				},
 				tools: [
 					{
 						name: "create_exchange_order",
@@ -955,6 +1006,12 @@ describe("RagReplyStrategy.generate", () => {
 					],
 				}),
 				exchangePolicyState: { stageSlug: "quote_calculated" },
+				exchangeCollected: {
+					asset: "USDT",
+					amount: 200,
+					network: "TRC20",
+					payoutMethod: "atm",
+				},
 				tools: [] as never,
 			}),
 			{ reflect: false },
@@ -999,6 +1056,14 @@ describe("RagReplyStrategy.generate", () => {
 					],
 				}),
 				exchangePolicyState: { stageSlug: "quote_calculated" },
+				// Все поля собраны, но СВЕЖЕЙ суммы этого хода нет (amountSetThisTurn
+				// false) → не котировка, а сводка/подтверждение.
+				exchangeCollected: {
+					asset: "USDT",
+					amount: 2000,
+					network: "TRC20",
+					payoutMethod: "atm",
+				},
 				tools: [quoteTool] as never,
 			}),
 			{ reflect: false },
@@ -1116,6 +1181,12 @@ describe("RagReplyStrategy.generate", () => {
 					kb: kbWith([HIT]),
 					messages: fakeMessages({ recent: history }),
 					exchangePolicyState: { stageSlug: "quote_calculated" },
+					exchangeCollected: {
+						asset: "USDT",
+						amount: 2000,
+						network: "TRC20",
+						payoutMethod: "atm",
+					},
 					awaitingOperator,
 					tools: [order.tool, quoteTool] as never,
 				}),
@@ -1174,6 +1245,14 @@ describe("RagReplyStrategy.generate", () => {
 					],
 				}),
 				exchangePolicyState: { stageSlug: "quote_calculated" },
+				// «на счёт, сбер» → universal field-extractor собрал способ оплаты
+				// (card_transfer); свежей суммы этого хода нет → сводка, не котировка.
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 20000,
+					payoutMethod: "atm",
+					paymentMethod: "card_transfer",
+				},
 				tools: [quoteTool] as never,
 			}),
 			{ reflect: false },
@@ -1212,6 +1291,12 @@ describe("RagReplyStrategy.generate", () => {
 					],
 				}),
 				exchangePolicyState: { stageSlug: "quote_calculated" },
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 20000,
+					payoutMethod: "atm",
+					paymentMethod: "card_transfer",
+				},
 				tools: [
 					{
 						name: "create_exchange_order",
@@ -1242,6 +1327,11 @@ describe("RagReplyStrategy.generate", () => {
 				template: EXCHANGE_TEMPLATE,
 				chat: new CapturingRagChat("x"),
 				kb: kbWith([HIT]),
+				exchangeCollected: {
+					asset: "USD",
+					amount: 2000,
+					amountSetThisTurn: true,
+				},
 				tools: [
 					{
 						name: "compute_exchange_quote",
@@ -1279,6 +1369,13 @@ describe("RagReplyStrategy.generate", () => {
 				template: EXCHANGE_TEMPLATE,
 				chat,
 				kb: kbWith([HIT]),
+				// Сумму/сеть собрал универсальный экстрактор (не regex реплики, #654).
+				exchangeCollected: {
+					asset: "USDT",
+					amount: 500,
+					network: "TRC20",
+					amountSetThisTurn: true,
+				},
 				tools: [
 					{
 						name: "compute_exchange_quote",
@@ -1308,8 +1405,9 @@ describe("RagReplyStrategy.generate", () => {
 				"Хочу обменять 500 USDT (TRC20) на песо. Какой курс и сколько песо я получу на руки?",
 		});
 
-		// Регрессия: слово «Какой» обрезалось окном `after` до хвостового «к» и
-		// давало ложный множитель ×1000 → 500 превращалось в 500000.
+		// Сумма берётся из собранного (500), а не из парсинга текста — где слово
+		// «Какой» когда-то давало ложный ×1000 (500→500000). Регрессия теперь
+		// невозможна структурно: regex-парсинг суммы из реплики удалён.
 		expect(seenArgs).toMatchObject({
 			asset: "USDT",
 			amount: 500,
@@ -1349,6 +1447,11 @@ describe("RagReplyStrategy.generate", () => {
 						status: "missing",
 						needsVerification: true,
 					},
+				},
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 10000,
+					payoutMethod: "atm",
 				},
 				tools: [
 					{
@@ -1422,6 +1525,11 @@ describe("RagReplyStrategy.generate", () => {
 						needsVerification: true,
 					},
 				},
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 10000,
+					payoutMethod: "atm",
+				},
 				tools: [
 					{
 						name: "create_exchange_order",
@@ -1481,6 +1589,11 @@ describe("RagReplyStrategy.generate", () => {
 						status: "verified",
 						needsVerification: false,
 					},
+				},
+				exchangeCollected: {
+					asset: "RUB",
+					amount: 10000,
+					payoutMethod: "atm",
 				},
 				tools: [
 					{
