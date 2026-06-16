@@ -16,7 +16,7 @@ import {
   personaFactReply,
   personaSmalltalkReply,
 } from "./persona-shortcuts.ts";
-import { composeSystemPrompt } from "./prompt.ts";
+import { composeSystemPrompt, renderKbContextBlock } from "./prompt.ts";
 import { rewriteQuery } from "./rewrite-query.ts";
 import { applyDynamicThreshold, mmrDiversify, rrfMerge } from "./retrieval-utils.ts";
 import { expandQueries } from "./multi-query.ts";
@@ -236,11 +236,16 @@ async function answerFromHits(opts: {
       : context;
 
   let systemPrompt: string;
+  // KB-контекст на стиль-пути выносим ОТДЕЛЬНЫМ system-сообщением ПОСЛЕ истории
+  // (тогда префикс system+history стабилен и кешируется провайдером). На legacy-
+  // пути (buildSystemPrompt) KB остаётся inline — это редкий fallback.
+  let kbContextMessage: string | null = null;
   let temperature = legacyRagSamplingTemperature(activePersona);
   if (input.style) {
     const stage: FunnelStage = input.stage ?? "qualify";
     systemPrompt = composeSystemPrompt(input.style, stage, contextForPrompt, {
       includeFewShot: input.includeFewShot ?? true,
+      inlineKbContext: false,
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
       ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
       ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
@@ -252,6 +257,7 @@ async function answerFromHits(opts: {
       ...(input.requestContext ? { requestContext: input.requestContext } : {}),
       ...(input.awaitingOperator ? { awaitingOperator: true } : {}),
     });
+    if (contextForPrompt) kbContextMessage = renderKbContextBlock(contextForPrompt);
     temperature = input.style.model.temperature;
   } else {
     systemPrompt = buildSystemPrompt(
@@ -265,6 +271,7 @@ async function answerFromHits(opts: {
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     ...(input.history ?? []),
+    ...(kbContextMessage ? [{ role: "system" as const, content: kbContextMessage }] : []),
     { role: "user", content: input.question },
   ];
 
@@ -512,11 +519,16 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
       : context;
 
   let systemPrompt: string;
+  // KB-контекст на стиль-пути выносим ОТДЕЛЬНЫМ system-сообщением ПОСЛЕ истории
+  // (тогда префикс system+history стабилен и кешируется провайдером). На legacy-
+  // пути (buildSystemPrompt) KB остаётся inline — это редкий fallback.
+  let kbContextMessage: string | null = null;
   let temperature = legacyRagSamplingTemperature(activePersona);
   if (input.style) {
     const stage: FunnelStage = input.stage ?? "qualify";
     systemPrompt = composeSystemPrompt(input.style, stage, contextForPrompt, {
       includeFewShot: input.includeFewShot ?? true,
+      inlineKbContext: false,
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
       ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
       ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
@@ -528,6 +540,7 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
       ...(input.requestContext ? { requestContext: input.requestContext } : {}),
       ...(input.awaitingOperator ? { awaitingOperator: true } : {}),
     });
+    if (contextForPrompt) kbContextMessage = renderKbContextBlock(contextForPrompt);
     temperature = input.style.model.temperature;
   } else {
     systemPrompt = buildSystemPrompt(
@@ -541,6 +554,7 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     ...(input.history ?? []),
+    ...(kbContextMessage ? [{ role: "system" as const, content: kbContextMessage }] : []),
     { role: "user", content: input.question },
   ];
 

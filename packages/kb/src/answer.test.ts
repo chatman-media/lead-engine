@@ -545,10 +545,10 @@ describe("answerWithRagStream", () => {
     expect(tel[0]?.path).toBe("ok");
   });
 
-  it("style + vacanciesBlock → composeSystemPrompt c вакансиями, persona из style", async () => {
-    let sys = "";
+  it("style + vacanciesBlock → KB отдельным system-сообщением после истории, persona в системном промпте", async () => {
+    let msgs: ChatMessage[] = [];
     const chat = fakeChat((m) => {
-      sys = m[0]?.content ?? "";
+      msgs = m;
       return "ответ по стилю";
     });
     const tel: AnswerTelemetry[] = [];
@@ -571,8 +571,14 @@ describe("answerWithRagStream", () => {
       ),
     );
     expect(out.toLowerCase()).toContain("ответ по стилю");
-    expect(sys).toContain("Вакансия: модель, Дубай");
-    expect(sys).toContain("Лена");
+    const sys = msgs[0]?.content ?? "";
+    expect(sys).toContain("Лена"); // persona — в системном промпте (стабильный префикс)
+    expect(sys).not.toContain("Вакансия: модель, Дубай"); // KB вынесен из системного промпта
+    // KB-контекст — отдельным system-сообщением; последнее сообщение остаётся вопросом.
+    const kbMsg = msgs.find((m) => (m.content ?? "").includes("KB CONTEXT"));
+    expect(kbMsg?.role).toBe("system");
+    expect(kbMsg?.content).toContain("Вакансия: модель, Дубай");
+    expect(msgs[msgs.length - 1]?.role).toBe("user");
     expect(tel[0]?.path).toBe("ok");
   });
 
