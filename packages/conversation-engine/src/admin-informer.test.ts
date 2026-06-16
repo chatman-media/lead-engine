@@ -158,6 +158,27 @@ describe("notificationEventToInformer", () => {
     const e = notificationEventToInformer(ev({ eventType: "high_value_deal", leadId: 9 }), "http://x");
     expect(e?.url).toBe("http://x/leads/9");
   });
+  it("exchange_rate_guard_tripped → orders/important с курсовым контекстом (раньше → null)", () => {
+    const e = notificationEventToInformer(
+      ev({
+        eventType: "exchange_rate_guard_tripped",
+        conversationId: 55,
+        data: {
+          asset: "USDT",
+          network: "TRC20",
+          deviationPct: 12.5,
+          reason: "отклонение от фида",
+        },
+      }),
+    );
+    expect(e).not.toBeNull();
+    expect(e?.topic).toBe("system");
+    expect(e?.severity).toBe("important");
+    expect(e?.conversationId).toBe(55);
+    expect(e?.detail).toContain("USDT (TRC20)");
+    expect(e?.detail).toContain("Отклонение: 12.5%");
+    expect(e?.detail).toContain("Причина: отклонение от фида");
+  });
 });
 
 // ── AdminInformer error-paths (фейковый Db, без Postgres) ───────────────────
