@@ -540,6 +540,13 @@ describe("LlmReplyStrategy", () => {
         template: EXCHANGE_TEMPLATE,
         resolveChat: () => chat,
         resolveTools: () => [exchangeQuoteTool()],
+        // #654 — поля собраны универсальным движком (вместо regex реплик).
+        resolveExchangeCollected: () => ({
+          asset: "USDT",
+          amount: 500,
+          network: "TRC20",
+          amountSetThisTurn: true,
+        }),
         recordToolCalls: async (input) => {
           recorded.push(input);
         },
@@ -582,6 +589,12 @@ describe("LlmReplyStrategy", () => {
 				resolveChat: () => chat,
 				resolveTools: () => [exchangeQuoteTool(), exchangeCreateOrderTool()],
 				resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+				// #654 — поля заявки из универсального движка (вместо regex истории).
+				resolveExchangeCollected: () => ({
+					asset: "RUB",
+					amount: 10000,
+					payoutMethod: "atm",
+				}),
 				recordToolCalls: async (input) => {
 					recorded.push(input);
 				},
@@ -625,6 +638,12 @@ describe("LlmReplyStrategy", () => {
 				resolveChat: () => chat,
 				resolveTools: () => [exchangeQuoteTool(), exchangeCreateOrderTool()],
 				resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+				// #654 — поля заявки из универсального движка (вместо regex истории).
+				resolveExchangeCollected: () => ({
+					asset: "RUB",
+					amount: 10000,
+					payoutMethod: "atm",
+				}),
 				recordToolCalls: async (input) => {
 					recorded.push(input);
 				},
@@ -698,6 +717,12 @@ describe("LlmReplyStrategy", () => {
 						status: "verified",
 						needsVerification: false,
 					},
+				}),
+				// #654 — поля заявки из универсального движка (вместо regex истории).
+				resolveExchangeCollected: () => ({
+					asset: "RUB",
+					amount: 10000,
+					payoutMethod: "atm",
 				}),
 				recordToolCalls: async (input) => {
 					recorded.push(input);
@@ -783,6 +808,13 @@ describe("LlmReplyStrategy", () => {
 				resolveChat: () => chat,
 				resolveTools: () => [exchangeQuoteTool()],
 				resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+				// #654 — все поля собраны универсальным движком (RUB: оплата картой).
+				resolveExchangeCollected: () => ({
+					asset: "RUB",
+					amount: 20000,
+					payoutMethod: "atm",
+					paymentMethod: "card_transfer",
+				}),
 			},
 			() => repo,
 		);
@@ -811,7 +843,12 @@ describe("LlmReplyStrategy", () => {
 			),
 		]);
 		const strategy = new LlmReplyStrategy(
-			{ template: EXCHANGE_TEMPLATE, resolveChat: () => chat },
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				// #654 — собранное состояние из универсального движка → грунтинг.
+				resolveExchangeCollected: () => ({ asset: "USDT", amount: 2000 }),
+			},
 			() => repo,
 		);
 		const result = await strategy.generate({
@@ -840,6 +877,12 @@ describe("LlmReplyStrategy", () => {
         template: EXCHANGE_TEMPLATE,
         resolveChat: () => chat,
         resolveTools: () => [exchangeQuoteTool()],
+        // #654 — сумма/актив из универсального движка (вместо парсинга текста).
+        resolveExchangeCollected: () => ({
+          asset: "USDT",
+          amount: 500,
+          amountSetThisTurn: true,
+        }),
         recordToolCalls: async (input) => {
           recorded.push(input);
         },
@@ -883,6 +926,13 @@ describe("LlmReplyStrategy", () => {
         template: EXCHANGE_TEMPLATE,
         resolveChat: () => chat,
         resolveTools: () => [exchangeQuoteTool()],
+        // #654 — сумма/актив из универсального движка (вместо парсинга текста).
+        resolveExchangeCollected: () => ({
+          asset: "USDT",
+          amount: 500,
+          network: "TRC20",
+          amountSetThisTurn: true,
+        }),
         recordToolCalls: async (input) => {
           recorded.push(input);
         },

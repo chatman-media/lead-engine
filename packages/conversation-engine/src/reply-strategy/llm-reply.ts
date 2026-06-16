@@ -195,23 +195,15 @@ type ExchangeOrderArgs = ExchangeQuoteArgs & {
 	payoutMethod?: string;
 };
 
-type AmountCandidate = {
-	amount: number;
-	start: number;
-	score: number;
-};
-
 type ExchangeForcedReply = {
 	text: string;
 	toolCalls: ToolCallRecord[];
 };
 
+// Интент-классификатор follow-up котировки (#654: KEEP — это не сбор полей).
+// Гейтит форс-котировку вместе с amountSetThisTurn: «посчитай/курс/сколько».
 const EXCHANGE_QUOTE_INTENT_RE =
 	/курс|rate|сколько|получ(?:у|ится|ить)|итого|посчитай|рассчитай/i;
-// Любая известная котируемая валюта: тенанты на одном деплое могут работать
-// в разных валютах (per-tenant настройка), guard ловит все.
-const EXCHANGE_OUTPUT_CURRENCY_RE = ANY_QUOTE_CURRENCY_MENTION_RE;
-const EXCHANGE_CONFIRMATION_RE = /точно|верно|правильно/i;
 const EXCHANGE_ORDER_CONFIRMATION_WORDS = new Set([
 	"да",
 	"давай",
@@ -406,125 +398,6 @@ function isExchangeOrderConfirmation(text: string): boolean {
 	return seen;
 }
 
-function assetMentionRe(asset: string): RegExp {
-	switch (asset) {
-		case "USDT":
-			return /\busdt\b|юсдт/i;
-		case "BTC":
-			return /\bbtc\b|битк/i;
-		case "ETH":
-			return /\beth\b|эфир/i;
-		case "RUB":
-			return /\brub\b|руб|₽/i;
-		case "EUR":
-			return /\beur\b|евро/i;
-		case "USD":
-			return /\busd\b|доллар|бакс/i;
-		default:
-			return new RegExp(`\\b${asset}\\b`, "i");
-	}
-}
-
-/**
- * Парсинг суммы с разделителями тысяч: «20.000» / «1.500.000» / «20,000» →
- * целое (точка/запятая как группировка по 3 цифры), иначе запятая = десятичная.
- * Без этого Number("20.000") = 20 → «20.000 руб» парсилось как 20 RUB.
- */
-function parseExchangeAmountToken(raw: string): number {
-	const s = raw.replace(/\s/g, "");
-	if (/^\d{1,3}(?:[.,]\d{3})+$/.test(s)) return Number(s.replace(/[.,]/g, ""));
-	return Number(s.replace(",", "."));
-}
-
-function amountCandidates(text: string, asset: string): AmountCandidate[] {
-	const assetRe = assetMentionRe(asset);
-	const matches = [
-		...text.matchAll(/\d+(?:[ \u00a0]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g),
-	];
-	const candidates: AmountCandidate[] = [];
-	for (const match of matches) {
-		const raw = match[0];
-		const start = match.index ?? 0;
-		const end = start + raw.length;
-		const before = text.slice(Math.max(0, start - 16), start).toLowerCase();
-		if (/trc\s*$|erc\s*$|bep\s*$/i.test(before)) continue;
-		const after = text.slice(end, end + 16).toLowerCase();
-		const n = parseExchangeAmountToken(raw);
-		if (!Number.isFinite(n) || n <= 0) continue;
-
-		let score = 0;
-		const afterTrimmed = after.trimStart();
-		// «тыс»/«к»/«k» — множитель тысяч ТОЛЬКО как суффикс сразу после числа
-		// (иначе слово вроде «тысяч»/обрезанное «к» в окне даёт ложный ×1000).
-		const multiplier =
-			/^тыс/i.test(afterTrimmed) || /^[кk](?:\b|\s|$)/iu.test(afterTrimmed)
-				? 1000
-				: 1;
-		const window = `${before}${raw}${after}`;
-		if (assetRe.test(window)) score += 5;
-		if (/(?:^|\s)за\s*$/iu.test(before) || /\bза\b/iu.test(before)) score += 2;
-		if (
-			EXCHANGE_OUTPUT_CURRENCY_RE.test(after) &&
-			asset !== QUOTE_CURRENCY.code
-		)
-			score -= 4;
-		candidates.push({ amount: n * multiplier, start, score });
-	}
-	return candidates;
-}
-
-function hasExchangeStartIntent(text: string): boolean {
-	const lower = text.toLowerCase();
-	return (
-		lower.includes("обмен") ||
-		lower.includes("помен") ||
-		lower.includes("меняю") ||
-		lower.includes("отдаю") ||
-		lower.includes("нужн")
-	);
-}
-
-function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
-	const quoteIntent = EXCHANGE_QUOTE_INTENT_RE.test(text);
-	const confirmationIntent =
-		EXCHANGE_CONFIRMATION_RE.test(text) &&
-		EXCHANGE_OUTPUT_CURRENCY_RE.test(text);
-	const strongIntent = quoteIntent || confirmationIntent;
-	if (!strongIntent && !hasExchangeStartIntent(text)) return null;
-	if (EXCHANGE_KYC_TOPIC_RE.test(text) && !strongIntent) return null;
-	if (
-		EXCHANGE_KYC_TOPIC_RE.test(text) &&
-		!confirmationIntent &&
-		!EXCHANGE_OUTPUT_CURRENCY_RE.test(text)
-	) {
-		return null;
-	}
-	const lower = text.toLowerCase();
-	const asset = /\busdt\b|юсдт/.test(lower)
-		? "USDT"
-		: /\bbtc\b|битк/.test(lower)
-			? "BTC"
-			: /\beth\b|эфир/.test(lower)
-				? "ETH"
-				: /\brub\b|руб|₽/.test(lower)
-					? "RUB"
-					: /\beur\b|евро/.test(lower)
-						? "EUR"
-						: /\busd\b|доллар|бакс/.test(lower)
-							? "USD"
-							: null;
-	if (!asset) return null;
-
-	const candidates = amountCandidates(text, asset);
-	const best = candidates.sort(
-		(a, b) => b.score - a.score || a.start - b.start,
-	)[0];
-	if (!best) return null;
-
-	const network = parseNetwork(text);
-	return { asset, amount: best.amount, ...(network ? { network } : {}) };
-}
-
 /** Сеть USDT из текста (TRC20/ERC20/BEP20) или undefined. */
 function parseNetwork(text: string): string | undefined {
 	return /trc[\s-]?20|tron/i.test(text)
@@ -534,51 +407,6 @@ function parseNetwork(text: string): string | undefined {
 			: /bep[\s-]?20|bsc/i.test(text)
 				? "BEP20"
 				: undefined;
-}
-
-function parsePayoutMethod(text: string): string | undefined {
-	if (/банкомат|atm/i.test(text)) return "atm";
-	if (/офис/i.test(text)) return "office_cash";
-	if (/наличны/i.test(text)) return "office_cash";
-	if (/курьер/i.test(text)) return "courier_cash";
-	if (
-		/тайск\w*\s*банк|thai\s*bank|bangkok|kbank|scb|зачисл|банк(?:овск)?\w*\s+сч[её]т/i.test(
-			text,
-		)
-	)
-		return "thai_bank_transfer";
-	return undefined;
-}
-
-function recentExchangeOrderArgs(
-	userMessageText: string,
-	history: MessageRow[],
-): ExchangeOrderArgs | null {
-	const texts = [
-		userMessageText,
-		...history
-			.filter((message) => message.role === "user")
-			.map((message) => message.text)
-			.reverse(),
-	];
-	let payoutMethod: string | undefined;
-	let detectedPaymentMethod: string | null = null;
-	for (const text of texts) {
-		payoutMethod ??= parsePayoutMethod(text);
-		detectedPaymentMethod ??= parsePaymentMethod(text);
-		const quoteArgs = parseExchangeQuoteArgs(text);
-		if (quoteArgs) {
-			return {
-				...quoteArgs,
-				amountMode: "source_amount",
-				...(payoutMethod ? { payoutMethod } : {}),
-				...(detectedPaymentMethod
-					? { paymentMethod: detectedPaymentMethod }
-					: {}),
-			};
-		}
-	}
-	return null;
 }
 
 /**
@@ -601,39 +429,26 @@ export interface ExchangeCollectedInput {
 	network?: string;
 	payoutMethod?: string;
 	paymentMethod?: string;
+	/**
+	 * Per-turn сигнал из универсального движка (#654): сумму (amount_from) на ЭТОМ
+	 * ходе (пере)задал field-extractor. Гейт форс-котировки. См. rag-reply.
+	 */
+	amountSetThisTurn?: boolean;
+	/** Аналогично amountSetThisTurn, но для актива (asset_from). */
+	assetSetThisTurn?: boolean;
 }
 
 function buildExchangeCollected(
-	userMessageText: string,
-	history: MessageRow[],
 	injected?: ExchangeCollectedInput | null,
 ): ExchangeCollected {
-	// Универсально собранное (ctx из leadFieldValues) — ПРИОРИТЕТ; regex — fallback.
-	const userTexts = [
-		userMessageText,
-		...history
-			.filter((m) => m.role === "user")
-			.map((m) => m.text)
-			.reverse(),
-	];
-	let base: ExchangeOrderArgs | null = null;
-	for (const t of userTexts) {
-		const parsed = parseExchangeQuoteArgs(t);
-		if (parsed) {
-			base = { ...parsed, amountMode: "source_amount" };
-			break;
-		}
-	}
-	const injAsset = injected?.asset ? injected.asset.toUpperCase() : null;
-	const injNetwork = injected?.network ? injected.network.toUpperCase() : null;
-	const asset = injAsset ?? base?.asset ?? null;
-	const amount = injected?.amount ?? base?.amount ?? null;
-	const network =
-		injNetwork ?? base?.network ?? userTexts.map(parseNetwork).find(Boolean) ?? null;
-	const payoutMethod =
-		injected?.payoutMethod ?? userTexts.map(parsePayoutMethod).find(Boolean) ?? null;
-	const paymentMethod =
-		injected?.paymentMethod ?? userTexts.map(parsePaymentMethod).find(Boolean) ?? null;
+	// Источник правды — универсально собранное (ctx из leadFieldValues). #654:
+	// regex-парсинг реплик удалён, проекция теперь чистая. asset/network приводим
+	// к ВЕРХНЕМУ регистру (формат тулов/меток): инжект приходит как usdt/trc20.
+	const asset = injected?.asset ? injected.asset.toUpperCase() : null;
+	const network = injected?.network ? injected.network.toUpperCase() : null;
+	const amount = injected?.amount ?? null;
+	const payoutMethod = injected?.payoutMethod ?? null;
+	const paymentMethod = injected?.paymentMethod ?? null;
 	const missing: string[] = [];
 	if (!asset || !amount) missing.push("amount");
 	if (asset && EXCHANGE_USDT_RE.test(asset) && !network)
@@ -728,7 +543,7 @@ function maybeForceExchangePaymentMethodQuestion(
 	if (state?.stageSlug !== "quote_calculated") return null;
 	// Несерьёзные / длинные сообщения оставляем LLM
 	if (userMessageText.trim().length > 300) return null;
-	const collected = buildExchangeCollected(userMessageText, history, injected);
+	const collected = buildExchangeCollected(injected);
 	if (collected.asset !== "RUB") return null; // крипта → crypto_transfer авто
 	if (collected.paymentMethod) return null; // уже назван
 	if (!collected.payoutMethod) return null; // сперва способ выдачи
@@ -781,36 +596,25 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 		: `Посчитал — получите ${amountToThb} ${currency.code} на руки.`;
 }
 
-const EXCHANGE_PAYOUT_KNOWN_RE =
-	/банкомат|atm|офис|наличны|курьер|тайск|bangkok|kbank|scb|зачисл/iu;
 const EXCHANGE_USDT_RE = /usdt|юсдт/iu;
-const EXCHANGE_PAYMENT_SBP_RE =
-	/\bqr\b|сбп|sbp|через\s+(?:банк-?)?приложен|мобильн\w*\s*банк/iu;
-const EXCHANGE_PAYMENT_CARD_RE =
-	/картой|на\s+карт|по\s+карт|\bcard\b|перевод\w*|\bсбер\b|сбербанк|тинькоф\w*|t-?bank|\bальфа\b|райфф\w*|\bвтб\b|газпромбанк|на\s+сч[её]т|со\s+сч[её]т|банковск\w*/iu;
-
-function parsePaymentMethod(text: string): string | null {
-	if (EXCHANGE_PAYMENT_SBP_RE.test(text)) return "sbp_qr";
-	if (EXCHANGE_PAYMENT_CARD_RE.test(text)) return "card_transfer";
-	return null;
-}
 
 /**
  * Вопрос о недостающих параметрах ПОСЛЕ котировки (см. rag-reply): сеть USDT
  * (если не указана) + способ выдачи. Способ оплаты (СБП/карта) выносим в
  * отдельный шаг (maybeForceExchangePaymentMethodQuestion) — в отдельном ходу
  * нет числа котировки → guard пропускает слова qr/сбп/карта.
+ * networkKnown/payoutKnown — поля из buildExchangeCollected (#654), не regex.
  */
 function exchangeMissingFieldsQuestion(
-	userText: string,
 	asset: string,
 	networkKnown: boolean,
+	payoutKnown: boolean,
 ): string | null {
 	const parts: string[] = [];
 	if (EXCHANGE_USDT_RE.test(asset) && !networkKnown) {
 		parts.push("в какой сети будете отправлять USDT — TRC20, ERC20 или BEP20");
 	}
-	if (!EXCHANGE_PAYOUT_KNOWN_RE.test(userText)) {
+	if (!payoutKnown) {
 		parts.push(
 			"как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на тайский банковский счёт",
 		);
@@ -822,20 +626,34 @@ function exchangeMissingFieldsQuestion(
 async function maybeForceExchangeQuoteReply(
 	userMessageText: string,
 	tools: AnyRagTool[],
+	injected?: ExchangeCollectedInput | null,
 ): Promise<ExchangeForcedReply | null> {
 	const quoteTool = tools.find(
 		(tool) => tool.name === "compute_exchange_quote",
 	);
 	if (!quoteTool) return null;
-	const args = parseExchangeQuoteArgs(userMessageText);
-	if (!args) return null;
+	// Аргументы — из универсально собранного (leadFieldValues), не regex (#654).
+	const collected = buildExchangeCollected(injected);
+	if (!collected.asset || !collected.amount) return null;
+	// Считаем котировку, только если клиент назвал СВЕЖУЮ сумму этого хода
+	// (amountSetThisTurn) или это follow-up «посчитай/курс/сколько». Иначе («TRC20
+	// в банкомате» при готовой сделке) → сводка/оплата, не котировка.
+	const freshAmount =
+		injected?.amountSetThisTurn === true ||
+		EXCHANGE_QUOTE_INTENT_RE.test(userMessageText);
+	if (!freshAmount) return null;
+	const args: ExchangeQuoteArgs = {
+		asset: collected.asset,
+		amount: collected.amount,
+		...(collected.network ? { network: collected.network } : {}),
+	};
 	const result = await quoteTool.execute(args);
 	const text = forcedExchangeQuoteText(result);
 	if (!text) return null;
 	const ask = exchangeMissingFieldsQuestion(
-		userMessageText,
-		args.asset,
-		Boolean(args.network),
+		collected.asset,
+		Boolean(collected.network),
+		Boolean(collected.payoutMethod),
 	);
 	return {
 		text: ask ? `${text}\n\n${ask}` : text,
@@ -872,17 +690,39 @@ function forcedExchangeRequisitesText(result: unknown): string | null {
 	return null;
 }
 
+/**
+ * Аргументы заявки из универсально собранного (leadFieldValues), не regex (#654).
+ * paymentMethod добавляем только если собран (в отличие от rag-reply здесь нет
+ * дефолта по активу — сохраняем прежнее поведение llm-reply).
+ */
+function exchangeOrderArgsFromCollected(
+	injected?: ExchangeCollectedInput | null,
+): ExchangeOrderArgs | null {
+	const collected = buildExchangeCollected(injected);
+	if (!collected.asset || !collected.amount) return null;
+	return {
+		asset: collected.asset,
+		amount: collected.amount,
+		amountMode: "source_amount",
+		...(collected.network ? { network: collected.network } : {}),
+		...(collected.payoutMethod ? { payoutMethod: collected.payoutMethod } : {}),
+		...(collected.paymentMethod
+			? { paymentMethod: collected.paymentMethod }
+			: {}),
+	};
+}
+
 async function maybeForceExchangeOrderReply(
 	userMessageText: string,
-	history: MessageRow[],
 	tools: AnyRagTool[],
 	state: ExchangePolicyState | null,
+	injected?: ExchangeCollectedInput | null,
 ): Promise<ExchangeForcedReply | null> {
 	if (state?.stageSlug !== "quote_calculated") return null;
 	if (!isExchangeOrderConfirmation(userMessageText)) return null;
 	const orderTool = tools.find((tool) => tool.name === "create_exchange_order");
 	if (!orderTool) return null;
-	const args = recentExchangeOrderArgs(userMessageText, history);
+	const args = exchangeOrderArgsFromCollected(injected);
 	if (!args) return null;
 	const result = await orderTool.execute(args);
 	const text = forcedExchangeOrderText(result);
@@ -965,7 +805,7 @@ async function maybeForceExchangeSummaryConfirm(
 	// «да»/«ок» → дальше создаём заявку (maybeForceExchangeOrderReply), не сводку.
 	if (isExchangeOrderConfirmation(userMessageText)) return null;
 	if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(userMessageText)) return null;
-	const collected = buildExchangeCollected(userMessageText, history, injected);
+	const collected = buildExchangeCollected(injected);
 	if (collected.missing.length > 0) return null;
 	if (!collected.asset || !collected.amount) return null;
 	if (exchangeSummaryAlreadyShown(history)) return null;
@@ -1213,11 +1053,15 @@ export class LlmReplyStrategy implements ReplyStrategy {
 				(await maybeForceExchangeCancelReply(input.userMessageText, tools)) ??
 				(await maybeForceExchangeOrderReply(
 					input.userMessageText,
-					history,
 					tools,
 					exchangePolicyState,
+					exchangeCollected,
 				)) ??
-				(await maybeForceExchangeQuoteReply(input.userMessageText, tools)) ??
+				(await maybeForceExchangeQuoteReply(
+					input.userMessageText,
+					tools,
+					exchangeCollected,
+				)) ??
 				maybeForceExchangePaymentMethodQuestion(
 					input.userMessageText,
 					history,
@@ -1327,9 +1171,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
 		// Грунтинг exchange-состояния: что клиент уже назвал (сумма/направление/
 		// выдача/оплата). Идёт в промпт — LLM не теряет сумму и не переспрашивает.
 		const exchangeGrounding = isExchange
-			? renderExchangeCollectedGrounding(
-					buildExchangeCollected(input.userMessageText, history, exchangeCollected),
-				)
+			? renderExchangeCollectedGrounding(buildExchangeCollected(exchangeCollected))
 			: null;
 		const systemPrompt = [
 			LLM_REPLY_BASE_SYSTEM_PROMPT,
