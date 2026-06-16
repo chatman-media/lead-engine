@@ -181,6 +181,14 @@ const NOTIF_MAP: Record<string, NotifMeta> = {
     severity: "important",
     title: "Ошибка отправки провайдеру",
   },
+  // Курсовой guard заблокировал котировку (отклонение от фида / протухший фид).
+  // Раньше event эмитился, но отсутствовал в NOTIF_MAP → владелец не получал
+  // алерт (ни в in-app колокол, ни в Telegram), хотя задумано «не тихий warn».
+  exchange_rate_guard_tripped: {
+    topic: "system",
+    severity: "important",
+    title: "Курс вне коридора — котировка заблокирована",
+  },
   high_value_deal: { topic: "orders", severity: "important", title: "Крупная сделка" },
 };
 
@@ -208,6 +216,16 @@ export function notificationEventToInformer(
   }
   if (typeof event.data.action === "string" && event.data.action) {
     parts.push(event.data.action);
+  }
+  if (typeof event.data.asset === "string" && event.data.asset) {
+    const net =
+      typeof event.data.network === "string" && event.data.network
+        ? ` (${event.data.network})`
+        : "";
+    parts.push(`${event.data.asset}${net}`);
+  }
+  if (event.data.deviationPct !== undefined && event.data.deviationPct !== null) {
+    parts.push(`Отклонение: ${event.data.deviationPct}%`);
   }
   if (typeof event.data.reason === "string" && event.data.reason) {
     parts.push(`Причина: ${event.data.reason}`);
