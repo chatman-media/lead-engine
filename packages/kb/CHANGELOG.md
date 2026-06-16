@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.14.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.14.0...@chatman-media/kb-v1.14.1) (2026-06-16)
+
+
+### Performance Improvements
+
+* **prompt:** вынести KB-контекст в хвост сообщений (кеш истории) ([65572b3](https://github.com/chatman-media/lead-engine/commit/65572b3f6baf1ba778e55237121e8a89448191f3)), closes [674/#676](https://github.com/chatman-media/lead-engine/issues/676) [#665](https://github.com/chatman-media/lead-engine/issues/665) [#678](https://github.com/chatman-media/lead-engine/issues/678)
+
 # [@chatman-media/kb-v1.14.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.13.3...@chatman-media/kb-v1.14.0) (2026-06-16)
 
 
