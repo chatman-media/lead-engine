@@ -1,8 +1,22 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { FUNNEL_STAGES } from "@chatman-media/kb";
 import { directorHooks } from "@chatman-media/storage";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+
+const VALID_STAGES = new Set<string>(FUNNEL_STAGES);
+
+/**
+ * Нормализует applicableStages из тела запроса в JSON-строку для хранения:
+ * оставляет только валидные slug'и воронки (FUNNEL_STAGES), дедуп, порядок.
+ * Невалидный/непереданный вход → "[]" (= применять на всех стадиях).
+ */
+function parseApplicableStages(raw: unknown): string {
+  if (!Array.isArray(raw)) return "[]";
+  const valid = raw.filter((s): s is string => typeof s === "string" && VALID_STAGES.has(s));
+  return JSON.stringify([...new Set(valid)]);
+}
 
 /**
  * Director hooks — tenant-specific persuasion scripts.
@@ -57,6 +71,7 @@ export function makeAdminDirectorHooksRoutes(opts: AdminDirectorHooksRoutesOpts)
       triggerHint?: unknown;
       isActive?: unknown;
       position?: unknown;
+      applicableStages?: unknown;
     };
     try {
       payload = (await c.req.json()) as typeof payload;
@@ -75,6 +90,7 @@ export function makeAdminDirectorHooksRoutes(opts: AdminDirectorHooksRoutesOpts)
         : null;
     const isActive = typeof payload.isActive === "boolean" ? payload.isActive : true;
     const position = typeof payload.position === "number" ? payload.position : 0;
+    const applicableStagesJson = parseApplicableStages(payload.applicableStages);
     const nowEpoch = Math.floor(Date.now() / 1000);
 
     const [inserted] = await withTenant(opts.db, tenantId, async (tx) =>
@@ -85,6 +101,7 @@ export function makeAdminDirectorHooksRoutes(opts: AdminDirectorHooksRoutesOpts)
           name,
           body,
           triggerHint,
+          applicableStagesJson,
           isActive,
           position,
           createdAt: nowEpoch,
@@ -154,6 +171,7 @@ export function makeAdminDirectorHooksRoutes(opts: AdminDirectorHooksRoutesOpts)
       body?: unknown;
       triggerHint?: unknown;
       isActive?: unknown;
+      applicableStages?: unknown;
     };
     try {
       payload = (await c.req.json()) as typeof payload;
@@ -167,6 +185,7 @@ export function makeAdminDirectorHooksRoutes(opts: AdminDirectorHooksRoutesOpts)
       body?: string;
       triggerHint?: string | null;
       isActive?: boolean;
+      applicableStagesJson?: string;
     } = { updatedAt: Math.floor(Date.now() / 1000) };
 
     if (typeof payload.name === "string" && payload.name.trim().length > 0) {
@@ -183,6 +202,9 @@ export function makeAdminDirectorHooksRoutes(opts: AdminDirectorHooksRoutesOpts)
     }
     if (typeof payload.isActive === "boolean") {
       setValues.isActive = payload.isActive;
+    }
+    if ("applicableStages" in payload) {
+      setValues.applicableStagesJson = parseApplicableStages(payload.applicableStages);
     }
 
     const [updated] = await withTenant(opts.db, tenantId, async (tx) =>

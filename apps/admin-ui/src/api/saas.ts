@@ -2026,6 +2026,8 @@ export interface DirectorHook {
   name: string;
   body: string;
   triggerHint: string | null;
+  /** JSON-массив slug'ов стадий. '[]' = на всех стадиях. */
+  applicableStagesJson: string;
   isActive: boolean;
   position: number;
   createdAt: number;
@@ -2036,6 +2038,8 @@ export interface CreateDirectorHookInput {
   name: string;
   body: string;
   triggerHint?: string;
+  /** Стадии воронки; пусто = на всех. */
+  applicableStages?: string[];
   isActive?: boolean;
 }
 
@@ -2043,6 +2047,7 @@ export interface UpdateDirectorHookInput {
   name?: string;
   body?: string;
   triggerHint?: string | null;
+  applicableStages?: string[];
   isActive?: boolean;
 }
 

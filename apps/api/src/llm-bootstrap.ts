@@ -773,6 +773,7 @@ export function makeDirectorHooksResolver(
 				name: directorHooks.name,
 				body: directorHooks.body,
 				triggerHint: directorHooks.triggerHint,
+				applicableStagesJson: directorHooks.applicableStagesJson,
 			})
 			.from(directorHooks)
 			.where(
@@ -782,7 +783,19 @@ export function makeDirectorHooksResolver(
 				),
 			)
 			.orderBy(asc(directorHooks.position), asc(directorHooks.id));
-		return rows;
+		return rows.map((r) => ({
+			name: r.name,
+			body: r.body,
+			triggerHint: r.triggerHint,
+			applicableStages: ((): readonly string[] => {
+				try {
+					const parsed = JSON.parse(r.applicableStagesJson) as unknown;
+					return Array.isArray(parsed) ? (parsed.filter((s) => typeof s === "string") as string[]) : [];
+				} catch {
+					return [];
+				}
+			})(),
+		}));
 	};
 }
 

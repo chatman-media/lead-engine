@@ -724,6 +724,8 @@ export const directorHooks = pgTable("director_hooks", {
   name: text("name").notNull(),
   body: text("body").notNull(),
   triggerHint: text("trigger_hint"),
+  /** JSON-массив slug'ов воронки. '[]' = применять на всех стадиях (как skills). */
+  applicableStagesJson: text("applicable_stages_json").notNull().default("[]"),
   isActive: boolean("is_active").notNull().default(true),
   position: integer("position").notNull().default(0),
   createdAt: integer("created_at").notNull().default(epochNow()),

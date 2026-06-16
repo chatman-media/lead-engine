@@ -144,4 +144,31 @@ describe("admin-director-hooks CRUD", () => {
     expect((await req("DELETE", `${BASE}/0`)).status).toBe(400);
     expect(((await (await req("GET", BASE)).json()) as { items: unknown[] }).items).toEqual([]);
   });
+
+  it("applicableStages: round-trip + фильтрация невалидных стадий", async () => {
+    if (!sql) return;
+    // Список пуст после DELETE-теста. Создаём с валидной + мусорной стадией.
+    const created = (await (
+      await req("POST", BASE, {
+        name: "Только закрытие",
+        body: "дави на закрытии",
+        applicableStages: ["close", "bogus_stage", "qualify"],
+      })
+    ).json()) as { id: number; applicableStagesJson: string };
+    // Мусор отфильтрован, валидные сохранены.
+    expect(JSON.parse(created.applicableStagesJson)).toEqual(["close", "qualify"]);
+
+    // PATCH сужает до одной стадии.
+    expect((await req("PATCH", `${BASE}/${created.id}`, { applicableStages: ["pitch"] })).status).toBe(200);
+    const after = ((await (await req("GET", BASE)).json()) as {
+      items: Array<{ applicableStagesJson: string }>;
+    }).items[0]!;
+    expect(JSON.parse(after.applicableStagesJson)).toEqual(["pitch"]);
+
+    // Дефолт без поля → '[]' (на всех стадиях).
+    const plain = (await (
+      await req("POST", BASE, { name: "Везде", body: "всегда" })
+    ).json()) as { applicableStagesJson: string };
+    expect(plain.applicableStagesJson).toBe("[]");
+  });
 });
