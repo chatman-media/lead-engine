@@ -58,6 +58,14 @@ describe("buildSystemPrompt", () => {
     expect(p).not.toContain("ЖИВАЯ РЕЧЬ");
   });
 
+  it("instructs grounding on cross-language CONTEXT and gender-neutral self-reference", () => {
+    const p = buildSystemPrompt({ name: "Бот", role: "assistant" }, "CTX");
+    // Кросс-язык: EN-источник не должен валиться в NO_CONTEXT только из-за языка.
+    expect(p).toContain("на ДРУГОМ ЯЗЫКЕ");
+    // Нейтральный род: не «посчитал»/«готов», а нейтральные формы.
+    expect(p).toContain("краткие прилагательные");
+  });
+
   it("persona.facts → блок ЛИЧНЫЕ ФАКТЫ (пустые отброшены)", () => {
     const p = buildSystemPrompt(
       { name: "Аня", role: "human", facts: { city: "Сочи", empty: "  " } },
