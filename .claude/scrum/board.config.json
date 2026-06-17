@@ -1,0 +1,29 @@
+{
+  "owner": "chatman-media",
+  "repo": "chatman-media/lead-engine",
+  "projectNumber": 5,
+  "projectId": "PVT_kwHOAA16T84BZ6PX",
+  "statusFieldId": "PVTSSF_lAHOAA16T84BZ6PXzhU1lmk",
+  "status": {
+    "Backlog": "3b52d1d6",
+    "Todo": "f0253a56",
+    "In Progress": "be5dddaa",
+    "In Review": "5217bc35",
+    "Done": "e0efe946"
+  },
+  "defaultBase": "main",
+  "sprint": {
+    "defaultCardLimit": 3,
+    "maxParallel": 3
+  },
+  "qa": {
+    "commands": [
+      "bun install",
+      "bun run typecheck",
+      "bun run check",
+      "bun run test"
+    ]
+  },
+  "autoMerge": false,
+  "_notes": "ID полей/опций получены через `gh project field-list 5 --owner chatman-media`. Если пересоздашь колонки — обнови status/*. qa.commands — что гоняет QA-агент на ветке PR (твой будущий тестовый стенд подключается сюда). autoMerge=false: PR мёржит человек."
+}
