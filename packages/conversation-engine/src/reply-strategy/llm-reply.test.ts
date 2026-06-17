@@ -3,6 +3,7 @@ import { type AnyRagTool, makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
+import { resolveQuoteCurrency } from "../exchange-quote-currency.ts";
 import { normalizeReplyStrategyResult } from "../process-inbound.ts";
 import { EXCHANGE_KYC_FALLBACK } from "./exchange-policy-guard.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
@@ -1001,6 +1002,36 @@ describe("LlmReplyStrategy", () => {
 		);
     expect(chat.lastCall).toBeNull();
     expect(recorded).toHaveLength(0);
+  });
+
+  it("exchange: KYC handoff uses per-tenant quote currency (THB → батов, not песо)", async () => {
+    const chat = new CapturingChat("ignored");
+    const repo = fakeMessagesRepo([
+      row(1, "user", "Какие документы нужны для верификации?"),
+    ]);
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveTools: () => [exchangeQuoteTool()],
+        // THB-тенант: форс-текст KYC должен говорить «батов», а не платформенный «песо».
+        resolveExchangeQuoteCurrency: () => resolveQuoteCurrency("THB"),
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "Какие документы нужны для верификации?",
+    });
+
+    const text = firstReplyText(result);
+    expect(text).toContain("способ получения батов");
+    expect(text).not.toContain("песо");
   });
 
   it("exchange: KYC confirmation wording does not trigger quote preflight", async () => {

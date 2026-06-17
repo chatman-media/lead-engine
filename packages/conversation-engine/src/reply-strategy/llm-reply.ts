@@ -18,6 +18,7 @@ import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import {
 	ANY_QUOTE_CURRENCY_MENTION_RE,
 	QUOTE_CURRENCY,
+	type QuoteCurrency,
 	resolveQuoteCurrency,
 } from "../exchange-quote-currency.ts";
 import type {
@@ -140,6 +141,15 @@ export interface LlmReplyStrategyOpts {
 		conversationId: number;
 		contactId: number;
 	}) => Promise<ExchangeCollectedInput | null> | ExchangeCollectedInput | null;
+	/**
+	 * Per-tenant котируемая валюта (exchange_settings.quote_asset) для форс-текстов
+	 * обмена (напр. KYC-handoff). null/absent → платформенный QUOTE_CURRENCY.
+	 */
+	resolveExchangeQuoteCurrency?: (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+	}) => Promise<QuoteCurrency | null> | QuoteCurrency | null;
 	/** false → exchange response guard bypassed for this tenant. Default: true. */
 	resolveExchangeResponseGuardEnabled?: (input: {
 		tenantId: number;
@@ -256,11 +266,15 @@ const EXCHANGE_ORDER_CONFIRMATION_WORDS = new Set([
 const EXCHANGE_KYC_TOPIC_RE = /верификац|kyc|документ|паспорт|видео|кружок/i;
 const EXCHANGE_KYC_MATERIAL_SENT_RE =
 	/(?:отправил|отправила|прислал|прислала|загрузил|загрузила|вот|держи|лови)[^.!\n]{0,80}(?:видео|кружок|документ|паспорт)|(?:видео|кружок|документ|паспорт)[^.!\n]{0,80}(?:отправил|отправила|прислал|прислала|загрузил|загрузила)/i;
-const EXCHANGE_KYC_HANDOFF_TEXT = [
-	"Да. Перед реквизитами нужна верификация клиента.",
-	"Пришлите короткое видео: лицо и документ в кадре. Оператор или внешний сервис проведёт проверку личности.",
-	`После проверки продолжим заявку: способ получения ${QUOTE_CURRENCY.wordGen}, реквизиты и финальное подтверждение.`,
-].join("\n");
+// Валюта выдачи — per-tenant (exchange_settings.quote_asset), не платформенный
+// дефолт: иначе THB-тенант видел «способ получения песо».
+function buildExchangeKycHandoffText(currency: QuoteCurrency): string {
+	return [
+		"Да. Перед реквизитами нужна верификация клиента.",
+		"Пришлите короткое видео: лицо и документ в кадре. Оператор или внешний сервис проведёт проверку личности.",
+		`После проверки продолжим заявку: способ получения ${currency.wordGen}, реквизиты и финальное подтверждение.`,
+	].join("\n");
+}
 
 function exchangeReplyOutput(input: {
 	channelId: number;
@@ -841,10 +855,11 @@ async function maybeForceExchangeSummaryConfirm(
 
 function maybeForceExchangeKycReply(
 	userMessageText: string,
+	currency: QuoteCurrency,
 ): ExchangeForcedReply | null {
 	if (!EXCHANGE_KYC_TOPIC_RE.test(userMessageText)) return null;
 	if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(userMessageText)) return null;
-	return { text: EXCHANGE_KYC_HANDOFF_TEXT, toolCalls: [] };
+	return { text: buildExchangeKycHandoffText(currency), toolCalls: [] };
 }
 
 // Числа сетей (TRC20/ERC20/BEP20) — буква перед «20» → не парсятся как сумма
@@ -1059,6 +1074,16 @@ export class LlmReplyStrategy implements ReplyStrategy {
 						return null;
 					})
 				: null;
+		const exchangeQuoteCurrency =
+			(isExchange && this.opts.resolveExchangeQuoteCurrency
+				? await Promise.resolve(
+						this.opts.resolveExchangeQuoteCurrency({
+							tenantId,
+							conversationId: input.conversationId,
+							contactId: input.contactId,
+						}),
+					).catch(() => null)
+				: null) ?? QUOTE_CURRENCY;
 		const forcedExchangeReply = isExchange
 			? (maybeForceExchangeUnsupportedNetworkReply(input.userMessageText) ??
 				(await maybeForceExchangeCancelReply(input.userMessageText, tools)) ??
@@ -1086,7 +1111,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					exchangePolicyState,
 					exchangeCollected,
 				)) ??
-				maybeForceExchangeKycReply(input.userMessageText))
+				maybeForceExchangeKycReply(input.userMessageText, exchangeQuoteCurrency))
 			: null;
 		const exchangeGuardEnabled =
 			isExchange && this.opts.resolveExchangeResponseGuardEnabled
