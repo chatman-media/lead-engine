@@ -113,36 +113,11 @@ DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test --coverage
 
 ### Integration test pattern
 
-All integration tests in `apps/api/src/routes/*.integration.test.ts` follow this pattern:
-
-```ts
-const ownerUrl = process.env.DATABASE_URL;
-const dbName = `lead_engine_<feature>_${Math.random().toString(36).slice(2, 10)}`;
-
-beforeAll(async () => {
-  if (!ownerUrl) return;                          // skip if no DB
-  const probe = await tryConnectToPg(ownerUrl);
-  if (!probe) return;
-  await probe.end({ timeout: 0 });
-
-  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-  sql = postgres(testUrl, { max: 3, onnotice: () => {} });
-  await applyAllMigrations(sql, migrationsDir);
-  db = drizzle(sql, { schema });
-
-  // Build isolated Hono app — same route wiring as apps/api/src/index.ts
-  app = new Hono();
-  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-  app.route("/", makeMyFeatureRoutes({ db }));
-}, 30_000);
-
-afterAll(async () => {
-  if (sql) { await sql.end({ timeout: 0 }).catch(() => {}); sql = null; }
-}, 10_000);
-```
-
-Key: each test file gets its own isolated Postgres database — no shared state between suites.
+Each integration test (`apps/api/src/routes/*.integration.test.ts`) spins up its own
+isolated Postgres DB via `createIsolatedDb`, applies all migrations, and wires an
+isolated Hono app with the same routes as `apps/api/src/index.ts` — no shared state
+between suites. Full boilerplate:
+[TESTING.md → Паттерн интеграционного теста](docs/engineering/TESTING.md).
 
 ---
 
@@ -232,37 +207,10 @@ apps/worker         → conversation-engine, channel-*
 
 ## Key schema tables
 
-```sql
-tenants             — slug, plan, status (active/suspended)
-admins              — email, role (superadmin/manager), tenantId
-admin_invites       — email, token, role, expiresAt, usedAt
-password_resets     — adminId, token (64 hex), expiresAt, usedAt
-channels            — tenantId, kind (telegram_bot/telegram_userbot/whatsapp/facebook/vk/max/web), status
-contacts            — tenantId (channel-agnostic person)
-channel_identities  — contactId, channelId, externalUserId
-conversations       — tenantId, contactId, channelId, mode (ai/human)
-messages            — conversationId, role (user/assistant/human), content
-leads               — tenantId, userId (contactId), state, stageDefinitionId
-lead_field_values   — leadId, fieldId, value
-funnels             — tenantId, slug, verticalTemplateId, stagesJson
-stage_definitions   — tenantId, funnelId, slug, kind (intake/active/terminal_won/terminal_lost), phase (qualify/offer/clear/fulfill — костяк)
-kb_documents        — tenantId, title, contentHash (dedup)
-kb_chunks           — documentId, embedding (vector), text, topic
-outbound_queue      — tenantId, channelId, payloadJson, scheduledAt, sentAt (SKIP LOCKED)
-tenant_secrets      — tenantId, key, value (AES-256-GCM encrypted)
-llm_provider_configs — tenantId, purpose (chat/embed/vision/judge/reranker/transcribe), provider, model
-audit_log           — tenantId, adminId, action, resourceType, resourceId, diff
-message_templates   — tenantId, name, body
-referral_codes      — tenantId, code, usageCount
-exchange_rates      — tenantId, asset, network, baseRate, marginPct, feeFixedThb (обменник)
-exchange_rate_tiers — tenantId, asset/quoteAsset/network, rangeBasis (target_thb/source_amount), minAmount/maxAmount, marketRate, displayRate, deviationPct, isActive, approvedByAdminId (approved объёмные ступени)
-exchange_orders     — tenantId, leadId, status, amounts, payment rails
-service_catalog_items — tenantId, slug, routeType (manual/funnel/partner_service/webhook), target refs
-partners            — tenantId, provider/partner contact data, defaultCommissionPct, settlementCurrency
-partner_services    — tenantId, partnerId, name, category, funnel/stage refs, commissionPct
-partner_deals       — tenantId, partnerId, serviceId, leadId, status, gross/commission, handoff mode, settlementId
-partner_settlements — tenantId, partnerId, periodStart/periodEnd, totalGross/totalCommission, currency, status (draft/issued/paid/cancelled)
-```
+Полный список таблиц вынесен в
+[ARCHITECTURE.md → Schema tables](docs/engineering/ARCHITECTURE.md#schema-tables-full-reference)
+(источник истины — `packages/storage/src/schema.ts`). Enum CHECK-ограничения,
+которые ломают вставку при нарушении:
 
 **`stage_definitions.kind` enum:** only `'intake' | 'active' | 'terminal_won' | 'terminal_lost'` — CHECK constraint will reject anything else.
 
