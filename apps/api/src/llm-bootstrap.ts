@@ -68,6 +68,7 @@ import type { VerticalTemplate } from "@chatman-media/verticals";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import type { ApiConfig } from "./config.ts";
 import { findActiveOrder, type OrderRow } from "./lib/exchange/orders.ts";
+import { getTenantQuoteCurrency } from "./lib/exchange/rates.ts";
 import {
 	hasActiveExchangeRates,
 	isKnownExchangeStage,
@@ -652,6 +653,15 @@ export function makeExchangeCollectedResolver(db: Db) {
 			turnStartedAt,
 		).catch(() => null);
 	};
+}
+
+/**
+ * Резолвер per-tenant котируемой валюты (exchange_settings.quote_asset) для
+ * форс-текстов обмена (KYC-handoff и т.п.), чтобы THB-тенант не получал «песо».
+ */
+export function makeExchangeQuoteCurrencyResolver(db: Db) {
+	return (input: { tenantId: number }) =>
+		getTenantQuoteCurrency(db, input.tenantId);
 }
 
 export interface ReplyStrategyBundle {
@@ -1257,6 +1267,7 @@ export function makeReplyStrategy(
 	});
 	const resolveExchangePolicyState = makeExchangePolicyStateResolver(db);
 	const resolveExchangeCollected = makeExchangeCollectedResolver(db);
+	const resolveExchangeQuoteCurrency = makeExchangeQuoteCurrencyResolver(db);
 	const resolveExchangeResponseGuardEnabled =
 		makeExchangeResponseGuardFlagResolver(db);
 	const resolveExchangeCustomerNoticeEnabled =
@@ -1281,6 +1292,7 @@ export function makeReplyStrategy(
 					resolveTools,
 					resolveExchangePolicyState,
 					resolveExchangeCollected,
+					resolveExchangeQuoteCurrency,
 					resolveExchangeResponseGuardEnabled,
 					resolveExchangeCustomerNoticeEnabled,
 					resolveHistoryLimit,
