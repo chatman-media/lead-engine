@@ -430,7 +430,12 @@ export function SaasConversations() {
   const [filterQ, setFilterQ] = useState("");
   const [filterQDebounced, setFilterQDebounced] = useState("");
   const filterQTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Прилипаем к низу только если пользователь уже внизу — иначе не дёргаем его,
+  // когда он отскроллил вверх читать историю (поллинг идёт каждые 5с).
+  const stickToBottomRef = useRef(true);
+  const prevConvIdRef = useRef<number | null>(null);
+  const prevMsgCountRef = useRef(0);
   const [detail, setDetail] = useState<{
     conversation: ConversationDetail;
     messages: MessageRow[];
@@ -837,9 +842,40 @@ export function SaasConversations() {
     }
   }
 
+  // Автоскролл к низу: при смене диалога — мгновенно, при новом сообщении —
+  // плавно и только если пользователь уже был внизу. Скроллим сам контейнер
+  // (не scrollIntoView), чтобы в узком режиме не дёргать скролл всего окна.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [detail?.messages]);
+    const messages = detail?.messages;
+    const convId = detail?.conversation.id ?? null;
+    if (!messages) {
+      prevConvIdRef.current = null;
+      prevMsgCountRef.current = 0;
+      return;
+    }
+    const convChanged = convId !== prevConvIdRef.current;
+    const countIncreased = messages.length > prevMsgCountRef.current;
+    prevConvIdRef.current = convId;
+    prevMsgCountRef.current = messages.length;
+
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    if (convChanged) {
+      el.scrollTop = el.scrollHeight;
+      stickToBottomRef.current = true;
+      return;
+    }
+    if (countIncreased && stickToBottomRef.current) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+  }, [detail?.messages, detail?.conversation.id]);
+
+  function handleMessagesScroll() {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    // «Внизу» с допуском, чтобы инерция/дробные пиксели не сбивали флаг.
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -1331,7 +1367,11 @@ export function SaasConversations() {
                 </div>
               )}
 
-              <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+              <div
+                ref={messagesContainerRef}
+                onScroll={handleMessagesScroll}
+                className="flex flex-1 flex-col gap-3 overflow-y-auto p-4"
+              >
                 {detail.messages.length === 0 ? (
                   <p className="text-center text-sm text-muted-foreground">Сообщений нет</p>
                 ) : (
@@ -1427,7 +1467,6 @@ export function SaasConversations() {
                     );
                   })
                 )}
-                <div ref={messagesEndRef} />
               </div>
 
               <form onSubmit={handleReply} className="flex items-end gap-2 border-t p-3">
