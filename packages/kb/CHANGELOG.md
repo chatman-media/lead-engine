@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.14.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.14.1...@chatman-media/kb-v1.14.2) (2026-06-17)
+
+
+### Bug Fixes
+
+* **exchange:** качество ответов бота — род, guard, сеть, кросс-язык грунтинг ([c183b74](https://github.com/chatman-media/lead-engine/commit/c183b74bed0965d6eb623e355eb25d6338efadf2))
+
 # [@chatman-media/kb-v1.14.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.14.0...@chatman-media/kb-v1.14.1) (2026-06-16)
 
 
