@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.21.3](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.2...@chatman-media/conversation-engine-v3.21.3) (2026-06-17)
+
+
+### Bug Fixes
+
+* **exchange:** качество ответов бота — род, guard, сеть, кросс-язык грунтинг ([c183b74](https://github.com/chatman-media/lead-engine/commit/c183b74bed0965d6eb623e355eb25d6338efadf2))
+
 # [@chatman-media/conversation-engine-v3.21.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.1...@chatman-media/conversation-engine-v3.21.2) (2026-06-16)
 
 
