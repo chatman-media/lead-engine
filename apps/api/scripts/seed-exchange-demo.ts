@@ -62,9 +62,11 @@ import {
 	serviceCatalogItems,
 	stageDefinitions,
 	stageFields,
+	styles,
 	tenants,
 } from "@chatman-media/storage";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { fastTraderPas } from "@chatman-media/vertical-exchange";
+import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { hashPassword } from "../src/lib/auth.ts";
@@ -1210,6 +1212,74 @@ async function seedDirectorHooks(input: {
 	return hooks.length;
 }
 
+// Sales-стиль обмена. БЕЗ активного стиля resolveStyle тенанта = null → бот
+// падает на legacy buildSystemPrompt (рекрутинговый), минуя sales-путь
+// composeSystemPrompt (stage-grounding, hooks, few-shot). Сеем fastTraderPas
+// активным. Slug скоупим тенантом: uniq_styles_active_slug и uniq_styles_slug_version
+// глобальны (по slug), иначе второй тенант с тем же стилем падал бы на конфликте.
+// default_style_id воронки тоже проставляем (forward-compat; роутинг идёт по
+// активной styles-строке тенанта). Идемпотентно: upsert по (tenantId, slug) среди
+// живых (deleted_at IS NULL).
+async function seedSalesStyle(input: {
+	db: Db;
+	tenantId: number;
+	exchangeFunnelId: number;
+	now: number;
+}): Promise<{ styleId: number; slug: string }> {
+	const slug = `${fastTraderPas.slug}-${input.tenantId}`;
+	const configJson = JSON.stringify(fastTraderPas);
+	return withTenant(input.db, input.tenantId, async (tx) => {
+		const [existing] = await tx
+			.select({ id: styles.id })
+			.from(styles)
+			.where(
+				and(
+					eq(styles.tenantId, input.tenantId),
+					eq(styles.slug, slug),
+					isNull(styles.deletedAt),
+				),
+			)
+			.limit(1);
+		let styleId: number;
+		if (existing) {
+			await tx
+				.update(styles)
+				.set({
+					displayName: fastTraderPas.displayName,
+					configJson,
+					isActive: true,
+				})
+				.where(eq(styles.id, existing.id));
+			styleId = existing.id;
+		} else {
+			const [inserted] = await tx
+				.insert(styles)
+				.values({
+					tenantId: input.tenantId,
+					slug,
+					displayName: fastTraderPas.displayName,
+					configJson,
+					isActive: true,
+					version: 1,
+					createdAt: input.now,
+				})
+				.returning({ id: styles.id });
+			if (!inserted) throw new Error("style insert failed");
+			styleId = inserted.id;
+		}
+		await tx
+			.update(funnels)
+			.set({ defaultStyleId: styleId, updatedAt: input.now })
+			.where(
+				and(
+					eq(funnels.tenantId, input.tenantId),
+					eq(funnels.id, input.exchangeFunnelId),
+				),
+			);
+		return { styleId, slug };
+	});
+}
+
 // KB-сэмплы трёх сервисов: каждый dir сидится глобально-скоупленными доками
 // (бот видит их во всех воронках; маршрут по воронкам решает интент-роутер).
 const KB_SAMPLE_SETS: Array<{ dir: string; topic: string; files: string[] }> = [
@@ -1694,6 +1764,12 @@ async function main() {
 			now,
 		});
 		const directorHookCount = await seedDirectorHooks({ db, tenantId, now });
+		const salesStyle = await seedSalesStyle({
+			db,
+			tenantId,
+			exchangeFunnelId: exchangeFunnel.funnelId,
+			now,
+		});
 		const currency = resolveQuoteCurrency(args.quoteAsset);
 		const fixtureResult = await seedExchangeFixtures({
 			db,
@@ -1757,6 +1833,7 @@ async function main() {
 					),
 					serviceCatalogItems: catalogItems,
 					directorHooks: directorHookCount,
+					salesStyle: { id: salesStyle.styleId, slug: salesStyle.slug },
 					fixtures: fixtureResult,
 					quote: {
 						asset: currency.code,
