@@ -37,7 +37,13 @@ coverage/
 # Raw KB export — the curated/extracted markdown is what we ingest, the
 # 5MB+ JSON dump it was generated from doesn't need to live in git.
 apps/bot/kb/result.json
-.claude/
+# Claude Code: ignore personal/runtime config, but track team-shared setup
+# (project hooks, subagents, and skills) so the whole team gets the same tools.
+.claude/*
+!.claude/settings.json
+!.claude/agents/
+!.claude/skills/
+!.claude/commands/
 TODO.md
 
 # Local raw Telegram exports used only to derive redacted eval fixtures.
