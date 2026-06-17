@@ -464,7 +464,7 @@ async function maybeForceExchangeQuoteReply(input: {
 	// Считаем котировку, только если клиент назвал СВЕЖУЮ сумму этого хода
 	// (amountSetThisTurn) или это follow-up «посчитай/пересчитай». «TRC20 в
 	// банкомате» при готовой сделке (суммы этого хода нет) → не котировка, а
-	// сводка/оплата. Заменяет старый latestExchangeQuoteArgs(history,text).
+	// сводка/оплата (#654: сумма берётся из injected, не из истории).
 	const freshAmount =
 		input.injected?.amountSetThisTurn === true ||
 		EXCHANGE_QUOTE_FOLLOWUP_RE.test(input.userMessageText);
@@ -649,7 +649,7 @@ function maybeForceExchangePaymentMethodQuestion(input: {
 /**
  * Аргументы заявки из универсально собранного (leadFieldValues), не regex (#654).
  * paymentMethod: берём из собранного; иначе дефолт по активу (RUB → bank_transfer,
- * крипта → crypto_transfer) — как раньше давал parseExchangeSourceArgs.
+ * крипта → crypto_transfer).
  */
 function exchangeOrderArgsFromCollected(
 	injected?: ExchangeCollectedInput | null,

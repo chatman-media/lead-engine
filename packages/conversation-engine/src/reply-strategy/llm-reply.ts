@@ -412,17 +412,6 @@ function isExchangeOrderConfirmation(text: string): boolean {
 	return seen;
 }
 
-/** Сеть USDT из текста (TRC20/ERC20/BEP20) или undefined. */
-function parseNetwork(text: string): string | undefined {
-	return /trc[\s-]?20|tron/i.test(text)
-		? "TRC20"
-		: /erc[\s-]?20/i.test(text)
-			? "ERC20"
-			: /bep[\s-]?20|bsc/i.test(text)
-				? "BEP20"
-				: undefined;
-}
-
 /**
  * Единый снимок собранных полей заявки из реплик клиента (см. rag-reply).
  * Источник правды для грунтинга промпта, вопроса оплаты и сводки.
@@ -867,8 +856,15 @@ function maybeForceExchangeKycReply(
 const EXCHANGE_SUPPORTED_NETWORKS_REPLY =
 	"Эту сеть, к сожалению, не поддерживаем. Доступны TRC20, ERC20 и BEP20 — в какой из них вам удобно отправить?";
 
+// Интент-классификатор поддерживаемой сети (#654: КЛАССИФИКАТОР, не сбор полей).
+// Копия паттерна rag-reply.ts (единый источник истины о поддерживаемых сетях):
+// исключает форс-ответ про неподдерживаемую сеть, когда клиент упомянул TRC20/
+// ERC20/BEP20/Tron/BSC. Сбор поля network идёт ТОЛЬКО из injected (exchangeCollected).
+const EXCHANGE_SUPPORTED_NETWORK_RE =
+	/trc[\s-]?20|tron|erc[\s-]?20|bep[\s-]?20|\bbsc\b/iu;
+
 // Сети, про которые часто спрашивают, но мы их НЕ принимаем (поддерживаем только
-// TRC20/ERC20/BEP20, см. parseNetwork). Latin \b ненадёжен для кириллицы → lookaround.
+// TRC20/ERC20/BEP20). Latin \b ненадёжен для кириллицы → lookaround.
 const EXCHANGE_UNSUPPORTED_NETWORK_RE =
 	/(?<![a-zа-яё])(?:ton|тон|solana|солана|polygon|полигон|matic|матик|avalanche|avax|arbitrum|арбитрум|optimism)(?![a-zа-яё])/iu;
 
@@ -882,7 +878,9 @@ function maybeForceExchangeUnsupportedNetworkReply(
 	userMessageText: string,
 ): ExchangeForcedReply | null {
 	if (!EXCHANGE_UNSUPPORTED_NETWORK_RE.test(userMessageText)) return null;
-	if (parseNetwork(userMessageText)) return null;
+	// Интент-классификатор (не сбор поля): упомянута поддерживаемая сеть →
+	// отдаём обычному потоку, форс-ответ про неподдерживаемую сеть не шлём.
+	if (EXCHANGE_SUPPORTED_NETWORK_RE.test(userMessageText)) return null;
 	return { text: EXCHANGE_SUPPORTED_NETWORKS_REPLY, toolCalls: [] };
 }
 

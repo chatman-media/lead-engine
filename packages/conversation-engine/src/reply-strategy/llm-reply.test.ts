@@ -959,6 +959,7 @@ describe("LlmReplyStrategy", () => {
   });
 
   it("exchange: KYC follow-up with amount is not forced into another quote", async () => {
+		// Интент-тест: текст сообщения — предмет, exchangeCollected не инжектится намеренно.
 		const chat = new CapturingChat(
 			"Да, видео нужно для верификации перед реквизитами.",
 		);
@@ -1035,6 +1036,7 @@ describe("LlmReplyStrategy", () => {
   });
 
   it("exchange: KYC confirmation wording does not trigger quote preflight", async () => {
+		// Интент-тест: текст сообщения — предмет, exchangeCollected не инжектится намеренно.
 		const chat = new CapturingChat(
 			"Да, видео нужно для проверки документов перед оплатой.",
 		);
@@ -1357,6 +1359,7 @@ describe("LlmReplyStrategy", () => {
 	});
 
 	it("exchange: вопрос про неподдерживаемую сеть (TON) — сразу называет доступные, без ретраев", async () => {
+		// Интент-тест: текст сообщения — предмет, exchangeCollected не инжектится намеренно.
 		const chat = new CapturingChat("Сейчас уточню у оператора.");
 		const repo = fakeMessagesRepo([row(1, "user", "а через TON сеть нельзя?")]);
 		const strategy = new LlmReplyStrategy(
@@ -1382,7 +1385,34 @@ describe("LlmReplyStrategy", () => {
 		expect(normalized?.operatorHandoffs).toHaveLength(0);
 	});
 
+	it("exchange: упомянута И неподдерживаемая (TON), И поддерживаемая (TRC20) сеть — форс НЕ срабатывает, уходит в LLM", async () => {
+		// Интент-тест (#654): EXCHANGE_SUPPORTED_NETWORK_RE как классификатор отказа,
+		// не сбор поля. Если в сообщении есть поддерживаемая сеть — обычный поток.
+		const chat = new CapturingChat("Окей, давайте TRC20.");
+		const repo = fakeMessagesRepo([
+			row(1, "user", "через TON или давайте TRC20"),
+		]);
+		const strategy = new LlmReplyStrategy(
+			{ template: EXCHANGE_TEMPLATE, resolveChat: () => chat },
+			() => repo,
+		);
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "через TON или давайте TRC20",
+		});
+		// Форс-ответ про неподдерживаемую сеть НЕ сработал → ушло в обычный LLM-поток.
+		expect(chat.calls).toBeGreaterThan(0);
+		expect(firstReplyText(result)).not.toContain(
+			"Эту сеть, к сожалению, не поддерживаем",
+		);
+	});
+
 	it("exchange: «отмени заявку» детерминированно отменяет, без LLM", async () => {
+		// Интент-тест: текст сообщения — предмет, exchangeCollected не инжектится намеренно.
 		const chat = new CapturingChat("Сейчас уточню у оператора.");
 		const repo = fakeMessagesRepo([row(1, "user", "отмени заявку")]);
 		const calls = { n: 0 };
