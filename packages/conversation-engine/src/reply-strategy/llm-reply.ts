@@ -18,6 +18,7 @@ import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import {
 	ANY_QUOTE_CURRENCY_MENTION_RE,
 	QUOTE_CURRENCY,
+	type QuoteCurrency,
 	resolveQuoteCurrency,
 } from "../exchange-quote-currency.ts";
 import type {
@@ -140,6 +141,15 @@ export interface LlmReplyStrategyOpts {
 		conversationId: number;
 		contactId: number;
 	}) => Promise<ExchangeCollectedInput | null> | ExchangeCollectedInput | null;
+	/**
+	 * Per-tenant котируемая валюта (exchange_settings.quote_asset) для форс-текстов
+	 * обмена (напр. KYC-handoff). null/absent → платформенный QUOTE_CURRENCY.
+	 */
+	resolveExchangeQuoteCurrency?: (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+	}) => Promise<QuoteCurrency | null> | QuoteCurrency | null;
 	/** false → exchange response guard bypassed for this tenant. Default: true. */
 	resolveExchangeResponseGuardEnabled?: (input: {
 		tenantId: number;
@@ -256,11 +266,15 @@ const EXCHANGE_ORDER_CONFIRMATION_WORDS = new Set([
 const EXCHANGE_KYC_TOPIC_RE = /верификац|kyc|документ|паспорт|видео|кружок/i;
 const EXCHANGE_KYC_MATERIAL_SENT_RE =
 	/(?:отправил|отправила|прислал|прислала|загрузил|загрузила|вот|держи|лови)[^.!\n]{0,80}(?:видео|кружок|документ|паспорт)|(?:видео|кружок|документ|паспорт)[^.!\n]{0,80}(?:отправил|отправила|прислал|прислала|загрузил|загрузила)/i;
-const EXCHANGE_KYC_HANDOFF_TEXT = [
-	"Да. Перед реквизитами нужна верификация клиента.",
-	"Пришлите короткое видео: лицо и документ в кадре. Оператор или внешний сервис проведёт проверку личности.",
-	`После проверки продолжим заявку: способ получения ${QUOTE_CURRENCY.wordGen}, реквизиты и финальное подтверждение.`,
-].join("\n");
+// Валюта выдачи — per-tenant (exchange_settings.quote_asset), не платформенный
+// дефолт: иначе THB-тенант видел «способ получения песо».
+function buildExchangeKycHandoffText(currency: QuoteCurrency): string {
+	return [
+		"Да. Перед реквизитами нужна верификация клиента.",
+		"Пришлите короткое видео: лицо и документ в кадре. Оператор или внешний сервис проведёт проверку личности.",
+		`После проверки продолжим заявку: способ получения ${currency.wordGen}, реквизиты и финальное подтверждение.`,
+	].join("\n");
+}
 
 function exchangeReplyOutput(input: {
 	channelId: number;
@@ -396,17 +410,6 @@ function isExchangeOrderConfirmation(text: string): boolean {
 		seen = true;
 	}
 	return seen;
-}
-
-/** Сеть USDT из текста (TRC20/ERC20/BEP20) или undefined. */
-function parseNetwork(text: string): string | undefined {
-	return /trc[\s-]?20|tron/i.test(text)
-		? "TRC20"
-		: /erc[\s-]?20/i.test(text)
-			? "ERC20"
-			: /bep[\s-]?20|bsc/i.test(text)
-				? "BEP20"
-				: undefined;
 }
 
 /**
@@ -570,7 +573,10 @@ function numberLike(value: unknown): number | null {
 	return Number.isFinite(n) ? n : null;
 }
 
-function forcedExchangeQuoteText(result: unknown): string | null {
+function forcedExchangeQuoteText(
+	result: unknown,
+	networkAssumed = false,
+): string | null {
 	if (!result || typeof result !== "object") return null;
 	const row = result as Record<string, unknown>;
 	if (typeof row.error === "string") return row.error;
@@ -584,6 +590,7 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 	);
 	// Тёплая формулировка (не сухое «Получите X»). Число/валюта — от compute_quote
 	// (guard пропускает). Исходную сумму повторяем, чтобы LLM не «терял» её.
+	// Грамматически нейтрально («Готово/получаете»), без гендерных глаголов прош. вр.
 	const amountFrom = numberLike(row.amountFrom);
 	const srcAsset =
 		typeof row.asset === "string"
@@ -591,9 +598,16 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 			: typeof row.direction === "string"
 				? row.direction.split("->")[0]
 				: null;
+	// Сеть не названа клиентом → курс/комиссия дефолтной сети; помечаем честно,
+	// чтобы первая цифра не вводила в заблуждение на ERC20/BEP20.
+	const net = typeof row.network === "string" ? row.network.toUpperCase() : null;
+	const netNote =
+		networkAssumed && net && srcAsset && /USDT|USDC|ETH/iu.test(srcAsset)
+			? ` (расчёт по сети ${net}; на других сетях курс и комиссия отличаются)`
+			: "";
 	return amountFrom !== null && srcAsset
-		? `Посчитал! Отдаёте ${amountFrom} ${srcAsset} — получите ${amountToThb} ${currency.code} на руки.`
-		: `Посчитал — получите ${amountToThb} ${currency.code} на руки.`;
+		? `Готово! Отдаёте ${amountFrom} ${srcAsset} — получите ${amountToThb} ${currency.code} на руки${netNote}.`
+		: `Готово — получите ${amountToThb} ${currency.code} на руки${netNote}.`;
 }
 
 const EXCHANGE_USDT_RE = /usdt|юсдт/iu;
@@ -648,7 +662,7 @@ async function maybeForceExchangeQuoteReply(
 		...(collected.network ? { network: collected.network } : {}),
 	};
 	const result = await quoteTool.execute(args);
-	const text = forcedExchangeQuoteText(result);
+	const text = forcedExchangeQuoteText(result, !args.network);
 	if (!text) return null;
 	const ask = exchangeMissingFieldsQuestion(
 		collected.asset,
@@ -830,10 +844,11 @@ async function maybeForceExchangeSummaryConfirm(
 
 function maybeForceExchangeKycReply(
 	userMessageText: string,
+	currency: QuoteCurrency,
 ): ExchangeForcedReply | null {
 	if (!EXCHANGE_KYC_TOPIC_RE.test(userMessageText)) return null;
 	if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(userMessageText)) return null;
-	return { text: EXCHANGE_KYC_HANDOFF_TEXT, toolCalls: [] };
+	return { text: buildExchangeKycHandoffText(currency), toolCalls: [] };
 }
 
 // Числа сетей (TRC20/ERC20/BEP20) — буква перед «20» → не парсятся как сумма
@@ -841,8 +856,15 @@ function maybeForceExchangeKycReply(
 const EXCHANGE_SUPPORTED_NETWORKS_REPLY =
 	"Эту сеть, к сожалению, не поддерживаем. Доступны TRC20, ERC20 и BEP20 — в какой из них вам удобно отправить?";
 
+// Интент-классификатор поддерживаемой сети (#654: КЛАССИФИКАТОР, не сбор полей).
+// Копия паттерна rag-reply.ts (единый источник истины о поддерживаемых сетях):
+// исключает форс-ответ про неподдерживаемую сеть, когда клиент упомянул TRC20/
+// ERC20/BEP20/Tron/BSC. Сбор поля network идёт ТОЛЬКО из injected (exchangeCollected).
+const EXCHANGE_SUPPORTED_NETWORK_RE =
+	/trc[\s-]?20|tron|erc[\s-]?20|bep[\s-]?20|\bbsc\b/iu;
+
 // Сети, про которые часто спрашивают, но мы их НЕ принимаем (поддерживаем только
-// TRC20/ERC20/BEP20, см. parseNetwork). Latin \b ненадёжен для кириллицы → lookaround.
+// TRC20/ERC20/BEP20). Latin \b ненадёжен для кириллицы → lookaround.
 const EXCHANGE_UNSUPPORTED_NETWORK_RE =
 	/(?<![a-zа-яё])(?:ton|тон|solana|солана|polygon|полигон|matic|матик|avalanche|avax|arbitrum|арбитрум|optimism)(?![a-zа-яё])/iu;
 
@@ -856,7 +878,9 @@ function maybeForceExchangeUnsupportedNetworkReply(
 	userMessageText: string,
 ): ExchangeForcedReply | null {
 	if (!EXCHANGE_UNSUPPORTED_NETWORK_RE.test(userMessageText)) return null;
-	if (parseNetwork(userMessageText)) return null;
+	// Интент-классификатор (не сбор поля): упомянута поддерживаемая сеть →
+	// отдаём обычному потоку, форс-ответ про неподдерживаемую сеть не шлём.
+	if (EXCHANGE_SUPPORTED_NETWORK_RE.test(userMessageText)) return null;
 	return { text: EXCHANGE_SUPPORTED_NETWORKS_REPLY, toolCalls: [] };
 }
 
@@ -1048,6 +1072,16 @@ export class LlmReplyStrategy implements ReplyStrategy {
 						return null;
 					})
 				: null;
+		const exchangeQuoteCurrency =
+			(isExchange && this.opts.resolveExchangeQuoteCurrency
+				? await Promise.resolve(
+						this.opts.resolveExchangeQuoteCurrency({
+							tenantId,
+							conversationId: input.conversationId,
+							contactId: input.contactId,
+						}),
+					).catch(() => null)
+				: null) ?? QUOTE_CURRENCY;
 		const forcedExchangeReply = isExchange
 			? (maybeForceExchangeUnsupportedNetworkReply(input.userMessageText) ??
 				(await maybeForceExchangeCancelReply(input.userMessageText, tools)) ??
@@ -1075,7 +1109,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
 					exchangePolicyState,
 					exchangeCollected,
 				)) ??
-				maybeForceExchangeKycReply(input.userMessageText))
+				maybeForceExchangeKycReply(input.userMessageText, exchangeQuoteCurrency))
 			: null;
 		const exchangeGuardEnabled =
 			isExchange && this.opts.resolveExchangeResponseGuardEnabled

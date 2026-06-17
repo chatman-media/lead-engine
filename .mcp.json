@@ -1,0 +1,16 @@
+{
+	"mcpServers": {
+		"postgres": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-postgres",
+				"${DATABASE_URL:-postgres://lead:lead@localhost:5434/lead_engine}"
+			]
+		},
+		"context7": {
+			"command": "npx",
+			"args": ["-y", "@upstash/context7-mcp@latest"]
+		}
+	}
+}

@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(jq -r '.tool_input.file_path // empty'); case \"$file\" in *.env.example|*.env.sample) ;; *.env|*.env.*) echo 'Blocked: editing .env files is not allowed (secrets live there). Edit .env.example instead.' >&2; exit 2;; esac"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(jq -r '.tool_input.file_path // empty'); case \"$file\" in *.ts|*.tsx|*.js|*.jsx|*.json|*.css) bunx @biomejs/biome check --write \"$file\" >/dev/null 2>&1 || true;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}

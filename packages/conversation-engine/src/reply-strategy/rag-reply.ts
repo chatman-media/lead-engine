@@ -381,7 +381,10 @@ function numberLike(value: unknown): number | null {
 	return Number.isFinite(n) ? n : null;
 }
 
-function forcedExchangeQuoteText(result: unknown): string | null {
+function forcedExchangeQuoteText(
+	result: unknown,
+	networkAssumed = false,
+): string | null {
 	if (!result || typeof result !== "object") return null;
 	const row = result as Record<string, unknown>;
 	if (typeof row.error === "string" && row.error.trim())
@@ -396,6 +399,7 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 	// Тёплая, живая формулировка (не сухое «Получите X»). Число/валюта — от
 	// compute_quote, поэтому guard пропускает. Исходную сумму повторяем, чтобы
 	// она оставалась в истории и LLM на следующих ходах не «терял» её.
+	// Грамматически нейтрально («Готово/получаете»), без гендерных глаголов прош. вр.
 	const amountFrom = numberLike(row.amountFrom);
 	const srcAsset =
 		typeof row.asset === "string"
@@ -403,9 +407,16 @@ function forcedExchangeQuoteText(result: unknown): string | null {
 			: typeof row.direction === "string"
 				? row.direction.split("->")[0]
 				: null;
+	// Сеть не названа клиентом → курс/комиссия дефолтной сети; помечаем честно,
+	// чтобы первая цифра не вводила в заблуждение на ERC20/BEP20.
+	const net = typeof row.network === "string" ? row.network.toUpperCase() : null;
+	const netNote =
+		networkAssumed && net && srcAsset && /USDT|USDC|ETH/iu.test(srcAsset)
+			? ` (расчёт по сети ${net}; на других сетях курс и комиссия отличаются)`
+			: "";
 	return amountFrom !== null && srcAsset
-		? `Посчитал! Отдаёте ${amountFrom} ${srcAsset} — получите ${amountToThb} ${currency.code} на руки.`
-		: `Посчитал — получите ${amountToThb} ${currency.code} на руки.`;
+		? `Готово! Отдаёте ${amountFrom} ${srcAsset} — получите ${amountToThb} ${currency.code} на руки${netNote}.`
+		: `Готово — получите ${amountToThb} ${currency.code} на руки${netNote}.`;
 }
 
 const EXCHANGE_USDT_RE = /usdt|юсдт/iu;
@@ -453,7 +464,7 @@ async function maybeForceExchangeQuoteReply(input: {
 	// Считаем котировку, только если клиент назвал СВЕЖУЮ сумму этого хода
 	// (amountSetThisTurn) или это follow-up «посчитай/пересчитай». «TRC20 в
 	// банкомате» при готовой сделке (суммы этого хода нет) → не котировка, а
-	// сводка/оплата. Заменяет старый latestExchangeQuoteArgs(history,text).
+	// сводка/оплата (#654: сумма берётся из injected, не из истории).
 	const freshAmount =
 		input.injected?.amountSetThisTurn === true ||
 		EXCHANGE_QUOTE_FOLLOWUP_RE.test(input.userMessageText);
@@ -465,7 +476,7 @@ async function maybeForceExchangeQuoteReply(input: {
 		...(collected.network ? { network: collected.network } : {}),
 	};
 	const result = await quoteTool.execute(args);
-	const text = forcedExchangeQuoteText(result);
+	const text = forcedExchangeQuoteText(result, !args.network);
 	if (!text) return null;
 	// После котировки дособираем способ выдачи/сети (если клиент ещё не назвал),
 	// чтобы вести к заявке, а не замирать на «Получите X». networkKnown/payoutKnown
@@ -638,7 +649,7 @@ function maybeForceExchangePaymentMethodQuestion(input: {
 /**
  * Аргументы заявки из универсально собранного (leadFieldValues), не regex (#654).
  * paymentMethod: берём из собранного; иначе дефолт по активу (RUB → bank_transfer,
- * крипта → crypto_transfer) — как раньше давал parseExchangeSourceArgs.
+ * крипта → crypto_transfer).
  */
 function exchangeOrderArgsFromCollected(
 	injected?: ExchangeCollectedInput | null,

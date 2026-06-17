@@ -1,3 +1,17 @@
+# [@chatman-media/conversation-engine-v3.21.4](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.3...@chatman-media/conversation-engine-v3.21.4) (2026-06-17)
+
+
+### Bug Fixes
+
+* **exchange:** KYC-текст использует per-tenant валюту выдачи (не «песо») ([7fa2833](https://github.com/chatman-media/lead-engine/commit/7fa2833181f488bd371e29868ad2522d8e0bc0b6))
+
+# [@chatman-media/conversation-engine-v3.21.3](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.2...@chatman-media/conversation-engine-v3.21.3) (2026-06-17)
+
+
+### Bug Fixes
+
+* **exchange:** качество ответов бота — род, guard, сеть, кросс-язык грунтинг ([c183b74](https://github.com/chatman-media/lead-engine/commit/c183b74bed0965d6eb623e355eb25d6338efadf2))
+
 # [@chatman-media/conversation-engine-v3.21.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.1...@chatman-media/conversation-engine-v3.21.2) (2026-06-16)
 
 

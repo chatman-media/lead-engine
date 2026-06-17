@@ -37,10 +37,14 @@ coverage/
 # Raw KB export — the curated/extracted markdown is what we ingest, the
 # 5MB+ JSON dump it was generated from doesn't need to live in git.
 apps/bot/kb/result.json
+# Claude Code: ignore personal/runtime config, but track team-shared setup
+# (project hooks, subagents, skills, and the scrum orchestrator) so the whole
+# team gets the same tools. Личное (settings.local.json, launch.json, worktrees)
+# остаётся игнором под .claude/* выше.
 .claude/*
-# Командный каркас scrum-агентов шарим в git; личное (settings.local.json, launch.json,
-# worktrees, .DS_Store) остаётся под .claude/* выше.
+!.claude/settings.json
 !.claude/agents/
+!.claude/skills/
 !.claude/commands/
 !.claude/scrum/
 TODO.md

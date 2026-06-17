@@ -54,14 +54,24 @@ const NUMBER_RE =
   /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/u;
 const NUMBER_SCAN_RE =
   /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/gu;
+// Не включаем общий глагол «получить»: он матчит бытовые справочные ответы
+// («чтобы получить наличные…») и душит KB-ответы в фолбэк. Голая валюта/актив
+// ниже всё равно требует ≥2 чисел (SOURCE_ASSET_RE-ветка).
 const QUOTE_RE = new RegExp(
-  `(?:курс|rate|отда[её]те|получ(?:а(?:ете|ешь)|ите|у|ится|ить)|итог(?:овая)?\\s+сумм|${ANY_QUOTE_CURRENCY_MENTION_RE.source})`,
+  `(?:курс|rate|отда[её]те|итог(?:овая)?\\s+сумм|${ANY_QUOTE_CURRENCY_MENTION_RE.source})`,
   "iu",
 );
 const SOURCE_ASSET_RE =
 	/(?:usdt|btc|eth|usd|eur|rub|юсдт|битк|эфир|доллар|евро|руб|₽)/iu;
-const REQUISITES_RE =
-  /(?:реквизит|кошел[её]к|wallet|адрес\s+(?:кошелька|для\s+оплаты)|оплат\w*|перев(?:од|ести)|sbp|сбп|qr|карта|card|binance\s*id)/iu;
+// «Конкретные реквизиты» = реальный артефакт (карта/крипто-адрес/URL),
+// императив-оплаты на адрес/сумму, ИЛИ requisites-тема + длинный destination-номер.
+// НЕ матчим бытовые «после оплаты»/«перевод» без артефакта (ложные срабатывания на
+// справочных ответах про процесс выдачи).
+const REQUISITES_TOPIC_RE =
+  /(?:реквизит|кошел[её]к|wallet|адрес\s+(?:кошелька|для\s+оплаты)|sbp|сбп|qr\b|карт[аеуы]\b|card|binance\s*id)/iu;
+const PAY_IMPERATIVE_RE =
+  /(?:оплатите|переведите|отправьте|внесите)\s+(?:по|на|сумм|\d|реквизит|карт|кошел)/iu;
+const DEST_NUMBER_RE = /\d[\d ]{4,}\d/u;
 const PAYOUT_RE = /(?:код\s+(?:выдачи|снятия|получения)|payout\s*code)/iu;
 const RATE_NEGOTIATION_RE =
   /(?:договор(?:имся|иться)|скидк|лучше\s+курс|курс\s+лучше|сдела(?:ю|ем)\s+курс|подвин(?:у|ем)\s+курс)/iu;
@@ -114,13 +124,15 @@ function hasConcreteQuoteClaim(text: string): boolean {
 }
 
 function hasConcreteRequisitesClaim(text: string): boolean {
-  if (CRYPTO_ADDRESS_RE.test(text) || CARDISH_RE.test(text)) return true;
-  if (!REQUISITES_RE.test(text)) return false;
-	return (
-		URL_PAYMENT_RE.test(text) ||
-		NUMBER_RE.test(text) ||
-		/(?:перев(?:едите|ести)|оплат(?:ите|ить)|адрес|ссылка)/iu.test(text)
-	);
+  if (
+    CRYPTO_ADDRESS_RE.test(text) ||
+    CARDISH_RE.test(text) ||
+    URL_PAYMENT_RE.test(text)
+  )
+    return true;
+  if (PAY_IMPERATIVE_RE.test(text)) return true;
+  if (!REQUISITES_TOPIC_RE.test(text)) return false;
+  return DEST_NUMBER_RE.test(text);
 }
 
 function hasConcretePayoutClaim(text: string): boolean {

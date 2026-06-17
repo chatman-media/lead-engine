@@ -874,6 +874,48 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 
 ---
 
+## Schema tables (full reference)
+
+Полный список таблиц схемы (источник истины — `packages/storage/src/schema.ts`).
+Подробнее про lead-pipeline таблицы — ниже в [Universal lead pipeline](#universal-lead-pipeline).
+
+```sql
+tenants             — slug, plan, status (active/suspended)
+admins              — email, role (superadmin/manager), tenantId
+admin_invites       — email, token, role, expiresAt, usedAt
+password_resets     — adminId, token (64 hex), expiresAt, usedAt
+channels            — tenantId, kind (telegram_bot/telegram_userbot/whatsapp/facebook/vk/max/web), status
+contacts            — tenantId (channel-agnostic person)
+channel_identities  — contactId, channelId, externalUserId
+conversations       — tenantId, contactId, channelId, mode (ai/human)
+messages            — conversationId, role (user/assistant/human), content
+leads               — tenantId, userId (contactId), state, stageDefinitionId
+lead_field_values   — leadId, fieldId, value
+funnels             — tenantId, slug, verticalTemplateId, stagesJson
+stage_definitions   — tenantId, funnelId, slug, kind (intake/active/terminal_won/terminal_lost), phase (qualify/offer/clear/fulfill — костяк)
+kb_documents        — tenantId, title, contentHash (dedup)
+kb_chunks           — documentId, embedding (vector), text, topic
+outbound_queue      — tenantId, channelId, payloadJson, scheduledAt, sentAt (SKIP LOCKED)
+tenant_secrets      — tenantId, key, value (AES-256-GCM encrypted)
+llm_provider_configs — tenantId, purpose (chat/embed/vision/judge/reranker/transcribe), provider, model
+audit_log           — tenantId, adminId, action, resourceType, resourceId, diff
+message_templates   — tenantId, name, body
+referral_codes      — tenantId, code, usageCount
+exchange_rates      — tenantId, asset, network, baseRate, marginPct, feeFixedThb (обменник)
+exchange_rate_tiers — tenantId, asset/quoteAsset/network, rangeBasis (target_thb/source_amount), minAmount/maxAmount, marketRate, displayRate, deviationPct, isActive, approvedByAdminId (approved объёмные ступени)
+exchange_orders     — tenantId, leadId, status, amounts, payment rails
+service_catalog_items — tenantId, slug, routeType (manual/funnel/partner_service/webhook), target refs
+partners            — tenantId, provider/partner contact data, defaultCommissionPct, settlementCurrency
+partner_services    — tenantId, partnerId, name, category, funnel/stage refs, commissionPct
+partner_deals       — tenantId, partnerId, serviceId, leadId, status, gross/commission, handoff mode, settlementId
+partner_settlements — tenantId, partnerId, periodStart/periodEnd, totalGross/totalCommission, currency, status (draft/issued/paid/cancelled)
+```
+
+Enum CHECK-ограничения на этих таблицах (нарушение = ошибка вставки) описаны в
+[AGENTS.md → Common pitfalls](../../AGENTS.md#common-pitfalls).
+
+---
+
 ## Universal lead pipeline
 
 Стадии лида хранятся в БД (`stage_definitions` / `stage_fields`) и
