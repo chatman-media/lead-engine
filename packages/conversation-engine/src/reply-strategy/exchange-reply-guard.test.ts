@@ -87,6 +87,26 @@ describe("guardExchangeReply", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("lets an informational KB answer (process + incidental numbers) pass", () => {
+    // Регрессия: справочный ответ про выдачу с бытовым «оплаты» и случайными
+    // цифрами (часы/минимум) НЕ должен подменяться фолбэком «уточню у оператора».
+    const r = guardExchangeReply({
+      text:
+        "Чтобы получить наличные в офисе, сначала нужно подтвердить оплату. " +
+        "После этого оператор проверит наличие нужной суммы в кассе. " +
+        "Офисы: Bangkok Asok, Phuket Central. Часы работы 10:00–20:00.",
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("still blocks SBP-number requisites without fetch_exchange_requisites", () => {
+    const r = guardExchangeReply({
+      text: "Реквизиты для оплаты: СБП по номеру 89991234567.",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("unbacked_requisites");
+  });
+
   it("blocks payment requisites without fetch_exchange_requisites", () => {
     const r = guardExchangeReply({
       text: "Оплатите по карте 2200 7000 1234 5678, после оплаты пришлите чек.",
