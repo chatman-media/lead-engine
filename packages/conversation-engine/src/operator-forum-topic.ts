@@ -1,10 +1,7 @@
 import type { TelegramClient } from "@chatman-media/channel-telegram";
-import {
-	admins,
-	conversations,
-	operatorSettings,
-} from "@chatman-media/storage";
-import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
+import { conversations } from "@chatman-media/storage";
+import { and, eq, isNull } from "drizzle-orm";
+import { pickLeastBusyOperator } from "./assign-operator.ts";
 import type { Db } from "./dal/types.ts";
 import { withTenant } from "./with-tenant.ts";
 
@@ -53,92 +50,6 @@ function topicName(
 }
 
 /**
- * Метка оператора для имени топика: @username, иначе имя/email, иначе
- * «оператор #id». Сам chat_id не палим.
- */
-function operatorLabel(row: {
-	name: string | null;
-	email: string;
-	adminId: number;
-}): string {
-	const name = row.name?.trim();
-	if (name) return name;
-	const local = row.email.split("@")[0]?.trim();
-	if (local) return `@${local}`;
-	return `оператор #${row.adminId}`;
-}
-
-/**
- * Пул (#651, минимальный least-busy): среди операторов с привязанным Telegram
- * (operator_settings.telegram_chat_id IS NOT NULL) выбирает того, на кого сейчас
- * назначено меньше всего активных (не resolved) диалогов. Если привязанных нет —
- * null (топик заведётся без метки «занято», ассайн не делаем).
- *
- * TODO(#651 pool): сейчас это «least-busy snapshot» без честной round-robin
- * памяти и без учёта онлайна/смен оператора. Следующий шаг — учитывать
- * последнюю активность оператора (operator_settings) и распределять при ничьей
- * по очереди (а не по min adminId), плюс снимать ассайн при возврате в AI.
- */
-async function pickLeastBusyOperator(
-	tx: Db,
-	tenantId: number,
-): Promise<{ adminId: number; label: string } | null> {
-	const candidates = await tx
-		.select({
-			adminId: operatorSettings.adminId,
-			name: admins.name,
-			email: admins.email,
-		})
-		.from(operatorSettings)
-		.innerJoin(admins, eq(admins.id, operatorSettings.adminId))
-		.where(
-			and(
-				eq(operatorSettings.tenantId, tenantId),
-				isNotNull(operatorSettings.telegramChatId),
-			),
-		);
-	if (candidates.length === 0) return null;
-
-	// Текущая нагрузка: число не-resolved диалогов на оператора.
-	const loadRows = await tx
-		.select({
-			adminId: conversations.assignedAdminId,
-			open: count(),
-		})
-		.from(conversations)
-		.where(
-			and(
-				eq(conversations.tenantId, tenantId),
-				isNotNull(conversations.assignedAdminId),
-			),
-		)
-		.groupBy(conversations.assignedAdminId);
-	const load = new Map<number, number>();
-	for (const row of loadRows) {
-		if (row.adminId != null) load.set(row.adminId, Number(row.open));
-	}
-
-	let best: { adminId: number; label: string } | null = null;
-	let bestLoad = Number.POSITIVE_INFINITY;
-	// Детерминированный тай-брейк по adminId (стабильно в тестах/проде).
-	for (const c of [...candidates].sort((a, b) => a.adminId - b.adminId)) {
-		const busy = load.get(c.adminId) ?? 0;
-		if (busy < bestLoad) {
-			bestLoad = busy;
-			best = {
-				adminId: c.adminId,
-				label: operatorLabel({
-					name: c.name,
-					email: c.email,
-					adminId: c.adminId,
-				}),
-			};
-		}
-	}
-	return best;
-}
-
-/**
  * Гарантирует топик для диалога в форум-группе и (при первом создании) назначает
  * оператора по least-busy. Возвращает message_thread_id или null, если топик
  * нельзя завести (нет диалога / Telegram отказал — caller тогда шлёт в общий
@@ -179,8 +90,9 @@ export async function ensureOperatorTopic(input: {
 	}
 
 	// 2. Пул: least-busy оператор (метка в имя топика + ассайн при создании).
+	//    requireTelegram — оператору нужен привязанный чат для handoff.
 	const operator = await withTenant(db, tenantId, (tx) =>
-		pickLeastBusyOperator(tx, tenantId),
+		pickLeastBusyOperator(tx, tenantId, { requireTelegram: true }),
 	);
 
 	// 3. Создаём топик в Telegram. Имя — контекст диалога.

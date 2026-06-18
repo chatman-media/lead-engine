@@ -2,8 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { resolveConversation } from "./conversation-resolver.ts";
 import type { ConversationsRepo } from "./dal/index.ts";
 
-function repo(existing?: unknown | unknown[]) {
+function repo(existing?: unknown | unknown[], assignAdminId?: number | null) {
 	const created: Array<Record<string, unknown>> = [];
+	const autoAssignCalls: number[] = [];
 	const rows = Array.isArray(existing)
 		? (existing as Record<string, unknown>[])
 		: existing
@@ -28,8 +29,12 @@ function repo(existing?: unknown | unknown[]) {
 			rows.push({ userId: data.contactId, ...c });
 			return c;
 		},
+		autoAssignLeastBusyOperator: async (conversationId: number) => {
+			autoAssignCalls.push(conversationId);
+			return assignAdminId ?? null;
+		},
 	} as unknown as ConversationsRepo;
-	return { conversations, created };
+	return { conversations, created, autoAssignCalls };
 }
 
 describe("resolveConversation", () => {
@@ -165,4 +170,60 @@ describe("resolveConversation", () => {
 			source: "bot",
 		});
 	});
+	it("новый диалог → авто-назначение наименее загруженного оператора (#694)", async () => {
+		const { conversations, created } = repo(undefined, 42);
+		const res = await resolveConversation({
+			contactId: 1,
+			channelId: 10,
+			channelKind: "telegram_bot",
+			conversations,
+			nowEpoch: 5,
+		});
+		expect(res.created).toBe(true);
+		expect(res.conversation.assignedAdminId).toBe(42);
+		expect(created).toHaveLength(1);
+	});
+
+	it("нет свободных операторов → диалог без назначения", async () => {
+		const { conversations } = repo(undefined, null);
+		const res = await resolveConversation({
+			contactId: 1,
+			channelId: 10,
+			channelKind: "telegram_bot",
+			conversations,
+			nowEpoch: 5,
+		});
+		expect(res.created).toBe(true);
+		expect(res.conversation.assignedAdminId ?? null).toBeNull();
+	});
+
+	it("self_play (симуляция) не авто-назначается", async () => {
+		const { conversations, autoAssignCalls } = repo(undefined, 42);
+		const res = await resolveConversation({
+			contactId: 1,
+			channelKind: "self_play",
+			conversations,
+			nowEpoch: 5,
+		});
+		expect(res.created).toBe(true);
+		expect(autoAssignCalls).toHaveLength(0);
+		expect(res.conversation.assignedAdminId ?? null).toBeNull();
+	});
+
+	it("существующий диалог не триггерит авто-назначение", async () => {
+		const { conversations, autoAssignCalls } = repo(
+			{ id: 7, userId: 1, channelId: 10, source: "bot" },
+			42,
+		);
+		const res = await resolveConversation({
+			contactId: 1,
+			channelId: 10,
+			channelKind: "telegram_bot",
+			conversations,
+			nowEpoch: 0,
+		});
+		expect(res.created).toBe(false);
+		expect(autoAssignCalls).toHaveLength(0);
+	});
+
 });

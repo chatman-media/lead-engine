@@ -3,6 +3,7 @@ import {
 	conversations as conversationsTable,
 } from "@chatman-media/storage";
 import { and, eq, isNull, sql } from "drizzle-orm";
+import { pickLeastBusyOperator } from "../assign-operator.ts";
 import type { RepoCtx } from "./types.ts";
 
 export interface ConversationRow {
@@ -338,6 +339,23 @@ export class ConversationsRepo {
 					eq(conversationsTable.tenantId, this.ctx.tenantId),
 				),
 			);
+	}
+
+	/**
+	 * #694 — авто-назначение наименее загруженного оператора на диалог
+	 * (балансировка по числу активных диалогов). Возвращает adminId
+	 * назначенного оператора или null, если операторов в тенанте нет.
+	 */
+	async autoAssignLeastBusyOperator(
+		conversationId: number,
+	): Promise<number | null> {
+		const operator = await pickLeastBusyOperator(
+			this.ctx.db,
+			this.ctx.tenantId,
+		);
+		if (!operator) return null;
+		await this.setAssignee(conversationId, operator.adminId);
+		return operator.adminId;
 	}
 
 	/** Persist the style / experiment chosen for this conversation turn. */

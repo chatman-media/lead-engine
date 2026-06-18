@@ -193,6 +193,12 @@ export class FakeConversationsRepo {
 		const row = this.rows.find((r) => r.id === conversationId);
 		if (row) row.assignedAdminId = adminId;
 	}
+	async autoAssignLeastBusyOperator(
+		_conversationId: number,
+	): Promise<number | null> {
+		// FakeRepo не моделирует пул операторов — авто-назначение пропускаем.
+		return null;
+	}
 	async applyAutoHandoff(input: {
 		conversationId: number;
 		reason: string;
