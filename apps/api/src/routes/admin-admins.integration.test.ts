@@ -1,6 +1,8 @@
 // Integration test для M4 multi-admin invite flow.
 // Signup superadmin → invite → accept-invite (новый admin) → list / revoke.
 
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
 import {
   adminInvites,
   admins,
@@ -9,11 +11,9 @@ import {
   schema,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
-import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminAdminsRoutes } from "./admin-admins.ts";
@@ -42,50 +42,47 @@ let superadminAdminId = 0;
 let managerToken = "";
 let secondTenantToken = "";
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route(
-      "/",
-      makeAdminAdminsRoutes({ db, publicUrl: "https://app.test", inviteExpiresSec: 60 * 60 }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route(
+    "/",
+    makeAdminAdminsRoutes({ db, publicUrl: "https://app.test", inviteExpiresSec: 60 * 60 }),
+  );
 
-    // Superadmin (signup создаёт superadmin role).
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "boss@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as {
-      token: string;
-      admin: { id: number; tenantId: number };
-    };
-    superadminToken = sba.token;
-    superadminTenantId = sba.admin.tenantId;
-    superadminAdminId = sba.admin.id;
+  // Superadmin (signup создаёт superadmin role).
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "boss@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as {
+    token: string;
+    admin: { id: number; tenantId: number };
+  };
+  superadminToken = sba.token;
+  superadminTenantId = sba.admin.tenantId;
+  superadminAdminId = sba.admin.id;
 
-    // Second tenant — для cross-tenant guard.
-    const sb = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "boss-other@demo.io", password: "strong-pwd-12345" }),
-    });
-    secondTenantToken = ((await sb.json()) as { token: string }).token;
-  },
-  30_000,
-);
+  // Second tenant — для cross-tenant guard.
+  const sb = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "boss-other@demo.io", password: "strong-pwd-12345" }),
+  });
+  secondTenantToken = ((await sb.json()) as { token: string }).token;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -216,18 +213,12 @@ describe("admin-admins invite flow", () => {
     managerToken = body.token;
 
     // Verify admin row создан в БД.
-    const [adminRow] = await db
-      .select()
-      .from(admins)
-      .where(eq(admins.email, "newhire@demo.io"));
+    const [adminRow] = await db.select().from(admins).where(eq(admins.email, "newhire@demo.io"));
     expect(adminRow).toBeDefined();
     expect(adminRow!.tenantId).toBe(superadminTenantId);
 
     // Invite помечен usedAt + acceptedAdminId.
-    const [invite] = await db
-      .select()
-      .from(adminInvites)
-      .where(eq(adminInvites.id, inviteId));
+    const [invite] = await db.select().from(adminInvites).where(eq(adminInvites.id, inviteId));
     expect(invite!.usedAt).not.toBeNull();
     expect(invite!.acceptedAdminId).toBe(adminRow!.id);
   });
@@ -257,7 +248,7 @@ describe("admin-admins invite flow", () => {
     const res = await authReq(managerToken, "/api/admin/admins");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: Array<{ email: string }> };
-    expect(body.items.length).toBe(2); // superadmin + new manager
+    expect(body.items.length).toBe(1); // only self — managers see only admins they personally invited
   });
 
   let secondInviteId = 0;
@@ -272,38 +263,29 @@ describe("admin-admins invite flow", () => {
     const cb = (await create.json()) as { id: number };
     secondInviteId = cb.id;
 
-    const del = await authReq(
-      superadminToken,
-      `/api/admin/admins/invites/${secondInviteId}`,
-      { method: "DELETE" },
-    );
+    const del = await authReq(superadminToken, `/api/admin/admins/invites/${secondInviteId}`, {
+      method: "DELETE",
+    });
     expect(del.status).toBe(200);
 
     // Verify row deleted.
-    const rows = await db
-      .select()
-      .from(adminInvites)
-      .where(eq(adminInvites.id, secondInviteId));
+    const rows = await db.select().from(adminInvites).where(eq(adminInvites.id, secondInviteId));
     expect(rows).toHaveLength(0);
   });
 
   it("DELETE accepted invite → 409", async () => {
     if (!sql) return;
-    const del = await authReq(
-      superadminToken,
-      `/api/admin/admins/invites/${inviteId}`,
-      { method: "DELETE" },
-    );
+    const del = await authReq(superadminToken, `/api/admin/admins/invites/${inviteId}`, {
+      method: "DELETE",
+    });
     expect(del.status).toBe(409);
   });
 
   it("DELETE non-existent → 404", async () => {
     if (!sql) return;
-    const del = await authReq(
-      superadminToken,
-      "/api/admin/admins/invites/999999",
-      { method: "DELETE" },
-    );
+    const del = await authReq(superadminToken, "/api/admin/admins/invites/999999", {
+      method: "DELETE",
+    });
     expect(del.status).toBe(404);
   });
 
