@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
-import { NotificationsRepo } from "./notifications.ts";
+import { NotificationsRepo, OPERATOR_ALL_EVENT } from "./notifications.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_notif_${Math.random().toString(36).slice(2, 10)}`;
@@ -112,6 +112,22 @@ describe("NotificationsRepo: rules", () => {
     expect((await repo.listRules(tenantId)).length).toBe(2);
     await repo.deleteRule(tenantId, active.id);
     expect((await repo.listRules(tenantId)).find((r) => r.id === active.id)).toBeUndefined();
+  });
+
+  it("OPERATOR_ALL_EVENT-правило ловит операторские эскалации, но не stage_changed", async () => {
+    if (!enabled) return;
+    const umbrella = await repo.createRule({
+      tenantId, eventType: OPERATOR_ALL_EVENT, conditionJson: "{}",
+      channelType: "telegram_group", targetId: "forum", targetIsForum: true, priority: "normal", isActive: true,
+    });
+    for (const ev of ["operator_handoff_required", "verification_requested", "human_takeover"]) {
+      const rules = await repo.findRulesByEvent(tenantId, ev);
+      expect(rules.some((r) => r.id === umbrella.id)).toBe(true);
+    }
+    // Неоператорское событие зонтик НЕ ловит.
+    const stage = await repo.findRulesByEvent(tenantId, "stage_changed");
+    expect(stage.some((r) => r.id === umbrella.id)).toBe(false);
+    await repo.deleteRule(tenantId, umbrella.id);
   });
 });
 

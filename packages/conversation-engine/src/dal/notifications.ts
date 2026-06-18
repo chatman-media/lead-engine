@@ -52,17 +52,44 @@ export interface OwnerSettings {
   settings: OperatorSettings | undefined;
 }
 
+/**
+ * Зонтичный event_type: правило с этим типом ловит ВСЕ операторские эскалации
+ * (см. OPERATOR_ESCALATION_EVENTS). Удобно для форум-группы — один /setup, и все
+ * диалоги, требующие человека, падают в группу топиками. Значение дублируется в
+ * admin-ui (SaasNotifications GROUP_EVENT_TYPES) — менять синхронно.
+ */
+export const OPERATOR_ALL_EVENT = "operator_all";
+
+/**
+ * События «оператор должен взять» — их покрывает OPERATOR_ALL_EVENT. Без
+ * stage_changed/lead_intake/lead_stale (они информационные, не операторская
+ * очередь).
+ */
+export const OPERATOR_ESCALATION_EVENTS = [
+  "operator_handoff_required",
+  "operator_confirm_needed",
+  "verification_requested",
+  "document_uploaded",
+  "human_takeover",
+] as const;
+const OPERATOR_ESCALATION_SET = new Set<string>(OPERATOR_ESCALATION_EVENTS);
+
 export class NotificationsRepo {
   constructor(private readonly db: PostgresJsDatabase) {}
 
   async findRulesByEvent(tenantId: number, eventType: string): Promise<NotificationRule[]> {
+    // Операторское событие матчит и точное правило, и зонтичное OPERATOR_ALL_EVENT
+    // (форум-группа «всё в один стол»). Неоператорские (stage_changed, …) — только точное.
+    const types = OPERATOR_ESCALATION_SET.has(eventType)
+      ? [eventType, OPERATOR_ALL_EVENT]
+      : [eventType];
     return this.db
       .select()
       .from(notificationRules)
       .where(
         and(
           eq(notificationRules.tenantId, tenantId),
-          eq(notificationRules.eventType, eventType),
+          inArray(notificationRules.eventType, types),
           eq(notificationRules.isActive, true)
         )
       );

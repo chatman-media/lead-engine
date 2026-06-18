@@ -57,6 +57,13 @@ const EVENT_TYPES: Record<string, string> = {
   lead_stale: "Лид без активности",
 };
 
+// Для привязки форум-группы: «operator_all» (зонтик OPERATOR_ALL_EVENT в бэкенде)
+// ловит ВСЕ операторские эскалации одним правилом — общий стол операторов.
+const GROUP_EVENT_TYPES: Record<string, string> = {
+  operator_all: "Все операторские события (рекоменд.)",
+  ...EVENT_TYPES,
+};
+
 const PLACEHOLDERS = "{{leadId}}, {{fromStage}}, {{toStage}}, {{displayName}}";
 
 // ── Informer справочники ────────────────────────────────────────────────
@@ -121,7 +128,7 @@ export function SaasNotifications() {
   const [savingRule, setSavingRule] = useState(false);
   const [testingRuleId, setTestingRuleId] = useState<number | null>(null);
   const [groupLinkToken, setGroupLinkToken] = useState<string | null>(null);
-  const [groupLinkEvent, setGroupLinkEvent] = useState("stage_changed");
+  const [groupLinkEvent, setGroupLinkEvent] = useState("operator_all");
   const [generatingGroupToken, setGeneratingGroupToken] = useState(false);
   const [addMode, setAddMode] = useState<"bot" | "manual" | null>(null);
 
@@ -895,7 +902,7 @@ export function SaasNotifications() {
                   className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm"
                 >
                   <Badge variant="secondary" className="shrink-0 text-xs">
-                    {EVENT_TYPES[rule.eventType] ?? rule.eventType}
+                    {GROUP_EVENT_TYPES[rule.eventType] ?? rule.eventType}
                   </Badge>
                   <code className="flex-1 truncate text-xs font-mono text-muted-foreground">
                     {rule.targetId}
@@ -953,7 +960,7 @@ export function SaasNotifications() {
                       onChange={(e) => { setGroupLinkEvent(e.target.value); setGroupLinkToken(null); }}
                       className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
                     >
-                      {Object.entries(EVENT_TYPES).map(([val, label]) => (
+                      {Object.entries(GROUP_EVENT_TYPES).map(([val, label]) => (
                         <option key={val} value={val}>{label}</option>
                       ))}
                     </select>
