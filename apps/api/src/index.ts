@@ -546,6 +546,16 @@ async function main() {
 			},
 			// Media-proxy для инбокса: качаем файл клиента адаптером канала-владельца.
 			downloadMedia: async (ref) => {
+				// Mock-медиа симуляции (self_play KYC): отдаём плейсхолдер-паспорт из
+				// assets, чтобы инбокс показывал документ, «присланный» sim-клиентом
+				// (см. buildSimKycMediaParts в routes/admin-sim). Видео-кружок не
+				// храним — у self_play нет адаптера, превью просто не отрисуется.
+				if (ref.externalRef === "__sim_kyc_passport__") {
+					const file = Bun.file(`${import.meta.dir}/../assets/bot-test/passport-demo.png`);
+					return (await file.exists())
+						? new Response(file, { headers: { "content-type": "image/png" } })
+						: null;
+				}
 				const channelId = Number(ref.channelId);
 				if (!Number.isInteger(channelId) || channelId <= 0) return null;
 				const entry = channels.byChannelId(channelId);
