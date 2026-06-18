@@ -70,6 +70,26 @@ SERVER_RUNBOOK. Онбординг обменного тенанта (визар
 (`/api/admin/notifications/ops-status`, `/ops-test`, см.
 [NOTIFICATIONS.md](NOTIFICATIONS.md)).
 
+## KYC / верификация
+
+Статус KYC хранится в `contacts.attributes_json.exchangeKyc`
+(`{ status, verified, needsVerification, verificationId, reviewedByAdminId,
+reviewedAt, source }`); legacy-фоллбэк — `isVerified`/`verificationStatus`.
+Гейт обмена смотрит на этот статус (`getExchangeVerificationStatus`), а не на
+стадию — поэтому, как только KYC `verified`, бот сам идёт дальше.
+
+На KYC-стадии бот просит документ + видео-кружок. Любое медиа в exchange-диалоге
+(`mode='ai'`) авто-эскалирует на оператора (`kyc_review`, `processInbound`).
+Подтверждают KYC двумя путями:
+
+- **Operator-бот** (Telegram) — callback `kycok` → мгновенное одобрение.
+- **Админка, страница «Диалоги»** (#699) — кнопка «✅ Подтвердить KYC» в
+  KYC-панели: `POST /api/admin/conversations/:id/kyc/approve` ставит
+  `exchangeKyc.verified` (через `moderateConversationContact`) и возвращает
+  диалог в AI-режим. Работает и для реальных клиентов, не только симуляции.
+
+Отзыв/разблокировка KYC — `POST /api/admin/leads/:id/verification/{revoke,unblock}`.
+
 ## Реквизиты
 
 Шифрованные `tenant_secrets` через allowlist
@@ -186,6 +206,23 @@ GET    /api/admin/exchange/turnover               — оборот
 шлёт cardless-withdrawal QR клиенту (Telegram `file_id` или HTTPS URL),
 ставит `outbound_queue kind="photo"`. Подробнее в ARCHITECTURE.
 
+## Симулятор диалогов
+
+`apps/api/src/routes/admin-sim.ts` (+ кнопка на странице «Диалоги»). LLM играет
+клиента: каждая реплика прогоняется через НАСТОЯЩИЙ `processInbound` (persist +
+stage + extract), ответ даёт `replyStrategy.generate()`. Диалог помечается
+`source='self_play'`, виден в живом инбоксе, в Telegram ничего не уходит.
+
+- **Управляемые сценарии (#698)** — таблица `sim_personas` (миграция `0073`).
+  Встроенные ~25 персон сидятся per-tenant идемпотентно из кода
+  (`ensureBuiltinPersonas`, по `persona_key`, правки оператора не перетираются),
+  кастомные — полный CRUD из админки: `GET/POST/PATCH/DELETE
+  /api/admin/sim/personas`. Встроенные можно редактировать, но не удалять.
+- **Mock KYC-медиа (#699 / #716)** — когда бот просит верификацию, sim-клиент на
+  следующем ходу «присылает» mock-паспорт (`photo`) + видео-кружок
+  (`video_note`); срабатывает штатная `kyc_review`-эскалация на оператора, далее
+  оператор подтверждает KYC из инбокса (см. выше).
+
 ## Карта файлов
 
 | Что | Где |
@@ -196,6 +233,8 @@ GET    /api/admin/exchange/turnover               — оборот
 | Реквизиты (allowlist) | `apps/api/src/lib/exchange/requisite-keys.ts` |
 | Заявки | `apps/api/src/lib/exchange/orders.ts` |
 | Admin API | `apps/api/src/routes/admin-exchange.ts` |
+| KYC-подтверждение (инбокс) | `apps/api/src/routes/admin-conversations.ts` (`/kyc/approve`) |
+| Симулятор + сценарии | `apps/api/src/routes/admin-sim.ts`, миграция `0073_sim_personas.sql` |
 | Ops-watch sweeper | `apps/worker/src/ops-watch-sweep.ts` |
 | Миграции | `0022_exchange.sql`, `0025_exchange_rate_tiers.sql`, `0026_exchange_order_methods.sql` |
 | E2E-кейсы | `apps/vertical-exchange/evals/exchange-candidate-cases/` |
