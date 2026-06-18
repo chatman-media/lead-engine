@@ -499,6 +499,12 @@ export const leads = pgTable("leads", {
   decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
   decidedAt: integer("decided_at"),
   lastCheckinAt: integer("last_checkin_at"),
+  // Cap on proactive check-in pings (apps/worker checkin-sweep): how many pings
+  // were sent on the CURRENT stage, and on which stage. On stage transition the
+  // count is logically reset (compared in the sweep), so each stage gets its own
+  // quota of WORKER_CHECKIN_MAX_PER_STAGE pings instead of nagging forever.
+  checkinCount: integer("checkin_count").notNull().default(0),
+  lastCheckinStageId: integer("last_checkin_stage_id"),
   visaInterviewField: text("visa_interview_field"),
   // Partner availability check token. Set when a lead enters an await_callback
   // partner-webhook stage. Cleared once /api/partner/cb/:token is received.
