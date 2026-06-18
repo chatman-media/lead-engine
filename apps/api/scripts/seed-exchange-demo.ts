@@ -386,8 +386,6 @@ function buildSampleLeads(
 			name: "Мария Соколова",
 			telegramId: "demo_exchange_002",
 			fields: {
-				exchange_rate: P.usdtRate,
-				thb_amount: QUOTE_CONFIRMED_TO,
 				rate_confirmed: true,
 			},
 			messages: [
