@@ -148,6 +148,30 @@ export class OutboundDispatcher {
       return;
     }
     const now = this.nowEpoch();
+    // #697 — задание на удаление сообщения из канала (а не отправка). Канал без
+    // capabilities.delete (WhatsApp/web/…) — no-op: soft-delete в БД уже сделан,
+    // из чата клиента сообщение не убрать. Send-политика к delete не применяется.
+    if (envelope.deleteExternalMessageId) {
+      try {
+        if (entry.adapter.capabilities.delete) {
+          await entry.adapter.delete({
+            channelId: envelope.channelId,
+            externalUserId: envelope.externalUserId,
+            externalMessageId: envelope.deleteExternalMessageId,
+          });
+        }
+        await withTenant(this.db, row.tenantId, async (tx) => {
+          const txRepo = new OutboundQueueRepo({ db: tx, tenantId: row.tenantId });
+          await txRepo.markSent(row.id, envelope.deleteExternalMessageId ?? "", this.nowEpoch());
+        });
+        this.opts.metrics?.outboundSent.inc(1, { ...tenantLabel, kind: entry.kind });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await this.markFailed(row, msg);
+        this.opts.metrics?.outboundFailed.inc(1, { ...tenantLabel, reason: "delete_error" });
+      }
+      return;
+    }
     const policyError = this.validateWhatsAppPolicy(entry.kind, envelope, now);
     if (policyError) {
       await this.markFailed(row, policyError);

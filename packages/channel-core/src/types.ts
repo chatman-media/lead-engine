@@ -188,6 +188,12 @@ export interface OutboundEnvelope {
   operatorHandoff?: OperatorHandoffMeta;
   /** Channel-specific send policy/payload metadata. */
   transport?: OutboundTransportMeta;
+  /**
+   * #697 — задание на удаление ранее отправленного сообщения (вместо send).
+   * Если задан, диспетчер зовёт adapter.delete (parts игнорируются). Каналы
+   * без capabilities.delete (WhatsApp/web/…) — no-op.
+   */
+  deleteExternalMessageId?: string;
 }
 
 /** Результат успешной отправки. */

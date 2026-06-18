@@ -50,24 +50,30 @@ let channelDbId = 0;
 class FakeAdapter implements ChannelAdapter {
   readonly kind: "telegram_bot" | "whatsapp";
   readonly id: string;
-  readonly capabilities: ChannelCapabilities = {
-    text: true,
-    photo: false,
-    video: false,
-    voice: false,
-    document: false,
-    edit: false,
-    delete: false,
-    callbackQuery: false,
-    typing: false,
-  };
+  readonly capabilities: ChannelCapabilities;
   sendCalls: OutboundEnvelope[] = [];
+  deleteCalls: DeleteOpts[] = [];
   shouldFail = false;
   failureMessage = "fake-adapter forced failure";
 
-  constructor(id: string, kind: "telegram_bot" | "whatsapp" = "telegram_bot") {
+  constructor(
+    id: string,
+    kind: "telegram_bot" | "whatsapp" = "telegram_bot",
+    deleteSupported = false,
+  ) {
     this.id = id;
     this.kind = kind;
+    this.capabilities = {
+      text: true,
+      photo: false,
+      video: false,
+      voice: false,
+      document: false,
+      edit: false,
+      delete: deleteSupported,
+      callbackQuery: false,
+      typing: false,
+    };
   }
   receive(): AsyncIterable<Inbound> {
     return { [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ value: undefined as unknown as Inbound, done: true }) }) };
@@ -84,8 +90,9 @@ class FakeAdapter implements ChannelAdapter {
   async edit(_opts: EditOpts): Promise<void> {
     throw new Error("not impl");
   }
-  async delete(_opts: DeleteOpts): Promise<void> {
-    throw new Error("not impl");
+  async delete(opts: DeleteOpts): Promise<void> {
+    this.deleteCalls.push(opts);
+    if (this.shouldFail) throw new Error(this.failureMessage);
   }
   async downloadMedia(_ref: MediaRef): Promise<Response> {
     throw new Error("not impl");
@@ -205,6 +212,28 @@ async function seedEnvelope(text: string): Promise<number> {
     })
     .returning();
   if (!row) throw new Error("seedEnvelope: insert returned no row");
+  return row.id;
+}
+
+async function seedDeleteEnvelope(targetExternalId: string): Promise<number> {
+  const now = Math.floor(Date.now() / 1000);
+  const [row] = await db
+    .insert(outboundQueue)
+    .values({
+      tenantId,
+      channelId: channelDbId,
+      payloadJson: JSON.stringify({
+        channelId: String(channelDbId),
+        externalUserId: "99999",
+        parts: [],
+        deleteExternalMessageId: targetExternalId,
+      }),
+      scheduledAt: now,
+      status: "pending",
+      createdAt: now,
+    })
+    .returning();
+  if (!row) throw new Error("seedDeleteEnvelope: insert returned no row");
   return row.id;
 }
 
@@ -776,5 +805,29 @@ describe("OutboundDispatcher integration", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("delete-envelope: capabilities.delete=true → adapter.delete + sent (#697)", async () => {
+    if (!sql) return;
+    const adapter = new FakeAdapter(String(channelDbId), "telegram_bot", true);
+    const { dispatcher } = makeDispatcher(adapter);
+    const queueId = await seedDeleteEnvelope("tg-777");
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
+    expect(adapter.sendCalls).toHaveLength(0);
+    expect(adapter.deleteCalls).toHaveLength(1);
+    expect(adapter.deleteCalls[0]?.externalMessageId).toBe("tg-777");
+    const [row] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, queueId));
+    expect(row?.status).toBe("sent");
+  });
+
+  it("delete-envelope: capabilities.delete=false → no-op, row sent", async () => {
+    if (!sql) return;
+    const adapter = new FakeAdapter(String(channelDbId), "telegram_bot", false);
+    const { dispatcher } = makeDispatcher(adapter);
+    const queueId = await seedDeleteEnvelope("wa-1");
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
+    expect(adapter.deleteCalls).toHaveLength(0);
+    const [row] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, queueId));
+    expect(row?.status).toBe("sent");
   });
 });

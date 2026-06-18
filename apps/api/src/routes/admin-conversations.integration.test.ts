@@ -1197,5 +1197,119 @@ describe("POST /api/admin/conversations/:id/kyc/approve", () => {
   });
 });
 
+describe("DELETE /api/admin/conversations/:id/messages/:msgId (#697)", () => {
+  it("soft-delete + ставит delete-job в outbound_queue (Telegram)", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Del Target" })
+      .returning({ id: contacts.id });
+    const [ch] = await db
+      .insert(channels)
+      .values({
+        tenantId: tenantA,
+        kind: "telegram_bot",
+        externalId: "delbot",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: channels.id });
+    await db.insert(channelIdentities).values({
+      contactId: contact!.id,
+      channelId: ch!.id,
+      externalUserId: "tg-del-99",
+      createdAt: now,
+    });
+    const [conv] = await db
+      .insert(conversations)
+      .values({
+        tenantId: tenantA,
+        userId: contact!.id,
+        source: "bot",
+        mode: "human",
+        status: "open",
+        lastMessageAt: now,
+        createdAt: now,
+      })
+      .returning({ id: conversations.id });
+    const [msg] = await db
+      .insert(messages)
+      .values({ tenantId: tenantA, conversationId: conv!.id, role: "human", text: "ошибся", createdAt: now })
+      .returning({ id: messages.id });
+    await db.insert(outboundQueue).values({
+      tenantId: tenantA,
+      channelId: ch!.id,
+      conversationId: conv!.id,
+      payloadJson: JSON.stringify({
+        channelId: String(ch!.id),
+        externalUserId: "tg-del-99",
+        parts: [{ kind: "text", text: "ошибся" }],
+      }),
+      idempotencyKey: `admin-reply-${msg!.id}`,
+      status: "sent",
+      externalMessageId: "tg-555",
+      scheduledAt: now,
+      sentAt: now,
+      createdAt: now,
+    });
+
+    const res = await authReq(
+      tokenA,
+      `/api/admin/conversations/${conv!.id}/messages/${msg!.id}`,
+      { method: "DELETE", headers: { "Content-Type": "application/json" } },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, channelDelete: true });
+
+    const [after] = await db
+      .select({ deletedAt: messages.deletedAt })
+      .from(messages)
+      .where(eq(messages.id, msg!.id));
+    expect(after!.deletedAt).not.toBeNull();
+
+    const [job] = await db
+      .select()
+      .from(outboundQueue)
+      .where(eq(outboundQueue.idempotencyKey, `admin-delete-${msg!.id}`));
+    expect(job).toBeDefined();
+    const payload = JSON.parse(job!.payloadJson) as { deleteExternalMessageId?: string };
+    expect(payload.deleteExternalMessageId).toBe("tg-555");
+  });
+
+  it("без отправленного external id → soft-delete без delete-job", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Del NoOut" })
+      .returning({ id: contacts.id });
+    const [conv] = await db
+      .insert(conversations)
+      .values({
+        tenantId: tenantA,
+        userId: contact!.id,
+        source: "bot",
+        mode: "human",
+        status: "open",
+        lastMessageAt: now,
+        createdAt: now,
+      })
+      .returning({ id: conversations.id });
+    const [msg] = await db
+      .insert(messages)
+      .values({ tenantId: tenantA, conversationId: conv!.id, role: "human", text: "x", createdAt: now })
+      .returning({ id: messages.id });
+    const res = await authReq(
+      tokenA,
+      `/api/admin/conversations/${conv!.id}/messages/${msg!.id}`,
+      { method: "DELETE", headers: { "Content-Type": "application/json" } },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, channelDelete: false });
+  });
+});
+
 // tenantB used only as cross-tenant guard
 void tenants;
