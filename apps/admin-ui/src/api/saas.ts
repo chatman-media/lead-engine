@@ -2724,8 +2724,31 @@ export const saas = {
   // ── Dialog simulator (dev/test) ──────────────────────────────────────────
   listSimPersonas() {
     return request<{
-      personas: Array<{ id: string; name: string; displayName: string; brief: string }>;
+      personas: Array<{
+        id: string;
+        name: string;
+        displayName: string;
+        brief: string;
+        isBuiltin: boolean;
+      }>;
     }>("/api/admin/sim/personas");
+  },
+  createSimPersona(input: { name: string; displayName: string; brief: string }) {
+    return request<{ ok: boolean; id: string }>("/api/admin/sim/personas", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updateSimPersona(key: string, patch: { name?: string; displayName?: string; brief?: string }) {
+    return request<{ ok: boolean }>(`/api/admin/sim/personas/${encodeURIComponent(key)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+  deleteSimPersona(key: string) {
+    return request<{ ok: boolean }>(`/api/admin/sim/personas/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    });
   },
   startSim(opts: {
     personaId?: string;

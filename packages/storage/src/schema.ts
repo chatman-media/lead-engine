@@ -499,6 +499,12 @@ export const leads = pgTable("leads", {
   decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
   decidedAt: integer("decided_at"),
   lastCheckinAt: integer("last_checkin_at"),
+  // Cap on proactive check-in pings (apps/worker checkin-sweep): how many pings
+  // were sent on the CURRENT stage, and on which stage. On stage transition the
+  // count is logically reset (compared in the sweep), so each stage gets its own
+  // quota of WORKER_CHECKIN_MAX_PER_STAGE pings instead of nagging forever.
+  checkinCount: integer("checkin_count").notNull().default(0),
+  lastCheckinStageId: integer("last_checkin_stage_id"),
   visaInterviewField: text("visa_interview_field"),
   // Partner availability check token. Set when a lead enters an await_callback
   // partner-webhook stage. Cleared once /api/partner/cb/:token is received.
@@ -1308,6 +1314,26 @@ export const referralCodes = pgTable("referral_codes", {
 }, (t) => [
   uniqueIndex("uniq_referral_codes_code").on(t.code),
   index("idx_referral_codes_tenant").on(t.tenantId),
+]);
+
+// ---- Dialog simulator personas (#698) -----------------------------------
+// Управляемые сценарии симуляции. Встроенные сидятся per-tenant из кода
+// (BUILTIN PERSONAS, идемпотентно по persona_key); кастомные создаются из UI.
+export const simPersonas = pgTable("sim_personas", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  /** Стабильный ключ: у встроенных = id из кода, у кастомных = custom_<token>. */
+  personaKey: text("persona_key").notNull(),
+  name: text("name").notNull(),
+  displayName: text("display_name").notNull(),
+  brief: text("brief").notNull(),
+  isBuiltin: boolean("is_builtin").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_sim_personas_tenant_key").on(t.tenantId, t.personaKey),
+  index("idx_sim_personas_tenant").on(t.tenantId),
 ]);
 
 // ---- Early access waitlist ----------------------------------------------

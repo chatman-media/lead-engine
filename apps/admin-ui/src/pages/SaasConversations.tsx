@@ -15,6 +15,7 @@ import React, { type FormEvent, useCallback, useEffect, useRef, useState } from 
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { LeadKbGuidanceCard } from "@/components/LeadKbGuidanceCard";
+import { SimPersonasManager } from "@/components/SimPersonasManager";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -470,6 +471,7 @@ export function SaasConversations() {
   const [simPersonaId, setSimPersonaId] = useState("");
   const [simTurns, setSimTurns] = useState("6");
   const [simStarting, setSimStarting] = useState(false);
+  const [simPersonasOpen, setSimPersonasOpen] = useState(false);
   // Поток («боевой режим»): N клиентов по интервалу
   const [simStream, setSimStream] = useState(false);
   const [simCount, setSimCount] = useState("10");
@@ -477,6 +479,15 @@ export function SaasConversations() {
   const [simStreams, setSimStreams] = useState<
     Array<{ id: string; total: number; spawned: number; intervalSec: number }>
   >([]);
+
+  async function reloadSimPersonas() {
+    try {
+      const r = await saas.listSimPersonas();
+      setSimPersonas(r.personas);
+    } catch {
+      // список обновится при следующем открытии панели
+    }
+  }
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -921,6 +932,13 @@ export function SaasConversations() {
                   ))}
                 </SelectContent>
               </Select>
+              <button
+                type="button"
+                className="text-[11px] text-primary hover:underline"
+                onClick={() => setSimPersonasOpen(true)}
+              >
+                Управление сценариями…
+              </button>
             </div>
             <div className="min-w-[220px] flex-1 space-y-1">
               <span className="text-xs font-medium text-muted-foreground">Куда писать</span>
@@ -1012,6 +1030,12 @@ export function SaasConversations() {
           )}
         </Card>
       )}
+
+      <SimPersonasManager
+        open={simPersonasOpen}
+        onOpenChange={setSimPersonasOpen}
+        onChanged={reloadSimPersonas}
+      />
 
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
