@@ -772,6 +772,7 @@ export function makeAdminSimRoutes(opts: {
 
     const runExchange = async (
       userText: string,
+      extraParts: Inbound["parts"] = [],
     ): Promise<{
       conversationId: number;
       contactId: number;
@@ -783,7 +784,7 @@ export function makeAdminSimRoutes(opts: {
         externalMessageId: `sim-${Date.now()}-${simToken()}`,
         externalUserId,
         externalUsername: params.displayName,
-        parts: [{ kind: "text", text: userText }],
+        parts: [{ kind: "text", text: userText }, ...extraParts],
         receivedAt: now,
         raw: {
           _sim: true,
@@ -883,6 +884,26 @@ export function makeAdminSimRoutes(opts: {
       };
     };
 
+    // #699 — когда бот просит верификацию, на следующем ходу sim-клиент
+    // «отправляет» mock-паспорт и видео-кружок. processInbound сам распознаёт
+    // медиа в exchange-диалоге и эскалирует на оператора (kyc_review) — далее
+    // оператор подтверждает KYC из правой панели.
+    const kycRequestRe = /(паспорт|документ|удостоверя|верификац|кружок|сел(ф|ьф)и)/i;
+    const mockKycParts = (): Inbound["parts"] => [
+      {
+        kind: "photo",
+        mediaRef: { channelId: channelIdStr, externalRef: `sim-kyc-passport-${simToken()}` },
+        caption: "Паспорт (симуляция)",
+      },
+      {
+        kind: "video_note",
+        mediaRef: { channelId: channelIdStr, externalRef: `sim-kyc-video-${simToken()}` },
+        durationSec: 4,
+      },
+    ];
+    let botAskedKyc = false;
+    let kycMediaSent = false;
+
     const exchanges: Array<{ user: string; bot: string }> = [];
     const nextUserMessage = async (): Promise<string | null> => {
       const msgs: ChatMessage[] = [{ role: "system", content: personaSystemPrompt(params.brief) }];
@@ -904,14 +925,18 @@ export function makeAdminSimRoutes(opts: {
     const first = await runExchange(firstUser);
     if (!first) throw new Error("pipeline produced no conversation");
     exchanges.push({ user: firstUser, bot: first.botReply });
+    botAskedKyc = kycRequestRe.test(first.botReply);
 
     const runRest = async () => {
       for (let turn = 1; turn < params.maxTurns; turn++) {
         if (aborted()) break; // kill-switch: «Остановить все» / стоп потока
         const userText = await nextUserMessage();
         if (!userText || aborted()) break;
-        const res = await runExchange(userText);
+        const sendKyc = botAskedKyc && !kycMediaSent;
+        const res = await runExchange(userText, sendKyc ? mockKycParts() : []);
         if (!res) break;
+        if (sendKyc) kycMediaSent = true;
+        botAskedKyc = kycRequestRe.test(res.botReply);
         exchanges.push({ user: userText, bot: res.botReply });
       }
     };
