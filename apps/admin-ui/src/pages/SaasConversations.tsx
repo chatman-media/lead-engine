@@ -1511,19 +1511,19 @@ export function SaasConversations() {
               <div className="space-y-3">
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold uppercase text-muted-foreground">Статус</label>
-                  <Select
-                    value={detail.conversation.status}
-                    onValueChange={(v) => handleUpdateConversation({ status: v })}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="open">Открыт</SelectItem>
-                      <SelectItem value="pending">Ожидание</SelectItem>
-                      <SelectItem value="resolved">Решен</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex h-9 items-center">
+                    <Badge
+                      variant={
+                        detail.conversation.status === "resolved"
+                          ? "success"
+                          : detail.conversation.status === "pending"
+                            ? "warning"
+                            : "secondary"
+                      }
+                    >
+                      {STATUS_RU[detail.conversation.status] ?? detail.conversation.status}
+                    </Badge>
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">
@@ -1594,7 +1594,7 @@ export function SaasConversations() {
                           }
                         }}
                       >
-                        {advancing ? "…" : "✅ Подтвердить · дальше"}
+                        {advancing ? "…" : "✅ Подтвердить и продвинуть"}
                       </Button>
                     </div>
                     <LeadKbGuidanceCard
