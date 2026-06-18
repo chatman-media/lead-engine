@@ -223,4 +223,51 @@ describe("admin-sim dialog simulator", () => {
     };
     expect(list.streams.length).toBe(0);
   });
+
+  it("POST /personas создаёт кастомный сценарий (isBuiltin=false)", async () => {
+    if (!sql) return;
+    const res = await req("POST", "/api/admin/sim/personas", {
+      name: "Тест-сценарий",
+      displayName: "Тестовый Клиент",
+      brief: "Ты — тестовый клиент, проверяешь обмен.",
+    });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    expect(id).toMatch(/^custom_/);
+    const list = (await (await req("GET", "/api/admin/sim/personas")).json()) as {
+      personas: { id: string; isBuiltin: boolean }[];
+    };
+    expect(list.personas.find((p) => p.id === id)?.isBuiltin).toBe(false);
+  });
+
+  it("PATCH /personas/:key редактирует бриф", async () => {
+    if (!sql) return;
+    const create = await req("POST", "/api/admin/sim/personas", {
+      name: "Редактируемый",
+      displayName: "Имя",
+      brief: "старый бриф",
+    });
+    const { id } = (await create.json()) as { id: string };
+    const patch = await req("PATCH", `/api/admin/sim/personas/${id}`, {
+      brief: "новый бриф",
+    });
+    expect(patch.status).toBe(200);
+    const list = (await (await req("GET", "/api/admin/sim/personas")).json()) as {
+      personas: { id: string; brief: string }[];
+    };
+    expect(list.personas.find((p) => p.id === id)?.brief).toBe("новый бриф");
+  });
+
+  it("DELETE /personas/:key удаляет кастомный, но не встроенный", async () => {
+    if (!sql) return;
+    const create = await req("POST", "/api/admin/sim/personas", {
+      name: "Удаляемый",
+      displayName: "Имя",
+      brief: "бриф",
+    });
+    const { id } = (await create.json()) as { id: string };
+    expect((await req("DELETE", `/api/admin/sim/personas/${id}`)).status).toBe(200);
+    // встроенный сценарий удалить нельзя
+    expect((await req("DELETE", "/api/admin/sim/personas/exchange_usdt")).status).toBe(400);
+  });
 });

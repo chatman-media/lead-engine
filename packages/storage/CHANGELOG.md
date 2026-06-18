@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.42.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.41.0...@chatman-media/storage-v1.42.0) (2026-06-18)
+
+
+### Features
+
+* **sim:** управление сценариями симуляции из админки — CRUD ([#698](https://github.com/chatman-media/lead-engine/issues/698)) ([cb2a25d](https://github.com/chatman-media/lead-engine/commit/cb2a25dd5a90f8f754e5fee38ee9bac2a9d68b89))
+
 # [@chatman-media/storage-v1.41.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.40.0...@chatman-media/storage-v1.41.0) (2026-06-18)
 
 
