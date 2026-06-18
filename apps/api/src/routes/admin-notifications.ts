@@ -102,7 +102,7 @@ export function makeAdminNotificationsRoutes(opts: {
     const adminId = c.var.adminId;
     const tenantId = c.var.tenantId;
     const body = await c.req.json().catch(() => ({}));
-    const eventType: string = body.eventType || "stage_changed";
+    const eventType: string = body.eventType || "operator_all";
     const token = await opts.repo.generateGroupLinkToken(tenantId, adminId, eventType);
     return c.json({ token });
   });
