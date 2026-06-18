@@ -22,7 +22,7 @@
  */
 
 import { randomBytes, randomInt } from "node:crypto";
-import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
+import type { Inbound, InboundPart, OutboundPart } from "@chatman-media/channel-core";
 import {
   ChannelIdentitiesRepo,
   ContactsRepo,
@@ -371,6 +371,38 @@ function personaSystemPrompt(brief: string): string {
 function firstPartText(parts: OutboundPart[]): string {
   const t = parts.find((p) => p.kind === "text");
   return t && "text" in t ? t.text : parts.length > 0 ? "[медиа]" : "";
+}
+
+// ── Mock KYC-медиа для симуляции ─────────────────────────────────────────────
+// В KYC-сценариях бот просит паспорт + видео-кружок, а LLM-клиент симуляции умеет
+// только писать текст → бот видит «медиа нет» и отвечает «верификация не прошла».
+// Когда бот на ПРЕДЫДУЩЕМ ходе запросил документы, инжектим mock-вложения (фото +
+// video_note) в следующий inbound, чтобы он прошёл по media-KYC ветке process-inbound
+// (как реальное медиа). Плейсхолдер-файл отдаётся downloadMedia по ref'ам ниже.
+export const SIM_KYC_PASSPORT_REF = "__sim_kyc_passport__";
+export const SIM_KYC_VIDEO_REF = "__sim_kyc_video__";
+const KYC_REQUEST_RE =
+  /паспорт|документ|удостоверени|видео|кружок|верифика|селфи|подтверд\w*\s+личност/i;
+
+/** Бот на прошлом ходе запросил KYC-материалы (паспорт/видео)? */
+export function botRequestedKyc(botReply: string): boolean {
+  return KYC_REQUEST_RE.test(botReply);
+}
+
+/** Mock-вложения KYC (паспорт-фото + видео-кружок) для инбаунда симуляции. */
+export function buildSimKycMediaParts(channelId: string): InboundPart[] {
+  return [
+    {
+      kind: "photo",
+      mediaRef: { channelId, externalRef: SIM_KYC_PASSPORT_REF },
+      caption: "SIMULATION PASSPORT",
+    },
+    {
+      kind: "video_note",
+      mediaRef: { channelId, externalRef: SIM_KYC_VIDEO_REF },
+      durationSec: 5,
+    },
+  ];
 }
 
 function positiveInt(value: unknown): number | undefined {
@@ -778,12 +810,20 @@ export function makeAdminSimRoutes(opts: {
       botReply: string;
     } | null> => {
       const now = Math.floor(Date.now() / 1000);
+      // Если бот на прошлом ходе попросил KYC-документы — sim-клиент «присылает»
+      // mock-паспорт + видео-кружок (см. buildSimKycMediaParts), иначе бот всегда
+      // отвечал бы «верификация не прошла».
+      const prevBotReply = exchanges[exchanges.length - 1]?.bot ?? "";
+      const kycMedia: InboundPart[] =
+        ctx.template?.slug === "exchange_v1" && botRequestedKyc(prevBotReply)
+          ? buildSimKycMediaParts(channelIdStr)
+          : [];
       const inbound: Inbound = {
         channelId: channelIdStr,
         externalMessageId: `sim-${Date.now()}-${simToken()}`,
         externalUserId,
         externalUsername: params.displayName,
-        parts: [{ kind: "text", text: userText }],
+        parts: [{ kind: "text", text: userText }, ...kycMedia],
         receivedAt: now,
         raw: {
           _sim: true,
