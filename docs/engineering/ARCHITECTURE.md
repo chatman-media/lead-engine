@@ -298,6 +298,15 @@ flowchart TB
 `claimKinds: ['telegram_bot', 'whatsapp', 'facebook', 'vk', 'max']`, чтобы не
 grab'ить rows, которые он не может отправить.
 
+**Delete-задания (#697):** та же `outbound_queue` несёт задания на удаление
+ранее отправленного сообщения — envelope с полем `deleteExternalMessageId`
+(вместо `parts`). Диспетчер ветвится: при `adapter.capabilities.delete === true`
+(Telegram bot + userbot) зовёт `adapter.delete(...)`, иначе **no-op** — WhatsApp/
+web/facebook/vk/max API не умеют удалять/отзывать отправленное, остаётся только
+soft-delete в админке (`messages.deleted_at`). Send-политика к delete не
+применяется. Оператор удаляет своё сообщение из правой панели; эндпоинт берёт
+external id из `outbound_queue` по `idempotencyKey = admin-reply-<msgId>`.
+
 ### Inbound / outbound sequence
 
 ```mermaid
@@ -346,6 +355,26 @@ sequenceDiagram
 ```
 
 ---
+
+## Operator inbox (страница «Диалоги»)
+
+`apps/admin-ui/src/pages/SaasConversations.tsx` + `apps/api/src/routes/admin-conversations.ts`.
+Оператор работает со всеми диалогами tenant'а в одном инбоксе.
+
+- **Статус диалога** (`open`/`pending`/`resolved`) — read-only badge: отражает
+  состояние, оператор не выставляет его вручную (#693).
+- **Назначение оператора** — авто на наименее загруженного при создании диалога
+  (least-busy, `packages/conversation-engine/src/assign-operator.ts`, #694) +
+  ручное переназначение из панели. Балансировка считает активные (не resolved)
+  диалоги на оператора; кандидаты — админы с `operator_settings`. self_play
+  (симуляция) не назначается. Тот же `pickLeastBusyOperator` используется при
+  Telegram-форум-handoff (`requireTelegram: true`, #651).
+- **Быстрые ответы** (#696) — когда ход у оператора (`mode='human'`), вместо
+  справочных фрагментов БЗ показываются готовые заготовки сообщений под текущую
+  стадию воронки; клик добавляет текст в поле ответа.
+- **Подтверждение KYC** (#699) — кнопка в KYC-панели; см. [EXCHANGE.md](EXCHANGE.md).
+- **Удаление своего сообщения** (#697) — soft-delete + delete-job в канал (см.
+  Outbound выше).
 
 ## Hot-reload
 
