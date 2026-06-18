@@ -67,7 +67,7 @@ const PAYOUT_LABEL: Record<string, string> = {
   office_cash: "Офис",
   courier_cash: "Курьер",
   cardless_atm: "Cardless ATM",
-  thai_bank_transfer: "Тайский банк",
+  thai_bank_transfer: "Перевод на банк",
   atm: "ATM",
 };
 
