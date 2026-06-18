@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.42.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.42.0...@chatman-media/storage-v1.42.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **exchange:** на стадии «Курс рассчитан» не собираем поля курс/сумма ([51fc1fa](https://github.com/chatman-media/lead-engine/commit/51fc1fadfb010ab50aa07fa6c98405fec66d590e))
+
 # [@chatman-media/storage-v1.42.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.41.0...@chatman-media/storage-v1.42.0) (2026-06-18)
 
 
