@@ -126,7 +126,10 @@ async function main() {
   // Check-in sweep: проактивный пинг лидам без активности дольше checkin_interval_days.
   let checkinSweeperPromise: Promise<void> = Promise.resolve();
   if (cfg.checkinSweepIntervalMs > 0) {
-    const checkinSweeper = new CheckinSweeper(db, { intervalMs: cfg.checkinSweepIntervalMs });
+    const checkinSweeper = new CheckinSweeper(db, {
+      intervalMs: cfg.checkinSweepIntervalMs,
+      maxCheckinsPerStage: cfg.checkinMaxPerStage,
+    });
     checkinSweeperPromise = checkinSweeper.run(abort.signal).catch((err) => {
       log.error("checkin-sweep fatal", { err: err instanceof Error ? err : new Error(String(err)) });
     });

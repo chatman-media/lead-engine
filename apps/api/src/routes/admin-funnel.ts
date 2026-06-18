@@ -684,7 +684,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 		{
 			slug: "exchange_request",
 			displayName: "Параметры обмена",
-			goal: `Собрать параметры обмена: что отдаёт клиент, сумму, сеть для крипты, способ получения ${QUOTE_CURRENCY.code} и (для рублей) способ внесения.`,
+			goal: `Собрать параметры обмена: что отдаёт клиент, сумму к обмену, сеть для крипты, способ выдачи ${QUOTE_CURRENCY.word} и (для рублей) способ внесения.`,
 			guidance: `Спокойно уточни актив-источник и сумму. Для USDT обязательно спроси сеть (принимаем TRC20). Узнай, как клиент хочет получить ${QUOTE_CURRENCY.tabloWord.toLowerCase()} — наличными в офисе по коду или через банкомат без карты. Если клиент отдаёт рубли — уточни, как удобнее внести: по СБП/QR или картой/переводом. Курс пока не называй.`,
 			kind: "intake",
 			stageType: "form_fill",
@@ -718,7 +718,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 				},
 				{
 					slug: "amount_from",
-					displayName: "Сумма (в источнике)",
+					displayName: "Сумма к обмену",
 					fieldType: "number",
 					required: true,
 					aiExtractable: true,
@@ -727,14 +727,14 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 				},
 				{
 					slug: "payout_method",
-					displayName: `Способ получения ${QUOTE_CURRENCY.code}`,
+					displayName: "Способ выдачи",
 					fieldType: "select",
 					required: false,
 					aiExtractable: true,
-					hint: "Офис (код) или банкомат (cardless)",
+					hint: "Наличные в офисе, банкомат, курьер или перевод на банк",
 					position: 3,
 					optionsJson:
-						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"},{"value":"courier_cash","label":"Курьер"},{"value":"thai_bank_transfer","label":"Перевод на тайский банк"}]',
+						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"},{"value":"courier_cash","label":"Курьер"},{"value":"thai_bank_transfer","label":"Перевод на банк"}]',
 				},
 				{
 					slug: "payment_method",
@@ -753,7 +753,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 			slug: "quote_calculated",
 			phase: "offer",
 			displayName: "Курс рассчитан",
-			goal: `Озвучить рассчитанный курс и итоговую сумму ${QUOTE_CURRENCY.code} и получить явное подтверждение клиента.`,
+			goal: `Озвучить рассчитанный курс и итоговую сумму к выдаче, получить явное подтверждение клиента.`,
 			guidance:
 				"Назови ТОЛЬКО тот курс и сумму, которые вернул расчёт — никогда не придумывай и не округляй курс сам и не торгуйся. Чётко проговори, сколько клиент отдаёт и сколько получит на руки, и дождись согласия продолжить.",
 			kind: "active",
@@ -773,7 +773,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 				},
 				{
 					slug: "thb_amount",
-					displayName: `Итоговая сумма ${QUOTE_CURRENCY.code}`,
+					displayName: "Итоговая сумма к выдаче",
 					fieldType: "number",
 					required: true,
 					aiExtractable: false,
@@ -806,7 +806,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 				},
 				{
 					slug: "amount_from",
-					displayName: "Сумма (в источнике)",
+					displayName: "Сумма к обмену",
 					fieldType: "number",
 					required: false,
 					aiExtractable: true,
@@ -826,14 +826,14 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 				},
 				{
 					slug: "payout_method",
-					displayName: `Способ получения ${QUOTE_CURRENCY.code}`,
+					displayName: "Способ выдачи",
 					fieldType: "select",
 					required: false,
 					aiExtractable: true,
-					hint: "Офис (код) или банкомат (cardless)",
+					hint: "Наличные в офисе, банкомат, курьер или перевод на банк",
 					position: 4,
 					optionsJson:
-						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"},{"value":"courier_cash","label":"Курьер"},{"value":"thai_bank_transfer","label":"Перевод на тайский банк"}]',
+						'[{"value":"office","label":"Офис (код)"},{"value":"atm","label":"Банкомат (cardless)"},{"value":"courier_cash","label":"Курьер"},{"value":"thai_bank_transfer","label":"Перевод на банк"}]',
 				},
 				{
 					slug: "payment_method",
@@ -980,7 +980,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 				},
 				{
 					slug: "amount_from",
-					displayName: "Сумма (в источнике)",
+					displayName: "Сумма к обмену",
 					fieldType: "number",
 					required: false,
 					aiExtractable: true,
@@ -1035,7 +1035,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 				},
 				{
 					slug: "amount_from",
-					displayName: "Сумма (в источнике)",
+					displayName: "Сумма к обмену",
 					fieldType: "number",
 					required: false,
 					aiExtractable: true,
@@ -1122,7 +1122,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 			fields: [
 				{
 					slug: "final_thb_paid",
-					displayName: `Выдано ${QUOTE_CURRENCY.code}`,
+					displayName: "Выданная сумма",
 					fieldType: "number",
 					required: true,
 					aiExtractable: false,

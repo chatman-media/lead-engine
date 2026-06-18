@@ -1709,7 +1709,7 @@ function OrderRow({
             <SelectItem value="none">выдача —</SelectItem>
             <SelectItem value="courier_cash">курьер</SelectItem>
             <SelectItem value="cardless_atm">cardless ATM</SelectItem>
-            <SelectItem value="thai_bank_transfer">Thai bank</SelectItem>
+            <SelectItem value="thai_bank_transfer">Перевод на банк</SelectItem>
             <SelectItem value="office_cash">офис</SelectItem>
             <SelectItem value="atm">ATM legacy</SelectItem>
           </SelectContent>

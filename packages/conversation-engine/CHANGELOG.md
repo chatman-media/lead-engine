@@ -1,3 +1,11 @@
+# [@chatman-media/conversation-engine-v3.22.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.4...@chatman-media/conversation-engine-v3.22.0) (2026-06-18)
+
+
+### Features
+
+* **conversations:** авто-назначение нового диалога на оператора по нагрузке ([#694](https://github.com/chatman-media/lead-engine/issues/694)) ([4a6d135](https://github.com/chatman-media/lead-engine/commit/4a6d135a0577b0d7223c91aaf2370948f74a4766)), closes [#651](https://github.com/chatman-media/lead-engine/issues/651)
+* **notifications:** stage-aware buttons for operator_request handoff ([a904ca7](https://github.com/chatman-media/lead-engine/commit/a904ca77ab534a105b529cc953facdf23cab7a85))
+
 # [@chatman-media/conversation-engine-v3.21.4](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.3...@chatman-media/conversation-engine-v3.21.4) (2026-06-17)
 
 

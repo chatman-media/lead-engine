@@ -15,6 +15,7 @@ import React, { type FormEvent, useCallback, useEffect, useRef, useState } from 
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { LeadKbGuidanceCard } from "@/components/LeadKbGuidanceCard";
+import { QuickReplies } from "@/components/QuickReplies";
 import { SimPersonasManager } from "@/components/SimPersonasManager";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -1571,6 +1572,10 @@ export function SaasConversations() {
                 </div>
               </div>
 
+              {detail.conversation.mode === "human" && (
+                <QuickReplies stage={contactLead?.state ?? null} onPick={appendReplyDraft} />
+              )}
+
               {/* Контакт и Лид */}
               <div className="space-y-3 border-t pt-4">
                 <div className="space-y-1">
@@ -1618,18 +1623,20 @@ export function SaasConversations() {
                           }
                         }}
                       >
-                        {advancing ? "…" : "✅ Подтвердить и продвинуть"}
+                        {advancing ? "…" : "Продвинуть по воронке"}
                       </Button>
                     </div>
-                    <LeadKbGuidanceCard
-                      guidance={kbGuidance}
-                      loading={kbGuidanceLoading}
-                      error={kbGuidanceError}
-                      onRefresh={() => void refreshKbGuidance(contactLead.id)}
-                      variant="section"
-                      onUseAction={appendReplyDraft}
-                      actionButtonLabel="В ответ"
-                    />
+                    {detail.conversation.mode !== "human" && (
+                      <LeadKbGuidanceCard
+                        guidance={kbGuidance}
+                        loading={kbGuidanceLoading}
+                        error={kbGuidanceError}
+                        onRefresh={() => void refreshKbGuidance(contactLead.id)}
+                        variant="section"
+                        onUseAction={appendReplyDraft}
+                        actionButtonLabel="В ответ"
+                      />
+                    )}
                   </>
                 ) : (
                   <div className="rounded-lg border border-dashed p-3 text-center">

@@ -87,6 +87,11 @@ export {
 } from "./admin-informer.ts";
 export { OperatorBotHandler } from "./operator-bot-handler.ts";
 export {
+	pickLeastBusyOperator,
+	operatorLabel,
+	type PickedOperator,
+} from "./assign-operator.ts";
+export {
   buildOperatorActionCallbackData,
   isOperatorHandoffEvent,
   OPERATOR_ACTION_CALLBACK_PREFIX,

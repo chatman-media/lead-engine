@@ -35,6 +35,9 @@ export function makeAdminOnboardingRoutes(opts: AdminOnboardingRoutesOpts): Hono
   const app = new Hono();
 
   app.get("/api/admin/onboarding-status", async (c) => {
+    // Invited operators (role=manager) always skip onboarding — they work with the owner's funnel.
+    if (c.var.role !== "superadmin") return c.json({ done: true });
+
     const tenantId = c.var.tenantId;
 
     const status = await withTenant(opts.db, tenantId, async (tx) => {
