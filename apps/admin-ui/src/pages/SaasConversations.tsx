@@ -1599,7 +1599,7 @@ export function SaasConversations() {
                           }
                         }}
                       >
-                        {advancing ? "…" : "✅ Подтвердить и продвинуть"}
+                        {advancing ? "…" : "Продвинуть по воронке"}
                       </Button>
                     </div>
                     {detail.conversation.mode !== "human" && (
