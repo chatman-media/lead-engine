@@ -14,7 +14,13 @@
  *      a. Найти channel_identities контакта (кроме web-каналов).
  *      b. Найти conversation для этого контакта + source.
  *      c. Поставить outbound text-сообщение в очередь (идемпотентно).
- *      d. Обновить leads.last_checkin_at = now.
+ *      d. Обновить leads.last_checkin_at + инкрементить checkin_count.
+ *
+ * Жёсткий лимит: не больше opts.maxCheckinsPerStage пингов НА СТАДИЮ. Счётчик
+ * (leads.checkin_count) логически обнуляется при переходе лида на новую стадию
+ * — сравнением leads.last_checkin_stage_id с текущей стадией прямо в sweep, без
+ * правок кода переходов. Так клиент не получает бесконечный поток «как дела», но
+ * на каждом новом этапе (оплата, выдача) напоминания снова доступны.
  */
 
 import { OutboundQueueRepo, withTenant } from "@chatman-media/conversation-engine";
@@ -48,6 +54,8 @@ export class CheckinSweeper {
       intervalMs: number;
       /** Text sent as the check-in message. Override for locale/branding. */
       messageText?: string;
+      /** Макс. пингов на стадию (см. doc). Default 2; 0 — не пинговать. */
+      maxCheckinsPerStage?: number;
     },
   ) {}
 
@@ -84,6 +92,8 @@ export class CheckinSweeper {
   }
 
   private async sweepTenant(tenantId: number, now: number): Promise<void> {
+    const max = this.opts.maxCheckinsPerStage ?? 2;
+    if (max <= 0) return; // пинги отключены
     await withTenant(this.db, tenantId, async (tx) => {
       // Find leads overdue for a check-in.
       // COALESCE(last_checkin_at, updated_at) is the "last contact" timestamp.
@@ -91,6 +101,9 @@ export class CheckinSweeper {
         .select({
           id: leads.id,
           userId: leads.userId,
+          stageId: leads.stageDefinitionId,
+          checkinCount: leads.checkinCount,
+          lastCheckinStageId: leads.lastCheckinStageId,
         })
         .from(leads)
         .innerJoin(
@@ -123,6 +136,11 @@ export class CheckinSweeper {
                 AND ${conversations.userId} = ${leads.userId}
                 AND ${conversations.lastMessageAt} >= ${now} - (${stageDefinitions.checkinIntervalDays} * 86400)
             )`,
+            // Жёсткий лимит: не больше max пингов на стадию. На новой стадии
+            // (last_checkin_stage_id != текущая, в т.ч. NULL) счётчик логически
+            // обнуляется → доступна свежая квота.
+            sql`(${leads.lastCheckinStageId} IS DISTINCT FROM ${leads.stageDefinitionId}
+                 OR ${leads.checkinCount} < ${max})`,
           ),
         );
 
@@ -222,9 +240,14 @@ export class CheckinSweeper {
           nowEpoch: now,
         });
 
+        const sameStage = lead.lastCheckinStageId === lead.stageId;
         await tx
           .update(leads)
-          .set({ lastCheckinAt: now })
+          .set({
+            lastCheckinAt: now,
+            checkinCount: sameStage ? lead.checkinCount + 1 : 1,
+            lastCheckinStageId: lead.stageId,
+          })
           .where(eq(leads.id, lead.id));
 
         sent++;

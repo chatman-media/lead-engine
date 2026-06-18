@@ -32,6 +32,13 @@ export interface WorkerConfig {
    */
   checkinSweepIntervalMs: number;
   /**
+   * Макс. число проактивных check-in пингов НА СТАДИЮ. Счётчик обнуляется при
+   * переходе лида на новую стадию — чтобы бот не душил клиента бесконечно, но и
+   * напоминания на новых стадиях не зарубались. Default 2. 0 — не пинговать.
+   * env WORKER_CHECKIN_MAX_PER_STAGE.
+   */
+  checkinMaxPerStage: number;
+  /**
    * Период payment-TTL sweep обменника, ms. Default 60000 (раз в минуту). 0 — отключить.
    * Напоминает/expire'ит заявки exchange_orders с истёкшим TTL котировки.
    */
@@ -98,6 +105,10 @@ export function loadWorkerConfig(): WorkerConfig {
     ),
     checkinSweepIntervalMs: Number.parseInt(
       process.env.WORKER_CHECKIN_SWEEP_MS ?? "3600000",
+      10,
+    ),
+    checkinMaxPerStage: Number.parseInt(
+      process.env.WORKER_CHECKIN_MAX_PER_STAGE ?? "2",
       10,
     ),
     exchangePaymentSweepMs: Number.parseInt(

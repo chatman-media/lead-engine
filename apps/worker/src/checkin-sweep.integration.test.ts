@@ -151,6 +151,72 @@ describe("CheckinSweeper.sweep (интеграция)", () => {
     expect(after.length).toBe(1);
   });
 
+  it("жёсткий лимит: ≤ maxCheckinsPerStage пингов на стадию, сброс при смене стадии", async () => {
+    if (!enabled) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [t] = await db.insert(tenants).values({ slug: `chk-cap-${now}` }).returning({ id: tenants.id });
+    const tid = t!.id;
+    const [f] = await db
+      .insert(funnels)
+      .values({ tenantId: tid, slug: `f-cap-${now}` })
+      .returning({ id: funnels.id });
+    const mkStage = async (slug: string) => {
+      const [st] = await db
+        .insert(stageDefinitions)
+        .values({
+          tenantId: tid,
+          funnelId: f!.id,
+          slug,
+          displayName: slug,
+          kind: "active",
+          checkinIntervalDays: 1,
+        })
+        .returning({ id: stageDefinitions.id });
+      return st!.id;
+    };
+    const stage1 = await mkStage(`s1-${now}`);
+    const stage2 = await mkStage(`s2-${now}`);
+    const [c] = await db.insert(contacts).values({ tenantId: tid }).returning({ id: contacts.id });
+    const [l] = await db
+      .insert(leads)
+      .values({ tenantId: tid, userId: c!.id, stageDefinitionId: stage1, updatedAt: now - 2 * 86400 })
+      .returning({ id: leads.id });
+    const lid = l!.id;
+    const [ch] = await db
+      .insert(channels)
+      .values({ tenantId: tid, kind: "telegram_bot", externalId: `bot-cap-${now}`, status: "active" })
+      .returning({ id: channels.id });
+    await db.insert(channelIdentities).values({ contactId: c!.id, channelId: ch!.id, externalUserId: "tg-cap" });
+    await db.insert(conversations).values({ tenantId: tid, userId: c!.id, source: "bot", mode: "ai" });
+
+    // cap = 2. Между проходами «отматываем» last_checkin_at в прошлое, чтобы лид
+    // снова стал overdue (внутри суток idempotencyKey дедупит саму отправку, но
+    // checkin_count обновляется при каждом выборе лида — на нём и проверяем).
+    const sweeper = new CheckinSweeper(db, { intervalMs: 1, messageText: "ping", maxCheckinsPerStage: 2 });
+    const overdueAgain = () =>
+      db.update(leads).set({ lastCheckinAt: now - 2 * 86400 }).where(eq(leads.id, lid));
+    const leadRow = async () => (await db.select().from(leads).where(eq(leads.id, lid)))[0];
+
+    await runSweep(sweeper);
+    await overdueAgain();
+    await runSweep(sweeper);
+    expect((await leadRow())?.checkinCount).toBe(2);
+
+    await overdueAgain();
+    await runSweep(sweeper); // лимит исчерпан → лид не выбирается, счётчик не растёт
+    expect((await leadRow())?.checkinCount).toBe(2);
+
+    // переход на новую стадию → квота обнуляется
+    await db
+      .update(leads)
+      .set({ stageDefinitionId: stage2, lastCheckinAt: now - 2 * 86400 })
+      .where(eq(leads.id, lid));
+    await runSweep(sweeper);
+    const fin = await leadRow();
+    expect(fin?.checkinCount).toBe(1);
+    expect(fin?.lastCheckinStageId).toBe(stage2);
+  });
+
   it("нет overdue-лидов у другого (пустого) тенанта → без отправок", async () => {
     if (!enabled) return;
     const now = Math.floor(Date.now() / 1000);
