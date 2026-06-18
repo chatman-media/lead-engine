@@ -8,6 +8,7 @@ import { getToken, saas } from "./api/saas.ts";
 import { SaasAcceptInvite } from "./pages/SaasAcceptInvite.tsx";
 import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasBilling } from "./pages/SaasBilling.tsx";
+import { SaasBotSettings } from "./pages/SaasBotSettings.tsx";
 import { SaasCampaigns } from "./pages/SaasCampaigns.tsx";
 import { SaasChannels } from "./pages/SaasChannels.tsx";
 import { SaasConversations } from "./pages/SaasConversations.tsx";
@@ -34,7 +35,6 @@ import { SaasQuality } from "./pages/SaasQuality.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
 import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { SaasServiceCatalog } from "./pages/SaasServiceCatalog.tsx";
-import { SaasBotSettings } from "./pages/SaasBotSettings.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSkills } from "./pages/SaasSkills.tsx";
 import { SaasStyles } from "./pages/SaasStyles.tsx";
@@ -81,10 +81,23 @@ function OnboardingGate({ require }: { require: "done" | "not-done" }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Invited operators (role=manager) skip onboarding — they see the owner's funnel.
     saas
-      .onboardingStatus()
-      .then((s) => {
-        if (!cancelled) setState(s.done ? "done" : "not-done");
+      .me()
+      .then((res) => {
+        if (cancelled) return;
+        if (res.admin.role !== "superadmin") {
+          setState("done");
+          return;
+        }
+        saas
+          .onboardingStatus()
+          .then((s) => {
+            if (!cancelled) setState(s.done ? "done" : "not-done");
+          })
+          .catch(() => {
+            if (!cancelled) setState("done");
+          });
       })
       .catch(() => {
         if (!cancelled) setState("done"); // fail-open
