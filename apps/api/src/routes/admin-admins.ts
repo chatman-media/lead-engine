@@ -1,6 +1,6 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import { adminInvites, admins, tenants } from "@chatman-media/storage";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { inviteEmailHtml, type Mailer } from "../lib/mailer.ts";
@@ -63,6 +63,7 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
    */
   app.get("/api/admin/admins", async (c) => {
     const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId;
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       return tx
         .select({
@@ -72,7 +73,19 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
           createdAt: admins.createdAt,
         })
         .from(admins)
-        .where(eq(admins.tenantId, tenantId))
+        .leftJoin(
+          adminInvites,
+          and(
+            eq(adminInvites.acceptedAdminId, admins.id),
+            eq(adminInvites.invitedByAdminId, adminId),
+          ),
+        )
+        .where(
+          and(
+            eq(admins.tenantId, tenantId),
+            or(eq(admins.id, adminId), isNotNull(adminInvites.acceptedAdminId)),
+          ),
+        )
         .orderBy(desc(admins.createdAt));
     });
     return c.json({ items: rows });
@@ -112,12 +125,15 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
     // Quota: сколько admin'ов разрешено на плане?
     const quota = await canAddAdmin({ db: opts.db, tenantId });
     if (!quota.allowed) {
-      return c.json({
-        error: "admins_limit_reached",
-        upgradeHint: `Лимит участников команды на плане ${quota.planLabel}: ${quota.limit}. Повысьте план для продолжения.`,
-        current: quota.current,
-        limit: quota.limit,
-      }, 402);
+      return c.json(
+        {
+          error: "admins_limit_reached",
+          upgradeHint: `Лимит участников команды на плане ${quota.planLabel}: ${quota.limit}. Повысьте план для продолжения.`,
+          current: quota.current,
+          limit: quota.limit,
+        },
+        402,
+      );
     }
 
     // Check existing admin с этим email в tenant'е.
@@ -157,25 +173,25 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
       details: { email, role, expiresAt },
     });
 
-    const shareUrl = opts.publicUrl
-      ? `${opts.publicUrl}/accept-invite?token=${token}`
-      : undefined;
+    const shareUrl = opts.publicUrl ? `${opts.publicUrl}/accept-invite?token=${token}` : undefined;
 
     // Отправить email с приглашением (best-effort).
     if (opts.mailer && shareUrl) {
       const [tenantRow] = await withTenant(opts.db, tenantId, async (tx) =>
         tx.select({ slug: tenants.slug }).from(tenants).where(eq(tenants.id, tenantId)),
       );
-      opts.mailer.send({
-        to: email,
-        subject: `Приглашение в команду ${tenantRow?.slug ?? tenantId} — lead-engine`,
-        html: inviteEmailHtml({
-          email,
-          inviteUrl: shareUrl,
-          tenantSlug: tenantRow?.slug ?? String(tenantId),
-          role,
-        }),
-      }).catch((e) => console.warn("[mailer] invite send failed:", e));
+      opts.mailer
+        .send({
+          to: email,
+          subject: `Приглашение в команду ${tenantRow?.slug ?? tenantId} — lead-engine`,
+          html: inviteEmailHtml({
+            email,
+            inviteUrl: shareUrl,
+            tenantSlug: tenantRow?.slug ?? String(tenantId),
+            role,
+          }),
+        })
+        .catch((e) => console.warn("[mailer] invite send failed:", e));
     }
 
     return c.json({
@@ -196,6 +212,7 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
    */
   app.get("/api/admin/admins/invites", async (c) => {
     const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId;
     const nowEpoch = Math.floor(Date.now() / 1000);
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       return tx
@@ -208,18 +225,13 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
           createdAt: adminInvites.createdAt,
         })
         .from(adminInvites)
-        .where(eq(adminInvites.tenantId, tenantId))
+        .where(and(eq(adminInvites.tenantId, tenantId), eq(adminInvites.invitedByAdminId, adminId)))
         .orderBy(desc(adminInvites.createdAt));
     });
     return c.json({
       items: rows.map((r) => ({
         ...r,
-        status:
-          r.usedAt !== null
-            ? "accepted"
-            : r.expiresAt < nowEpoch
-              ? "expired"
-              : "pending",
+        status: r.usedAt !== null ? "accepted" : r.expiresAt < nowEpoch ? "expired" : "pending",
       })),
     });
   });
@@ -247,16 +259,12 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
       const [existing] = await tx
         .select({ usedAt: adminInvites.usedAt, email: adminInvites.email })
         .from(adminInvites)
-        .where(
-          and(eq(adminInvites.tenantId, tenantId), eq(adminInvites.id, id)),
-        );
+        .where(and(eq(adminInvites.tenantId, tenantId), eq(adminInvites.id, id)));
       if (!existing) return { kind: "not_found" } as const;
       if (existing.usedAt !== null) return { kind: "already_used" } as const;
       await tx
         .delete(adminInvites)
-        .where(
-          and(eq(adminInvites.tenantId, tenantId), eq(adminInvites.id, id)),
-        );
+        .where(and(eq(adminInvites.tenantId, tenantId), eq(adminInvites.id, id)));
       return { kind: "deleted", email: existing.email } as const;
     });
 
