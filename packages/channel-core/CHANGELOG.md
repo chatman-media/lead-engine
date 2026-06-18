@@ -1,3 +1,10 @@
+# [@chatman-media/channel-core-v1.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.7.0...@chatman-media/channel-core-v1.8.0) (2026-06-18)
+
+
+### Features
+
+* **conversations:** удаление сообщения оператора из канала (Telegram) ([#697](https://github.com/chatman-media/lead-engine/issues/697)) ([9b9916f](https://github.com/chatman-media/lead-engine/commit/9b9916fef76be5cc2867cc4c0c01d876b11e0d3c))
+
 # [@chatman-media/channel-core-v1.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.6.0...@chatman-media/channel-core-v1.7.0) (2026-06-14)
 
 
