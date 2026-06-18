@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.23.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.22.0...@chatman-media/conversation-engine-v3.23.0) (2026-06-18)
+
+
+### Features
+
+* **notifications:** зонтичное событие «все операторские» для форум-группы ([45c7e4a](https://github.com/chatman-media/lead-engine/commit/45c7e4a535d3fe46986aab79bacd8bcb4eda1600))
+
 # [@chatman-media/conversation-engine-v3.22.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.21.4...@chatman-media/conversation-engine-v3.22.0) (2026-06-18)
 
 
