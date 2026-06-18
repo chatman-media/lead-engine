@@ -79,5 +79,22 @@ export async function resolveConversation(opts: {
 		mode: "ai",
 		nowEpoch: opts.nowEpoch,
 	});
+	// #694 — балансируем нового клиента по операторам (least-busy). Best-effort:
+	// сбой назначения НЕ должен ломать создание диалога/обработку входящего.
+	// Sim-диалоги (self_play) не назначаем — тестовая нагрузка не искажает баланс.
+	if (source !== "self_play") {
+		try {
+			const assignedAdminId =
+				await opts.conversations.autoAssignLeastBusyOperator(created.id);
+			if (assignedAdminId != null) {
+				return {
+					conversation: { ...created, assignedAdminId },
+					created: true,
+				};
+			}
+		} catch (err) {
+			console.warn("[resolveConversation] auto-assign failed:", err);
+		}
+	}
 	return { conversation: created, created: true };
 }
