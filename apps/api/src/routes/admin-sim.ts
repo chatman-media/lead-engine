@@ -28,10 +28,10 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
-	MessagesRepo,
-	normalizeReplyStrategyResult,
-	OutboundQueueRepo,
-	processInbound,
+  MessagesRepo,
+  normalizeReplyStrategyResult,
+  OutboundQueueRepo,
+  processInbound,
   type ReplyStrategy,
   runDeferredInboundPostProcessing,
   type StageClassifier,
@@ -258,6 +258,17 @@ const PERSONAS: SimPersona[] = [
     brief:
       "Ты — представитель B2B-компании (отдел продаж 20–30 человек), сейчас на AmoCRM, но не устраивает. " +
       "Хочешь попробовать продукт, в итоге просишь демо на следующей неделе.",
+  },
+  {
+    id: "exchange_reverse",
+    name: `Обменник — обратный обмен (${QC} → крипта/рубли)`,
+    displayName: "Антон Краев",
+    brief:
+      `Ты — клиент. У тебя на руках ${QC === "PHP" ? "30 000 песо" : "15 000 батов"} и ты хочешь ` +
+      `обменять их обратно в USDT (или рубли). Уверен, что обменник это делает. Настаиваешь, ` +
+      `просишь курс ${QC}→USDT. Если бот говорит, что такое направление не поддерживается — ` +
+      `удивляешься, переспрашиваешь, пробуешь другие варианты (${QC}→RUB, ${QC}→BTC), ` +
+      `и в итоге разочарованно завершаешь диалог.`,
   },
 ];
 
@@ -805,16 +816,18 @@ export function makeAdminSimRoutes(opts: {
 
       let botReply = "";
       try {
-				const result = await ctx.replyStrategy.generate({
-					tenant,
-					channel,
-					conversationId: pi.conversationId,
-					contactId: pi.contactId,
-					inbound,
-					userMessageText: userText,
-				});
-				botReply = firstPartText(normalizeReplyStrategyResult(result)?.envelopes.flatMap((e) => e.parts) ?? []);
-			} catch (err) {
+        const result = await ctx.replyStrategy.generate({
+          tenant,
+          channel,
+          conversationId: pi.conversationId,
+          contactId: pi.contactId,
+          inbound,
+          userMessageText: userText,
+        });
+        botReply = firstPartText(
+          normalizeReplyStrategyResult(result)?.envelopes.flatMap((e) => e.parts) ?? [],
+        );
+      } catch (err) {
         botReply = `(reply error: ${err instanceof Error ? err.message : String(err)})`;
       }
 
