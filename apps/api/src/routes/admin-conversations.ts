@@ -845,6 +845,82 @@ export function makeAdminConversationsRoutes(
   });
 
   /**
+   * POST /api/admin/conversations/:id/kyc/approve
+   * Оператор подтверждает KYC прямо из инбокса (#699): ставит
+   * exchangeKyc.verified, снимает needsVerification и возвращает диалог в
+   * AI-режим — бот продолжает за KYC-гейтом (статус-driven, без ручного
+   * перескока стадий). Зеркало operator-bot kyc_approved, но из админки.
+   */
+  app.post("/api/admin/conversations/:id/kyc/approve", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const conversationId = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(conversationId) || conversationId <= 0) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await moderateConversationContact(
+      tenantId,
+      conversationId,
+      adminId,
+      now,
+      (attrs) => {
+        const parsed = parseJsonObject(attrs);
+        const prevKyc =
+          parsed.exchangeKyc &&
+          typeof parsed.exchangeKyc === "object" &&
+          !Array.isArray(parsed.exchangeKyc)
+            ? (parsed.exchangeKyc as Record<string, unknown>)
+            : {};
+        const verificationId =
+          typeof prevKyc.verificationId === "string" && prevKyc.verificationId
+            ? prevKyc.verificationId
+            : `kyc-admin-${conversationId}-${now}`;
+        return {
+          attributesJson: JSON.stringify({
+            ...parsed,
+            isVerified: true,
+            verificationStatus: "verified",
+            exchangeKyc: {
+              ...prevKyc,
+              status: "verified",
+              verified: true,
+              needsVerification: false,
+              verificationId,
+              reviewedByAdminId: adminId ?? null,
+              reviewedAt: now,
+              source: "admin_inbox",
+            },
+          }),
+          eventType: "verification_approved",
+          eventDetails: { verificationId, source: "admin_inbox" },
+        };
+      },
+    );
+    if (outcome.kind === "not_found") return c.json({ error: "conversation not found" }, 404);
+    if (outcome.kind === "contact_not_found") return c.json({ error: "contact not found" }, 409);
+
+    // Вернуть диалог в AI-режим — бот продолжает обслуживание за KYC-гейтом.
+    await withTenant(opts.db, tenantId, async (tx) => {
+      await tx
+        .update(conversations)
+        .set({ mode: "ai", escalatedAt: null })
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)));
+    });
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "conversation.kyc_approve",
+      targetKind: "conversation",
+      targetId: conversationId,
+      details: { contactId: outcome.contactId },
+    });
+
+    return c.json({ ok: true, contactId: outcome.contactId });
+  });
+
+  /**
    * PUT /api/admin/conversations/:id/mode
    * Body: { mode: 'ai' | 'human' }
    *

@@ -317,7 +317,15 @@ function maskPassport(value: string): string {
   return compact.length > 4 ? `**** ${compact.slice(-4)}` : compact;
 }
 
-function ConversationVerificationPanel({ attributesJson }: { attributesJson: string | null }) {
+function ConversationVerificationPanel({
+  attributesJson,
+  onApproveKyc,
+  approving,
+}: {
+  attributesJson: string | null;
+  onApproveKyc?: () => void;
+  approving?: boolean;
+}) {
   const attrs = parseJsonRecord(attributesJson);
   const kyc = attrs.exchangeKyc && typeof attrs.exchangeKyc === "object" && !Array.isArray(attrs.exchangeKyc)
     ? (attrs.exchangeKyc as Record<string, unknown>)
@@ -383,6 +391,11 @@ function ConversationVerificationPanel({ attributesJson }: { attributesJson: str
           </div>
         )}
       </div>
+      {status && status !== "verified" && status !== "rejected" && onApproveKyc && (
+        <Button size="sm" className="w-full" disabled={approving} onClick={onApproveKyc}>
+          {approving ? "…" : "✅ Подтвердить KYC"}
+        </Button>
+      )}
     </div>
   );
 }
@@ -448,6 +461,7 @@ export function SaasConversations() {
   const [sending, setSending] = useState(false);
   const [togglingMode, setTogglingMode] = useState(false);
   const [advancing, setAdvancing] = useState(false);
+  const [approvingKyc, setApprovingKyc] = useState(false);
   const [confirmingTakeover, setConfirmingTakeover] = useState(false);
   const [banningContact, setBanningContact] = useState(false);
   const [confirmBanContact, setConfirmBanContact] = useState(false);
@@ -840,6 +854,23 @@ export function SaasConversations() {
       await refreshDetail(selectedId);
     } catch (err) {
       if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleApproveKyc() {
+    if (!selectedId || !detail) return;
+    setApprovingKyc(true);
+    setError("");
+    try {
+      await saas.approveKyc(selectedId);
+      await refreshDetail(selectedId);
+      await refreshList();
+      const nextLead = await refreshContactLead(detail.conversation.contactId);
+      await refreshKbGuidance(nextLead?.id ?? null);
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApprovingKyc(false);
     }
   }
 
@@ -1584,7 +1615,11 @@ export function SaasConversations() {
                   <p className="text-[11px] text-muted-foreground">ID: {detail.conversation.contactId}</p>
                 </div>
 
-                <ConversationVerificationPanel attributesJson={detail.conversation.contactAttributesJson} />
+                <ConversationVerificationPanel
+                  attributesJson={detail.conversation.contactAttributesJson}
+                  onApproveKyc={handleApproveKyc}
+                  approving={approvingKyc}
+                />
 
                 {contactLead ? (
                   <>

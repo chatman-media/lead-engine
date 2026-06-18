@@ -2833,6 +2833,12 @@ export const saas = {
       body: JSON.stringify(text ? { text } : {}),
     });
   },
+  approveKyc(conversationId: number) {
+    return request<{ ok: boolean; contactId: number }>(
+      `/api/admin/conversations/${conversationId}/kyc/approve`,
+      { method: "POST" },
+    );
+  },
   updateConversation(id: number, patch: { status?: string; assignedAdminId?: number | null }) {
     return request<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/admin/conversations/${id}`,

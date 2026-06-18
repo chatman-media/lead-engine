@@ -1133,5 +1133,69 @@ describe("GET /api/admin/conversations/:id/media", () => {
   });
 });
 
+describe("POST /api/admin/conversations/:id/kyc/approve", () => {
+  it("ставит exchangeKyc.verified и возвращает диалог в AI-режим (#699)", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({
+        tenantId: tenantA,
+        displayName: "KYC Approve Target",
+        attributesJson: JSON.stringify({
+          exchangeKyc: { status: "documents_received", verified: false },
+        }),
+      })
+      .returning({ id: contacts.id });
+    if (!contact) throw new Error("no contact");
+    const [conv] = await db
+      .insert(conversations)
+      .values({
+        tenantId: tenantA,
+        userId: contact.id,
+        source: "bot",
+        mode: "queued",
+        status: "open",
+        escalatedAt: now,
+        lastMessageAt: now,
+        createdAt: now,
+      })
+      .returning({ id: conversations.id });
+    if (!conv) throw new Error("no conv");
+
+    const res = await authReq(tokenA, `/api/admin/conversations/${conv.id}/kyc/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+
+    const [updated] = await db
+      .select({ attributesJson: contacts.attributesJson })
+      .from(contacts)
+      .where(eq(contacts.id, contact.id));
+    const attrs = JSON.parse(updated?.attributesJson ?? "{}") as {
+      exchangeKyc?: { verified?: boolean; status?: string };
+    };
+    expect(attrs.exchangeKyc?.verified).toBe(true);
+    expect(attrs.exchangeKyc?.status).toBe("verified");
+
+    const [convAfter] = await db
+      .select({ mode: conversations.mode, escalatedAt: conversations.escalatedAt })
+      .from(conversations)
+      .where(eq(conversations.id, conv.id));
+    expect(convAfter?.mode).toBe("ai");
+    expect(convAfter?.escalatedAt).toBeNull();
+  });
+
+  it("несуществующий conversation → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/conversations/99999999/kyc/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
 // tenantB used only as cross-tenant guard
 void tenants;
