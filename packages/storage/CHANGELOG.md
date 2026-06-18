@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.41.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.40.0...@chatman-media/storage-v1.41.0) (2026-06-18)
+
+
+### Features
+
+* **exchange,worker:** clearer funnel labels + cap proactive check-in pings ([7bcb8b8](https://github.com/chatman-media/lead-engine/commit/7bcb8b8dc2e7e8caf17edec3370470947728c59e))
+
 # [@chatman-media/storage-v1.40.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.39.1...@chatman-media/storage-v1.40.0) (2026-06-16)
 
 
