@@ -1,18 +1,12 @@
-import {
-	TelegramClient,
-	type TgInlineKeyboardButton,
-} from "@chatman-media/channel-telegram";
+import { TelegramClient, type TgInlineKeyboardButton } from "@chatman-media/channel-telegram";
 import type { AdminInformer } from "./admin-informer.ts";
-import type {
-	NotificationRule,
-	NotificationsRepo,
-} from "./dal/notifications.ts";
+import type { NotificationRule, NotificationsRepo } from "./dal/notifications.ts";
 import type { Db } from "./dal/types.ts";
 import {
-	buildOperatorActionCallbackData,
-	isOperatorHandoffEvent,
-	type OperatorBotExchangeAction,
-	operatorExchangeActionCallbackData,
+  buildOperatorActionCallbackData,
+  isOperatorHandoffEvent,
+  type OperatorBotExchangeAction,
+  operatorExchangeActionCallbackData,
 } from "./operator-bot-actions.ts";
 import { ensureOperatorTopic } from "./operator-forum-topic.ts";
 
@@ -21,784 +15,717 @@ import { ensureOperatorTopic } from "./operator-forum-topic.ts";
  * ReDoS на строках вида "////…/x"). Один обратный проход — линейно по длине.
  */
 function trimTrailingSlashes(value: string): string {
-	let end = value.length;
-	while (end > 0 && value.charCodeAt(end - 1) === 47 /* "/" */) {
-		end--;
-	}
-	return value.slice(0, end);
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47 /* "/" */) {
+    end--;
+  }
+  return value.slice(0, end);
 }
 
 export interface NotificationEvent {
-	tenantId: number;
-	eventType: string;
-	leadId?: number;
-	conversationId?: number;
-	contactId?: number;
-	/** assignedAdminId — если задан, проверяется notifyOnAssignedOnly */
-	assignedAdminId?: number;
-	data: Record<string, unknown>;
+  tenantId: number;
+  eventType: string;
+  leadId?: number;
+  conversationId?: number;
+  contactId?: number;
+  /** assignedAdminId — если задан, проверяется notifyOnAssignedOnly */
+  assignedAdminId?: number;
+  data: Record<string, unknown>;
 }
 
-type NotificationMediaKind =
-	| "photo"
-	| "video"
-	| "video_note"
-	| "document"
-	| "voice";
+type NotificationMediaKind = "photo" | "video" | "video_note" | "document" | "voice";
 
 export interface NotificationMediaRef {
-	kind: NotificationMediaKind;
-	channelId: string;
-	externalRef: string;
-	caption?: string;
-	mimeType?: string;
-	fileName?: string;
-	durationSec?: number;
+  kind: NotificationMediaKind;
+  channelId: string;
+  externalRef: string;
+  caption?: string;
+  mimeType?: string;
+  fileName?: string;
+  durationSec?: number;
 }
 
 export type NotificationMediaDownloader = (
-	ref: NotificationMediaRef,
+  ref: NotificationMediaRef,
 ) => Promise<Response | null | undefined>;
 
 type TelegramButtonRows = TgInlineKeyboardButton[][];
 
 function numericId(value: unknown): number | null {
-	if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-		return value;
-	}
-	if (typeof value !== "string" || !value.trim()) return null;
-	const parsed = Number.parseInt(value, 10);
-	return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function parseMediaRefsJson(value: unknown): NotificationMediaRef[] {
-	if (typeof value !== "string" || !value.trim()) return [];
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(value);
-	} catch {
-		return [];
-	}
-	if (!Array.isArray(parsed)) return [];
-	const refs: NotificationMediaRef[] = [];
-	for (const item of parsed) {
-		if (!item || typeof item !== "object") continue;
-		const record = item as Record<string, unknown>;
-		const kind = record.kind;
-		if (
-			kind !== "photo" &&
-			kind !== "video" &&
-			kind !== "video_note" &&
-			kind !== "document" &&
-			kind !== "voice"
-		) {
-			continue;
-		}
-		if (
-			typeof record.channelId !== "string" ||
-			!record.channelId ||
-			typeof record.externalRef !== "string" ||
-			!record.externalRef
-		) {
-			continue;
-		}
-		refs.push({
-			kind,
-			channelId: record.channelId,
-			externalRef: record.externalRef,
-			...(typeof record.caption === "string" && record.caption
-				? { caption: record.caption }
-				: {}),
-			...(typeof record.mimeType === "string" && record.mimeType
-				? { mimeType: record.mimeType }
-				: {}),
-			...(typeof record.fileName === "string" && record.fileName
-				? { fileName: record.fileName }
-				: {}),
-			...(typeof record.durationSec === "number"
-				? { durationSec: record.durationSec }
-				: {}),
-		});
-	}
-	return refs;
+  if (typeof value !== "string" || !value.trim()) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const refs: NotificationMediaRef[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const kind = record.kind;
+    if (
+      kind !== "photo" &&
+      kind !== "video" &&
+      kind !== "video_note" &&
+      kind !== "document" &&
+      kind !== "voice"
+    ) {
+      continue;
+    }
+    if (
+      typeof record.channelId !== "string" ||
+      !record.channelId ||
+      typeof record.externalRef !== "string" ||
+      !record.externalRef
+    ) {
+      continue;
+    }
+    refs.push({
+      kind,
+      channelId: record.channelId,
+      externalRef: record.externalRef,
+      ...(typeof record.caption === "string" && record.caption ? { caption: record.caption } : {}),
+      ...(typeof record.mimeType === "string" && record.mimeType
+        ? { mimeType: record.mimeType }
+        : {}),
+      ...(typeof record.fileName === "string" && record.fileName
+        ? { fileName: record.fileName }
+        : {}),
+      ...(typeof record.durationSec === "number" ? { durationSec: record.durationSec } : {}),
+    });
+  }
+  return refs;
 }
 
 function defaultContentType(kind: NotificationMediaKind): string {
-	if (kind === "photo") return "image/jpeg";
-	if (kind === "video" || kind === "video_note") return "video/mp4";
-	return "application/octet-stream";
+  if (kind === "photo") return "image/jpeg";
+  if (kind === "video" || kind === "video_note") return "video/mp4";
+  return "application/octet-stream";
 }
 
 function defaultFileName(ref: NotificationMediaRef, index: number): string {
-	if (ref.fileName) return ref.fileName;
-	const extension =
-		ref.kind === "photo"
-			? "jpg"
-			: ref.kind === "video" || ref.kind === "video_note"
-				? "mp4"
-				: "bin";
-	return `operator-handoff-${index + 1}.${extension}`;
+  if (ref.fileName) return ref.fileName;
+  const extension =
+    ref.kind === "photo"
+      ? "jpg"
+      : ref.kind === "video" || ref.kind === "video_note"
+        ? "mp4"
+        : "bin";
+  return `operator-handoff-${index + 1}.${extension}`;
 }
 
 export class NotificationService {
-	private client: TelegramClient | null = null;
+  private client: TelegramClient | null = null;
 
-	constructor(
-		private readonly repo: NotificationsRepo,
-		private readonly botToken: string,
-		private readonly appUrl: string,
-		/**
-		 * Если задан — владелец (superadmin) обслуживается информером (уровни +
-		 * дайджест + лента) и пропускается в per-operator-рассылке ниже, чтобы не
-		 * было дублей. Операторские правила/группы — без изменений.
-		 */
-		private readonly informer?: AdminInformer,
-		private readonly mediaDownloader?: NotificationMediaDownloader,
-		/**
-		 * #651 — нужен для форум-топиков: чтение/запись
-		 * conversations.operator_thread_id + least-busy ассайн оператора. Без db
-		 * фича выключена (поведение прежнее, единый чат без топиков).
-		 */
-		private readonly db?: Db,
-	) {
-		if (botToken) {
-			this.client = new TelegramClient({ token: botToken });
-		}
-	}
+  constructor(
+    private readonly repo: NotificationsRepo,
+    private readonly botToken: string,
+    private readonly appUrl: string,
+    /**
+     * Если задан — владелец (superadmin) обслуживается информером (уровни +
+     * дайджест + лента) и пропускается в per-operator-рассылке ниже, чтобы не
+     * было дублей. Операторские правила/группы — без изменений.
+     */
+    private readonly informer?: AdminInformer,
+    private readonly mediaDownloader?: NotificationMediaDownloader,
+    /**
+     * #651 — нужен для форум-топиков: чтение/запись
+     * conversations.operator_thread_id + least-busy ассайн оператора. Без db
+     * фича выключена (поведение прежнее, единый чат без топиков).
+     */
+    private readonly db?: Db,
+  ) {
+    if (botToken) {
+      this.client = new TelegramClient({ token: botToken });
+    }
+  }
 
-	async notify(event: NotificationEvent): Promise<void> {
-		// Владелец — через информер (уровни/дайджест/лента), отдельно от операторов.
-		const ownerAdminId = this.informer
-			? await this.informer.resolveOwnerAdminId(event.tenantId)
-			: null;
-		if (this.informer) {
-			await this.informer.emitNotificationEvent(event);
-		}
+  async notify(event: NotificationEvent): Promise<void> {
+    // Владелец — через информер (уровни/дайджест/лента), отдельно от операторов.
+    const ownerAdminId = this.informer
+      ? await this.informer.resolveOwnerAdminId(event.tenantId)
+      : null;
+    if (this.informer) {
+      await this.informer.emitNotificationEvent(event);
+    }
 
-		const client = this.client;
-		if (!client) return;
+    const client = this.client;
+    if (!client) return;
 
-		const [rules, operatorSettingsList] = await Promise.all([
-			this.repo.findRulesByEvent(event.tenantId, event.eventType),
-			this.repo.findOperatorSettingsByTenant(event.tenantId),
-		]);
+    const [rules, operatorSettingsList] = await Promise.all([
+      this.repo.findRulesByEvent(event.tenantId, event.eventType),
+      this.repo.findOperatorSettingsByTenant(event.tenantId),
+    ]);
 
-		const template = await this.repo.findTemplate(
-			event.tenantId,
-			event.eventType,
-		);
-		const text = template
-			? this.renderTemplate(template.body, event)
-			: this.formatMessage(event);
-		const buttons = this.formatButtons(event);
+    const template = await this.repo.findTemplate(event.tenantId, event.eventType);
+    const text = template ? this.renderTemplate(template.body, event) : this.formatMessage(event);
+    const buttons = this.formatButtons(event);
 
-		// 1. Групповые/канальные правила
-		const matchedRules = rules.filter((rule) =>
-			this.matchesCondition(rule, event),
-		);
-		for (const rule of matchedRules) {
-			try {
-				// #651: форум-группа → заводим/находим топик диалога и шлём карточку
-				// в этот тред. Не форум (или нет db/conversationId) → как раньше.
-				const threadId = await this.resolveForumThreadId(rule, event);
-				await this.sendNotificationTarget(
-					client,
-					rule.targetId,
-					event,
-					text,
-					buttons,
-					threadId,
-				);
-			} catch (err) {
-				console.error(
-					`[NotificationService] rule ${rule.id} send failed:`,
-					err,
-				);
-			}
-		}
+    // 1. Групповые/канальные правила
+    const matchedRules = rules.filter((rule) => this.matchesCondition(rule, event));
+    for (const rule of matchedRules) {
+      try {
+        // #651: форум-группа → заводим/находим топик диалога и шлём карточку
+        // в этот тред. Не форум (или нет db/conversationId) → как раньше.
+        const threadId = await this.resolveForumThreadId(rule, event);
+        await this.sendNotificationTarget(client, rule.targetId, event, text, buttons, threadId);
+      } catch (err) {
+        console.error(`[NotificationService] rule ${rule.id} send failed:`, err);
+      }
+    }
 
-		// 2. Личные уведомления операторам через operator_settings
-		for (const settings of operatorSettingsList) {
-			if (!settings.telegramChatId) continue;
-			// Владельца обслуживает информер — пропускаем, чтобы не дублировать.
-			if (ownerAdminId !== null && settings.adminId === ownerAdminId) continue;
-			// Фильтр по назначению: пропускаем если флаг включён, а лид назначен другому
-			if (
-				settings.notifyOnAssignedOnly &&
-				event.assignedAdminId !== undefined &&
-				event.assignedAdminId !== settings.adminId
-			) {
-				continue;
-			}
-			try {
-				await this.sendNotificationTarget(
-					client,
-					settings.telegramChatId,
-					event,
-					text,
-					buttons,
-				);
-			} catch (err) {
-				console.error(
-					`[NotificationService] personal send to admin ${settings.adminId} failed:`,
-					err,
-				);
-			}
-		}
-	}
+    // 2. Личные уведомления операторам через operator_settings
+    for (const settings of operatorSettingsList) {
+      if (!settings.telegramChatId) continue;
+      // Владельца обслуживает информер — пропускаем, чтобы не дублировать.
+      if (ownerAdminId !== null && settings.adminId === ownerAdminId) continue;
+      // Фильтр по назначению: пропускаем если флаг включён, а лид назначен другому
+      if (
+        settings.notifyOnAssignedOnly &&
+        event.assignedAdminId !== undefined &&
+        event.assignedAdminId !== settings.adminId
+      ) {
+        continue;
+      }
+      try {
+        await this.sendNotificationTarget(client, settings.telegramChatId, event, text, buttons);
+      } catch (err) {
+        console.error(
+          `[NotificationService] personal send to admin ${settings.adminId} failed:`,
+          err,
+        );
+      }
+    }
+  }
 
-	async sendTestMessage(
-		chatId: string,
-	): Promise<{ ok: boolean; error?: string }> {
-		const client = this.client;
-		if (!client) return { ok: false, error: "Бот не настроен (нет токена)" };
-		try {
-			await client.sendMessage({
-				chatId,
-				text: "🧪 <b>Тестовое уведомление</b>\n\nПравило активно — сообщения доходят корректно.",
-				parseMode: "HTML",
-			});
-			return { ok: true };
-		} catch (err) {
-			return {
-				ok: false,
-				error: err instanceof Error ? err.message : String(err),
-			};
-		}
-	}
+  async sendTestMessage(chatId: string): Promise<{ ok: boolean; error?: string }> {
+    const client = this.client;
+    if (!client) return { ok: false, error: "Бот не настроен (нет токена)" };
+    try {
+      await client.sendMessage({
+        chatId,
+        text: "🧪 <b>Тестовое уведомление</b>\n\nПравило активно — сообщения доходят корректно.",
+        parseMode: "HTML",
+      });
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
 
-	async sendDirectMessage(
-		chatId: string,
-		htmlText: string,
-	): Promise<{ ok: boolean; error?: string }> {
-		const client = this.client;
-		if (!client) return { ok: false, error: "Бот не настроен (нет токена)" };
-		try {
-			await this.sendMessage(client, chatId, htmlText, null);
-			return { ok: true };
-		} catch (err) {
-			return {
-				ok: false,
-				error: err instanceof Error ? err.message : String(err),
-			};
-		}
-	}
+  async sendDirectMessage(
+    chatId: string,
+    htmlText: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const client = this.client;
+    if (!client) return { ok: false, error: "Бот не настроен (нет токена)" };
+    try {
+      await this.sendMessage(client, chatId, htmlText, null);
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
 
-	/**
-	 * #651 — message_thread_id топика для этого правила, если: db настроена,
-	 * правило ведёт в форум-группу (target_is_forum), а событие — операторский
-	 * хендофф с conversationId. Заводит топик при первом хендоффе диалога и
-	 * (минимальный пул) назначает least-busy оператора. Любая ошибка/не-форум →
-	 * undefined: шлём в общий чат, как раньше (фича строго ADDITIVE).
-	 */
-	private async resolveForumThreadId(
-		rule: NotificationRule,
-		event: NotificationEvent,
-	): Promise<number | undefined> {
-		if (!this.db || !rule.targetIsForum) return undefined;
-		if (!isOperatorHandoffEvent(event) || !event.conversationId)
-			return undefined;
-		try {
-			const ensured = await ensureOperatorTopic({
-				db: this.db,
-				client: this.client as TelegramClient,
-				tenantId: event.tenantId,
-				chatId: rule.targetId,
-				context: {
-					conversationId: event.conversationId,
-					displayName:
-						typeof event.data.displayName === "string"
-							? event.data.displayName
-							: null,
-					amountLabel:
-						typeof event.data.amount === "string" && event.data.amount
-							? event.data.amount
-							: null,
-				},
-				nowEpoch: Math.floor(Date.now() / 1000),
-			});
-			return ensured?.threadId;
-		} catch (err) {
-			console.error(
-				`[NotificationService] ensure forum topic failed (conv ${event.conversationId}):`,
-				err,
-			);
-			return undefined;
-		}
-	}
+  /**
+   * #651 — message_thread_id топика для этого правила, если: db настроена,
+   * правило ведёт в форум-группу (target_is_forum), а событие — операторский
+   * хендофф с conversationId. Заводит топик при первом хендоффе диалога и
+   * (минимальный пул) назначает least-busy оператора. Любая ошибка/не-форум →
+   * undefined: шлём в общий чат, как раньше (фича строго ADDITIVE).
+   */
+  private async resolveForumThreadId(
+    rule: NotificationRule,
+    event: NotificationEvent,
+  ): Promise<number | undefined> {
+    if (!this.db || !rule.targetIsForum) return undefined;
+    if (!isOperatorHandoffEvent(event) || !event.conversationId) return undefined;
+    try {
+      const ensured = await ensureOperatorTopic({
+        db: this.db,
+        client: this.client as TelegramClient,
+        tenantId: event.tenantId,
+        chatId: rule.targetId,
+        context: {
+          conversationId: event.conversationId,
+          displayName: typeof event.data.displayName === "string" ? event.data.displayName : null,
+          amountLabel:
+            typeof event.data.amount === "string" && event.data.amount ? event.data.amount : null,
+        },
+        nowEpoch: Math.floor(Date.now() / 1000),
+      });
+      return ensured?.threadId;
+    } catch (err) {
+      console.error(
+        `[NotificationService] ensure forum topic failed (conv ${event.conversationId}):`,
+        err,
+      );
+      return undefined;
+    }
+  }
 
-	private async sendMessage(
-		client: TelegramClient,
-		chatId: string,
-		text: string,
-		buttons: TelegramButtonRows | null,
-		messageThreadId?: number,
-	): Promise<void> {
-		await client.sendMessage({
-			chatId,
-			text,
-			parseMode: "HTML",
-			replyMarkup: buttons ? { inline_keyboard: buttons } : undefined,
-			...(messageThreadId !== undefined ? { messageThreadId } : {}),
-		});
-	}
+  private async sendMessage(
+    client: TelegramClient,
+    chatId: string,
+    text: string,
+    buttons: TelegramButtonRows | null,
+    messageThreadId?: number,
+  ): Promise<void> {
+    await client.sendMessage({
+      chatId,
+      text,
+      parseMode: "HTML",
+      replyMarkup: buttons ? { inline_keyboard: buttons } : undefined,
+      ...(messageThreadId !== undefined ? { messageThreadId } : {}),
+    });
+  }
 
-	private async sendNotificationTarget(
-		client: TelegramClient,
-		chatId: string,
-		event: NotificationEvent,
-		text: string,
-		buttons: TelegramButtonRows | null,
-		messageThreadId?: number,
-	): Promise<void> {
-		await this.sendMediaPreviews(client, chatId, event, messageThreadId);
-		await this.sendMessage(client, chatId, text, buttons, messageThreadId);
-	}
+  private async sendNotificationTarget(
+    client: TelegramClient,
+    chatId: string,
+    event: NotificationEvent,
+    text: string,
+    buttons: TelegramButtonRows | null,
+    messageThreadId?: number,
+  ): Promise<void> {
+    await this.sendMediaPreviews(client, chatId, event, messageThreadId);
+    await this.sendMessage(client, chatId, text, buttons, messageThreadId);
+  }
 
-	private async sendMediaPreviews(
-		client: TelegramClient,
-		chatId: string,
-		event: NotificationEvent,
-		messageThreadId?: number,
-	): Promise<void> {
-		if (!isOperatorHandoffEvent(event)) return;
-		const refs = parseMediaRefsJson(event.data.mediaRefsJson);
-		for (const [i, ref] of refs.entries()) {
-			try {
-				await this.sendMediaPreview(
-					client,
-					chatId,
-					event,
-					ref,
-					i,
-					refs.length,
-					messageThreadId,
-				);
-			} catch (err) {
-				console.error("[NotificationService] media preview send failed:", err);
-			}
-		}
-	}
+  private async sendMediaPreviews(
+    client: TelegramClient,
+    chatId: string,
+    event: NotificationEvent,
+    messageThreadId?: number,
+  ): Promise<void> {
+    if (!isOperatorHandoffEvent(event)) return;
+    const refs = parseMediaRefsJson(event.data.mediaRefsJson);
+    for (const [i, ref] of refs.entries()) {
+      try {
+        await this.sendMediaPreview(client, chatId, event, ref, i, refs.length, messageThreadId);
+      } catch (err) {
+        console.error("[NotificationService] media preview send failed:", err);
+      }
+    }
+  }
 
-	private async sendMediaPreview(
-		client: TelegramClient,
-		chatId: string,
-		event: NotificationEvent,
-		ref: NotificationMediaRef,
-		index: number,
-		total: number,
-		messageThreadId?: number,
-	): Promise<void> {
-		const caption =
-			ref.kind === "video_note"
-				? undefined
-				: this.mediaPreviewCaption(event, ref, index, total);
-		const upload = await this.downloadPreviewMedia(ref).catch((err) => {
-			console.error(
-				"[NotificationService] media preview download failed:",
-				err,
-			);
-			return null;
-		});
-		if (upload) {
-			await this.sendUploadedMedia(
-				client,
-				chatId,
-				ref,
-				index,
-				upload,
-				caption,
-				messageThreadId,
-			);
-			return;
-		}
-		await this.sendReferencedMedia(
-			client,
-			chatId,
-			ref,
-			caption,
-			messageThreadId,
-		);
-	}
+  private async sendMediaPreview(
+    client: TelegramClient,
+    chatId: string,
+    event: NotificationEvent,
+    ref: NotificationMediaRef,
+    index: number,
+    total: number,
+    messageThreadId?: number,
+  ): Promise<void> {
+    const caption =
+      ref.kind === "video_note" ? undefined : this.mediaPreviewCaption(event, ref, index, total);
+    const upload = await this.downloadPreviewMedia(ref).catch((err) => {
+      console.error("[NotificationService] media preview download failed:", err);
+      return null;
+    });
+    if (upload) {
+      await this.sendUploadedMedia(client, chatId, ref, index, upload, caption, messageThreadId);
+      return;
+    }
+    await this.sendReferencedMedia(client, chatId, ref, caption, messageThreadId);
+  }
 
-	private async downloadPreviewMedia(ref: NotificationMediaRef): Promise<{
-		bytes: ArrayBuffer;
-		contentType: string;
-		filename: string;
-	} | null> {
-		if (!this.mediaDownloader) return null;
-		const response = await this.mediaDownloader(ref);
-		if (!response) return null;
-		if (!response.ok) {
-			throw new Error(`media download failed (${response.status})`);
-		}
-		return {
-			bytes: await response.arrayBuffer(),
-			contentType:
-				response.headers.get("content-type") ??
-				ref.mimeType ??
-				defaultContentType(ref.kind),
-			filename: defaultFileName(ref, 0),
-		};
-	}
+  private async downloadPreviewMedia(ref: NotificationMediaRef): Promise<{
+    bytes: ArrayBuffer;
+    contentType: string;
+    filename: string;
+  } | null> {
+    if (!this.mediaDownloader) return null;
+    const response = await this.mediaDownloader(ref);
+    if (!response) return null;
+    if (!response.ok) {
+      throw new Error(`media download failed (${response.status})`);
+    }
+    return {
+      bytes: await response.arrayBuffer(),
+      contentType:
+        response.headers.get("content-type") ?? ref.mimeType ?? defaultContentType(ref.kind),
+      filename: defaultFileName(ref, 0),
+    };
+  }
 
-	private async sendUploadedMedia(
-		client: TelegramClient,
-		chatId: string,
-		ref: NotificationMediaRef,
-		index: number,
-		upload: { bytes: ArrayBuffer; contentType: string; filename: string },
-		caption: string | undefined,
-		messageThreadId?: number,
-	): Promise<void> {
-		const thread = messageThreadId !== undefined ? { messageThreadId } : {};
-		if (ref.kind === "photo") {
-			await client.sendPhotoUpload({
-				chatId,
-				bytes: upload.bytes,
-				filename: defaultFileName(ref, index),
-				contentType: upload.contentType,
-				...(caption ? { caption } : {}),
-				...thread,
-			});
-			return;
-		}
-		if (ref.kind === "video") {
-			await client.sendVideoUpload({
-				chatId,
-				bytes: upload.bytes,
-				filename: defaultFileName(ref, index),
-				contentType: upload.contentType,
-				...(caption ? { caption } : {}),
-				...thread,
-			});
-			return;
-		}
-		if (ref.kind === "video_note") {
-			await client.sendVideoNoteUpload({
-				chatId,
-				bytes: upload.bytes,
-				filename: defaultFileName(ref, index),
-				contentType: upload.contentType,
-				...thread,
-			});
-			return;
-		}
-		await client.sendDocumentUpload({
-			chatId,
-			bytes: upload.bytes,
-			filename: defaultFileName(ref, index),
-			contentType: upload.contentType,
-			...(caption ? { caption } : {}),
-			...thread,
-		});
-	}
+  private async sendUploadedMedia(
+    client: TelegramClient,
+    chatId: string,
+    ref: NotificationMediaRef,
+    index: number,
+    upload: { bytes: ArrayBuffer; contentType: string; filename: string },
+    caption: string | undefined,
+    messageThreadId?: number,
+  ): Promise<void> {
+    const thread = messageThreadId !== undefined ? { messageThreadId } : {};
+    if (ref.kind === "photo") {
+      await client.sendPhotoUpload({
+        chatId,
+        bytes: upload.bytes,
+        filename: defaultFileName(ref, index),
+        contentType: upload.contentType,
+        ...(caption ? { caption } : {}),
+        ...thread,
+      });
+      return;
+    }
+    if (ref.kind === "video") {
+      await client.sendVideoUpload({
+        chatId,
+        bytes: upload.bytes,
+        filename: defaultFileName(ref, index),
+        contentType: upload.contentType,
+        ...(caption ? { caption } : {}),
+        ...thread,
+      });
+      return;
+    }
+    if (ref.kind === "video_note") {
+      await client.sendVideoNoteUpload({
+        chatId,
+        bytes: upload.bytes,
+        filename: defaultFileName(ref, index),
+        contentType: upload.contentType,
+        ...thread,
+      });
+      return;
+    }
+    await client.sendDocumentUpload({
+      chatId,
+      bytes: upload.bytes,
+      filename: defaultFileName(ref, index),
+      contentType: upload.contentType,
+      ...(caption ? { caption } : {}),
+      ...thread,
+    });
+  }
 
-	private async sendReferencedMedia(
-		client: TelegramClient,
-		chatId: string,
-		ref: NotificationMediaRef,
-		caption: string | undefined,
-		messageThreadId?: number,
-	): Promise<void> {
-		const thread = messageThreadId !== undefined ? { messageThreadId } : {};
-		if (ref.kind === "photo") {
-			await client.sendPhoto({
-				chatId,
-				photoFileId: ref.externalRef,
-				...(caption ? { caption } : {}),
-				...thread,
-			});
-			return;
-		}
-		if (ref.kind === "video") {
-			await client.sendVideo({
-				chatId,
-				videoFileId: ref.externalRef,
-				...(caption ? { caption } : {}),
-				...thread,
-			});
-			return;
-		}
-		if (ref.kind === "video_note") {
-			await client.sendVideoNote({
-				chatId,
-				videoNoteFileId: ref.externalRef,
-				...thread,
-			});
-			return;
-		}
-		await client.sendDocument({
-			chatId,
-			documentFileId: ref.externalRef,
-			...(caption ? { caption } : {}),
-			...thread,
-		});
-	}
+  private async sendReferencedMedia(
+    client: TelegramClient,
+    chatId: string,
+    ref: NotificationMediaRef,
+    caption: string | undefined,
+    messageThreadId?: number,
+  ): Promise<void> {
+    const thread = messageThreadId !== undefined ? { messageThreadId } : {};
+    if (ref.kind === "photo") {
+      await client.sendPhoto({
+        chatId,
+        photoFileId: ref.externalRef,
+        ...(caption ? { caption } : {}),
+        ...thread,
+      });
+      return;
+    }
+    if (ref.kind === "video") {
+      await client.sendVideo({
+        chatId,
+        videoFileId: ref.externalRef,
+        ...(caption ? { caption } : {}),
+        ...thread,
+      });
+      return;
+    }
+    if (ref.kind === "video_note") {
+      await client.sendVideoNote({
+        chatId,
+        videoNoteFileId: ref.externalRef,
+        ...thread,
+      });
+      return;
+    }
+    await client.sendDocument({
+      chatId,
+      documentFileId: ref.externalRef,
+      ...(caption ? { caption } : {}),
+      ...thread,
+    });
+  }
 
-	private mediaPreviewCaption(
-		event: NotificationEvent,
-		ref: NotificationMediaRef,
-		index: number,
-		total: number,
-	): string {
-		const lines = [
-			`Материал ${index + 1}/${total} · ${ref.kind}`,
-			event.data.displayName ? `Клиент: ${event.data.displayName}` : null,
-			event.data.title ? String(event.data.title) : null,
-			ref.caption ? `Подпись: ${ref.caption}` : null,
-		].filter((line): line is string => Boolean(line));
-		return lines.join("\n").slice(0, 1000);
-	}
+  private mediaPreviewCaption(
+    event: NotificationEvent,
+    ref: NotificationMediaRef,
+    index: number,
+    total: number,
+  ): string {
+    const lines = [
+      `Материал ${index + 1}/${total} · ${ref.kind}`,
+      event.data.displayName ? `Клиент: ${event.data.displayName}` : null,
+      event.data.title ? String(event.data.title) : null,
+      ref.caption ? `Подпись: ${ref.caption}` : null,
+    ].filter((line): line is string => Boolean(line));
+    return lines.join("\n").slice(0, 1000);
+  }
 
-	matchesCondition(rule: NotificationRule, event: NotificationEvent): boolean {
-		if (!rule.conditionJson || rule.conditionJson === "{}") return true;
-		try {
-			const condition = JSON.parse(rule.conditionJson) as Record<
-				string,
-				unknown
-			>;
-			for (const [key, value] of Object.entries(condition)) {
-				if (event.data[key] !== value) return false;
-			}
-			return true;
-		} catch {
-			return true;
-		}
-	}
+  matchesCondition(rule: NotificationRule, event: NotificationEvent): boolean {
+    if (!rule.conditionJson || rule.conditionJson === "{}") return true;
+    try {
+      const condition = JSON.parse(rule.conditionJson) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(condition)) {
+        if (event.data[key] !== value) return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  }
 
-	renderTemplate(body: string, event: NotificationEvent): string {
-		const vars: Record<string, unknown> = {
-			...event.data,
-			leadId: event.leadId,
-			conversationId: event.conversationId,
-			tenantId: event.tenantId,
-		};
-		let result = body;
-		for (const [key, value] of Object.entries(vars)) {
-			result = result.replace(
-				new RegExp(`\\{\\{${key}\\}\\}`, "g"),
-				String(value ?? ""),
-			);
-		}
-		return result.replace(/\{\{.{0,200}?\}\}/g, "");
-	}
+  renderTemplate(body: string, event: NotificationEvent): string {
+    const vars: Record<string, unknown> = {
+      ...event.data,
+      leadId: event.leadId,
+      conversationId: event.conversationId,
+      tenantId: event.tenantId,
+    };
+    let result = body;
+    for (const [key, value] of Object.entries(vars)) {
+      result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), String(value ?? ""));
+    }
+    return result.replace(/\{\{.{0,200}?\}\}/g, "");
+  }
 
-	formatMessage(event: NotificationEvent): string {
-		const emoji = this.getEventEmoji(event.eventType);
-		let msg = `${emoji} <b>${this.getEventTitle(event.eventType)}</b>\n\n`;
+  formatMessage(event: NotificationEvent): string {
+    const emoji = this.getEventEmoji(event.eventType);
+    let msg = `${emoji} <b>${this.getEventTitle(event.eventType)}</b>\n\n`;
 
-		if (event.data.displayName) {
-			msg += `👤 <b>Клиент:</b> ${event.data.displayName}\n`;
-		}
-		if (event.data.mediaSummary) {
-			msg += `📎 <b>Материалы:</b>\n${this.escape(String(event.data.mediaSummary))}\n`;
-		}
+    if (event.data.displayName) {
+      msg += `👤 <b>Клиент:</b> ${event.data.displayName}\n`;
+    }
+    if (event.data.mediaSummary) {
+      msg += `📎 <b>Материалы:</b>\n${this.escape(String(event.data.mediaSummary))}\n`;
+    }
 
-		for (const [key, value] of Object.entries(event.data)) {
-			if (
-				[
-					"displayName",
-					"toStage",
-					"fromStage",
-					// Служебные поля — нужны для кнопок/логики, оператору их не показываем.
-					"mediaRefsJson",
-					"mediaSummary",
-					"mediaCount",
-					"reason",
-					"orderId",
-				].includes(key)
-			) {
-				continue;
-			}
-			msg += `🔹 <b>${this.formatKey(key)}:</b> ${value}\n`;
-		}
+    for (const [key, value] of Object.entries(event.data)) {
+      if (
+        [
+          "displayName",
+          "toStage",
+          "fromStage",
+          // Служебные поля — нужны для кнопок/логики, оператору их не показываем.
+          "mediaRefsJson",
+          "mediaSummary",
+          "mediaCount",
+          "reason",
+          "orderId",
+        ].includes(key)
+      ) {
+        continue;
+      }
+      msg += `🔹 <b>${this.formatKey(key)}:</b> ${value}\n`;
+    }
 
-		if (event.data.fromStage && event.data.toStage) {
-			msg += `\n🔄 <b>Стадия:</b> ${event.data.fromStage} ➡️ ${event.data.toStage}\n`;
-		} else if (event.data.toStage) {
-			msg += `\n📍 <b>Стадия:</b> ${event.data.toStage}\n`;
-		}
+    if (event.data.fromStage && event.data.toStage) {
+      msg += `\n🔄 <b>Стадия:</b> ${event.data.fromStage} ➡️ ${event.data.toStage}\n`;
+    } else if (event.data.toStage) {
+      msg += `\n📍 <b>Стадия:</b> ${event.data.toStage}\n`;
+    }
 
-		return msg;
-	}
+    return msg;
+  }
 
-	private formatButtons(event: NotificationEvent): TelegramButtonRows | null {
-		if (isOperatorHandoffEvent(event)) {
-			const conversationId = event.conversationId as number;
-			const baseRows: TelegramButtonRows = [
-				[
-					{
-						text: "👁 Открыть чат",
-						url: this.conversationUrl(conversationId),
-					},
-				],
-				[
-					{
-						text: "✋ Взять",
-						callback_data: buildOperatorActionCallbackData({
-							action: "takeover",
-							tenantId: event.tenantId,
-							conversationId,
-						}),
-					},
-					{
-						text: "🤖 Вернуть AI",
-						callback_data: buildOperatorActionCallbackData({
-							action: "return_ai",
-							tenantId: event.tenantId,
-							conversationId,
-						}),
-					},
-				],
-			];
-			const exchangeRows = this.exchangeActionRows(event);
-			return [...baseRows, ...exchangeRows];
-		}
-		if (event.leadId) {
-			return [
-				[{ text: "👁 Посмотреть", url: `${this.appUrl}/leads/${event.leadId}` }],
-			];
-		}
-		if (event.conversationId) {
-			return [
-				[
-					{
-						text: "👁 Чат",
-						url: `${this.appUrl}/conversations/${event.conversationId}`,
-					},
-				],
-			];
-		}
-		return null;
-	}
+  private formatButtons(event: NotificationEvent): TelegramButtonRows | null {
+    if (isOperatorHandoffEvent(event)) {
+      const conversationId = event.conversationId as number;
+      const baseRows: TelegramButtonRows = [
+        [
+          {
+            text: "👁 Открыть чат",
+            url: this.conversationUrl(conversationId),
+          },
+        ],
+        [
+          {
+            text: "✋ Взять",
+            callback_data: buildOperatorActionCallbackData({
+              action: "takeover",
+              tenantId: event.tenantId,
+              conversationId,
+            }),
+          },
+          {
+            text: "🤖 Вернуть AI",
+            callback_data: buildOperatorActionCallbackData({
+              action: "return_ai",
+              tenantId: event.tenantId,
+              conversationId,
+            }),
+          },
+        ],
+      ];
+      const exchangeRows = this.exchangeActionRows(event);
+      return [...baseRows, ...exchangeRows];
+    }
+    if (event.leadId) {
+      return [[{ text: "👁 Посмотреть", url: `${this.appUrl}/leads/${event.leadId}` }]];
+    }
+    if (event.conversationId) {
+      return [
+        [
+          {
+            text: "👁 Чат",
+            url: `${this.appUrl}/conversations/${event.conversationId}`,
+          },
+        ],
+      ];
+    }
+    return null;
+  }
 
-	private exchangeActionRows(event: NotificationEvent): TelegramButtonRows {
-		if (!event.conversationId) return [];
-		const reason = String(event.data.reason ?? "");
-		const orderId = numericId(event.data.orderId);
-		const row = (
-			items: Array<{ text: string; action: OperatorBotExchangeAction }>,
-		): TgInlineKeyboardButton[] =>
-			items.map((item) => ({
-				text: item.text,
-				callback_data: operatorExchangeActionCallbackData(
-					item.action,
-					event.conversationId as number,
-					orderId,
-				),
-			}));
+  private exchangeActionRows(event: NotificationEvent): TelegramButtonRows {
+    if (!event.conversationId) return [];
+    const reason = String(event.data.reason ?? "");
+    const orderId = numericId(event.data.orderId);
+    const row = (
+      items: Array<{ text: string; action: OperatorBotExchangeAction }>,
+    ): TgInlineKeyboardButton[] =>
+      items.map((item) => ({
+        text: item.text,
+        callback_data: operatorExchangeActionCallbackData(
+          item.action,
+          event.conversationId as number,
+          orderId,
+        ),
+      }));
 
-		if (reason === "kyc_review") {
-			return [
-				row([
-					{ text: "✅ KYC OK", action: "kyc_approved" },
-					{ text: "📎 Дослать", action: "kyc_request_materials" },
-					{ text: "⛔ Отклонить", action: "kyc_rejected" },
-				]),
-			];
-		}
-		if (reason === "payment_review") {
-			return [
-				row([
-					{ text: "✅ Оплата OK", action: "payment_confirmed" },
-					{ text: "⏳ Проверяем", action: "payment_under_review" },
-					{ text: "⚠️ Проблема", action: "payment_problem" },
-				]),
-			];
-		}
-		if (reason === "office_payout") {
-			return [
-				row([
-					{ text: "🏢 Офис/время", action: "office_details" },
-					{ text: "🔐 Выдача", action: "payout_ready" },
-				]),
-			];
-		}
-		if (reason === "payout_review") {
-			return [
-				row([
-					{ text: "🔐 Выдача", action: "payout_ready" },
-					{ text: "🏢 Офис/время", action: "office_details" },
-				]),
-			];
-		}
-		if (reason === "operator_request") {
-			// Generic «разобрать вручную»: даём те же быстрые действия, что и на
-			// payment/payout-хендоффах, чтобы оператор мог двигать сделку прямо из
-			// бота (подтвердить оплату / выдать код), а не уходить в админку.
-			return [
-				row([
-					{ text: "✅ Оплата OK", action: "payment_confirmed" },
-					{ text: "🔐 Выдача", action: "payout_ready" },
-				]),
-				row([{ text: "✍️ Ответить", action: "operator_reply" }]),
-			];
-		}
-		return [];
-	}
+    if (reason === "kyc_review") {
+      return [
+        row([
+          { text: "✅ KYC OK", action: "kyc_approved" },
+          { text: "📎 Дослать", action: "kyc_request_materials" },
+          { text: "⛔ Отклонить", action: "kyc_rejected" },
+        ]),
+      ];
+    }
+    if (reason === "payment_review") {
+      return [
+        row([
+          { text: "✅ Оплата OK", action: "payment_confirmed" },
+          { text: "⏳ Проверяем", action: "payment_under_review" },
+          { text: "⚠️ Проблема", action: "payment_problem" },
+        ]),
+      ];
+    }
+    if (reason === "office_payout") {
+      return [
+        row([
+          { text: "🏢 Офис/время", action: "office_details" },
+          { text: "🔐 Выдача", action: "payout_ready" },
+        ]),
+      ];
+    }
+    if (reason === "payout_review") {
+      return [
+        row([
+          { text: "🔐 Выдача", action: "payout_ready" },
+          { text: "🏢 Офис/время", action: "office_details" },
+        ]),
+      ];
+    }
+    if (reason === "operator_request") {
+      const stageSlug = String(event.data.stageSlug ?? "");
+      // Стадии, на которых клиент уже должен был оплатить — оператор может подтвердить оплату.
+      const PAYMENT_STAGES = new Set(["order_created", "requisites_sent", "payment_proof_waiting"]);
+      // Стадии, на которых оплата уже подтверждена — оператор выдаёт средства.
+      const PAYOUT_STAGES = new Set(["payment_verified", "payout_or_completion"]);
 
-	private conversationUrl(conversationId: number): string {
-		return `${trimTrailingSlashes(this.appUrl)}/conversations/${conversationId}`;
-	}
+      if (PAYMENT_STAGES.has(stageSlug)) {
+        return [
+          row([
+            { text: "✅ Оплата OK", action: "payment_confirmed" },
+            { text: "⚠️ Проблема", action: "payment_problem" },
+          ]),
+          row([{ text: "✍️ Ответить", action: "operator_reply" }]),
+        ];
+      }
+      if (PAYOUT_STAGES.has(stageSlug)) {
+        return [
+          row([{ text: "🔐 Выдача", action: "payout_ready" }]),
+          row([{ text: "✍️ Ответить", action: "operator_reply" }]),
+        ];
+      }
+      // Ранние стадии (quote_calculated, risk_review и т.д.) — только ответ.
+      return [row([{ text: "✍️ Ответить", action: "operator_reply" }])];
+    }
+    return [];
+  }
 
-	private getEventEmoji(type: string): string {
-		const map: Record<string, string> = {
-			lead_intake_complete: "🆕",
-			stage_changed: "🔄",
-			human_takeover: "🆘",
-			operator_handoff_required: "✋",
-			verification_requested: "🪪",
-			document_uploaded: "📸",
-			high_value_deal: "💎",
-			lead_stale: "⏰",
-			operator_confirm_needed: "✋",
-			provider_request_send_failed: "⚠️",
-		};
-		return map[type] ?? "🔔";
-	}
+  private conversationUrl(conversationId: number): string {
+    return `${trimTrailingSlashes(this.appUrl)}/conversations/${conversationId}`;
+  }
 
-	private getEventTitle(type: string): string {
-		const map: Record<string, string> = {
-			lead_intake_complete: "Новый лид",
-			stage_changed: "Смена стадии",
-			human_takeover: "Нужна помощь оператора",
-			operator_handoff_required: "Нужно действие оператора",
-			verification_requested: "Нужна верификация клиента",
-			document_uploaded: "Загружен документ",
-			high_value_deal: "Крупная сделка",
-			lead_stale: "Лид завис",
-			operator_confirm_needed: "Нужно подтверждение оператора",
-			provider_request_send_failed: "Ошибка отправки провайдеру",
-		};
-		return map[type] ?? "Уведомление";
-	}
+  private getEventEmoji(type: string): string {
+    const map: Record<string, string> = {
+      lead_intake_complete: "🆕",
+      stage_changed: "🔄",
+      human_takeover: "🆘",
+      operator_handoff_required: "✋",
+      verification_requested: "🪪",
+      document_uploaded: "📸",
+      high_value_deal: "💎",
+      lead_stale: "⏰",
+      operator_confirm_needed: "✋",
+      provider_request_send_failed: "⚠️",
+    };
+    return map[type] ?? "🔔";
+  }
 
-	private escape(value: string): string {
-		return value
-			.replaceAll("&", "&amp;")
-			.replaceAll("<", "&lt;")
-			.replaceAll(">", "&gt;");
-	}
+  private getEventTitle(type: string): string {
+    const map: Record<string, string> = {
+      lead_intake_complete: "Новый лид",
+      stage_changed: "Смена стадии",
+      human_takeover: "Нужна помощь оператора",
+      operator_handoff_required: "Нужно действие оператора",
+      verification_requested: "Нужна верификация клиента",
+      document_uploaded: "Загружен документ",
+      high_value_deal: "Крупная сделка",
+      lead_stale: "Лид завис",
+      operator_confirm_needed: "Нужно подтверждение оператора",
+      provider_request_send_failed: "Ошибка отправки провайдеру",
+    };
+    return map[type] ?? "Уведомление";
+  }
 
-	private formatKey(key: string): string {
-		const map: Record<string, string> = {
-			amount: "Сумма",
-			action: "Действие",
-			asset: "Актив",
-			accepted: "Принято",
-			contractId: "Contract",
-			context: "Контекст",
-			network: "Сеть",
-			pending: "Ожидает",
-			phone: "Телефон",
-			priority: "Приоритет",
-			rail: "Платёжный канал",
-			reviewPath: "Путь проверки",
-			email: "Email",
-			text: "Сообщение",
-			urgency: "Срочность",
-		};
-		return map[key] ?? key;
-	}
+  private escape(value: string): string {
+    return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  }
+
+  private formatKey(key: string): string {
+    const map: Record<string, string> = {
+      amount: "Сумма",
+      action: "Действие",
+      asset: "Актив",
+      accepted: "Принято",
+      contractId: "Contract",
+      context: "Контекст",
+      network: "Сеть",
+      pending: "Ожидает",
+      phone: "Телефон",
+      priority: "Приоритет",
+      rail: "Платёжный канал",
+      reviewPath: "Путь проверки",
+      email: "Email",
+      text: "Сообщение",
+      urgency: "Срочность",
+    };
+    return map[key] ?? key;
+  }
 }
