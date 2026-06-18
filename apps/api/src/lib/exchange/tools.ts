@@ -11,12 +11,26 @@
  * результат verbatim.
  */
 
-import { type Db, getDecryptedSecret, QUOTE_CURRENCY, withTenant } from "@chatman-media/conversation-engine";
+import {
+  type Db,
+  getDecryptedSecret,
+  QUOTE_CURRENCY,
+  withTenant,
+} from "@chatman-media/conversation-engine";
 import type { AnyRagTool } from "@chatman-media/kb";
-import { conversations, exchangeRates, funnels, leadFieldValues, leads, stageDefinitions, stageFields } from "@chatman-media/storage";
+import {
+  conversations,
+  exchangeRates,
+  funnels,
+  leadFieldValues,
+  leads,
+  stageDefinitions,
+  stageFields,
+} from "@chatman-media/storage";
 import { and, asc, desc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_TX_MAX_AGE_SECONDS, extractTxHash, verifyTronUsdt } from "./chain.ts";
+import type { RateGuardTrip } from "./guardrails.ts";
 import {
   cancelOpenExchangeOrders,
   createOrderIdempotent,
@@ -33,7 +47,6 @@ import {
   updateOrder,
 } from "./orders.ts";
 import { getPaymentProvider, verifyWestWalletInvoicePayment } from "./providers.ts";
-import type { RateGuardTrip } from "./guardrails.ts";
 import { computeQuote, isCryptoAsset, normAsset, resolveNetwork } from "./rates.ts";
 import { assessOrderRisk } from "./risk.ts";
 import { getExchangeVerificationStatus } from "./verification.ts";
@@ -50,9 +63,7 @@ function logGuardTrip(
   network: string | undefined,
   guard: RateGuardTrip,
 ): void {
-  const dev = Number.isFinite(guard.deviationPct)
-    ? `${guard.deviationPct.toFixed(2)}%`
-    : "n/a";
+  const dev = Number.isFinite(guard.deviationPct) ? `${guard.deviationPct.toFixed(2)}%` : "n/a";
   console.warn(
     `[exchange-guard] tripped tenant=${tenantId} conv=${conversationId} ` +
       `${asset}${network ? `/${network}` : ""} reason=${guard.reason} ` +
@@ -61,9 +72,7 @@ function logGuardTrip(
 }
 
 function compactInfoLines(lines: Array<string | null | undefined>): string | null {
-  const out = lines
-    .map((line) => line?.trim())
-    .filter((line): line is string => Boolean(line));
+  const out = lines.map((line) => line?.trim()).filter((line): line is string => Boolean(line));
   return out.length > 0 ? out.join("\n") : null;
 }
 
@@ -105,10 +114,7 @@ async function moveExchangeLeadToStage(opts: {
         funnelId: stageDefinitions.funnelId,
       })
       .from(conversations)
-      .innerJoin(
-        leads,
-        and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)),
-      )
+      .innerJoin(leads, and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)))
       .leftJoin(stageDefinitions, eq(stageDefinitions.id, leads.stageDefinitionId))
       .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
       .orderBy(desc(leads.updatedAt), desc(leads.id))
@@ -141,15 +147,11 @@ async function moveExchangeLeadToStage(opts: {
       .limit(1);
     if (!target) return null;
 
-    if (
-      lead.stageDefinitionId === target.id &&
-      lead.state === target.slug
-    ) {
+    if (lead.stageDefinitionId === target.id && lead.state === target.slug) {
       return { leadId: lead.id, stageSlug: target.slug, changed: false };
     }
 
-    const currentPosition =
-      typeof lead.currentPosition === "number" ? lead.currentPosition : null;
+    const currentPosition = typeof lead.currentPosition === "number" ? lead.currentPosition : null;
     if (!allowBackward && currentPosition != null && target.position < currentPosition) {
       return { leadId: lead.id, stageSlug: lead.state, changed: false };
     }
@@ -179,10 +181,7 @@ async function resolveLeadStageSlug(
     const [row] = await tx
       .select({ slug: stageDefinitions.slug })
       .from(conversations)
-      .innerJoin(
-        leads,
-        and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)),
-      )
+      .innerJoin(leads, and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)))
       .leftJoin(stageDefinitions, eq(stageDefinitions.id, leads.stageDefinitionId))
       .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
       .orderBy(desc(leads.updatedAt), desc(leads.id))
@@ -270,11 +269,9 @@ export function mapExchangeCollectedValues(
   const network = fieldString(bySlug.network);
   if (network) collected.network = network;
   const payout = fieldString(bySlug.payout_method);
-  if (payout)
-    collected.payoutMethod = PAYOUT_VALUE_MAP[payout.toLowerCase()] ?? payout;
+  if (payout) collected.payoutMethod = PAYOUT_VALUE_MAP[payout.toLowerCase()] ?? payout;
   const payment = fieldString(bySlug.payment_method);
-  if (payment)
-    collected.paymentMethod = PAYMENT_VALUE_MAP[payment.toLowerCase()] ?? payment;
+  if (payment) collected.paymentMethod = PAYMENT_VALUE_MAP[payment.toLowerCase()] ?? payment;
   return collected;
 }
 
@@ -300,16 +297,8 @@ export async function readExchangeCollectedFields(
     const [lead] = await tx
       .select({ id: leads.id })
       .from(conversations)
-      .innerJoin(
-        leads,
-        and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)),
-      )
-      .where(
-        and(
-          eq(conversations.tenantId, tenantId),
-          eq(conversations.id, conversationId),
-        ),
-      )
+      .innerJoin(leads, and(eq(leads.tenantId, tenantId), eq(leads.userId, conversations.userId)))
+      .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
       .orderBy(desc(leads.updatedAt), desc(leads.id))
       .limit(1);
     if (!lead) return {};
@@ -328,12 +317,7 @@ export async function readExchangeCollectedFields(
       })
       .from(leadFieldValues)
       .innerJoin(stageFields, eq(stageFields.id, leadFieldValues.fieldId))
-      .where(
-        and(
-          eq(leadFieldValues.leadId, lead.id),
-          eq(leadFieldValues.tenantId, tenantId),
-        ),
-      )
+      .where(and(eq(leadFieldValues.leadId, lead.id), eq(leadFieldValues.tenantId, tenantId)))
       .orderBy(desc(leadFieldValues.updatedAt), desc(leadFieldValues.id));
 
     const bySlug: Record<string, unknown> = {};
@@ -350,11 +334,9 @@ export async function readExchangeCollectedFields(
     const collected = mapExchangeCollectedValues(bySlug);
     if (turnStartedAt !== undefined) {
       collected.amountSetThisTurn =
-        collected.amount !== undefined &&
-        (updatedBySlug.amount_from ?? -1) >= turnStartedAt;
+        collected.amount !== undefined && (updatedBySlug.amount_from ?? -1) >= turnStartedAt;
       collected.assetSetThisTurn =
-        collected.asset !== undefined &&
-        (updatedBySlug.asset_from ?? -1) >= turnStartedAt;
+        collected.asset !== undefined && (updatedBySlug.asset_from ?? -1) >= turnStartedAt;
     }
     return collected;
   });
@@ -393,11 +375,15 @@ export interface ExchangeToolsDeps {
 
 const AssetEnum = z
   .string()
-  .describe("Актив, который отдаёт клиент: USDT, BTC, ETH, RUB, EUR или USD");
+  .describe(
+    `Актив, который отдаёт клиент: USDT, BTC, ETH, RUB, EUR или USD. Если клиент хочет отдать ${QUOTE_CURRENCY.code} (баты) — это направление мы не обслуживаем, сообщи об этом сразу и не продолжай сбор данных.`,
+  );
 const AmountModeEnum = z
   .enum(["source_amount", "target_thb"])
   .optional()
-  .describe(`source_amount — клиент назвал сумму, которую отдаёт; target_thb — клиент назвал сумму, которую хочет получить в котируемой валюте (${QUOTE_CURRENCY.code})`);
+  .describe(
+    `source_amount — клиент назвал сумму, которую отдаёт; target_thb — клиент назвал сумму, которую хочет получить в котируемой валюте (${QUOTE_CURRENCY.code})`,
+  );
 const PaymentMethodEnum = z
   .enum(["crypto_transfer", "sbp_qr", "card_transfer", "bank_transfer", "cash"])
   .optional()
@@ -405,7 +391,9 @@ const PaymentMethodEnum = z
 const PayoutMethodEnum = z
   .enum(["office_cash", "cardless_atm", "courier_cash", "thai_bank_transfer", "atm"])
   .optional()
-  .describe(`Как клиент получает ${QUOTE_CURRENCY.code}: courier_cash, cardless_atm, thai_bank_transfer (перевод на местный банк), office_cash`);
+  .describe(
+    `Как клиент получает ${QUOTE_CURRENCY.code}: courier_cash, cardless_atm, thai_bank_transfer (перевод на местный банк), office_cash`,
+  );
 
 const KNOWN_EXCHANGE_STAGES = new Set([
   "exchange_request",
@@ -463,7 +451,10 @@ export function exchangeAllowedActionsBlock(stageSlug: string | null | undefined
   ].join(" ");
 }
 
-export function guardExchangeToolForStage(toolName: string, stageSlug: string | null | undefined): null | {
+export function guardExchangeToolForStage(
+  toolName: string,
+  stageSlug: string | null | undefined,
+): null | {
   ok: false;
   needsOperator: true;
   reason: "action_not_allowed_for_stage";
@@ -537,9 +528,7 @@ function withStageAdvance(
     execute: async (args) => {
       const result = await tool.execute(args);
       const slug =
-        result && typeof result === "object"
-          ? pick(result as Record<string, unknown>)
-          : null;
+        result && typeof result === "object" ? pick(result as Record<string, unknown>) : null;
       if (slug) {
         await moveExchangeLeadToStage({ db, tenantId, conversationId, stageSlug: slug });
       }
@@ -574,7 +563,13 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ].join(" "),
     parameters: z.object({
       asset: AssetEnum.optional(),
-      amount: z.number().positive().optional().describe(`Сумма. По умолчанию в активе-источнике; если клиент сказал 'нужно 10000 ${QUOTE_CURRENCY.word}', передай amountMode=target_thb и amount=10000. Если не передать — берётся из собранных полей заявки.`),
+      amount: z
+        .number()
+        .positive()
+        .optional()
+        .describe(
+          `Сумма. По умолчанию в активе-источнике; если клиент сказал 'нужно 10000 ${QUOTE_CURRENCY.word}', передай amountMode=target_thb и amount=10000. Если не передать — берётся из собранных полей заявки.`,
+        ),
       amountMode: AmountModeEnum,
       network: z
         .string()
@@ -662,20 +657,40 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ].join(" "),
     parameters: z.object({
       asset: AssetEnum.optional(),
-      amount: z.number().positive().optional().describe(`Сумма: source asset или целевые ${QUOTE_CURRENCY.code}, если amountMode=target_thb. Если не передать — берётся из собранных полей заявки.`),
+      amount: z
+        .number()
+        .positive()
+        .optional()
+        .describe(
+          `Сумма: source asset или целевые ${QUOTE_CURRENCY.code}, если amountMode=target_thb. Если не передать — берётся из собранных полей заявки.`,
+        ),
       amountMode: AmountModeEnum,
       network: z.string().optional(),
       paymentMethod: PaymentMethodEnum,
-      paymentRail: z.string().optional().describe("Конкретный rail: trc20, binance_id, sber, tinkoff, sbp, etc."),
-      sourceBank: z.string().optional().describe("Банк/источник отправителя, если клиент назвал: Сбер, Тинькофф/T-Bank и т.д."),
+      paymentRail: z
+        .string()
+        .optional()
+        .describe("Конкретный rail: trc20, binance_id, sber, tinkoff, sbp, etc."),
+      sourceBank: z
+        .string()
+        .optional()
+        .describe("Банк/источник отправителя, если клиент назвал: Сбер, Тинькофф/T-Bank и т.д."),
       payerName: z.string().optional().describe("Имя плательщика, если известно."),
-      thirdPartyApproved: z.boolean().optional().describe("true только если оператор явно разрешил перевод от третьего лица."),
+      thirdPartyApproved: z
+        .boolean()
+        .optional()
+        .describe("true только если оператор явно разрешил перевод от третьего лица."),
       payoutMethod: PayoutMethodEnum,
-      payoutLocation: z.string().optional().describe("Локация/банк выдачи: отель, Bangkok Bank, SCB, KBank, офис и т.д."),
+      payoutLocation: z
+        .string()
+        .optional()
+        .describe("Локация/банк выдачи: отель, Bangkok Bank, SCB, KBank, офис и т.д."),
       payoutDestination: z
         .record(z.string(), z.unknown())
         .optional()
-        .describe("Структурированные данные выдачи: hotel/location, atmBank, thaiBankName, thaiAccountLast4 и т.д."),
+        .describe(
+          "Структурированные данные выдачи: hotel/location, atmBank, thaiBankName, thaiAccountLast4 и т.д.",
+        ),
     }),
     execute: async (args) => {
       // Источник правды для незаданных аргументов: АКТИВНАЯ заявка (подтверждённая
@@ -687,7 +702,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       const amountArg =
         args.amount ?? active?.requestedAmount ?? active?.amountFrom ?? collected.amount;
       const networkArg = args.network ?? active?.network ?? collected.network;
-      const paymentMethodArg = args.paymentMethod ?? active?.paymentMethod ?? collected.paymentMethod;
+      const paymentMethodArg =
+        args.paymentMethod ?? active?.paymentMethod ?? collected.paymentMethod;
       const payoutMethodArg = args.payoutMethod ?? active?.payoutMethod ?? collected.payoutMethod;
       if (!assetArg || amountArg === undefined) {
         return { error: "Не хватает данных для заявки: уточните, что меняете и на какую сумму." };
@@ -788,7 +804,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         thirdPartyApproved: args.thirdPartyApproved ?? false,
         payoutMethod: payoutMethodArg ?? null,
         payoutLocation: args.payoutLocation ?? null,
-        payoutDestinationJson: args.payoutDestination ? JSON.stringify(args.payoutDestination) : null,
+        payoutDestinationJson: args.payoutDestination
+          ? JSON.stringify(args.payoutDestination)
+          : null,
         verificationId: verification.verificationId,
         riskJson: JSON.stringify({
           ok: true,
@@ -859,7 +877,13 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       return {
         cancelled,
         ...(active
-          ? { lastDeal: { asset: active.assetFrom, amount: active.requestedAmount ?? active.amountFrom, network: active.network } }
+          ? {
+              lastDeal: {
+                asset: active.assetFrom,
+                amount: active.requestedAmount ?? active.amountFrom,
+                network: active.network,
+              },
+            }
           : {}),
       };
     },
@@ -995,12 +1019,16 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       "Для фиата (RUB) автопроверка недоступна — вернётся needsOperator.",
     ].join(" "),
     parameters: z.object({
-      proof: z
+      proof: z.string().optional().describe("tx hash или ссылка на транзакцию (для крипты)"),
+      sourceBank: z
         .string()
         .optional()
-        .describe("tx hash или ссылка на транзакцию (для крипты)"),
-      sourceBank: z.string().optional().describe("Банк отправителя из чека: Сбер, Тинькофф/T-Bank и т.д."),
-      receiptAmount: z.number().positive().optional().describe("Сумма оплаты из чека в валюте оплаты, если удалось прочитать."),
+        .describe("Банк отправителя из чека: Сбер, Тинькофф/T-Bank и т.д."),
+      receiptAmount: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Сумма оплаты из чека в валюте оплаты, если удалось прочитать."),
       payerName: z.string().optional().describe("Имя плательщика из чека, если видно."),
       paymentReference: z.string().optional().describe("Номер/референс платежа из чека."),
     }),
@@ -1177,9 +1205,18 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       "вернётся needsOperator: попроси оператора подготовить код.",
     ].join(" "),
     parameters: z.object({
-      payoutMethod: z.enum(["office_cash", "cardless_atm", "courier_cash", "thai_bank_transfer", "atm"]),
+      payoutMethod: z.enum([
+        "office_cash",
+        "cardless_atm",
+        "courier_cash",
+        "thai_bank_transfer",
+        "atm",
+      ]),
       location: z.string().describe("Офис (Бангтао) или банк банкомата (Kbank/Bangkok Bank/SCB)"),
-      destination: z.record(z.string(), z.unknown()).optional().describe("Структурированные детали выдачи: банк, отель, адрес, последние цифры счёта."),
+      destination: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Структурированные детали выдачи: банк, отель, адрес, последние цифры счёта."),
     }),
     execute: async (args) => {
       const order = await findActiveOrder(db, tenantId, conversationId);
@@ -1192,7 +1229,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         status: "payout",
         payoutMethod: args.payoutMethod,
         payoutLocation: args.location,
-        payoutDestinationJson: args.destination ? JSON.stringify(args.destination) : order.payoutDestinationJson,
+        payoutDestinationJson: args.destination
+          ? JSON.stringify(args.destination)
+          : order.payoutDestinationJson,
       });
 
       // Код выдачи не генерируется ботом. Если оператор уже проставил payout_code —
@@ -1200,8 +1239,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       // (payout_code_expires_at < now) НЕ выдаём — это снова кейс оператора.
       const fresh = await findActiveOrder(db, tenantId, conversationId);
       const nowSec = Math.floor(Date.now() / 1000);
-      const codeExpired =
-        fresh?.payoutCodeExpiresAt != null && fresh.payoutCodeExpiresAt < nowSec;
+      const codeExpired = fresh?.payoutCodeExpiresAt != null && fresh.payoutCodeExpiresAt < nowSec;
       if (fresh?.payoutCode && !codeExpired) {
         return {
           orderId: order.id,
@@ -1260,17 +1298,62 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         officeAddress,
       ] = await withTenant(db, tenantId, (tx) =>
         Promise.all([
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_working_hours", masterKeyHex }),
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_operator_contact", masterKeyHex }),
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_operator_telegram", masterKeyHex }),
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_operator_whatsapp", masterKeyHex }),
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_operator_line", masterKeyHex }),
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_payout_methods", masterKeyHex }),
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_payout_bank_methods", masterKeyHex }),
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_payout_cash_methods", masterKeyHex }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_working_hours",
+            masterKeyHex,
+          }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_operator_contact",
+            masterKeyHex,
+          }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_operator_telegram",
+            masterKeyHex,
+          }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_operator_whatsapp",
+            masterKeyHex,
+          }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_operator_line",
+            masterKeyHex,
+          }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_payout_methods",
+            masterKeyHex,
+          }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_payout_bank_methods",
+            masterKeyHex,
+          }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_payout_cash_methods",
+            masterKeyHex,
+          }),
           getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_aml_policy", masterKeyHex }),
           getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_kyc_policy", masterKeyHex }),
-          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_office_address", masterKeyHex }),
+          getDecryptedSecret({
+            db: tx as Db,
+            tenantId,
+            key: "exchange_office_address",
+            masterKeyHex,
+          }),
         ]),
       );
       const operatorContact =
