@@ -47,6 +47,7 @@ import {
   leadFieldValues,
   leads,
   messages,
+  simPersonas,
   stageDefinitions,
   stageFields,
   tenants,
@@ -668,6 +669,66 @@ async function walkLeads(
 
 // ── Route factory ────────────────────────────────────────────────────────────
 
+/** Персона как её отдаёт API/читает раннер (id = persona_key). */
+interface PersonaRow {
+  id: string;
+  name: string;
+  displayName: string;
+  brief: string;
+  isBuiltin: boolean;
+}
+
+/**
+ * #698 — идемпотентно сидит встроенные персоны для тенанта (по persona_key).
+ * Не перетирает уже существующие строки (правки оператора сохраняются), только
+ * добавляет недостающие ключи. Валютная интерполяция брифов берётся из кода
+ * (PERSONAS вычисляется на платформенной валюте).
+ */
+async function ensureBuiltinPersonas(db: Db, tenantId: number): Promise<void> {
+  await withTenant(db, tenantId, async (tx) => {
+    await tx
+      .insert(simPersonas)
+      .values(
+        PERSONAS.map((p, i) => ({
+          tenantId,
+          personaKey: p.id,
+          name: p.name,
+          displayName: p.displayName,
+          brief: p.brief,
+          isBuiltin: true,
+          sortOrder: i,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [simPersonas.tenantId, simPersonas.personaKey],
+      });
+  });
+}
+
+/** Все персоны тенанта, отсортированные для UI/раннера. */
+async function listPersonaRows(db: Db, tenantId: number): Promise<PersonaRow[]> {
+  const rows = await withTenant(db, tenantId, async (tx) =>
+    tx
+      .select({
+        personaKey: simPersonas.personaKey,
+        name: simPersonas.name,
+        displayName: simPersonas.displayName,
+        brief: simPersonas.brief,
+        isBuiltin: simPersonas.isBuiltin,
+      })
+      .from(simPersonas)
+      .where(eq(simPersonas.tenantId, tenantId))
+      .orderBy(asc(simPersonas.sortOrder), asc(simPersonas.id)),
+  );
+  return rows.map((r) => ({
+    id: r.personaKey,
+    name: r.name,
+    displayName: r.displayName,
+    brief: r.brief,
+    isBuiltin: r.isBuiltin,
+  }));
+}
+
 export function makeAdminSimRoutes(opts: {
   db: Db;
   replyStrategy?: ReplyStrategy | null;
@@ -931,7 +992,107 @@ export function makeAdminSimRoutes(opts: {
 
   // ── GET /api/admin/sim/personas ────────────────────────────────────────
   app.get("/api/admin/sim/personas", async (c) => {
-    return c.json({ personas: PERSONAS });
+    const tenantId = c.var.tenantId;
+    await ensureBuiltinPersonas(opts.db, tenantId);
+    const personas = await listPersonaRows(opts.db, tenantId);
+    return c.json({ personas });
+  });
+
+  // ── POST /api/admin/sim/personas ───────────────────────────────────────
+  // Создать кастомный сценарий тенанта.
+  app.post("/api/admin/sim/personas", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: { name?: unknown; displayName?: unknown; brief?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const displayName = typeof body.displayName === "string" ? body.displayName.trim() : "";
+    const brief = typeof body.brief === "string" ? body.brief.trim() : "";
+    if (!name || !displayName || !brief) {
+      return c.json({ error: "name, displayName, brief required" }, 400);
+    }
+    if (brief.length > 4000) return c.json({ error: "brief too long (max 4000)" }, 400);
+
+    const personaKey = `custom_${simToken(6)}`;
+    const [row] = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .insert(simPersonas)
+        .values({
+          tenantId,
+          personaKey,
+          name,
+          displayName,
+          brief,
+          isBuiltin: false,
+          // в хвост списка, после встроенных
+          sortOrder: 1000,
+        })
+        .returning({ personaKey: simPersonas.personaKey }),
+    );
+    return c.json({ ok: true, id: row?.personaKey ?? personaKey });
+  });
+
+  // ── PATCH /api/admin/sim/personas/:key ─────────────────────────────────
+  // Редактировать сценарий (встроенный или кастомный) — правки per-tenant.
+  app.patch("/api/admin/sim/personas/:key", async (c) => {
+    const tenantId = c.var.tenantId;
+    const key = c.req.param("key");
+    let body: { name?: unknown; displayName?: unknown; brief?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const updates: Partial<typeof simPersonas.$inferInsert> = {};
+    if (typeof body.name === "string" && body.name.trim()) updates.name = body.name.trim();
+    if (typeof body.displayName === "string" && body.displayName.trim()) {
+      updates.displayName = body.displayName.trim();
+    }
+    if (typeof body.brief === "string" && body.brief.trim()) {
+      if (body.brief.trim().length > 4000) {
+        return c.json({ error: "brief too long (max 4000)" }, 400);
+      }
+      updates.brief = body.brief.trim();
+    }
+    if (Object.keys(updates).length === 0) return c.json({ error: "no updates provided" }, 400);
+    updates.updatedAt = Math.floor(Date.now() / 1000);
+
+    const res = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .update(simPersonas)
+        .set(updates)
+        .where(and(eq(simPersonas.tenantId, tenantId), eq(simPersonas.personaKey, key)))
+        .returning({ id: simPersonas.id }),
+    );
+    if (res.length === 0) return c.json({ error: "persona not found" }, 404);
+    return c.json({ ok: true });
+  });
+
+  // ── DELETE /api/admin/sim/personas/:key ────────────────────────────────
+  // Удалить можно только кастомный сценарий; встроенный — лишь редактировать
+  // (иначе он переедет обратно при следующем seed).
+  app.delete("/api/admin/sim/personas/:key", async (c) => {
+    const tenantId = c.var.tenantId;
+    const key = c.req.param("key");
+    const res = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .delete(simPersonas)
+        .where(
+          and(
+            eq(simPersonas.tenantId, tenantId),
+            eq(simPersonas.personaKey, key),
+            eq(simPersonas.isBuiltin, false),
+          ),
+        )
+        .returning({ id: simPersonas.id }),
+    );
+    if (res.length === 0) {
+      return c.json({ error: "not found or builtin (встроенный сценарий нельзя удалить)" }, 400);
+    }
+    return c.json({ ok: true });
   });
 
   // ── GET /api/admin/sim/streams ─────────────────────────────────────────
@@ -993,7 +1154,9 @@ export function makeAdminSimRoutes(opts: {
       MAX_TURNS_CAP,
     );
     const ids = Array.isArray(body.personaIds) ? (body.personaIds as string[]) : undefined;
-    const scenarios = PERSONAS.filter(
+    await ensureBuiltinPersonas(opts.db, tenantId);
+    const allPersonas = await listPersonaRows(opts.db, tenantId);
+    const scenarios = allPersonas.filter(
       (p) => p.id.startsWith("exchange") && (!ids || ids.includes(p.id)),
     );
     if (scenarios.length === 0) return c.json({ error: "no exchange scenarios" }, 400);
@@ -1041,7 +1204,9 @@ export function makeAdminSimRoutes(opts: {
       return c.json({ error: "invalid json" }, 400);
     }
 
-    const persona = body.personaId ? PERSONAS.find((p) => p.id === body.personaId) : undefined;
+    await ensureBuiltinPersonas(opts.db, tenantId);
+    const personas = await listPersonaRows(opts.db, tenantId);
+    const persona = body.personaId ? personas.find((p) => p.id === body.personaId) : undefined;
     const brief = (body.brief?.trim() || persona?.brief || "").trim();
     if (!brief) return c.json({ error: "personaId or brief required" }, 400);
     const displayName = (
@@ -1105,10 +1270,12 @@ export function makeAdminSimRoutes(opts: {
     const maxTurns = Math.min(Math.max(1, body.maxTurns ?? DEFAULT_MAX_TURNS), MAX_TURNS_CAP);
     const targetFunnelId = positiveInt(body.targetFunnelId);
     const targetCatalogItemId = positiveInt(body.targetCatalogItemId);
+    await ensureBuiltinPersonas(opts.db, tenantId);
+    const allPersonas = await listPersonaRows(opts.db, tenantId);
     const pool =
       body.personaIds && body.personaIds.length > 0
-        ? PERSONAS.filter((p) => body.personaIds!.includes(p.id))
-        : PERSONAS;
+        ? allPersonas.filter((p) => body.personaIds!.includes(p.id))
+        : allPersonas;
     if (pool.length === 0) return c.json({ error: "no matching personas" }, 400);
 
     const ctx = await buildCtx(tenantId, adminId);

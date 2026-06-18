@@ -1316,6 +1316,26 @@ export const referralCodes = pgTable("referral_codes", {
   index("idx_referral_codes_tenant").on(t.tenantId),
 ]);
 
+// ---- Dialog simulator personas (#698) -----------------------------------
+// Управляемые сценарии симуляции. Встроенные сидятся per-tenant из кода
+// (BUILTIN PERSONAS, идемпотентно по persona_key); кастомные создаются из UI.
+export const simPersonas = pgTable("sim_personas", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  /** Стабильный ключ: у встроенных = id из кода, у кастомных = custom_<token>. */
+  personaKey: text("persona_key").notNull(),
+  name: text("name").notNull(),
+  displayName: text("display_name").notNull(),
+  brief: text("brief").notNull(),
+  isBuiltin: boolean("is_builtin").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_sim_personas_tenant_key").on(t.tenantId, t.personaKey),
+  index("idx_sim_personas_tenant").on(t.tenantId),
+]);
+
 // ---- Early access waitlist ----------------------------------------------
 //
 // Публичные заявки на alpha/early-access. Таблица БЕЗ RLS: на момент заявки
