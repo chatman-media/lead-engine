@@ -189,10 +189,10 @@ export function SaasTeam() {
                 required
               />
             </div>
-            <div className="space-y-1.5 sm:w-56">
+            <div className="space-y-1.5 sm:w-80">
               <Label>Роль</Label>
               <Select value={role} onValueChange={(v) => setRole(v as "manager" | "superadmin")}>
-                <SelectTrigger>
+                <SelectTrigger className="whitespace-nowrap">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
