@@ -763,22 +763,9 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 			color: "#f59e0b",
 			nextStages: ["verification_check", "cancelled"],
 			fields: [
-				{
-					slug: "exchange_rate",
-					displayName: "Актуальный курс",
-					fieldType: "number",
-					required: true,
-					aiExtractable: false,
-					position: 0,
-				},
-				{
-					slug: "thb_amount",
-					displayName: "Итоговая сумма к выдаче",
-					fieldType: "number",
-					required: true,
-					aiExtractable: false,
-					position: 1,
-				},
+				// Курс и итоговую сумму НЕ собираем полями: их вычисляет бот
+				// (computeQuote) и хранит заявка (exchange_orders). На этой стадии
+				// нужен только факт подтверждения клиентом (rate_confirmed).
 				{
 					slug: "rate_confirmed",
 					displayName: "Клиент подтвердил",
