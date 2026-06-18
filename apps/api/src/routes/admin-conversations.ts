@@ -1024,7 +1024,71 @@ export function makeAdminConversationsRoutes(
       .returning({ id: messages.id });
 
     if (updated.length === 0) return c.json({ error: "message not found or not deletable" }, 404);
-    return c.json({ ok: true });
+
+    // #697 — попробовать удалить сообщение и из канала (Telegram). Берём external
+    // id отправленного сообщения из outbound_queue (idempotencyKey admin-reply-<id>)
+    // и chat id из channel_identity, затем ставим delete-job в ту же очередь —
+    // воркер зовёт adapter.delete (no-op для каналов без capabilities.delete,
+    // напр. WhatsApp). Best-effort: сбой не отменяет soft-delete.
+    let channelDelete = false;
+    try {
+      channelDelete = await withTenant(opts.db, tenantId, async (tx) => {
+        const [ob] = await tx
+          .select({
+            channelId: outboundQueue.channelId,
+            externalMessageId: outboundQueue.externalMessageId,
+          })
+          .from(outboundQueue)
+          .where(
+            and(
+              eq(outboundQueue.tenantId, tenantId),
+              eq(outboundQueue.idempotencyKey, `admin-reply-${messageId}`),
+            ),
+          )
+          .limit(1);
+        if (!ob?.externalMessageId || ob.channelId == null) return false;
+
+        const [conv] = await tx
+          .select({ contactId: conversations.userId })
+          .from(conversations)
+          .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
+          .limit(1);
+        if (!conv) return false;
+
+        const [identity] = await tx
+          .select({ externalUserId: channelIdentities.externalUserId })
+          .from(channelIdentities)
+          .where(
+            and(
+              eq(channelIdentities.contactId, conv.contactId),
+              eq(channelIdentities.channelId, ob.channelId),
+            ),
+          )
+          .limit(1);
+        if (!identity) return false;
+
+        await tx.insert(outboundQueue).values({
+          tenantId,
+          channelId: ob.channelId,
+          conversationId,
+          payloadJson: JSON.stringify({
+            channelId: String(ob.channelId),
+            externalUserId: identity.externalUserId,
+            parts: [],
+            deleteExternalMessageId: ob.externalMessageId,
+            idempotencyKey: `admin-delete-${messageId}`,
+          }),
+          idempotencyKey: `admin-delete-${messageId}`,
+          scheduledAt: nowEpoch,
+          createdAt: nowEpoch,
+        });
+        return true;
+      });
+    } catch {
+      // удаление из канала — best-effort; soft-delete уже выполнен
+    }
+
+    return c.json({ ok: true, channelDelete });
   });
 
   /**
