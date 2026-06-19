@@ -396,6 +396,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						feedStaleSec: exchangeSettings.feedStaleSec,
 						quoteAsset: exchangeSettings.quoteAsset,
 						handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
+						requireRateConfirmation: exchangeSettings.requireRateConfirmation,
 					})
 				.from(exchangeSettings)
 				.where(eq(exchangeSettings.tenantId, tenantId))
@@ -407,6 +408,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				quoteAsset: row?.quoteAsset ?? QUOTE_CURRENCY.code,
 				quoteAssetOptions: QUOTE_CURRENCY_CODES,
 				handoffCustomerNotice: row?.handoffCustomerNotice ?? true,
+				requireRateConfirmation: row?.requireRateConfirmation ?? false,
 			});
 	});
 
@@ -448,6 +450,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				);
 			}
 			const handoffCustomerNotice = body?.handoffCustomerNotice !== false;
+			// Тумблер «требовать подтверждение оператором при обновлении базового курса»
+			// (даже мелких тиков). Дефолт false — back-compat.
+			const requireRateConfirmation = body?.requireRateConfirmation === true;
 			const now = Math.floor(Date.now() / 1000);
 		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
 			tx
@@ -458,6 +463,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						feedStaleSec: stale,
 						quoteAsset: quoteAssetRaw,
 						handoffCustomerNotice,
+						requireRateConfirmation,
 						createdAt: now,
 					updatedAt: now,
 				})
@@ -468,6 +474,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 							feedStaleSec: stale,
 							quoteAsset: quoteAssetRaw,
 							handoffCustomerNotice,
+							requireRateConfirmation,
 							updatedAt: now,
 					},
 				})
@@ -476,6 +483,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						feedStaleSec: exchangeSettings.feedStaleSec,
 						quoteAsset: exchangeSettings.quoteAsset,
 						handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
+						requireRateConfirmation: exchangeSettings.requireRateConfirmation,
 					}),
 		);
 		return c.json({ ok: true, settings: row });
