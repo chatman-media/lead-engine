@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.24.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.5...@chatman-media/conversation-engine-v3.24.0) (2026-06-19)
+
+
+### Features
+
+* **exchange:** маршрутизация оператора по покрытию точки выдачи (B4b) ([5d981ab](https://github.com/chatman-media/lead-engine/commit/5d981ab4d3ee2d959a1c01fdc29fafb32c341d36))
+
 # [@chatman-media/conversation-engine-v3.23.5](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.4...@chatman-media/conversation-engine-v3.23.5) (2026-06-19)
 
 
