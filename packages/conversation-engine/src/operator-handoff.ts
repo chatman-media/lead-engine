@@ -144,6 +144,7 @@ export async function emitOperatorHandoffNotifications(
 					amount: handoff.amount ?? "",
 					rail: handoff.rail ?? "",
 					network: handoff.network ?? "",
+					...(handoff.payoutPointId != null ? { payoutPointId: handoff.payoutPointId } : {}),
 					text: input.userMessageText || "",
 					...mediaData,
 				},

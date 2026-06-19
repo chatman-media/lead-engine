@@ -91,12 +91,7 @@ export interface ReplyMarkup {
 }
 
 export interface OperatorHandoffMeta {
-  reason:
-    | "kyc_review"
-    | "payment_review"
-    | "office_payout"
-    | "payout_review"
-    | "operator_request";
+  reason: "kyc_review" | "payment_review" | "office_payout" | "payout_review" | "operator_request";
   title: string;
   action: string;
   contractId?: string;
@@ -111,6 +106,7 @@ export interface OperatorHandoffMeta {
   amount?: string;
   rail?: string;
   network?: string;
+  payoutPointId?: number;
 }
 
 export type OutboundPart =
@@ -119,10 +115,7 @@ export type OutboundPart =
   | { kind: "video"; mediaRef: MediaRef; caption?: string }
   | { kind: "document"; mediaRef: MediaRef; caption?: string };
 
-export type WhatsAppTemplateCategory =
-  | "marketing"
-  | "utility"
-  | "authentication";
+export type WhatsAppTemplateCategory = "marketing" | "utility" | "authentication";
 
 export type WhatsAppTemplateParameter =
   | { type: "text"; text: string }

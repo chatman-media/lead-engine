@@ -567,6 +567,7 @@ export function exchangeOrderPolicyStateFromOrder(
 		payoutCompleted: order.status === "completed",
 		payoutCodeIssued: hasJsonPayload(order.payoutCode),
 		verificationId: order.verificationId,
+		payoutPointId: order.payoutPointId ?? null,
 	};
 }
 

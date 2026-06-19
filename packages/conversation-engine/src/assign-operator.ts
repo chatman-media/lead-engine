@@ -37,9 +37,9 @@ export function operatorLabel(row: {
 export async function pickLeastBusyOperator(
   tx: Db,
   tenantId: number,
-  opts?: { requireTelegram?: boolean },
+  opts?: { requireTelegram?: boolean; eligibleAdminIds?: number[] },
 ): Promise<PickedOperator | null> {
-  const candidates = await tx
+  let candidates = await tx
     .select({
       adminId: operatorSettings.adminId,
       name: admins.name,
@@ -53,6 +53,13 @@ export async function pickLeastBusyOperator(
         : eq(operatorSettings.tenantId, tenantId),
     );
   if (candidates.length === 0) return null;
+  // Сужаем пул до покрывающих точку выдачи операторов; если пул пуст — fallback
+  // на всех (чтобы заявка не зависла без назначения).
+  if (opts?.eligibleAdminIds && opts.eligibleAdminIds.length > 0) {
+    const eligible = new Set(opts.eligibleAdminIds);
+    const filtered = candidates.filter((c) => eligible.has(c.adminId));
+    if (filtered.length > 0) candidates = filtered;
+  }
 
   // Текущая нагрузка: активные (не resolved) диалоги на оператора.
   const loadRows = await tx
