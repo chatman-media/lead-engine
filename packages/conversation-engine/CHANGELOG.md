@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.23.5](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.4...@chatman-media/conversation-engine-v3.23.5) (2026-06-19)
+
+
+### Bug Fixes
+
+* **funnel:** advance лида ограничен его воронкой — не дрейфует в чужую (gc_request) ([db439a8](https://github.com/chatman-media/lead-engine/commit/db439a88e7388dd1ccaa0effd125ab22b54ddf57))
+
 # [@chatman-media/conversation-engine-v3.23.4](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.3...@chatman-media/conversation-engine-v3.23.4) (2026-06-19)
 
 
