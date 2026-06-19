@@ -27,6 +27,11 @@ import {
 	exchangeFixtureOffices,
 	seedExchangeFixtures,
 } from "./fixtures.ts";
+import {
+	computeQuote,
+	getTenantQuoteCurrency,
+	listActiveDirections,
+} from "./rates.ts";
 import { makeExchangeTools } from "./tools.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
@@ -337,5 +342,63 @@ describe("exchange deterministic fixtures", () => {
 		expect(rejected.error).toContain("не обслуживается");
 		expect(rejected.error).not.toContain("не продолжай");
 		expect(rejected.availableDirections?.map((d) => d.asset)).toContain("USDT");
+	});
+});
+
+// PH-сценарий «RUB→PHP из коробки» (issue #729). Тенант с явным quoteAsset='PHP'.
+describe("exchange fixtures: RUB→PHP auto-quote out of the box (PH)", () => {
+	it("сидит активную (RUB,PHP,'',divide), отдаёт её в listActiveDirections и считает котировку с попаданием в тир", async () => {
+		if (!sql || !appSql) return;
+
+		// Отдельный тенант, чтобы не пересекаться с дефолтным сценарием выше.
+		const [phTenant] = await db
+			.insert(tenants)
+			.values({
+				slug: "exchange-fixtures-ph-rub",
+				plan: "free",
+				status: "active",
+				createdAt: NOW,
+				updatedAt: NOW,
+			})
+			.returning({ id: tenants.id });
+		if (!phTenant) throw new Error("ph tenant insert failed");
+
+		await seedExchangeFixtures({
+			db: appDb as Db,
+			tenantId: phTenant.id,
+			masterKeyHex: MASTER_KEY,
+			nowEpoch: NOW,
+			quoteAsset: "PHP",
+		});
+
+		// Котируемая валюта тенанта — PHP.
+		const currency = await getTenantQuoteCurrency(appDb as Db, phTenant.id);
+		expect(currency.code).toBe("PHP");
+
+		// Активная строка (RUB,PHP,'',divide) видна через listActiveDirections.
+		const dirs = await listActiveDirections(appDb as Db, phTenant.id);
+		const rub = dirs.find((d) => d.asset === "RUB");
+		expect(rub).toBeDefined();
+		if (!rub) return;
+		expect(rub.quoteAsset).toBe("PHP");
+		expect(rub.isCrypto).toBe(false);
+
+		// computeQuote по RUB-сумме 30 000 ₽ (попадает в тир 60_000-240_000 при
+		// делении amount/baseRate ≈ 30_000 / 1.43 ≈ 20 979 PHP — НЕТ, это под нижний
+		// порог. Возьмём 100 000 ₽: ≈ 69 930 PHP → попадает в первый PHP-тир).
+		const q = await computeQuote(appDb as Db, phTenant.id, {
+			asset: "RUB",
+			amount: 100_000,
+			amountMode: "source_amount",
+		});
+		expect(q.ok).toBe(true);
+		if (!q.ok) return;
+		expect(q.direction).toBe("RUB->PHP");
+		expect(q.quoteAsset).toBe("PHP");
+		expect(q.asset).toBe("RUB");
+		expect(q.quoteMode).toBe("divide");
+		expect(q.amountToThb).toBeGreaterThan(0);
+		// Тир первый (60k-240k PHP): displayRate ≈ 1.4543.
+		expect(q.rate).toBeCloseTo(1.4543, 3);
 	});
 });

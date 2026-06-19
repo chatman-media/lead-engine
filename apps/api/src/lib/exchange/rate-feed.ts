@@ -62,6 +62,15 @@ async function fetchJson(
 	}
 }
 
+/**
+ * Сбрасывает кэш FX-фида. ТОЛЬКО для тестов: разные describe-блоки могут
+ * проверять разные FX-наборы (THB-only, PHP+RUB и т.п.), и без сброса
+ * кэшированные за прошлый тест курсы провалят последующие фетчи новых валют.
+ */
+export function __resetFxCacheForTests(): void {
+	fxCache = null;
+}
+
 /** Курсы валют за 1 USD (включая котируемые, RUB, EUR). С кэшем. */
 async function getFxPerUsd(): Promise<Record<string, number>> {
 	if (fxCache && Date.now() - fxCache.at < FX_TTL_MS) return fxCache.rates;
