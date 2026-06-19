@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.45.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.44.0...@chatman-media/storage-v1.45.0) (2026-06-19)
+
+
+### Features
+
+* **i18n:** conversations.detected_lang storage layer ([#735](https://github.com/chatman-media/lead-engine/issues/735)) ([8a63206](https://github.com/chatman-media/lead-engine/commit/8a63206e8d6c13f8051502376cca3f8355c487b4)), closes [730/#731](https://github.com/chatman-media/lead-engine/issues/731)
+
 # [@chatman-media/storage-v1.44.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.43.0...@chatman-media/storage-v1.44.0) (2026-06-19)
 
 
