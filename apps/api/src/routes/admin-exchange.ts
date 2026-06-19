@@ -20,6 +20,7 @@ import {
 	contacts,
 	conversations,
 	exchangeOrders,
+	exchangeRateProposals,
 	exchangeRates,
 	exchangeRateTiers,
 	exchangeSettings,
@@ -31,6 +32,7 @@ import { and, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import {
+	applyBaseRateToTiers,
 	buildDefaultRateCardProposal,
 	type RateCardProposal,
 	rateDeviationPct,
@@ -487,6 +489,212 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 					}),
 		);
 		return c.json({ ok: true, settings: row });
+	});
+
+	// ── Pending-предложения обновления курса (issue #732) ──────────────────────
+	// Когда фид находит отклонение в диапазоне soft..hard или включён тумблер
+	// require_rate_confirmation — base_rate не меняется, а кладётся предложение.
+	// Жёсткое отклонение (> hard) даёт ещё и rate_anomaly + sanity-guard'ом
+	// замораживает курс. Confirm применяет предложенный курс к exchange_rates
+	// и пересчитывает тиры (общая функция applyBaseRateToTiers). Reject оставляет
+	// текущий курс. Идемпотентность повторного клика — 409 (status != pending).
+	app.get("/api/admin/exchange/rate-proposals", async (c) => {
+		const tenantId = c.var.tenantId;
+		const rows = await withTenant(opts.db, tenantId, async (tx) =>
+			tx
+				.select()
+				.from(exchangeRateProposals)
+				.where(
+					and(
+						eq(exchangeRateProposals.tenantId, tenantId),
+						eq(exchangeRateProposals.status, "pending"),
+					),
+				)
+				.orderBy(desc(exchangeRateProposals.createdAt)),
+		);
+		return c.json({ proposals: rows });
+	});
+
+	app.post("/api/admin/exchange/rate-proposals/:id/confirm", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = c.var.adminId as number | undefined;
+		const id = Number(c.req.param("id"));
+		if (!Number.isInteger(id) || id <= 0) {
+			return c.json({ error: "bad id" }, 400);
+		}
+		const now = Math.floor(Date.now() / 1000);
+		const result = await withTenant(opts.db, tenantId, async (tx) => {
+			const [proposal] = await tx
+				.select()
+				.from(exchangeRateProposals)
+				.where(
+					and(
+						eq(exchangeRateProposals.tenantId, tenantId),
+						eq(exchangeRateProposals.id, id),
+					),
+				)
+				.limit(1);
+			if (!proposal) return { kind: "not_found" as const };
+			if (proposal.status !== "pending") {
+				return { kind: "not_pending" as const, status: proposal.status };
+			}
+			// Сверка гонки фид↔confirm: применяем next из снапшота, но только если
+			// активный baseRate не сдвинулся за это время. Если сдвинулся → 409 stale.
+			const [activeRate] = await tx
+				.select({ id: exchangeRates.id, baseRate: exchangeRates.baseRate })
+				.from(exchangeRates)
+				.where(
+					and(
+						eq(exchangeRates.tenantId, tenantId),
+						eq(exchangeRates.asset, proposal.asset),
+						eq(exchangeRates.quoteAsset, proposal.quoteAsset),
+						eq(exchangeRates.network, proposal.network),
+					),
+				)
+				.limit(1);
+			if (!activeRate) return { kind: "rate_missing" as const };
+			const currentBase = Number(activeRate.baseRate);
+			const snapshotPrev = Number(proposal.prevBaseRate);
+			// Сравниваем с допуском (база — double precision); 1e-9 — численный шум.
+			if (Math.abs(currentBase - snapshotPrev) > 1e-9) {
+				return {
+					kind: "stale" as const,
+					currentBaseRate: currentBase,
+					snapshotPrev,
+				};
+			}
+			// Применяем next к exchange_rates и пересчитываем тиры — общая функция,
+			// чтобы публичная rate-card не разошлась с базой (issue #732, тиры).
+			await applyBaseRateToTiers(
+				tx,
+				tenantId,
+				{
+					rateId: activeRate.id,
+					asset: proposal.asset,
+					quoteAsset: proposal.quoteAsset,
+					network: proposal.network,
+					quoteMode: proposal.quoteMode,
+					baseRate: Number(proposal.nextBaseRate),
+				},
+				now,
+			);
+			const [updated] = await tx
+				.update(exchangeRateProposals)
+				.set({
+					status: "confirmed",
+					decidedByAdminId: adminId ?? null,
+					decidedAt: now,
+					updatedAt: now,
+				})
+				.where(
+					and(
+						eq(exchangeRateProposals.tenantId, tenantId),
+						eq(exchangeRateProposals.id, id),
+					),
+				)
+				.returning();
+			return { kind: "ok" as const, proposal: updated };
+		});
+		if (result.kind === "not_found") {
+			return c.json({ error: "not found" }, 404);
+		}
+		if (result.kind === "rate_missing") {
+			return c.json({ error: "exchange rate row missing" }, 409);
+		}
+		if (result.kind === "not_pending") {
+			return c.json(
+				{ error: "proposal already decided", status: result.status },
+				409,
+			);
+		}
+		if (result.kind === "stale") {
+			return c.json(
+				{
+					error: "stale: baseRate moved since proposal was created",
+					currentBaseRate: result.currentBaseRate,
+					snapshotPrev: result.snapshotPrev,
+				},
+				409,
+			);
+		}
+		await recordAudit(opts.db, {
+			tenantId,
+			...(adminId !== undefined ? { adminId } : {}),
+			action: "exchange.rate_proposal.confirm",
+			targetKind: "exchange_rate_proposal",
+			targetId: id,
+			details: {
+				asset: result.proposal?.asset ?? null,
+				quoteAsset: result.proposal?.quoteAsset ?? null,
+				network: result.proposal?.network ?? null,
+				prev: result.proposal?.prevBaseRate ?? null,
+				next: result.proposal?.nextBaseRate ?? null,
+			},
+		});
+		opts.onReload?.(tenantId);
+		return c.json({ ok: true, proposal: result.proposal });
+	});
+
+	app.post("/api/admin/exchange/rate-proposals/:id/reject", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = c.var.adminId as number | undefined;
+		const id = Number(c.req.param("id"));
+		if (!Number.isInteger(id) || id <= 0) {
+			return c.json({ error: "bad id" }, 400);
+		}
+		const now = Math.floor(Date.now() / 1000);
+		const result = await withTenant(opts.db, tenantId, async (tx) => {
+			const [proposal] = await tx
+				.select()
+				.from(exchangeRateProposals)
+				.where(
+					and(
+						eq(exchangeRateProposals.tenantId, tenantId),
+						eq(exchangeRateProposals.id, id),
+					),
+				)
+				.limit(1);
+			if (!proposal) return { kind: "not_found" as const };
+			if (proposal.status !== "pending") {
+				return { kind: "not_pending" as const, status: proposal.status };
+			}
+			const [updated] = await tx
+				.update(exchangeRateProposals)
+				.set({
+					status: "rejected",
+					decidedByAdminId: adminId ?? null,
+					decidedAt: now,
+					updatedAt: now,
+				})
+				.where(
+					and(
+						eq(exchangeRateProposals.tenantId, tenantId),
+						eq(exchangeRateProposals.id, id),
+					),
+				)
+				.returning();
+			return { kind: "ok" as const, proposal: updated };
+		});
+		if (result.kind === "not_found") return c.json({ error: "not found" }, 404);
+		if (result.kind === "not_pending") {
+			return c.json(
+				{ error: "proposal already decided", status: result.status },
+				409,
+			);
+		}
+		await recordAudit(opts.db, {
+			tenantId,
+			...(adminId !== undefined ? { adminId } : {}),
+			action: "exchange.rate_proposal.reject",
+			targetKind: "exchange_rate_proposal",
+			targetId: id,
+			details: {
+				asset: result.proposal?.asset ?? null,
+				quoteAsset: result.proposal?.quoteAsset ?? null,
+				network: result.proposal?.network ?? null,
+			},
+		});
+		return c.json({ ok: true, proposal: result.proposal });
 	});
 
 	app.post("/api/admin/exchange/rate-card/preview", async (c) => {
