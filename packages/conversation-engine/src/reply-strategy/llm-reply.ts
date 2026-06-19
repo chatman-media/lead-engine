@@ -214,6 +214,11 @@ type ExchangeForcedReply = {
 // Гейтит форс-котировку вместе с amountSetThisTurn: «посчитай/курс/сколько».
 const EXCHANGE_QUOTE_INTENT_RE =
 	/курс|rate|сколько|получ(?:у|ится|ить)|итого|посчитай|рассчитай/i;
+// Явный вопрос ИМЕННО про значение курса — тогда курс показываем (проактивная
+// котировка его прячет). НЕ матчит «курс устраивает/ок». \b/\w не юзаем —
+// в JS они ASCII-only и ломаются на кириллице.
+const EXCHANGE_RATE_QUESTION_RE =
+	/(?:как(?:ой|ому|ая)|по\s+как(?:ому|ой)|нужен|нужна|не\s+хватает|назов|скажите|сообщите|что\s+за|информаци)[^.?!]{0,20}курс|курс[^.?!а-яa-z]{0,3}\?|какой\s+rate/iu;
 const EXCHANGE_ORDER_CONFIRMATION_WORDS = new Set([
 	"да",
 	"давай",
@@ -576,6 +581,7 @@ function numberLike(value: unknown): number | null {
 function forcedExchangeQuoteText(
 	result: unknown,
 	networkAssumed = false,
+	showRate = false,
 ): string | null {
 	if (!result || typeof result !== "object") return null;
 	const row = result as Record<string, unknown>;
@@ -605,8 +611,14 @@ function forcedExchangeQuoteText(
 		networkAssumed && net && srcAsset && /USDT|USDC|ETH/iu.test(srcAsset)
 			? ` (расчёт по сети ${net}; на других сетях курс и комиссия отличаются)`
 			: "";
+	// Курс показываем только когда клиент его явно спросил (showRate).
+	const rate = numberLike(row.rate);
+	const rateNote =
+		showRate && rate !== null && srcAsset
+			? ` (курс 1 ${srcAsset} = ${rate} ${currency.code})`
+			: "";
 	return amountFrom !== null && srcAsset
-		? `Готово! Отдаёте ${amountFrom} ${srcAsset} — получите ${amountToThb} ${currency.code} на руки${netNote}.`
+		? `Готово! Отдаёте ${amountFrom} ${srcAsset}${rateNote} — получите ${amountToThb} ${currency.code} на руки${netNote}.`
 		: `Готово — получите ${amountToThb} ${currency.code} на руки${netNote}.`;
 }
 
@@ -669,18 +681,20 @@ async function maybeForceExchangeQuoteReply(
 	// (amountSetThisTurn) ИЛИ это первый запрос курса (ещё не котировали).
 	// После выданной котировки «курс устраивает»/повторное «сколько» НЕ
 	// пере-котируем (#723) — отдаём дальше на подтверждение/сводку/LLM.
+	const rateAsked = EXCHANGE_RATE_QUESTION_RE.test(userMessageText);
 	const freshAmount =
 		injected?.amountSetThisTurn === true ||
 		(EXCHANGE_QUOTE_INTENT_RE.test(userMessageText) &&
 			!hasRecentExchangeQuote(history));
-	if (!freshAmount) return null;
+	// Явный вопрос про курс обслуживаем всегда — показываем курс (showRate).
+	if (!freshAmount && !rateAsked) return null;
 	const args: ExchangeQuoteArgs = {
 		asset: collected.asset,
 		amount: collected.amount,
 		...(collected.network ? { network: collected.network } : {}),
 	};
 	const result = await quoteTool.execute(args);
-	const text = forcedExchangeQuoteText(result, !args.network);
+	const text = forcedExchangeQuoteText(result, !args.network, rateAsked);
 	if (!text) return null;
 	const ask = exchangeMissingFieldsQuestion(
 		collected.asset,

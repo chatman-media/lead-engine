@@ -300,6 +300,10 @@ type ExchangeForcedReply = {
 
 const EXCHANGE_QUOTE_FOLLOWUP_RE =
 	/курс|rate|сколько|получ(?:у|ится|ить)|итого|посчитай|рассчитай|пересчитай/iu;
+// Явный вопрос ИМЕННО про значение курса (клиент требует цифру) — тогда курс
+// показываем (проактивная котировка его прячет). НЕ матчит «курс устраивает/ок».
+const EXCHANGE_RATE_QUESTION_RE =
+	/(?:как(?:ой|ому|ая)|по\s+как(?:ому|ой)|нужен|нужна|не\s+хватает|назов|скажите|сообщите|что\s+за|информаци)[^.?!]{0,20}курс|курс[^.?!а-яa-z]{0,3}\?|какой\s+rate/iu;
 const EXCHANGE_ORDER_CONFIRMATION_RE =
 	/(?:^|[\s,.!?])(?:да|ок|окей|ok|okay|супер|класс|топ|отл(?:ично)?|хорошо|хор|норм(?:ально)?|год(?:ится|но)|ага|угу|ид[её]т|пойд[её]т|беру|давай(?:те)?|подходит|готов(?:ы)?|оформ[а-яё]*|создава[а-яё]*|делаем|погнали|впер[её]д|соглас(?:ен|на)?|договорились|подтвержда[а-яё]*|лады|ладно|начинаем|поехали)(?:$|[\s,.!?])/iu;
 const EXCHANGE_KYC_MATERIAL_SENT_RE =
@@ -384,6 +388,7 @@ function numberLike(value: unknown): number | null {
 function forcedExchangeQuoteText(
 	result: unknown,
 	networkAssumed = false,
+	showRate = false,
 ): string | null {
 	if (!result || typeof result !== "object") return null;
 	const row = result as Record<string, unknown>;
@@ -414,8 +419,15 @@ function forcedExchangeQuoteText(
 		networkAssumed && net && srcAsset && /USDT|USDC|ETH/iu.test(srcAsset)
 			? ` (расчёт по сети ${net}; на других сетях курс и комиссия отличаются)`
 			: "";
+	// Курс показываем только когда клиент его явно спросил (showRate) — иначе
+	// прячем спред. Число курса — из compute_quote (guard пропускает).
+	const rate = numberLike(row.rate);
+	const rateNote =
+		showRate && rate !== null && srcAsset
+			? ` (курс 1 ${srcAsset} = ${rate} ${currency.code})`
+			: "";
 	return amountFrom !== null && srcAsset
-		? `Готово! Отдаёте ${amountFrom} ${srcAsset} — получите ${amountToThb} ${currency.code} на руки${netNote}.`
+		? `Готово! Отдаёте ${amountFrom} ${srcAsset}${rateNote} — получите ${amountToThb} ${currency.code} на руки${netNote}.`
 		: `Готово — получите ${amountToThb} ${currency.code} на руки${netNote}.`;
 }
 
@@ -451,6 +463,7 @@ function exchangeMissingFieldsQuestion(
 async function maybeForceExchangeQuoteReply(input: {
 	userMessageText: string;
 	tools: AnyRagTool[];
+	history: MessageRow[];
 	injected?: ExchangeCollectedInput | null;
 }): Promise<ExchangeForcedReply | null> {
 	if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(input.userMessageText)) return null;
@@ -465,10 +478,15 @@ async function maybeForceExchangeQuoteReply(input: {
 	// (amountSetThisTurn) или это follow-up «посчитай/пересчитай». «TRC20 в
 	// банкомате» при готовой сделке (суммы этого хода нет) → не котировка, а
 	// сводка/оплата (#654: сумма берётся из injected, не из истории).
+	// Анти-повтор (как в llm-reply, #723): после выданной котировки повторные
+	// «сколько/посчитай» НЕ пере-котируют. НО явный вопрос про КУРС (rateAsked)
+	// обслуживаем всегда — показываем курс (forcedExchangeQuoteText showRate).
+	const rateAsked = EXCHANGE_RATE_QUESTION_RE.test(input.userMessageText);
 	const freshAmount =
 		input.injected?.amountSetThisTurn === true ||
-		EXCHANGE_QUOTE_FOLLOWUP_RE.test(input.userMessageText);
-	if (!freshAmount) return null;
+		(EXCHANGE_QUOTE_FOLLOWUP_RE.test(input.userMessageText) &&
+			!hasRecentExchangeQuote(input.history));
+	if (!freshAmount && !rateAsked) return null;
 	const args: ExchangeQuoteArgs = {
 		asset: collected.asset,
 		amount: collected.amount,
@@ -476,7 +494,7 @@ async function maybeForceExchangeQuoteReply(input: {
 		...(collected.network ? { network: collected.network } : {}),
 	};
 	const result = await quoteTool.execute(args);
-	const text = forcedExchangeQuoteText(result, !args.network);
+	const text = forcedExchangeQuoteText(result, !args.network, rateAsked);
 	if (!text) return null;
 	// После котировки дособираем способ выдачи/сети (если клиент ещё не назвал),
 	// чтобы вести к заявке, а не замирать на «Получите X». networkKnown/payoutKnown
@@ -1080,6 +1098,7 @@ export class RagReplyStrategy implements ReplyStrategy {
 				(await maybeForceExchangeQuoteReply({
 					userMessageText: input.userMessageText,
 					tools,
+					history: historyWithoutCurrent,
 					injected: exchangeCollected,
 				})) ??
 				maybeForceExchangePaymentMethodQuestion({
