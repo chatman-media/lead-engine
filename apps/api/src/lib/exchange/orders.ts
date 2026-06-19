@@ -141,6 +141,7 @@ export interface OrderRow {
   verificationId: string | null;
   rateExpiresAt: number | null;
   idempotencyKey: string | null;
+  payoutPointId: number | null;
 }
 
 const ORDER_COLS = {
@@ -169,6 +170,7 @@ const ORDER_COLS = {
   verificationId: exchangeOrders.verificationId,
   rateExpiresAt: exchangeOrders.rateExpiresAt,
   idempotencyKey: exchangeOrders.idempotencyKey,
+  payoutPointId: exchangeOrders.payoutPointId,
 };
 
 function coerce(row: Record<string, unknown>): OrderRow {
@@ -198,6 +200,7 @@ function coerce(row: Record<string, unknown>): OrderRow {
     verificationId: (row.verificationId as string | null) ?? null,
     rateExpiresAt: (row.rateExpiresAt as number | null) ?? null,
     idempotencyKey: (row.idempotencyKey as string | null) ?? null,
+    payoutPointId: (row.payoutPointId as number | null) ?? null,
   };
 }
 

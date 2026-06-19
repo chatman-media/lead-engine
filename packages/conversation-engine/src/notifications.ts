@@ -268,6 +268,8 @@ export class NotificationService {
           displayName: typeof event.data.displayName === "string" ? event.data.displayName : null,
           amountLabel:
             typeof event.data.amount === "string" && event.data.amount ? event.data.amount : null,
+          payoutPointId:
+            typeof event.data.payoutPointId === "number" ? event.data.payoutPointId : null,
         },
         nowEpoch: Math.floor(Date.now() / 1000),
       });

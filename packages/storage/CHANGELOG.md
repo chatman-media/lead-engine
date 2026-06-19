@@ -1,3 +1,17 @@
+# [@chatman-media/storage-v1.45.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.44.0...@chatman-media/storage-v1.45.0) (2026-06-19)
+
+
+### Features
+
+* **i18n:** conversations.detected_lang storage layer ([#735](https://github.com/chatman-media/lead-engine/issues/735)) ([8a63206](https://github.com/chatman-media/lead-engine/commit/8a63206e8d6c13f8051502376cca3f8355c487b4)), closes [730/#731](https://github.com/chatman-media/lead-engine/issues/731)
+
+# [@chatman-media/storage-v1.44.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.43.0...@chatman-media/storage-v1.44.0) (2026-06-19)
+
+
+### Features
+
+* **exchange:** модель покрытия операторов по точкам выдачи (B4a) ([#742](https://github.com/chatman-media/lead-engine/issues/742)) ([cdb5e1a](https://github.com/chatman-media/lead-engine/commit/cdb5e1ab413dfef6ccee8f52d49e3494439b8946))
+
 # [@chatman-media/storage-v1.43.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.42.2...@chatman-media/storage-v1.43.0) (2026-06-19)
 
 

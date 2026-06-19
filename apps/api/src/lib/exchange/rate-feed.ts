@@ -656,9 +656,7 @@ export async function refreshTenantRates(
         : Number.NaN;
       if (decision.decision === "freeze") {
         result.skipped++;
-        log?.warn?.(
-          `rate-feed: ${row.asset} отклонён sanity-guard (prev=${prev}, next=${next})`,
-        );
+        log?.warn?.(`rate-feed: ${row.asset} отклонён sanity-guard (prev=${prev}, next=${next})`);
         // Резкое колебание курса — поднимаем аномалию (доставку владельцу делает #145).
         onAnomaly?.({ tenantId, asset: row.asset, prev, next, deviationPct });
         // …и кладём pending, чтобы у оператора был управляемый путь применить.

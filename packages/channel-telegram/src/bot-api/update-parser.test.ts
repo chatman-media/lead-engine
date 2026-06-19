@@ -285,4 +285,52 @@ describe("parseUpdate", () => {
     };
     expect(parseUpdate(CH, update)).toBeNull();
   });
+
+  // #735 — слабый bootstrap-сигнал языка из Telegram language_code.
+  it("пробрасывает from.language_code → Inbound.channelLangHint", () => {
+    const update: TgUpdate = {
+      update_id: 10,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: "private" },
+        from: { id: 1, language_code: "ko" },
+        date: 1700000000,
+        text: "안녕",
+      },
+    };
+    expect(parseUpdate(CH, update)?.channelLangHint).toBe("ko");
+  });
+
+  it("без language_code — channelLangHint отсутствует", () => {
+    const update: TgUpdate = {
+      update_id: 11,
+      message: {
+        message_id: 2,
+        chat: { id: 2, type: "private" },
+        from: { id: 2 },
+        date: 1700000000,
+        text: "hi",
+      },
+    };
+    const inbound = parseUpdate(CH, update);
+    expect(inbound).not.toBeNull();
+    expect(inbound?.channelLangHint).toBeUndefined();
+  });
+
+  it("пробрасывает language_code из callback_query.from", () => {
+    const update: TgUpdate = {
+      update_id: 12,
+      callback_query: {
+        id: "cb1",
+        from: { id: 99, language_code: "en-US" },
+        data: "ok",
+        message: {
+          message_id: 50,
+          chat: { id: 99, type: "private" },
+          date: 1700000000,
+        },
+      },
+    };
+    expect(parseUpdate(CH, update)?.channelLangHint).toBe("en-US");
+  });
 });

@@ -24,6 +24,9 @@ import {
   type ExchangeRateProposal,
   type ExchangeSettings,
   type ExchangeTurnover,
+  type PayoutCoverageOperator,
+  type PayoutPoint,
+  type PayoutPointInput,
   saas,
 } from "@/api/saas";
 import { RateCardEditor } from "@/components/exchange/RateCardEditor";
@@ -31,6 +34,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -57,16 +61,22 @@ import { Textarea } from "@/components/ui/textarea";
 const ASSETS = ["USDT", "USDC", "BTC", "ETH", "LTC", "TRX", "TON", "RUB", "EUR", "USD", "THB"];
 const NETWORKS = ["", "trc20", "erc20", "bep20", "ton", "solana", "tron"];
 
-const EMPTY_RATE: ExchangeRateInput = {
-  asset: "USDT",
-  quoteAsset: "RUB",
-  network: "trc20",
-  baseRate: 0,
-  quoteMode: "multiply",
-  marginPct: 0,
-  isActive: true,
-  autoUpdate: false,
-};
+// Дефолт quoteAsset берётся ИЗ валюты тенанта через emptyRate(quoteCode):
+// статичный фикс `"RUB"` (THB-центризм) приводил к битой строке `→RUB`, которая
+// проваливается фильтром listActiveDirections (quoteAsset должен совпадать с
+// валютой тенанта). Поэтому используем фабрику и читаем `quoteCode` в компоненте.
+function emptyRate(quoteCode: string): ExchangeRateInput {
+  return {
+    asset: "USDT",
+    quoteAsset: quoteCode,
+    network: "trc20",
+    baseRate: 0,
+    quoteMode: "multiply",
+    marginPct: 0,
+    isActive: true,
+    autoUpdate: false,
+  };
+}
 
 const STATUS_VARIANT: Record<
   string,
@@ -539,7 +549,7 @@ export function SaasExchange() {
 
   // Произвольное направление обмена (помимо табло RUB/USDT→THB)
   const [addingRate, setAddingRate] = useState(false);
-  const [rateForm, setRateForm] = useState<ExchangeRateInput>(EMPTY_RATE);
+  const [rateForm, setRateForm] = useState<ExchangeRateInput>(() => emptyRate(quoteCode));
   const [savingRate, setSavingRate] = useState(false);
 
   // Реквизиты
@@ -608,7 +618,7 @@ export function SaasExchange() {
     try {
       await saas.saveExchangeRate(rateForm);
       toast.success("Направление сохранено");
-      setRateForm(EMPTY_RATE);
+      setRateForm(emptyRate(quoteCode));
       setAddingRate(false);
       load();
     } catch (err) {
@@ -848,6 +858,7 @@ export function SaasExchange() {
           <TabsTrigger value="orders">Заявки</TabsTrigger>
           <TabsTrigger value="kyc">Клиенты (KYC)</TabsTrigger>
           <TabsTrigger value="requisites">Реквизиты</TabsTrigger>
+          <TabsTrigger value="payout-points">Точки выдачи</TabsTrigger>
         </TabsList>
 
         {/* ── Курсы ─────────────────────────────────────────────── */}
@@ -1256,7 +1267,7 @@ export function SaasExchange() {
                     variant="ghost"
                     onClick={() => {
                       setAddingRate(false);
-                      setRateForm(EMPTY_RATE);
+                      setRateForm(emptyRate(quoteCode));
                     }}
                   >
                     Отмена
@@ -1581,8 +1592,437 @@ export function SaasExchange() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ── Точки выдачи ──────────────────────────────────────── */}
+        <TabsContent value="payout-points" className="space-y-4">
+          <PayoutPointsTab />
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+const KIND_LABEL: Record<string, string> = {
+  atm: "ATM",
+  office: "Офис",
+  courier_zone: "Курьер",
+};
+
+const EMPTY_POINT: PayoutPointInput = {
+  kind: "atm",
+  code: "",
+  label: "",
+  bankName: null,
+  quoteAsset: "PHP",
+  denomination: null,
+  perWithdrawalMax: null,
+  feeFixed: 0,
+  feePct: 0,
+  codeTtlSec: null,
+  city: null,
+  address: null,
+  isActive: true,
+};
+
+function PayoutPointsTab() {
+  const [points, setPoints] = useState<PayoutPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editPoint, setEditPoint] = useState<PayoutPoint | null>(null);
+  const [editForm, setEditForm] = useState<PayoutPointInput>(EMPTY_POINT);
+  const [isNew, setIsNew] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [coveragePoint, setCoveragePoint] = useState<PayoutPoint | null>(null);
+  const [coverage, setCoverage] = useState<PayoutCoverageOperator[]>([]);
+  const [coverageLoading, setCoverageLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    saas
+      .listPayoutPoints()
+      .then((r) => setPoints(r.points))
+      .catch(() => toast.error("Не удалось загрузить точки выдачи"))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(load, []);
+
+  const openNew = () => {
+    setIsNew(true);
+    setEditForm(EMPTY_POINT);
+    setEditPoint({} as PayoutPoint);
+  };
+
+  const openEdit = (p: PayoutPoint) => {
+    setIsNew(false);
+    setEditForm({
+      kind: p.kind,
+      code: p.code,
+      label: p.label,
+      bankName: p.bankName,
+      quoteAsset: p.quoteAsset,
+      denomination: p.denomination,
+      perWithdrawalMax: p.perWithdrawalMax,
+      feeFixed: p.feeFixed,
+      feePct: p.feePct,
+      codeTtlSec: p.codeTtlSec,
+      city: p.city,
+      address: p.address,
+      isActive: p.isActive,
+    });
+    setEditPoint(p);
+  };
+
+  const savePoint = async () => {
+    setSaving(true);
+    try {
+      if (isNew) {
+        await saas.createPayoutPoint(editForm);
+        toast.success("Точка выдачи добавлена");
+      } else if (editPoint?.id) {
+        await saas.updatePayoutPoint(editPoint.id, editForm);
+        toast.success("Точка обновлена");
+      }
+      setEditPoint(null);
+      load();
+    } catch {
+      toast.error("Ошибка сохранения");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deactivate = async (p: PayoutPoint) => {
+    if (!confirm(`Деактивировать точку «${p.label}»?`)) return;
+    try {
+      await saas.deletePayoutPoint(p.id);
+      toast.success("Деактивировано");
+      load();
+    } catch {
+      toast.error("Ошибка");
+    }
+  };
+
+  const openCoverage = async (p: PayoutPoint) => {
+    setCoveragePoint(p);
+    setCoverageLoading(true);
+    try {
+      const r = await saas.listPayoutCoverage(p.id);
+      setCoverage(r.operators);
+    } catch {
+      toast.error("Не удалось загрузить операторов");
+    } finally {
+      setCoverageLoading(false);
+    }
+  };
+
+  const toggleCoverage = async (op: PayoutCoverageOperator) => {
+    if (!coveragePoint) return;
+    try {
+      if (op.covering) {
+        await saas.removePayoutCoverage(coveragePoint.id, op.adminId);
+      } else {
+        await saas.addPayoutCoverage(coveragePoint.id, op.adminId);
+      }
+      const r = await saas.listPayoutCoverage(coveragePoint.id);
+      setCoverage(r.operators);
+    } catch {
+      toast.error("Ошибка");
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base">Каталог точек выдачи</CardTitle>
+          <Button size="sm" onClick={openNew}>
+            <PlusIcon className="mr-1 h-4 w-4" />
+            Добавить
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : points.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Точки выдачи не настроены.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Тип</TableHead>
+                  <TableHead>Банк / Зона</TableHead>
+                  <TableHead>Название</TableHead>
+                  <TableHead>Валюта</TableHead>
+                  <TableHead>Номинал</TableHead>
+                  <TableHead>Лим./сн.</TableHead>
+                  <TableHead>Комиссия</TableHead>
+                  <TableHead>Город</TableHead>
+                  <TableHead>Активна</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {points.map((p) => (
+                  <TableRow key={p.id} className={!p.isActive ? "opacity-50" : undefined}>
+                    <TableCell>
+                      <Badge variant="outline">{KIND_LABEL[p.kind] ?? p.kind}</Badge>
+                    </TableCell>
+                    <TableCell className="text-sm">{p.bankName ?? "—"}</TableCell>
+                    <TableCell className="font-medium">{p.label}</TableCell>
+                    <TableCell>{p.quoteAsset}</TableCell>
+                    <TableCell>{p.denomination ?? "—"}</TableCell>
+                    <TableCell>{p.perWithdrawalMax?.toLocaleString() ?? "—"}</TableCell>
+                    <TableCell>
+                      {p.feeFixed > 0 ? `+${p.feeFixed}` : ""}
+                      {p.feePct > 0 ? ` ${p.feePct}%` : ""}
+                      {p.feeFixed === 0 && p.feePct === 0 ? "0" : ""}
+                    </TableCell>
+                    <TableCell>{p.city ?? "—"}</TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={p.isActive}
+                        onCheckedChange={(v) =>
+                          saas
+                            .updatePayoutPoint(p.id, { isActive: v })
+                            .then(load)
+                            .catch(() => toast.error("Ошибка"))
+                        }
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>
+                          Изм.
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => openCoverage(p)}>
+                          Операторы
+                        </Button>
+                        {p.isActive && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive"
+                            onClick={() => deactivate(p)}
+                          >
+                            <Trash2Icon className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Диалог редактирования точки */}
+      <Dialog open={editPoint != null} onOpenChange={(o) => !o && setEditPoint(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{isNew ? "Добавить точку выдачи" : "Редактировать точку"}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Тип</Label>
+                <Select
+                  value={editForm.kind}
+                  onValueChange={(v) =>
+                    setEditForm((f) => ({ ...f, kind: v as PayoutPointInput["kind"] }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="atm">ATM (cardless)</SelectItem>
+                    <SelectItem value="office">Офис</SelectItem>
+                    <SelectItem value="courier_zone">Зона курьера</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Валюта выдачи</Label>
+                <Select
+                  value={editForm.quoteAsset}
+                  onValueChange={(v) => setEditForm((f) => ({ ...f, quoteAsset: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["PHP", "THB", "USD", "VND", "IDR"].map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Код (уникальный)</Label>
+                <Input
+                  value={editForm.code}
+                  disabled={!isNew}
+                  onChange={(e) => setEditForm((f) => ({ ...f, code: e.target.value }))}
+                  placeholder="scb_asok"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Банк / Провайдер</Label>
+                <Input
+                  value={editForm.bankName ?? ""}
+                  onChange={(e) => setEditForm((f) => ({ ...f, bankName: e.target.value || null }))}
+                  placeholder="SCB"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Название точки</Label>
+              <Input
+                value={editForm.label}
+                onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))}
+                placeholder="SCB Asok (BTS)"
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label>Номинал (шаг)</Label>
+                <Input
+                  type="number"
+                  value={editForm.denomination ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({
+                      ...f,
+                      denomination: e.target.value ? Number(e.target.value) : null,
+                    }))
+                  }
+                  placeholder="500"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Лимит снятия</Label>
+                <Input
+                  type="number"
+                  value={editForm.perWithdrawalMax ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({
+                      ...f,
+                      perWithdrawalMax: e.target.value ? Number(e.target.value) : null,
+                    }))
+                  }
+                  placeholder="20000"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>TTL кода (сек)</Label>
+                <Input
+                  type="number"
+                  value={editForm.codeTtlSec ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({
+                      ...f,
+                      codeTtlSec: e.target.value ? Number(e.target.value) : null,
+                    }))
+                  }
+                  placeholder="900"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Комиссия фикс.</Label>
+                <Input
+                  type="number"
+                  value={editForm.feeFixed}
+                  onChange={(e) => setEditForm((f) => ({ ...f, feeFixed: Number(e.target.value) }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Комиссия %</Label>
+                <Input
+                  type="number"
+                  value={editForm.feePct}
+                  onChange={(e) => setEditForm((f) => ({ ...f, feePct: Number(e.target.value) }))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Город</Label>
+                <Input
+                  value={editForm.city ?? ""}
+                  onChange={(e) => setEditForm((f) => ({ ...f, city: e.target.value || null }))}
+                  placeholder="Bangkok"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Адрес</Label>
+                <Input
+                  value={editForm.address ?? ""}
+                  onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value || null }))}
+                  placeholder="Sukhumvit Soi 21"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={editForm.isActive}
+                onCheckedChange={(v) => setEditForm((f) => ({ ...f, isActive: v }))}
+              />
+              <Label>Активна</Label>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setEditPoint(null)}>
+                Отмена
+              </Button>
+              <Button onClick={savePoint} disabled={saving}>
+                {saving ? <Loader2Icon className="mr-1 h-4 w-4 animate-spin" /> : null}
+                Сохранить
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Диалог покрытия операторов */}
+      <Dialog open={coveragePoint != null} onOpenChange={(o) => !o && setCoveragePoint(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Операторы: {coveragePoint?.label}</DialogTitle>
+          </DialogHeader>
+          {coverageLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : coverage.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Нет операторов (нет записей в operator_settings).
+            </p>
+          ) : (
+            <div className="space-y-2 pt-1">
+              {coverage.map((op) => (
+                <div
+                  key={op.adminId}
+                  className="flex items-center justify-between rounded border px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium">{op.name ?? op.email}</p>
+                    {op.name && <p className="text-xs text-muted-foreground">{op.email}</p>}
+                  </div>
+                  <Switch checked={op.covering} onCheckedChange={() => toggleCoverage(op)} />
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground pt-1">
+                Включённые операторы получают хэндофф выдачи через эту точку.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

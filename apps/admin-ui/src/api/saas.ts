@@ -2279,6 +2279,34 @@ export interface ExchangeRateProposal {
   updatedAt: number;
 }
 
+export interface PayoutPoint {
+  id: number;
+  kind: "atm" | "office" | "courier_zone";
+  code: string;
+  label: string;
+  bankName: string | null;
+  quoteAsset: string;
+  denomination: number | null;
+  perWithdrawalMax: number | null;
+  feeFixed: number;
+  feePct: number;
+  codeTtlSec: number | null;
+  city: string | null;
+  address: string | null;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type PayoutPointInput = Omit<PayoutPoint, "id" | "createdAt" | "updatedAt">;
+
+export interface PayoutCoverageOperator {
+  adminId: number;
+  name: string | null;
+  email: string;
+  covering: boolean;
+}
+
 export interface ExchangeRateCardProposal {
   asset: string;
   network: string;
@@ -4346,6 +4374,43 @@ export const saas = {
   },
   deleteExchangeRate(id: number) {
     return request<{ ok: boolean }>(`/api/admin/exchange/rates/${id}`, { method: "DELETE" });
+  },
+  listPayoutPoints() {
+    return request<{ points: PayoutPoint[] }>("/api/admin/exchange/payout-points");
+  },
+  createPayoutPoint(input: PayoutPointInput) {
+    return request<{ ok: boolean; point: PayoutPoint }>("/api/admin/exchange/payout-points", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updatePayoutPoint(id: number, input: Partial<PayoutPointInput>) {
+    return request<{ ok: boolean; point: PayoutPoint }>(`/api/admin/exchange/payout-points/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  deletePayoutPoint(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/exchange/payout-points/${id}`, {
+      method: "DELETE",
+    });
+  },
+  listPayoutCoverage(pointId: number) {
+    return request<{ operators: PayoutCoverageOperator[] }>(
+      `/api/admin/exchange/payout-points/${pointId}/coverage`,
+    );
+  },
+  addPayoutCoverage(pointId: number, adminId: number) {
+    return request<{ ok: boolean }>(`/api/admin/exchange/payout-points/${pointId}/coverage`, {
+      method: "POST",
+      body: JSON.stringify({ adminId }),
+    });
+  },
+  removePayoutCoverage(pointId: number, adminId: number) {
+    return request<{ ok: boolean }>(
+      `/api/admin/exchange/payout-points/${pointId}/coverage/${adminId}`,
+      { method: "DELETE" },
+    );
   },
   refreshExchangeRates() {
     return request<{ ok: boolean; updated: number; skipped: number; failed: number }>(

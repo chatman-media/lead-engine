@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/channel-core",
-  "version": "1.8.0",
+  "version": "1.10.0",
   "description": "Channel-agnostic contract: ChannelAdapter, Inbound, OutboundEnvelope, ChannelCapabilities. Pluggable layer для Telegram / WhatsApp / web-chat / etc.",
   "type": "module",
   "main": "./dist/index.js",

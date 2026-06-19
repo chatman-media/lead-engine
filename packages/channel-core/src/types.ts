@@ -76,6 +76,14 @@ export interface Inbound {
    */
   edited?: boolean;
   /**
+   * Слабый bootstrap-сигнал языка от канала (не язык переписки!).
+   * Telegram: `from.language_code` — язык интерфейса клиента (`en-US`, `ru`, …).
+   * WhatsApp / VK / web — обычно undefined. Conversation-engine использует
+   * это только если текстовый детект не дал результата (media-only, цифры).
+   * Никогда не перебивает confident-детект по тексту. См. #735 `language.ts`.
+   */
+  channelLangHint?: string;
+  /**
    * Escape-hatch: канал-специфичный raw payload. Conversation-engine не
    * должен на это смотреть — нужно только для audit/debug и адаптер-специфичных
    * расширений (например, MTProto reply-to-resolve).
@@ -91,12 +99,7 @@ export interface ReplyMarkup {
 }
 
 export interface OperatorHandoffMeta {
-  reason:
-    | "kyc_review"
-    | "payment_review"
-    | "office_payout"
-    | "payout_review"
-    | "operator_request";
+  reason: "kyc_review" | "payment_review" | "office_payout" | "payout_review" | "operator_request";
   title: string;
   action: string;
   contractId?: string;
@@ -111,6 +114,7 @@ export interface OperatorHandoffMeta {
   amount?: string;
   rail?: string;
   network?: string;
+  payoutPointId?: number;
 }
 
 export type OutboundPart =
@@ -119,10 +123,7 @@ export type OutboundPart =
   | { kind: "video"; mediaRef: MediaRef; caption?: string }
   | { kind: "document"; mediaRef: MediaRef; caption?: string };
 
-export type WhatsAppTemplateCategory =
-  | "marketing"
-  | "utility"
-  | "authentication";
+export type WhatsAppTemplateCategory = "marketing" | "utility" | "authentication";
 
 export type WhatsAppTemplateParameter =
   | { type: "text"; text: string }

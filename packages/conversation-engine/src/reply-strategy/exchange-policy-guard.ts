@@ -73,6 +73,7 @@ export interface ExchangeOrderPolicyState {
 	payoutCompleted: boolean;
 	payoutCodeIssued: boolean;
 	verificationId?: string | null;
+	payoutPointId?: number | null;
 }
 
 const KYC_PENDING_STAGES = new Set([

@@ -267,7 +267,7 @@ const EXCHANGE_FIXTURE_RATES_THB: ExchangeFixtureRate[] = [
 	},
 ];
 
-// PHP-набор (Филиппины): base_rate близок к рынку (USDT→PHP ≈ 61–62, RUB за 1 PHP ≈ 1.3);
+// PHP-набор (Филиппины): base_rate близок к рынку (USDT→PHP ≈ 61–62, RUB за 1 PHP ≈ 1.43);
 // autoUpdate: true — фид сам ведёт base_rate, демо показывает живую синхронизацию.
 const EXCHANGE_FIXTURE_RATES_PHP: ExchangeFixtureRate[] = [
 	{
@@ -314,7 +314,7 @@ const EXCHANGE_FIXTURE_RATES_PHP: ExchangeFixtureRate[] = [
 		asset: "RUB",
 		quoteAsset: "PHP",
 		network: "",
-		baseRate: 1.17,
+		baseRate: 1.43,
 		quoteMode: "divide",
 		marginPct: 1.25,
 		feeFixedThb: 0,
@@ -459,9 +459,9 @@ const EXCHANGE_FIXTURE_RATE_TIERS_PHP: ExchangeFixtureRateTier[] = [
 		rangeBasis: "target_thb",
 		minAmount: 60_000,
 		maxAmount: 240_000,
-		marketRate: 1.17,
-		displayRate: 1.19,
-		deviationPct: 1.7094,
+		marketRate: 1.43,
+		displayRate: 1.4543,
+		deviationPct: 1.7,
 	},
 	{
 		key: "rub_240k_plus",
@@ -471,9 +471,9 @@ const EXCHANGE_FIXTURE_RATE_TIERS_PHP: ExchangeFixtureRateTier[] = [
 		rangeBasis: "target_thb",
 		minAmount: 240_000,
 		maxAmount: null,
-		marketRate: 1.17,
-		displayRate: 1.18,
-		deviationPct: 0.8547,
+		marketRate: 1.43,
+		displayRate: 1.4422,
+		deviationPct: 0.85,
 	},
 ];
 

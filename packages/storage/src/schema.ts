@@ -141,6 +141,11 @@ export const conversations = pgTable("conversations", {
   // диалог, чтобы заявки разных клиентов не сыпались в один поток и оператор
   // понимал, кому отвечает. NULL = топик ещё не создан / группа не форум.
   operatorThreadId: integer("operator_thread_id"),
+  // #735 — определённый язык диалога (ru/en/ko/zh). NULL = не определён,
+  // runtime фолбэкается на тенант-дефолт. Валидация набора в коде (без CHECK).
+  detectedLang: text("detected_lang"),
+  // Залипание языка: true = менять только confident-сигналом другого скрипта.
+  langLocked: boolean("lang_locked").notNull().default(false),
 }, (t) => [
   check("conversations_source_check", sql`${t.source} IN ('bot', 'userbot', 'self_play')`),
   check("conversations_mode_check", sql`${t.mode} IN ('ai', 'queued', 'human')`),

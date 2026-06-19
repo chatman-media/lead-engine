@@ -1,26 +1,29 @@
 import {
+  ArrowDownRightIcon,
   ArrowRightIcon,
-  Building2Icon,
-  ChevronRightIcon,
+  ArrowUpRightIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CircleCheckIcon,
   CircleDotIcon,
   CircleXIcon,
   Clock3Icon,
-  FlameIcon,
   GitBranchIcon,
-  HourglassIcon,
   RouteIcon,
+  TableIcon,
   TriangleAlertIcon,
   TrophyIcon,
   UsersRoundIcon,
 } from "lucide-react";
-import { type CSSProperties, Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import type { FunnelAnalytics, LeadListItem, StageDefinition } from "@/api/saas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 type FlowFilter = "all" | "hot" | "idle";
+type FlowView = "flow" | "table";
+type SortKey = "position" | "current" | "entered" | "conversion" | "avgDays" | "hot" | "idle";
 
 interface FunnelFlowProps {
   stages: StageDefinition[];
@@ -34,17 +37,21 @@ interface FunnelFlowProps {
 
 interface FlowStage {
   id: number | "unassigned";
+  position: number;
   displayName: string;
   kind: StageDefinition["kind"] | "unassigned";
   stageType: StageDefinition["stageType"] | "unassigned";
   color: string;
-  fields: StageDefinition["fields"];
   leads: LeadListItem[];
+  current: number;
+  hot: number;
+  active: number;
+  idle: number;
   /** Сколько лидов когда-либо вошло в этап (из аналитики). */
   entered: number | null;
   /** Среднее время в этапе, дни (из аналитики). */
   avgDays: number | null;
-  /** Конверсия из предыдущего активного этапа, %. null = нет входящего / нет данных. */
+  /** Конверсия из предыдущего проходного этапа, %. null = старт / нет данных. */
   conversion: number | null;
   /** Отток лидов на входе в этап (entered[prev] - entered[this]). */
   drop: number | null;
@@ -57,21 +64,6 @@ const FILTER_LABEL: Record<FlowFilter, string> = {
 };
 
 const FALLBACK_COLORS = ["#38bdf8", "#22c55e", "#f59e0b", "#a855f7", "#10b981", "#f43f5e"];
-
-const STAGE_ACTION: Record<string, string> = {
-  form_fill: "собрать анкету",
-  document_upload: "получить документ",
-  document_signature: "провести подпись",
-  rate_confirmation: "подтвердить курс",
-  external_approval: "дождаться проверки",
-  payment: "довести до оплаты",
-  waiting: "снять ожидание",
-  awaiting_operator: "подключить оператора",
-  interaction: "задать следующий вопрос",
-  assessment: "оценить заявку",
-  milestone: "зафиксировать результат",
-  unassigned: "назначить первый этап",
-};
 
 function normalizeMs(value: number | null | undefined): number | null {
   if (!value) return null;
@@ -100,7 +92,8 @@ function formatAge(lead: LeadListItem): string {
   return `${Math.round(hours / 24)} д назад`;
 }
 
-function formatDays(days: number): string {
+function formatDays(days: number | null): string {
+  if (days == null) return "—";
   if (days <= 0) return "0 д";
   if (days < 1) return `${Math.max(1, Math.round(days * 24))} ч`;
   return `${Math.round(days * 10) / 10} д`;
@@ -125,12 +118,12 @@ function shortName(lead: LeadListItem): string {
   return lead.contactName?.trim() || lead.applicationId || `Лид #${lead.id}`;
 }
 
-function leadProgress(lead: LeadListItem): number {
-  if (lead.requiredFieldsTotal <= 0) return 20;
-  return Math.round((lead.requiredFieldsFilled / lead.requiredFieldsTotal) * 100);
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
-function isTerminalStage(stage: FlowStage | StageDefinition | null | undefined): boolean {
+function isTerminalStage(stage: { kind?: string } | null | undefined): boolean {
   return stage?.kind === "terminal_won" || stage?.kind === "terminal_lost";
 }
 
@@ -157,20 +150,13 @@ function isIdleLead(lead: LeadListItem, stageById: Map<number, StageDefinition>)
   return ageHours(lead) >= 72 || lead.state === "stale";
 }
 
-function stateLabel(lead: LeadListItem | null): string {
-  if (!lead) return "нет лида";
-  if (lead.state === "won") return "выигран";
-  if (lead.state === "lost") return "потерян";
-  if (lead.state === "stale") return "застрял";
-  return "в работе";
-}
-
-function questionForStage(stage: FlowStage | null, lead: LeadListItem | null): string {
-  if (!stage) return "выбрать этап";
-  const missingField = stage.fields.find((field) => field.required);
-  if (missingField) return `спросить: ${missingField.displayName}`;
-  if (lead?.lastMessageText) return "ответить на последнее сообщение";
-  return STAGE_ACTION[stage.stageType] ?? "сделать следующий шаг";
+function leadHealth(
+  lead: LeadListItem,
+  stageById: Map<number, StageDefinition>,
+): "hot" | "idle" | "active" {
+  if (isHotLead(lead, stageById)) return "hot";
+  if (isIdleLead(lead, stageById)) return "idle";
+  return "active";
 }
 
 function filterLead(
@@ -183,17 +169,11 @@ function filterLead(
   return true;
 }
 
-function stageLoadTone(
-  stage: FlowStage,
-  stageById: Map<number, StageDefinition>,
-): "hot" | "idle" | "ok" {
-  if (stage.leads.some((lead) => isIdleLead(lead, stageById))) return "idle";
-  if (stage.leads.some((lead) => isHotLead(lead, stageById))) return "hot";
-  return "ok";
-}
-
-function stageStyle(stage: FlowStage): CSSProperties {
-  return { "--flow-color": stage.color } as CSSProperties;
+function convTone(conversion: number | null): "good" | "warn" | "bad" | null {
+  if (conversion == null) return null;
+  if (conversion >= 75) return "good";
+  if (conversion >= 50) return "warn";
+  return "bad";
 }
 
 interface BuiltFunnel {
@@ -201,18 +181,20 @@ interface BuiltFunnel {
   active: FlowStage[];
   won: number;
   lost: number;
+  inWork: number;
 }
 
 /**
- * Строит ленту активных этапов с конверсией/скоростью и считает исходы.
- * Конверсия/время берутся из сквозной аналитики (не зависят от фильтра),
- * текущие лиды/чипы — из переданного (отфильтрованного) списка.
+ * Строит ленту активных этапов с конверсией/скоростью/здоровьем и считает исходы.
+ * Конверсия/время — из сквозной аналитики (не зависят от фильтра); текущие лиды,
+ * чипы и health-бар — из переданного (отфильтрованного) списка.
  */
 function buildFunnel(
   stages: StageDefinition[],
   leads: LeadListItem[],
   analytics: FunnelAnalytics | null,
 ): BuiltFunnel {
+  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
   const sorted = [...stages].sort((a, b) => a.position - b.position || a.id - b.id);
   const stageIds = new Set(sorted.map((stage) => stage.id));
   const analyticsById = new Map((analytics?.stages ?? []).map((stage) => [stage.id, stage]));
@@ -220,16 +202,28 @@ function buildFunnel(
     (lead) => !lead.stageDefinitionId || !stageIds.has(lead.stageDefinitionId),
   );
 
+  const counts = (stageLeads: LeadListItem[]) => {
+    const hot = stageLeads.filter((lead) => isHotLead(lead, stageById)).length;
+    const idle = stageLeads.filter((lead) => isIdleLead(lead, stageById)).length;
+    return { hot, idle, active: Math.max(0, stageLeads.length - hot - idle) };
+  };
+
   const mapped: FlowStage[] = sorted.map((stage, index) => {
+    const stageLeads = leads.filter((lead) => lead.stageDefinitionId === stage.id);
     const a = analyticsById.get(stage.id) ?? null;
+    const c = counts(stageLeads);
     return {
       id: stage.id,
+      position: stage.position,
       displayName: stage.displayName,
       kind: stage.kind,
       stageType: stage.stageType,
       color: usableColor(stage.color, index),
-      fields: stage.fields,
-      leads: leads.filter((lead) => lead.stageDefinitionId === stage.id),
+      leads: stageLeads,
+      current: stageLeads.length,
+      hot: c.hot,
+      active: c.active,
+      idle: c.idle,
       entered: a?.leadsEntered ?? null,
       avgDays: a?.avgDaysInStage ?? null,
       conversion: null,
@@ -237,7 +231,7 @@ function buildFunnel(
     };
   });
 
-  // Цепочка конверсии — только проходные этапы (терминалы — это исходы, не шаги).
+  // Конверсия — только по проходным этапам (терминалы — это исходы, не шаги).
   const chain = mapped.filter((stage) => stage.kind === "intake" || stage.kind === "active");
   let prevEntered: number | null = null;
   for (const stage of chain) {
@@ -249,15 +243,20 @@ function buildFunnel(
   }
 
   const active: FlowStage[] = [];
-  if (unassignedLeads.length > 0 || chain.length === 0) {
+  if (unassignedLeads.length > 0) {
+    const c = counts(unassignedLeads);
     active.push({
       id: "unassigned",
+      position: -1,
       displayName: "Входящие",
       kind: "unassigned",
       stageType: "unassigned",
       color: "#64748b",
-      fields: [],
       leads: unassignedLeads,
+      current: unassignedLeads.length,
+      hot: c.hot,
+      active: c.active,
+      idle: c.idle,
       entered: null,
       avgDays: null,
       conversion: null,
@@ -266,15 +265,15 @@ function buildFunnel(
   }
   active.push(...chain);
 
-  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
   const won = leads.filter((lead) =>
     isWonLead(lead, lead.stageDefinitionId ? stageById.get(lead.stageDefinitionId) : null),
   ).length;
   const lost = leads.filter((lead) =>
     isLostLead(lead, lead.stageDefinitionId ? stageById.get(lead.stageDefinitionId) : null),
   ).length;
+  const inWork = leads.filter((lead) => !isTerminalLead(lead, stageById)).length;
 
-  return { active, won, lost };
+  return { active, won, lost, inWork };
 }
 
 export function FunnelFlow({
@@ -286,10 +285,14 @@ export function FunnelFlow({
   onOpenFunnel,
 }: FunnelFlowProps) {
   const [filter, setFilter] = useState<FlowFilter>("all");
-  const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
+  const [view, setView] = useState<FlowView>("flow");
+  const [selectedId, setSelectedId] = useState<FlowStage["id"] | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("position");
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
 
   const stageById = useMemo(() => new Map(stages.map((stage) => [stage.id, stage])), [stages]);
 
+  // Фильтр сужает лиды (счётчики/чипы/дрилл-даун); конверсия/время берутся из аналитики.
   const filteredLeads = useMemo(
     () => leads.filter((lead) => filterLead(lead, filter, stageById)),
     [filter, leads, stageById],
@@ -300,28 +303,17 @@ export function FunnelFlow({
     [stages, filteredLeads, analytics],
   );
   const active = funnel.active;
-  const maxCurrent = useMemo(
-    () => Math.max(1, ...active.map((stage) => stage.leads.length)),
-    [active],
-  );
+  const chain = useMemo(() => active.filter((s) => typeof s.id === "number"), [active]);
 
-  // Сквозные номера присваиваем только проходным этапам, буфер «Входящие» — без номера.
-  const stageNumbers = useMemo(() => {
-    let n = 0;
-    return active.map((stage) => (typeof stage.id === "number" ? ++n : null));
-  }, [active]);
-
-  const flowStageById = useMemo(() => {
-    const map = new Map<number, FlowStage>();
-    for (const stage of active) {
-      if (typeof stage.id === "number") map.set(stage.id, stage);
-    }
+  const stageNumber = useMemo(() => {
+    const map = new Map<FlowStage["id"], number>();
+    chain.forEach((stage, index) => map.set(stage.id, index + 1));
     return map;
-  }, [active]);
+  }, [chain]);
 
   // Узкое место: проходной этап с минимальной конверсией (тай-брейк — медленнее).
   const bottleneck = useMemo(() => {
-    const candidates = active.filter((stage) => stage.conversion != null);
+    const candidates = chain.filter((stage) => stage.conversion != null);
     if (candidates.length === 0) return null;
     return candidates.reduce((worst, stage) => {
       const c = stage.conversion ?? 100;
@@ -330,63 +322,77 @@ export function FunnelFlow({
       if (c === wc && (stage.avgDays ?? 0) > (worst.avgDays ?? 0)) return stage;
       return worst;
     });
-  }, [active]);
+  }, [chain]);
 
+  // Если выбранный этап выпал из текущего фильтра — снимаем выбор.
   useEffect(() => {
-    if (filteredLeads.length === 0) {
-      setSelectedLeadId(null);
-      return;
+    if (selectedId != null && !active.some((stage) => stage.id === selectedId)) {
+      setSelectedId(null);
     }
-    if (!selectedLeadId || !filteredLeads.some((lead) => lead.id === selectedLeadId)) {
-      setSelectedLeadId(filteredLeads[0]?.id ?? null);
-    }
-  }, [filteredLeads, selectedLeadId]);
+  }, [active, selectedId]);
 
-  const selectedLead = filteredLeads.find((lead) => lead.id === selectedLeadId) ?? null;
-  const selectedStage =
-    (selectedLead?.stageDefinitionId ? flowStageById.get(selectedLead.stageDefinitionId) : null) ??
-    active.find((stage) => stage.id === "unassigned") ??
-    active[0] ??
-    null;
-  const selectedQuestion = questionForStage(selectedStage, selectedLead);
-  const selectedRequiredTotal = selectedLead?.requiredFieldsTotal ?? 0;
-  const selectedRequiredFilled = selectedLead?.requiredFieldsFilled ?? 0;
-  const selectedProgress = selectedLead ? leadProgress(selectedLead) : 0;
+  const selectedStage = active.find((stage) => stage.id === selectedId) ?? null;
 
-  const metrics = useMemo(
-    () => ({
-      total: leads.length,
-      hot: leads.filter((lead) => isHotLead(lead, stageById)).length,
-      idle: leads.filter((lead) => isIdleLead(lead, stageById)).length,
-      won: leads.filter((lead) =>
-        isWonLead(lead, lead.stageDefinitionId ? stageById.get(lead.stageDefinitionId) : null),
-      ).length,
-    }),
-    [leads, stageById],
-  );
-
-  const stageCount = active.filter((stage) => typeof stage.id === "number").length;
-  const firstEntered = active.find(
-    (stage) => stage.kind !== "unassigned" && stage.entered != null,
-  )?.entered;
+  const firstEntered = chain.find((stage) => stage.entered != null)?.entered;
   const overall =
     firstEntered && firstEntered > 0 ? Math.round((funnel.won / firstEntered) * 100) : null;
-  const subtitle =
-    `${stageCount} ${stageCount === 1 ? "этап" : "этапов"} в потоке` +
-    (overall != null ? ` · сквозная конверсия ${overall}%` : "");
+  const cycleDays = chain.reduce<number | null>((sum, stage) => {
+    if (stage.avgDays == null) return sum;
+    return (sum ?? 0) + stage.avgDays;
+  }, null);
+
+  const subtitle = [
+    `${chain.length} ${chain.length === 1 ? "этап" : "этапов"}`,
+    overall != null ? `сквозная конверсия ${overall}%` : null,
+    `${funnel.won} выдано`,
+    funnel.lost > 0 ? `${funnel.lost} отменено` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  function toggleStage(id: FlowStage["id"]) {
+    setSelectedId((prev) => (prev === id ? null : id));
+  }
 
   function focusBottleneck() {
-    if (!bottleneck) return;
-    const target =
-      bottleneck.leads.find((lead) => isIdleLead(lead, stageById)) ?? bottleneck.leads[0];
-    if (target) {
-      setSelectedLeadId(target.id);
+    if (bottleneck) {
+      setView("flow");
+      setSelectedId(bottleneck.id);
     } else {
       onOpenLeads();
     }
   }
 
-  const visibleLeadRows = filteredLeads.slice(0, 8);
+  function setSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 1 ? -1 : 1));
+    } else {
+      setSortKey(key);
+      setSortDir(1);
+    }
+  }
+
+  const sortedForTable = useMemo(() => {
+    const value = (stage: FlowStage): number => {
+      switch (sortKey) {
+        case "current":
+          return stage.current;
+        case "entered":
+          return stage.entered ?? -1;
+        case "conversion":
+          return stage.conversion ?? -1;
+        case "avgDays":
+          return stage.avgDays ?? -1;
+        case "hot":
+          return stage.hot;
+        case "idle":
+          return stage.idle;
+        default:
+          return stage.position;
+      }
+    };
+    return [...active].sort((a, b) => (value(a) - value(b)) * sortDir);
+  }, [active, sortKey, sortDir]);
 
   return (
     <section className="funnel-flow-shell">
@@ -395,11 +401,11 @@ export function FunnelFlow({
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <RouteIcon className="size-4" />
-              Поток воронки
+              Воронка обмена
             </div>
-            <h2 className="mt-1 text-xl font-semibold tracking-tight">Где сейчас лиды</h2>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight">{subtitle}</h2>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Объём, конверсия между этапами и узкое место — слева направо по воронке.
+              Объём, конверсия и узкое место. Кликните этап — раскроются его лиды.
             </p>
           </div>
 
@@ -420,9 +426,34 @@ export function FunnelFlow({
                 </button>
               ))}
             </div>
+            <div className="flex rounded-lg border p-0.5">
+              <button
+                type="button"
+                onClick={() => setView("flow")}
+                className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  view === "flow"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <RouteIcon className="size-3.5" />
+                Поток
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("table")}
+                className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  view === "table"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <TableIcon className="size-3.5" />
+                Таблица
+              </button>
+            </div>
             <Button variant="outline" size="sm" onClick={onOpenFunnel}>
-              <RouteIcon />
-              Воронка
+              Настроить
             </Button>
           </div>
         </div>
@@ -430,310 +461,302 @@ export function FunnelFlow({
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <FlowMetric
             icon={<UsersRoundIcon className="size-4" />}
-            label="Лидов в схеме"
-            value={metrics.total}
+            label="В работе"
+            value={String(funnel.inWork)}
           />
           <FlowMetric
-            icon={<FlameIcon className="size-4" />}
-            label="Горячих"
-            value={metrics.hot}
-            tone="hot"
+            icon={<RouteIcon className="size-4" />}
+            label="Сквозная конверсия"
+            value={overall != null ? `${overall}%` : "—"}
           />
           <FlowMetric
-            icon={<HourglassIcon className="size-4" />}
-            label="Застряли"
-            value={metrics.idle}
-            tone="idle"
+            icon={<Clock3Icon className="size-4" />}
+            label="Ср. цикл"
+            value={cycleDays != null ? formatDays(cycleDays) : "—"}
           />
           <FlowMetric
             icon={<TrophyIcon className="size-4" />}
             label="Выдано"
-            value={metrics.won}
+            value={String(funnel.won)}
             tone="won"
           />
         </div>
 
-        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
-          <div className="funnel-flow-board">
-            <div className="funnel-flow-toolbar">
-              <div>
-                <p className="text-sm font-semibold">{subtitle}</p>
-                <p className="text-xs text-muted-foreground">
-                  {filteredLeads.length} {pluralLeads(filteredLeads.length)} в текущем фильтре
-                </p>
-              </div>
-              <Badge variant="secondary">
-                <GitBranchIcon className="mr-1 size-3" />
-                Live
-              </Badge>
+        <div className="funnel-flow-board">
+          <div className="funnel-flow-toolbar">
+            <div className="funnel-flow-legend">
+              <span>
+                <i className="funnel-flow-dot is-hot" /> горячие
+              </span>
+              <span>
+                <i className="funnel-flow-dot is-active" /> в работе
+              </span>
+              <span>
+                <i className="funnel-flow-dot is-idle" /> застряли
+              </span>
             </div>
-
-            {bottleneck && (
-              <div className="funnel-flow-bottleneck">
-                <TriangleAlertIcon className="size-4 shrink-0" />
-                <p className="min-w-0 flex-1 text-sm">
-                  Узкое место: <span className="font-semibold">{bottleneck.displayName}</span> —
-                  конверсия {bottleneck.conversion}%
-                  {bottleneck.drop != null && bottleneck.drop > 0
-                    ? `, теряется ${bottleneck.drop} ${pluralLeads(bottleneck.drop)}`
-                    : ""}
-                  {bottleneck.avgDays != null
-                    ? `, ср. ожидание ${formatDays(bottleneck.avgDays)}`
-                    : ""}
-                  .
-                </p>
-                <Button size="sm" variant="outline" onClick={focusBottleneck}>
-                  Разобрать
-                </Button>
-              </div>
-            )}
-
-            <div className="funnel-flow-lane">
-              {active.map((stage, index) => (
-                <Fragment key={stage.id}>
-                  {index > 0 && <StageConnector conversion={stage.conversion} />}
-                  <StageColumn
-                    stage={stage}
-                    number={stageNumbers[index]}
-                    maxCurrent={maxCurrent}
-                    stageById={stageById}
-                    isBottleneck={bottleneck?.id === stage.id}
-                    selectedStageId={selectedStage?.id ?? null}
-                    selectedLeadId={selectedLeadId}
-                    onSelectStage={(target) => setSelectedLeadId(target.leads[0]?.id ?? null)}
-                    onSelectLead={setSelectedLeadId}
-                  />
-                </Fragment>
-              ))}
-              <StageConnector outcome />
-              <OutcomeTiles won={funnel.won} lost={funnel.lost} />
-            </div>
+            <Badge variant="secondary">
+              <GitBranchIcon className="mr-1 size-3" />
+              {filteredLeads.length} {pluralLeads(filteredLeads.length)}
+            </Badge>
           </div>
 
-          <aside className="funnel-flow-panel">
-            {selectedLead ? (
-              <>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-base font-semibold">{shortName(selectedLead)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {selectedStage?.displayName ?? "Без этапа"} · {formatAge(selectedLead)}
-                    </p>
-                  </div>
-                  <Badge variant={isIdleLead(selectedLead, stageById) ? "warning" : "secondary"}>
-                    {stateLabel(selectedLead)}
-                  </Badge>
-                </div>
-
-                <div className="funnel-flow-action">
-                  <p className="text-xs font-medium uppercase text-muted-foreground">
-                    Следующий шаг
-                  </p>
-                  <p className="mt-1 text-sm font-medium">{selectedQuestion}</p>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Прогресс анкеты</span>
-                    <span>
-                      {selectedRequiredFilled}/{selectedRequiredTotal}
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${selectedProgress}%` }}
-                    />
-                  </div>
-                </div>
-
-                {selectedLead.lastMessageText && (
-                  <p className="line-clamp-3 rounded-md border bg-muted/35 p-3 text-sm text-muted-foreground">
-                    {selectedLead.lastMessageText}
-                  </p>
-                )}
-
-                <Button size="sm" onClick={() => onOpenLead(selectedLead.id)}>
-                  Открыть лид
-                  <ArrowRightIcon />
-                </Button>
-              </>
-            ) : (
-              <div className="grid min-h-48 place-items-center rounded-md border border-dashed text-center">
-                <div className="px-6">
-                  <Building2Icon className="mx-auto size-8 text-muted-foreground" />
-                  <p className="mt-3 text-sm font-medium">Лидов для этого фильтра нет</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Схема заполнится, когда заявки попадут в воронку.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Лиды</p>
-                <Button variant="ghost" size="sm" onClick={onOpenLeads}>
-                  Все
-                </Button>
-              </div>
-              <div className="space-y-1.5">
-                {visibleLeadRows.map((lead) => {
-                  const stage = lead.stageDefinitionId
-                    ? flowStageById.get(lead.stageDefinitionId)
-                    : null;
-                  const leadColor = stage?.color ?? "#64748b";
-                  return (
-                    <button
-                      key={lead.id}
-                      type="button"
-                      className={`funnel-flow-row ${lead.id === selectedLeadId ? "is-selected" : ""}`}
-                      onClick={() => setSelectedLeadId(lead.id)}
-                    >
-                      <span
-                        className="funnel-flow-row-avatar"
-                        style={{ backgroundColor: leadColor }}
-                      >
-                        <CircleDotIcon className="size-3" />
-                      </span>
-                      <span className="min-w-0 flex-1 text-left">
-                        <span className="block truncate text-sm font-medium">
-                          {shortName(lead)}
-                        </span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {stage?.displayName ?? lead.stageName ?? "Входящие"}
-                        </span>
-                      </span>
-                      <span className="text-xs text-muted-foreground">{formatAge(lead)}</span>
-                    </button>
-                  );
-                })}
-              </div>
+          {bottleneck && (
+            <div className="funnel-flow-bottleneck">
+              <TriangleAlertIcon className="size-4 shrink-0" />
+              <p className="min-w-0 flex-1 text-sm">
+                Узкое место: <span className="font-semibold">{bottleneck.displayName}</span> —
+                конверсия {bottleneck.conversion}%
+                {bottleneck.drop != null && bottleneck.drop > 0
+                  ? `, теряется ${bottleneck.drop} ${pluralLeads(bottleneck.drop)}`
+                  : ""}
+                {bottleneck.avgDays != null
+                  ? `, ср. ожидание ${formatDays(bottleneck.avgDays)}`
+                  : ""}
+                .
+              </p>
+              <Button size="sm" variant="outline" onClick={focusBottleneck}>
+                Разобрать
+              </Button>
             </div>
-          </aside>
+          )}
+
+          {view === "flow" ? (
+            <div className="funnel-flow-body">
+              {chain.length > 0 && (
+                <FunnelRibbon
+                  chain={chain}
+                  selectedId={selectedId}
+                  bottleneckId={bottleneck?.id ?? null}
+                  onSelect={toggleStage}
+                />
+              )}
+
+              <div className="funnel-flow-rail">
+                {active.map((stage) => (
+                  <StageCard
+                    key={stage.id}
+                    stage={stage}
+                    number={stageNumber.get(stage.id) ?? null}
+                    isBottleneck={bottleneck?.id === stage.id}
+                    isSelected={selectedId === stage.id}
+                    filter={filter}
+                    onToggle={() => toggleStage(stage.id)}
+                  />
+                ))}
+                <OutcomeTiles won={funnel.won} lost={funnel.lost} />
+              </div>
+
+              {selectedStage && (
+                <StageDrawer
+                  stage={selectedStage}
+                  number={stageNumber.get(selectedStage.id) ?? null}
+                  stageById={stageById}
+                  onOpenLead={onOpenLead}
+                  onClose={() => setSelectedId(null)}
+                />
+              )}
+            </div>
+          ) : (
+            <FunnelTable
+              rows={sortedForTable}
+              numbers={stageNumber}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={setSort}
+              onPick={(id) => {
+                setView("flow");
+                setSelectedId(id);
+              }}
+            />
+          )}
         </div>
       </div>
     </section>
   );
 }
 
-function StageConnector({
-  conversion,
-  outcome,
+function FunnelRibbon({
+  chain,
+  selectedId,
+  bottleneckId,
+  onSelect,
 }: {
-  conversion?: number | null;
-  outcome?: boolean;
+  chain: FlowStage[];
+  selectedId: FlowStage["id"] | null;
+  bottleneckId: FlowStage["id"] | null;
+  onSelect: (id: FlowStage["id"]) => void;
 }) {
-  if (outcome) {
-    return (
-      <div className="funnel-flow-connector is-outcome" aria-hidden="true">
-        <ChevronRightIcon className="funnel-flow-connector-icon size-4" />
-      </div>
-    );
-  }
-  const tone =
-    conversion == null ? "na" : conversion >= 75 ? "good" : conversion >= 50 ? "warn" : "bad";
+  const W = 720;
+  const H = 146;
+  const pad = 12;
+  const n = chain.length;
+  const heights = chain.map((stage) => stage.entered ?? stage.current);
+  const maxH = Math.max(1, ...heights);
+  const slotW = (W - pad * 2) / n;
+  const midY = H / 2 - 8;
+  const maxBar = 96;
+  const barH = (i: number) => Math.max(10, (heights[i] / maxH) * maxBar);
+  const cx = (i: number) => pad + slotW * i + slotW / 2;
+
+  const top = chain.map((_, i) => [cx(i), midY - barH(i) / 2] as const);
+  const bot = chain.map((_, i) => [cx(i), midY + barH(i) / 2] as const);
+
   return (
-    <div className={`funnel-flow-connector is-${tone}`}>
-      <ChevronRightIcon className="funnel-flow-connector-icon size-4" />
-      {conversion != null && <span className="funnel-flow-pill">{conversion}%</span>}
-    </div>
+    <svg
+      className="funnel-flow-ribbon"
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label="Воронка по объёму с конверсией между этапами"
+    >
+      {chain.slice(0, n - 1).map((stage, i) => {
+        const points = [top[i], top[i + 1], bot[i + 1], bot[i]].map((p) => p.join(",")).join(" ");
+        const isBn = chain[i].id === bottleneckId || chain[i + 1].id === bottleneckId;
+        const opacity = 0.4 + 0.5 * (heights[i] / maxH);
+        return (
+          <polygon
+            key={`seg-${stage.id}`}
+            className={`funnel-flow-slice ${isBn ? "is-bn" : ""}`}
+            points={points}
+            style={{ fillOpacity: opacity }}
+          />
+        );
+      })}
+      {chain.map((stage, i) => {
+        const tone = convTone(stage.conversion);
+        const selected = stage.id === selectedId;
+        return (
+          <g key={`node-${stage.id}`}>
+            <circle
+              className={`funnel-flow-ribbon-dot ${selected ? "is-selected" : ""}`}
+              cx={cx(i)}
+              cy={midY}
+              r={selected ? 4 : 2.5}
+            />
+            <text
+              className="funnel-flow-ribbon-num"
+              x={cx(i)}
+              y={midY - barH(i) / 2 - 6}
+              textAnchor="middle"
+            >
+              {stage.current}
+            </text>
+            {i > 0 && stage.conversion != null && (
+              <text
+                className={`funnel-flow-ribbon-conv is-${tone}`}
+                x={pad + slotW * i}
+                y={midY + barH(i) / 2 + 16}
+                textAnchor="middle"
+              >
+                {stage.conversion}%
+              </text>
+            )}
+            <text className="funnel-flow-ribbon-idx" x={cx(i)} y={H - 4} textAnchor="middle">
+              {i + 1}
+            </text>
+            <rect
+              className="funnel-flow-ribbon-hit"
+              x={pad + slotW * i}
+              y={0}
+              width={slotW}
+              height={H}
+              onClick={() => onSelect(stage.id)}
+            >
+              <title>{stage.displayName}</title>
+            </rect>
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
-function StageColumn({
+function HealthBar({ stage }: { stage: FlowStage }) {
+  const total = Math.max(1, stage.hot + stage.active + stage.idle);
+  const seg = (count: number, tone: string) =>
+    count > 0 ? (
+      <span
+        className={`funnel-flow-health-seg is-${tone}`}
+        style={{ width: `${(count / total) * 100}%` }}
+      />
+    ) : null;
+  return (
+    <span className="funnel-flow-health">
+      {seg(stage.hot, "hot")}
+      {seg(stage.active, "active")}
+      {seg(stage.idle, "idle")}
+    </span>
+  );
+}
+
+function ConvChip({ conversion }: { conversion: number | null }) {
+  if (conversion == null) {
+    return <span className="funnel-flow-start">старт</span>;
+  }
+  const tone = convTone(conversion);
+  const Icon =
+    conversion >= 75 ? ArrowUpRightIcon : conversion >= 50 ? ArrowRightIcon : ArrowDownRightIcon;
+  return (
+    <span className={`funnel-flow-conv is-${tone}`}>
+      <Icon className="size-3" />
+      {conversion}%
+    </span>
+  );
+}
+
+function StageCard({
   stage,
   number,
-  maxCurrent,
-  stageById,
   isBottleneck,
-  selectedStageId,
-  selectedLeadId,
-  onSelectStage,
-  onSelectLead,
+  isSelected,
+  filter,
+  onToggle,
 }: {
   stage: FlowStage;
   number: number | null;
-  maxCurrent: number;
-  stageById: Map<number, StageDefinition>;
   isBottleneck: boolean;
-  selectedStageId: FlowStage["id"] | null;
-  selectedLeadId: number | null;
-  onSelectStage: (stage: FlowStage) => void;
-  onSelectLead: (leadId: number) => void;
+  isSelected: boolean;
+  filter: FlowFilter;
+  onToggle: () => void;
 }) {
-  const current = stage.leads.length;
-  const hotCount = stage.leads.filter((lead) => isHotLead(lead, stageById)).length;
-  const idleCount = stage.leads.filter((lead) => isIdleLead(lead, stageById)).length;
-  const tone = stageLoadTone(stage, stageById);
-  const barWidth = current > 0 ? Math.max(8, Math.round((current / maxCurrent) * 100)) : 0;
+  const count = filter === "hot" ? stage.hot : filter === "idle" ? stage.idle : stage.current;
+  const dimmed = filter !== "all" && count === 0;
 
   return (
     <button
       type="button"
-      className={`funnel-flow-col is-${tone} ${isBottleneck ? "is-bottleneck" : ""} ${
-        stage.id === selectedStageId ? "is-selected" : ""
-      }`}
-      style={stageStyle(stage)}
-      onClick={() => onSelectStage(stage)}
+      className={`funnel-flow-card ${isBottleneck ? "is-bottleneck" : ""} ${
+        isSelected ? "is-selected" : ""
+      } ${dimmed ? "is-dimmed" : ""}`}
+      onClick={onToggle}
     >
-      <span className="funnel-flow-col-head">
-        <span className="funnel-flow-col-index">
+      <span className="funnel-flow-card-head">
+        <span className="funnel-flow-card-index">
           {number ?? <CircleDotIcon className="size-3" />}
         </span>
-        <span className="block min-w-0 flex-1 text-sm font-semibold leading-tight">
-          {stage.displayName}
+        <span className="funnel-flow-card-name">{stage.displayName}</span>
+      </span>
+
+      <span className="funnel-flow-card-count">
+        {count}
+        <ConvChip conversion={stage.conversion} />
+      </span>
+
+      <HealthBar stage={stage} />
+
+      <span className="funnel-flow-card-foot">
+        <span className="inline-flex items-center gap-1">
+          <Clock3Icon className="size-3" />
+          {formatDays(stage.avgDays)}
         </span>
-      </span>
-
-      <span className="funnel-flow-count">
-        {current}
-        <small>сейчас</small>
-      </span>
-
-      <span className="funnel-flow-bar">
-        <span style={{ width: `${barWidth}%` }} />
-      </span>
-
-      <span className="funnel-flow-meta">
-        {stage.avgDays != null && (
-          <span className="inline-flex items-center gap-1">
-            <Clock3Icon className="size-3" />
-            {formatDays(stage.avgDays)}
-          </span>
-        )}
-        {hotCount > 0 && (
-          <span className="funnel-flow-tag is-hot">
-            <FlameIcon className="size-3" />
-            {hotCount}
-          </span>
-        )}
-        {idleCount > 0 && (
-          <span className="funnel-flow-tag is-idle">
-            <HourglassIcon className="size-3" />
-            {idleCount}
-          </span>
-        )}
-      </span>
-
-      <span className="funnel-flow-chips">
-        {stage.leads.slice(0, 3).map((lead) => (
-          <span
-            key={lead.id}
-            className={`funnel-flow-chip ${lead.id === selectedLeadId ? "is-selected" : ""}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onSelectLead(lead.id);
-            }}
-          >
-            <span className="funnel-flow-chip-dot" />
-            <span className="truncate">{shortName(lead)}</span>
-          </span>
-        ))}
-        {stage.leads.length > 3 && (
-          <span className="funnel-flow-chip-more">+{stage.leads.length - 3}</span>
-        )}
-        {stage.leads.length === 0 && <span className="funnel-flow-empty">пусто</span>}
+        <span className="inline-flex items-center gap-1">
+          {isSelected ? (
+            <ChevronUpIcon className="size-3" />
+          ) : (
+            <ChevronDownIcon className="size-3" />
+          )}
+          {stage.current} лид.
+        </span>
       </span>
     </button>
   );
@@ -760,6 +783,152 @@ function OutcomeTiles({ won, lost }: { won: number; lost: number }) {
   );
 }
 
+function StageDrawer({
+  stage,
+  number,
+  stageById,
+  onOpenLead,
+  onClose,
+}: {
+  stage: FlowStage;
+  number: number | null;
+  stageById: Map<number, StageDefinition>;
+  onOpenLead: (leadId: number) => void;
+  onClose: () => void;
+}) {
+  const rows = stage.leads.slice(0, 12);
+  return (
+    <div className="funnel-flow-drawer">
+      <div className="funnel-flow-drawer-head">
+        <p className="text-sm font-medium">
+          {number != null ? `${number}. ` : ""}
+          {stage.displayName} · {stage.current} {pluralLeads(stage.current)}
+        </p>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>конверсия {stage.conversion != null ? `${stage.conversion}%` : "—"}</span>
+          <span>вошло {stage.entered ?? "—"}</span>
+          <span>ср. {formatDays(stage.avgDays)}</span>
+          <button type="button" className="funnel-flow-drawer-close" onClick={onClose}>
+            Свернуть
+          </button>
+        </div>
+      </div>
+      {rows.length > 0 ? (
+        <div className="funnel-flow-drawer-list">
+          {rows.map((lead) => {
+            const health = leadHealth(lead, stageById);
+            return (
+              <button
+                key={lead.id}
+                type="button"
+                className="funnel-flow-lead"
+                onClick={() => onOpenLead(lead.id)}
+              >
+                <span className="funnel-flow-lead-av" style={{ backgroundColor: stage.color }}>
+                  {initials(shortName(lead))}
+                </span>
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate text-sm">{shortName(lead)}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {formatAge(lead)}
+                    {lead.lastMessageText ? ` · ${lead.lastMessageText}` : ""}
+                  </span>
+                </span>
+                <span className={`funnel-flow-lead-dot is-${health}`} />
+                <ArrowRightIcon className="size-3.5 text-muted-foreground" />
+              </button>
+            );
+          })}
+          {stage.current > rows.length && (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              …и ещё {stage.current - rows.length}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="px-2 py-3 text-xs text-muted-foreground">Нет лидов под текущий фильтр.</p>
+      )}
+    </div>
+  );
+}
+
+function FunnelTable({
+  rows,
+  numbers,
+  sortKey,
+  sortDir,
+  onSort,
+  onPick,
+}: {
+  rows: FlowStage[];
+  numbers: Map<FlowStage["id"], number>;
+  sortKey: SortKey;
+  sortDir: 1 | -1;
+  onSort: (key: SortKey) => void;
+  onPick: (id: FlowStage["id"]) => void;
+}) {
+  const columns: { key: SortKey; label: string }[] = [
+    { key: "position", label: "Этап" },
+    { key: "current", label: "Сейчас" },
+    { key: "entered", label: "Вошло" },
+    { key: "conversion", label: "Конверсия" },
+    { key: "avgDays", label: "Ср. время" },
+    { key: "hot", label: "Горячие" },
+    { key: "idle", label: "Застряли" },
+  ];
+  const arrow = (key: SortKey) => (sortKey === key ? (sortDir === 1 ? " ↑" : " ↓") : "");
+  return (
+    <div className="funnel-flow-table-wrap">
+      <table className="funnel-flow-table">
+        <thead>
+          <tr>
+            {columns.map((col) => (
+              <th key={col.key} onClick={() => onSort(col.key)}>
+                {col.label}
+                {arrow(col.key)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((stage) => {
+            const tone = convTone(stage.conversion);
+            const num = numbers.get(stage.id);
+            return (
+              <tr key={stage.id} onClick={() => onPick(stage.id)}>
+                <td>
+                  <span className="funnel-flow-table-idx">{num ?? "—"}</span>
+                  {stage.displayName}
+                </td>
+                <td className="font-medium tabular-nums">{stage.current}</td>
+                <td className="tabular-nums text-muted-foreground">{stage.entered ?? "—"}</td>
+                <td>
+                  {stage.conversion != null ? (
+                    <span className={`funnel-flow-conv is-${tone}`}>{stage.conversion}%</span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
+                <td className="tabular-nums text-muted-foreground">{formatDays(stage.avgDays)}</td>
+                <td
+                  className={`tabular-nums ${stage.hot ? "funnel-flow-num-hot" : "text-muted-foreground"}`}
+                >
+                  {stage.hot || "—"}
+                </td>
+                <td
+                  className={`tabular-nums ${stage.idle ? "funnel-flow-num-idle" : "text-muted-foreground"}`}
+                >
+                  {stage.idle || "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function FlowMetric({
   icon,
   label,
@@ -768,8 +937,8 @@ function FlowMetric({
 }: {
   icon: ReactNode;
   label: string;
-  value: number;
-  tone?: "hot" | "idle" | "won";
+  value: string;
+  tone?: "won";
 }) {
   return (
     <div className={`funnel-flow-metric ${tone ? `is-${tone}` : ""}`}>
