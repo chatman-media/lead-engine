@@ -2,8 +2,8 @@ import { AlertTriangleIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { FunnelFlow } from "@/components/FunnelFlow";
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
-import { PipelineMap3d } from "@/components/PipelineMap3d";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -486,9 +486,10 @@ export function SaasDashboard() {
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
 
-      <PipelineMap3d
+      <FunnelFlow
         stages={pipelineFunnel?.stages ?? []}
         leads={pipelineLeads}
+        analytics={funnel}
         onOpenLead={(leadId) => navigate(`/leads/${leadId}`)}
         onOpenLeads={() => navigate("/leads")}
         onOpenFunnel={() => navigate("/funnel")}

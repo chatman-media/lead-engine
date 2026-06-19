@@ -221,7 +221,7 @@
   color: transparent;
 }
 
-.lead-city-shell {
+.funnel-flow-shell {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background:
@@ -229,7 +229,7 @@
     var(--card);
 }
 
-.lead-city-metric {
+.funnel-flow-metric {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -240,7 +240,7 @@
   padding: 11px 12px;
 }
 
-.lead-city-metric-icon {
+.funnel-flow-metric-icon {
   display: inline-flex;
   width: 34px;
   height: 34px;
@@ -252,181 +252,94 @@
   color: var(--primary);
 }
 
-.lead-city-metric.is-hot .lead-city-metric-icon {
+.funnel-flow-metric.is-hot .funnel-flow-metric-icon {
   background: color-mix(in oklch, var(--warning) 16%, transparent);
   color: var(--warning);
 }
 
-.lead-city-metric.is-idle .lead-city-metric-icon {
+.funnel-flow-metric.is-idle .funnel-flow-metric-icon {
   background: color-mix(in oklch, var(--destructive) 13%, transparent);
   color: var(--destructive);
 }
 
-.lead-city-board {
-  position: relative;
-  isolation: isolate;
-  min-height: 560px;
-  overflow-x: hidden;
-  overflow-y: hidden;
-  border: 1px solid color-mix(in oklch, var(--foreground) 14%, var(--border));
+.funnel-flow-metric.is-won .funnel-flow-metric-icon {
+  background: color-mix(in oklch, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.funnel-flow-board {
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--foreground) 12%, var(--border));
   border-radius: var(--radius-lg);
-  background:
-    radial-gradient(circle at 14% 12%, rgba(56, 189, 248, 0.14), transparent 27%),
-    radial-gradient(circle at 82% 18%, rgba(34, 197, 94, 0.1), transparent 24%),
-    linear-gradient(180deg, color-mix(in oklch, var(--card) 86%, #0f172a 14%), var(--card));
-  box-shadow:
-    inset 0 1px 0 color-mix(in oklch, white 11%, transparent),
-    0 26px 70px -48px color-mix(in oklch, var(--primary) 82%, transparent);
+  background: linear-gradient(180deg, color-mix(in oklch, var(--card) 90%, var(--primary) 5%), var(--card));
 }
 
-.lead-city-board::before {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background-image:
-    linear-gradient(color-mix(in oklch, var(--foreground) 6%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in oklch, var(--foreground) 6%, transparent) 1px, transparent 1px),
-    radial-gradient(circle at 18% 22%, color-mix(in oklch, var(--primary) 14%, transparent), transparent 30%),
-    radial-gradient(circle at 76% 70%, rgba(34, 197, 94, 0.1), transparent 28%);
-  background-position:
-    0 0,
-    0 0,
-    0 0,
-    0 0;
-  background-size:
-    34px 34px,
-    34px 34px,
-    100% 100%,
-    100% 100%;
-  content: "";
-  pointer-events: none;
-}
-
-.lead-city-board::after {
-  position: absolute;
-  inset: 78px 20px 20px;
-  z-index: 0;
-  border: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
-  border-radius: var(--radius-lg);
-  background:
-    linear-gradient(90deg, color-mix(in oklch, var(--primary) 7%, transparent), transparent 32%),
-    color-mix(in oklch, var(--background) 28%, transparent);
-  content: "";
-  pointer-events: none;
-}
-
-.lead-flow-toolbar {
-  position: relative;
-  z-index: 3;
+.funnel-flow-toolbar {
   display: flex;
-  width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
-  background: color-mix(in oklch, var(--card) 88%, transparent);
-  padding: 14px 16px;
-  backdrop-filter: blur(12px);
+  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  padding: 12px 16px;
 }
 
-.lead-flow-viewport {
-  position: relative;
-  z-index: 1;
-  min-height: 500px;
-}
-
-.lead-flow-plane {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-  height: 500px;
-}
-
-.lead-flow-rail {
-  position: absolute;
-  inset: 74px 40px 40px;
-  width: calc(100% - 80px);
-  height: 320px;
-  overflow: visible;
-}
-
-.lead-flow-rail-shadow {
-  fill: none;
-  stroke: color-mix(in oklch, black 36%, transparent);
-  stroke-linecap: round;
-  stroke-width: 22;
-}
-
-.lead-flow-rail-line {
-  fill: none;
-  stroke: url("#lead-flow-gradient");
-  stroke-dasharray: 10 10;
-  stroke-linecap: round;
-  stroke-width: 4;
-}
-
-.lead-flow-rail-dot-glow {
-  fill: color-mix(in oklch, var(--primary) 22%, transparent);
-}
-
-.lead-flow-rail-dot {
-  fill: var(--primary);
-  stroke: color-mix(in oklch, white 74%, transparent);
-  stroke-width: 2;
-}
-
-.lead-flow-node {
-  --flow-color: var(--primary);
-  position: absolute;
-  z-index: 2;
+.funnel-flow-bottleneck {
   display: flex;
-  width: clamp(168px, 24%, 190px);
-  min-height: 148px;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
-  border: 1px solid color-mix(in oklch, var(--flow-color) 38%, var(--border));
+  border-bottom: 1px solid color-mix(in oklch, var(--destructive) 28%, transparent);
+  background: color-mix(in oklch, var(--destructive) 10%, transparent);
+  padding: 10px 16px;
+  color: var(--destructive);
+}
+
+.funnel-flow-lane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+}
+
+.funnel-flow-col {
+  --flow-color: var(--primary);
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid color-mix(in oklch, var(--flow-color) 24%, var(--border));
+  border-left: 3px solid var(--flow-color);
   border-radius: var(--radius-md);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--flow-color) 12%, transparent), transparent),
-    color-mix(in oklch, var(--card) 94%, black 6%);
-  box-shadow:
-    0 20px 48px -34px var(--flow-color),
-    inset 0 1px 0 color-mix(in oklch, white 12%, transparent);
+  background: color-mix(in oklch, var(--card) 94%, black 6%);
+  padding: 10px 12px;
   color: inherit;
-  padding: 12px;
   text-align: left;
-  transform: translate(-50%, -50%);
   transition:
     border-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+    box-shadow 140ms ease;
 }
 
-.lead-flow-node:hover,
-.lead-flow-node.is-selected {
-  border-color: color-mix(in oklch, var(--flow-color) 70%, white 10%);
-  box-shadow:
-    0 24px 56px -30px var(--flow-color),
-    0 0 0 3px color-mix(in oklch, var(--flow-color) 18%, transparent),
-    inset 0 1px 0 color-mix(in oklch, white 14%, transparent);
-  transform: translate(-50%, -50%) translateY(-2px);
+.funnel-flow-col:hover,
+.funnel-flow-col.is-selected {
+  border-color: color-mix(in oklch, var(--flow-color) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--flow-color) 16%, transparent);
 }
 
-.lead-flow-node.is-idle {
-  border-color: color-mix(in oklch, var(--destructive) 44%, var(--border));
+.funnel-flow-col.is-bottleneck {
+  border-color: color-mix(in oklch, var(--destructive) 55%, var(--border));
+  border-left-color: var(--destructive);
 }
 
-.lead-flow-node-head {
+.funnel-flow-col-head {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
-.lead-flow-node-index {
+.funnel-flow-col-index {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex: none;
   align-items: center;
   justify-content: center;
@@ -434,10 +347,27 @@
   background: var(--flow-color);
   color: white;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
-.lead-flow-progress {
+.funnel-flow-col.is-bottleneck .funnel-flow-col-index {
+  background: var(--destructive);
+}
+
+.funnel-flow-count {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.funnel-flow-count small {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.funnel-flow-bar {
   display: block;
   height: 6px;
   overflow: hidden;
@@ -445,16 +375,20 @@
   background: color-mix(in oklch, var(--foreground) 9%, transparent);
 }
 
-.lead-flow-progress span {
+.funnel-flow-bar span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--flow-color);
+  background: color-mix(in oklch, var(--foreground) 42%, transparent);
 }
 
-.lead-flow-node-meta {
+.funnel-flow-col.is-bottleneck .funnel-flow-bar span {
+  background: var(--destructive);
+}
+
+.funnel-flow-meta {
   display: flex;
-  min-height: 20px;
+  min-height: 18px;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
@@ -463,32 +397,34 @@
   font-weight: 600;
 }
 
-.lead-flow-hot,
-.lead-flow-idle {
+.funnel-flow-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   border-radius: 9999px;
   padding: 2px 6px;
 }
 
-.lead-flow-hot {
+.funnel-flow-tag.is-hot {
   background: color-mix(in oklch, var(--warning) 15%, transparent);
   color: var(--warning);
 }
 
-.lead-flow-idle {
+.funnel-flow-tag.is-idle {
   background: color-mix(in oklch, var(--destructive) 13%, transparent);
   color: var(--destructive);
 }
 
-.lead-flow-chip-row {
+.funnel-flow-chips {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.lead-flow-chip,
-.lead-flow-chip-more,
-.lead-flow-empty {
+.funnel-flow-chip,
+.funnel-flow-chip-more,
+.funnel-flow-empty {
   display: inline-flex;
   max-width: 100%;
   align-items: center;
@@ -496,19 +432,19 @@
   border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
   border-radius: 9999px;
   background: color-mix(in oklch, var(--background) 46%, transparent);
-  padding: 4px 7px;
+  padding: 3px 7px;
   color: var(--muted-foreground);
   font-size: 11px;
   line-height: 1;
 }
 
-.lead-flow-chip.is-selected {
+.funnel-flow-chip.is-selected {
   border-color: color-mix(in oklch, var(--flow-color) 54%, var(--border));
   background: color-mix(in oklch, var(--flow-color) 14%, transparent);
   color: var(--foreground);
 }
 
-.lead-flow-chip-dot {
+.funnel-flow-chip-dot {
   width: 6px;
   height: 6px;
   flex: none;
@@ -516,7 +452,81 @@
   background: var(--flow-color);
 }
 
-.lead-city-panel {
+.funnel-flow-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 0;
+  color: var(--muted-foreground);
+}
+
+.funnel-flow-connector-icon {
+  transform: rotate(90deg);
+}
+
+.funnel-flow-pill {
+  border-radius: 9999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.funnel-flow-connector.is-good .funnel-flow-pill {
+  background: color-mix(in oklch, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.funnel-flow-connector.is-good .funnel-flow-connector-icon {
+  color: var(--success);
+}
+
+.funnel-flow-connector.is-warn .funnel-flow-pill {
+  background: color-mix(in oklch, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+
+.funnel-flow-connector.is-warn .funnel-flow-connector-icon {
+  color: var(--warning);
+}
+
+.funnel-flow-connector.is-bad .funnel-flow-pill {
+  background: color-mix(in oklch, var(--destructive) 16%, transparent);
+  color: var(--destructive);
+}
+
+.funnel-flow-connector.is-bad .funnel-flow-connector-icon {
+  color: var(--destructive);
+}
+
+.funnel-flow-outcomes {
+  display: flex;
+  gap: 8px;
+}
+
+.funnel-flow-outcome {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.funnel-flow-outcome.is-won {
+  border-color: color-mix(in oklch, var(--success) 40%, var(--border));
+  background: color-mix(in oklch, var(--success) 10%, transparent);
+  color: var(--success);
+}
+
+.funnel-flow-outcome.is-lost {
+  border-color: color-mix(in oklch, var(--destructive) 38%, var(--border));
+  background: color-mix(in oklch, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.funnel-flow-panel {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -527,7 +537,7 @@
   padding: 16px;
 }
 
-.lead-city-action {
+.funnel-flow-action {
   border: 1px solid color-mix(in oklch, var(--primary) 24%, var(--border));
   border-radius: var(--radius-md);
   background:
@@ -536,7 +546,7 @@
   padding: 12px;
 }
 
-.lead-city-row {
+.funnel-flow-row {
   display: flex;
   width: 100%;
   min-width: 0;
@@ -551,13 +561,13 @@
     background-color 140ms ease;
 }
 
-.lead-city-row:hover,
-.lead-city-row.is-selected {
+.funnel-flow-row:hover,
+.funnel-flow-row.is-selected {
   border-color: var(--border);
   background: color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 
-.lead-city-row-avatar {
+.funnel-flow-row-avatar {
   display: inline-flex;
   width: 26px;
   height: 26px;
@@ -570,12 +580,31 @@
   box-shadow: 0 8px 18px -12px currentColor;
 }
 
-@media (max-width: 768px) {
-  .lead-city-board {
-    min-height: 540px;
+@media (min-width: 1024px) {
+  .funnel-flow-lane {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    overflow-x: auto;
+    padding: 16px;
   }
 
-  .lead-flow-node {
-    width: 184px;
+  .funnel-flow-col {
+    width: 168px;
+    flex: 0 0 168px;
+  }
+
+  .funnel-flow-connector {
+    flex: 0 0 52px;
+    flex-direction: column;
+  }
+
+  .funnel-flow-connector-icon {
+    transform: none;
+  }
+
+  .funnel-flow-outcomes {
+    flex: 0 0 150px;
+    flex-direction: column;
   }
 }
