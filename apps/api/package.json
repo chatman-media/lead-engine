@@ -20,6 +20,7 @@
     "rehearse:exchange-demo": "bun run scripts/rehearse-exchange-demo.ts",
     "seed:exchange-demo": "bun run scripts/seed-exchange-demo.ts",
     "seed:exchange-fixtures": "bun run scripts/seed-exchange-fixtures.ts",
+    "seed:payout-points": "bun run scripts/seed-payout-points.ts",
     "test": "bun test"
   },
   "dependencies": {

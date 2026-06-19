@@ -15,19 +15,23 @@ import {
 	withTenant,
 } from "@chatman-media/conversation-engine";
 import {
+	admins,
 	channelIdentities,
 	channels,
 	contacts,
 	conversations,
 	exchangeOrders,
+	exchangePayoutPoints,
 	exchangeRates,
 	exchangeRateTiers,
 	exchangeSettings,
 	messages,
+	operatorPayoutCoverage,
+	operatorSettings,
 	outboundQueue,
 	tenantSecrets,
 } from "@chatman-media/storage";
-import { and, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import {
@@ -1203,6 +1207,202 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 			return { totals, byContact };
 		});
 		return c.json(result);
+	});
+
+	// ─── Точки выдачи (exchange_payout_points) ─────────────────────────────────
+	// GET /api/admin/exchange/payout-points
+	app.get("/api/admin/exchange/payout-points", async (c) => {
+		const tenantId = c.var.tenantId;
+		const rows = await withTenant(opts.db, tenantId, async (tx) => {
+			return tx
+				.select()
+				.from(exchangePayoutPoints)
+				.where(eq(exchangePayoutPoints.tenantId, tenantId))
+				.orderBy(asc(exchangePayoutPoints.kind), asc(exchangePayoutPoints.label));
+		});
+		return c.json({ points: rows });
+	});
+
+	// POST /api/admin/exchange/payout-points
+	app.post("/api/admin/exchange/payout-points", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = c.var.adminId as number | undefined;
+		const body = await c.req.json<{
+			kind: string;
+			code: string;
+			label: string;
+			bankName?: string | null;
+			quoteAsset: string;
+			denomination?: number | null;
+			perWithdrawalMax?: number | null;
+			feeFixed?: number;
+			feePct?: number;
+			codeTtlSec?: number | null;
+			city?: string | null;
+			address?: string | null;
+			isActive?: boolean;
+		}>();
+		const now = Math.floor(Date.now() / 1000);
+		const [point] = await withTenant(opts.db, tenantId, async (tx) => {
+			return tx
+				.insert(exchangePayoutPoints)
+				.values({
+					tenantId,
+					kind: body.kind as "atm" | "office" | "courier_zone",
+					code: body.code,
+					label: body.label,
+					bankName: body.bankName ?? null,
+					quoteAsset: body.quoteAsset,
+					denomination: body.denomination ?? null,
+					perWithdrawalMax: body.perWithdrawalMax ?? null,
+					feeFixed: body.feeFixed ?? 0,
+					feePct: body.feePct ?? 0,
+					codeTtlSec: body.codeTtlSec ?? null,
+					city: body.city ?? null,
+					address: body.address ?? null,
+					isActive: body.isActive ?? true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning();
+		});
+		await recordAudit(opts.db, { tenantId, adminId, action: "exchange.payout_point_created", details: { payoutPointId: point?.id, code: body.code } });
+		return c.json({ ok: true, point });
+	});
+
+	// PATCH /api/admin/exchange/payout-points/:id
+	app.patch("/api/admin/exchange/payout-points/:id", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = c.var.adminId as number | undefined;
+		const id = Number(c.req.param("id"));
+		const body = await c.req.json<Partial<{
+			label: string;
+			bankName: string | null;
+			denomination: number | null;
+			perWithdrawalMax: number | null;
+			feeFixed: number;
+			feePct: number;
+			codeTtlSec: number | null;
+			city: string | null;
+			address: string | null;
+			isActive: boolean;
+		}>>();
+		const now = Math.floor(Date.now() / 1000);
+		const [updated] = await withTenant(opts.db, tenantId, async (tx) => {
+			return tx
+				.update(exchangePayoutPoints)
+				.set({ ...body, updatedAt: now })
+				.where(
+					and(
+						eq(exchangePayoutPoints.tenantId, tenantId),
+						eq(exchangePayoutPoints.id, id),
+					),
+				)
+				.returning();
+		});
+		if (!updated) return c.json({ ok: false, error: "not_found" }, 404);
+		await recordAudit(opts.db, { tenantId, adminId, action: "exchange.payout_point_updated", details: { payoutPointId: id } });
+		return c.json({ ok: true, point: updated });
+	});
+
+	// DELETE /api/admin/exchange/payout-points/:id
+	app.delete("/api/admin/exchange/payout-points/:id", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = c.var.adminId as number | undefined;
+		const id = Number(c.req.param("id"));
+		const now = Math.floor(Date.now() / 1000);
+		const [deactivated] = await withTenant(opts.db, tenantId, async (tx) => {
+			return tx
+				.update(exchangePayoutPoints)
+				.set({ isActive: false, updatedAt: now })
+				.where(
+					and(
+						eq(exchangePayoutPoints.tenantId, tenantId),
+						eq(exchangePayoutPoints.id, id),
+					),
+				)
+				.returning({ id: exchangePayoutPoints.id });
+		});
+		if (!deactivated) return c.json({ ok: false, error: "not_found" }, 404);
+		await recordAudit(opts.db, { tenantId, adminId, action: "exchange.payout_point_deleted", details: { payoutPointId: id } });
+		return c.json({ ok: true });
+	});
+
+	// GET /api/admin/exchange/payout-points/:id/coverage
+	app.get("/api/admin/exchange/payout-points/:id/coverage", async (c) => {
+		const tenantId = c.var.tenantId;
+		const pointId = Number(c.req.param("id"));
+		const rows = await withTenant(opts.db, tenantId, async (tx) => {
+			return tx
+				.select({
+					adminId: operatorPayoutCoverage.adminId,
+					name: admins.name,
+					email: admins.email,
+				})
+				.from(operatorPayoutCoverage)
+				.innerJoin(admins, eq(admins.id, operatorPayoutCoverage.adminId))
+				.where(
+					and(
+						eq(operatorPayoutCoverage.tenantId, tenantId),
+						eq(operatorPayoutCoverage.payoutPointId, pointId),
+					),
+				);
+		});
+		// All operators with operatorSettings (candidates pool)
+		const allOps = await withTenant(opts.db, tenantId, async (tx) => {
+			return tx
+				.select({ adminId: operatorSettings.adminId, name: admins.name, email: admins.email })
+				.from(operatorSettings)
+				.innerJoin(admins, eq(admins.id, operatorSettings.adminId))
+				.where(eq(operatorSettings.tenantId, tenantId));
+		});
+		const coveringIds = new Set(rows.map((r) => r.adminId));
+		return c.json({
+			operators: allOps.map((op) => ({
+				adminId: op.adminId,
+				name: op.name,
+				email: op.email,
+				covering: coveringIds.has(op.adminId),
+			})),
+		});
+	});
+
+	// POST /api/admin/exchange/payout-points/:id/coverage
+	app.post("/api/admin/exchange/payout-points/:id/coverage", async (c) => {
+		const tenantId = c.var.tenantId;
+		const actorId = c.var.adminId as number | undefined;
+		const pointId = Number(c.req.param("id"));
+		const body = await c.req.json<{ adminId: number }>();
+		const now = Math.floor(Date.now() / 1000);
+		await withTenant(opts.db, tenantId, async (tx) => {
+			await tx
+				.insert(operatorPayoutCoverage)
+				.values({ tenantId, adminId: body.adminId, payoutPointId: pointId, createdAt: now })
+				.onConflictDoNothing();
+		});
+		await recordAudit(opts.db, { tenantId, adminId: actorId, action: "exchange.coverage_added", details: { payoutPointId: pointId, operatorAdminId: body.adminId } });
+		return c.json({ ok: true });
+	});
+
+	// DELETE /api/admin/exchange/payout-points/:id/coverage/:adminId
+	app.delete("/api/admin/exchange/payout-points/:id/coverage/:adminId", async (c) => {
+		const tenantId = c.var.tenantId;
+		const actorId = c.var.adminId as number | undefined;
+		const pointId = Number(c.req.param("id"));
+		const targetAdminId = Number(c.req.param("adminId"));
+		await withTenant(opts.db, tenantId, async (tx) => {
+			await tx
+				.delete(operatorPayoutCoverage)
+				.where(
+					and(
+						eq(operatorPayoutCoverage.tenantId, tenantId),
+						eq(operatorPayoutCoverage.payoutPointId, pointId),
+						eq(operatorPayoutCoverage.adminId, targetAdminId),
+					),
+				);
+		});
+		await recordAudit(opts.db, { tenantId, adminId: actorId, action: "exchange.coverage_removed", details: { payoutPointId: pointId, operatorAdminId: targetAdminId } });
+		return c.json({ ok: true });
 	});
 
 	return app;
