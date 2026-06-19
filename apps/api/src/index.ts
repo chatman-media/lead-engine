@@ -1413,6 +1413,31 @@ async function main() {
 							log.warn("ops-alert emit failed", { err: String(e) }),
 						);
 				},
+				// Pending-предложение от фида (soft/hard) → info-уведомление владельцу.
+				// partial-unique на (asset, quote_asset, network) WHERE status='pending'
+				// уже схлопывает повторные сэмплы; dedupKey даёт ops-anti-storm cooldown.
+				onProposal: (pn) => {
+					const dev = Number.isFinite(pn.deviationPct)
+						? Math.round(pn.deviationPct)
+						: null;
+					void opsAlertRouter
+						.emit({
+							tenantId: pn.tenantId,
+							kind: "rate_proposal_pending",
+							severity: "info",
+							title: "Курс ждёт подтверждения",
+							detail:
+								`Фид по ${pn.asset}→${pn.quoteAsset}` +
+								(pn.network ? `/${pn.network}` : "") +
+								` предложил ${pn.next} при текущем ${pn.prev}` +
+								`${dev !== null ? ` (${dev > 0 ? "+" : ""}${dev}%)` : ""}. ` +
+								"Подтвердите или отклоните в админке.",
+							dedupKey: `rate_proposal:${pn.asset}:${pn.quoteAsset}:${pn.network}`,
+						})
+						.catch((e) =>
+							log.warn("ops-alert emit failed", { err: String(e) }),
+						);
+				},
 			}).catch((e) => log.warn("rate-feed tick failed", { err: e }));
 		rateFeedInterval = setInterval(runFeed, tickMs);
 		setTimeout(runFeed, 15_000); // первый прогон через 15с после старта

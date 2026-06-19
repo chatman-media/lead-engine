@@ -2247,6 +2247,36 @@ export interface ExchangeSettings {
   quoteAssetOptions?: string[];
   /** Отправлять клиенту сообщение при автоматической передаче оператору. */
   handoffCustomerNotice: boolean;
+  /**
+   * Требовать ручное подтверждение даже мелких изменений курса (issue #732).
+   * Если включено — каждый обновлённый baseRate от фида падает в pending-карточку
+   * и не применяется до клика «Подтвердить». Дефолт false (back-compat).
+   */
+  requireRateConfirmation?: boolean;
+}
+
+/**
+ * Pending-предложение от фида: текущий курс vs предложенный, для карточки
+ * «Обновлённые курсы — подтвердите» (issue #732).
+ */
+export interface ExchangeRateProposal {
+  id: number;
+  rateId: number | null;
+  asset: string;
+  quoteAsset: string;
+  network: string;
+  quoteMode: "multiply" | "divide";
+  prevBaseRate: number;
+  nextBaseRate: number;
+  /** Знаковое отклонение в процентах. */
+  deviationPct: number;
+  severity: "soft" | "hard";
+  status: "pending" | "confirmed" | "rejected" | "superseded";
+  source: "feed" | "manual";
+  decidedByAdminId: number | null;
+  decidedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface PayoutPoint {
@@ -4396,6 +4426,23 @@ export const saas = {
       method: "PUT",
       body: JSON.stringify(input),
     });
+  },
+  // Pending-предложения обновлённого курса от рыночного фида (issue #732).
+  // Открыты по одному на направление (partial-unique pending).
+  listRateProposals() {
+    return request<{ proposals: ExchangeRateProposal[] }>("/api/admin/exchange/rate-proposals");
+  },
+  confirmRateProposal(id: number) {
+    return request<{ ok: boolean; proposal: ExchangeRateProposal }>(
+      `/api/admin/exchange/rate-proposals/${id}/confirm`,
+      { method: "POST" },
+    );
+  },
+  rejectRateProposal(id: number) {
+    return request<{ ok: boolean; proposal: ExchangeRateProposal }>(
+      `/api/admin/exchange/rate-proposals/${id}/reject`,
+      { method: "POST" },
+    );
   },
   previewExchangeRateCard() {
     return request<{ ok: boolean; proposals: ExchangeRateCardProposal[]; message: string }>(

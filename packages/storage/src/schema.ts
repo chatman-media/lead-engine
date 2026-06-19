@@ -1694,6 +1694,10 @@ export const exchangeSettings = pgTable("exchange_settings", {
   riskFirstDealReview: boolean("risk_first_deal_review").notNull().default(false),
   // Суточный кумулятивный лимит клиента за 24ч → ручная проверка (анти-дробление).
   riskDailyLimit: integer("risk_daily_limit"),
+  // Тумблер: требовать подтверждение оператором при обновлении базового курса
+  // (даже мелких тиков). По дефолту выкл — фид авто-применяет в пределах soft.
+  // См. exchange_rate_proposals + apps/api/src/lib/exchange/rate-feed.ts.
+  requireRateConfirmation: boolean("require_rate_confirmation").notNull().default(false),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
@@ -1756,6 +1760,48 @@ export const operatorPayoutCoverage = pgTable("operator_payout_coverage", {
   uniqueIndex("uniq_operator_payout_coverage").on(t.tenantId, t.adminId, t.payoutPointId),
   index("idx_operator_payout_coverage_point").on(t.tenantId, t.payoutPointId),
   index("idx_operator_payout_coverage_admin").on(t.tenantId, t.adminId),
+]);
+
+// Pending-предложения обновления базового курса. Когда фид даёт курс с заметным
+// отклонением (soft/hard порог) или включён тумблер require_rate_confirmation,
+// мы не трогаем exchange_rates.base_rate, а ставим предложение сюда — оператор
+// подтверждает/отклоняет вручную. До подтверждения котировка идёт по прежнему
+// активному курсу (computeQuote читает is_active exchange_rates). Partial-unique
+// (tenant_id, asset, quote_asset, network) WHERE status=pending — один открытый
+// pending на направление, повторный сэмпл фида перетирает.
+export const exchangeRateProposals = pgTable("exchange_rate_proposals", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  rateId: integer("rate_id").references(() => exchangeRates.id, { onDelete: "set null" }),
+  asset: text("asset").notNull(),
+  quoteAsset: text("quote_asset").notNull(),
+  network: text("network").notNull().default(""),
+  // multiply (крипта: quote=amount*rate) | divide (RUB: quote=amount/rate)
+  quoteMode: text("quote_mode").notNull(),
+  // Снапшот: prev — base_rate на момент сэмпла фида (для сверки гонки фид↔confirm);
+  // next — то, что предложено применить. deviationPct = (next-prev)/prev*100.
+  prevBaseRate: doublePrecision("prev_base_rate").notNull(),
+  nextBaseRate: doublePrecision("next_base_rate").notNull(),
+  deviationPct: doublePrecision("deviation_pct").notNull(),
+  // soft (в диапазоне soft..hard) | hard (> hard, sanity-guard) — для UI.
+  severity: text("severity").notNull(),
+  // pending → confirmed | rejected; superseded — старый pending вытеснен новым.
+  status: text("status").notNull().default("pending"),
+  source: text("source").notNull().default("feed"),
+  decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+  decidedAt: integer("decided_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("exchange_rate_proposals_severity_check", sql`${t.severity} IN ('soft','hard')`),
+  check("exchange_rate_proposals_status_check", sql`${t.status} IN ('pending','confirmed','rejected','superseded')`),
+  check("exchange_rate_proposals_source_check", sql`${t.source} IN ('feed','manual')`),
+  check("exchange_rate_proposals_quote_mode_check", sql`${t.quoteMode} IN ('multiply','divide')`),
+  check("exchange_rate_proposals_quote_asset_check", sql`${t.quoteAsset} ~ '^[A-Z]{3}$'`),
+  uniqueIndex("uniq_exchange_rate_proposals_pending_dir")
+    .on(t.tenantId, t.asset, t.quoteAsset, t.network)
+    .where(sql`status = 'pending'`),
+  index("idx_exchange_rate_proposals_tenant_status").on(t.tenantId, t.status, sql`${t.createdAt} DESC`),
 ]);
 
 // Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.

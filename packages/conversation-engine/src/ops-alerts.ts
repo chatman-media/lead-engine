@@ -28,6 +28,7 @@ import { withTenant } from "./with-tenant.ts";
 
 export type OpsAlertKind =
   | "rate_anomaly"
+  | "rate_proposal_pending"
   | "rate_feed_stale"
   | "order_stuck"
   | "channel_down"
