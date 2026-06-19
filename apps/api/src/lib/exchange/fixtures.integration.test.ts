@@ -338,4 +338,39 @@ describe("exchange deterministic fixtures", () => {
 		expect(rejected.error).not.toContain("не продолжай");
 		expect(rejected.availableDirections?.map((d) => d.asset)).toContain("USDT");
 	});
+
+	it("compute applies ATM payout adjustment and exposes payout points tool", async () => {
+		if (!sql || !appSql) return;
+		await seedExchangeFixtures({
+			db: appDb as Db,
+			tenantId,
+			masterKeyHex: MASTER_KEY,
+			nowEpoch: NOW,
+		});
+		const conversationId = await createVerifiedConversation();
+		const tools = toolsFor(conversationId);
+
+		const quote = (await tools.compute_exchange_quote?.execute({
+			asset: "RUB",
+			amount: 12_345,
+			amountMode: "target_thb",
+			payoutMethod: "cardless_atm",
+		})) as {
+			amountToThb: number;
+			payout?: { payoutAmount: number; roundStep: number; codes?: number[]; dispensable: boolean };
+		};
+		expect(quote.amountToThb).toBe(12_345);
+		// PHP-тенант: дефолтный шаг 100, лимит снятия 10000 → округление вниз + дробление.
+		expect(quote.payout?.roundStep).toBe(100);
+		expect(quote.payout?.payoutAmount).toBe(12_300);
+		expect(quote.payout?.codes).toEqual([10_000, 2_300]);
+		expect(quote.payout?.dispensable).toBe(true);
+
+		// Точки фикстурами не засеяны → тул отвечает «не настроены», но он подключён.
+		const points = (await tools.list_exchange_payout_points?.execute({})) as {
+			note?: string;
+			points?: unknown[];
+		};
+		expect(points.points ?? points.note).toBeDefined();
+	});
 });

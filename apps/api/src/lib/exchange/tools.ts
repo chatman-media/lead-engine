@@ -46,6 +46,8 @@ import {
   reviveExpiredOrder,
   updateOrder,
 } from "./orders.ts";
+import { listActivePayoutPoints } from "./payout-points.ts";
+import { applyPayoutAdjustment } from "./payout-quote.ts";
 import { getPaymentProvider, verifyWestWalletInvoicePayment } from "./providers.ts";
 import {
   computeQuote,
@@ -421,6 +423,8 @@ const TOOL_STAGE_MATRIX: Record<string, Set<string> | "any"> = {
   // Список доступных направлений можно показать на любой стадии (клиент вправе
   // переспросить «а что ещё меняете» хоть перед оплатой).
   list_exchange_directions: "any",
+  // Точки выдачи можно показать на любой стадии (клиент выбирает способ/банкомат).
+  list_exchange_payout_points: "any",
   compute_exchange_quote: new Set([
     "exchange_request",
     "quote_calculated",
@@ -586,6 +590,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         .string()
         .optional()
         .describe("Сеть для крипты: TRC20/ERC20/BEP20. Для USDT по умолчанию TRC20."),
+      payoutMethod: PayoutMethodEnum.optional().describe(
+        "Способ выдачи, если клиент спрашивает «сколько получу через банкомат/доставкой». Влияет на итог: ATM округляет вниз до номинала, доставка — минус комиссия. Если не передан — берётся из собранных полей.",
+      ),
     }),
     execute: async (args) => {
       // Источник правды для НЕзаданных аргументов: сначала АКТИВНАЯ заявка
@@ -639,6 +646,31 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         }
       }
 
+      // Коррекция под способ выдачи (СЛОЙ ПОВЕРХ котировки — курс/amountToThb не
+      // трогаем): ATM округляет вниз до номинала и дробит на коды, доставка минусует
+      // комиссию. Способ берём из аргумента/заявки/собранных полей.
+      const payoutMethod = args.payoutMethod ?? active?.payoutMethod ?? collected.payoutMethod;
+      const payout = payoutMethod
+        ? applyPayoutAdjustment({
+            amount: q.amountToThb,
+            quoteAsset: q.quoteAsset,
+            method: payoutMethod,
+          })
+        : null;
+      const payoutBlock =
+        payout && (payout.isAtm || payout.fee > 0)
+          ? {
+              method: payout.method,
+              payoutAmount: payout.payoutAmount,
+              ...(payout.roundStep ? { roundStep: payout.roundStep } : {}),
+              ...(payout.roundingRemainder ? { roundingRemainder: payout.roundingRemainder } : {}),
+              ...(payout.fee ? { fee: payout.fee } : {}),
+              ...(payout.codes.length > 1 ? { codes: payout.codes } : {}),
+              dispensable: payout.dispensable,
+            }
+          : undefined;
+      const baseLine = `Отдаёте: ${q.amountFrom} ${q.asset}`;
+
       return {
         direction: q.direction,
         asset: q.asset,
@@ -648,7 +680,10 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amountFrom: q.amountFrom,
         rate: q.rate,
         amountToThb: q.amountToThb,
-        display: `Отдаёте: ${q.amountFrom} ${q.asset}\nПолучаете: ${q.amountToThb} ${q.quoteAsset}`,
+        ...(payoutBlock ? { payout: payoutBlock } : {}),
+        display: payout?.note
+          ? `${baseLine}\n${payout.note}`
+          : `${baseLine}\nПолучаете: ${q.amountToThb} ${q.quoteAsset}`,
       };
     },
   };
@@ -1320,6 +1355,43 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     },
   };
 
+  const listPayoutPointsTool: AnyRagTool = {
+    name: "list_exchange_payout_points",
+    description: [
+      "Вернуть доступные точки выдачи тенанта: банкоматы (atm), офисы (office), зоны доставки (courier_zone).",
+      "Вызывай, когда клиент спрашивает «где/как получить», «какие банкоматы», или нужно предложить способ выдачи.",
+      "Клиенту показывай label/город/банк; денежные лимиты — для расчёта, не зачитывай дословно. Не выдумывай точки — только из инструмента.",
+    ].join(" "),
+    parameters: z.object({
+      kind: z
+        .enum(["atm", "office", "courier_zone"])
+        .optional()
+        .describe("Фильтр по типу точки выдачи."),
+    }),
+    execute: async (args) => {
+      const currency = await getTenantQuoteCurrency(db, tenantId);
+      const points = await listActivePayoutPoints(db, tenantId, {
+        quoteAsset: currency.code,
+        ...(args.kind ? { kind: args.kind } : {}),
+      });
+      if (points.length === 0) {
+        return { note: "Точки выдачи не настроены — уточни способ выдачи или подключи оператора." };
+      }
+      return {
+        quoteAsset: currency.code,
+        points: points.map((p) => ({
+          code: p.code,
+          kind: p.kind,
+          label: p.label,
+          ...(p.bankName ? { bank: p.bankName } : {}),
+          ...(p.city ? { city: p.city } : {}),
+          ...(p.denomination != null ? { denomination: p.denomination } : {}),
+          ...(p.perWithdrawalMax != null ? { perWithdrawalMax: p.perWithdrawalMax } : {}),
+        })),
+      };
+    },
+  };
+
   const businessInfoTool: AnyRagTool = {
     name: "get_exchange_business_info",
     description: [
@@ -1456,6 +1528,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ),
     businessInfoTool,
     listDirectionsTool,
+    listPayoutPointsTool,
   ].map((tool) => withExchangeStageGuard(tool, stageSlug, resolveCurrentStage));
 
   // Policy-текст (текущая стадия + разрешённые инструменты) добавляем ОДИН раз —
