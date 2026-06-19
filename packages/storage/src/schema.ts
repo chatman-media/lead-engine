@@ -1697,6 +1697,47 @@ export const exchangeSettings = pgTable("exchange_settings", {
   check("exchange_settings_quote_asset_check", sql`${t.quoteAsset} ~ '^[A-Z]{3}$'`),
 ]);
 
+// Каталог точек выдачи (ATM/офис/зона курьера). denomination — шаг округления
+// выдачи банкомата (вниз; NULL → дефолт настройки тенанта); per_withdrawal_max —
+// лимит одного cardless-снятия (выше → дробить на несколько кодов); fee_fixed/
+// fee_pct — комиссия выдачи. source/external_id — провенанс и ключ апсерта фида.
+export const exchangePayoutPoints = pgTable("exchange_payout_points", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  code: text("code").notNull(),
+  label: text("label").notNull(),
+  bankName: text("bank_name"),
+  provider: text("provider"),
+  quoteAsset: text("quote_asset").notNull().default("PHP"),
+  denomination: integer("denomination"),
+  perWithdrawalMax: doublePrecision("per_withdrawal_max"),
+  dailyMax: doublePrecision("daily_max"),
+  feeFixed: doublePrecision("fee_fixed").notNull().default(0),
+  feePct: doublePrecision("fee_pct").notNull().default(0),
+  codeTtlSec: integer("code_ttl_sec"),
+  area: text("area"),
+  city: text("city"),
+  address: text("address"),
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
+  isActive: boolean("is_active").notNull().default(true),
+  source: text("source").notNull().default("manual"),
+  externalId: text("external_id"),
+  updatedByAdminId: integer("updated_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+  syncedAt: integer("synced_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("exchange_payout_points_kind_check", sql`${t.kind} IN ('atm','office','courier_zone')`),
+  check("exchange_payout_points_source_check", sql`${t.source} IN ('manual','feed')`),
+  check("exchange_payout_points_quote_asset_check", sql`${t.quoteAsset} ~ '^[A-Z]{3}$'`),
+  uniqueIndex("uniq_exchange_payout_points_code").on(t.tenantId, t.code),
+  uniqueIndex("uniq_exchange_payout_points_external").on(t.tenantId, t.externalId).where(sql`external_id IS NOT NULL`),
+  index("idx_exchange_payout_points_tenant_kind_active").on(t.tenantId, t.kind, t.isActive),
+  index("idx_exchange_payout_points_tenant_currency").on(t.tenantId, t.quoteAsset, t.isActive),
+]);
+
 // Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.
 // Оборот считается агрегатом SUM(amount_to_thb) по completed.
 export const exchangeOrders = pgTable("exchange_orders", {
@@ -1723,6 +1764,7 @@ export const exchangeOrders = pgTable("exchange_orders", {
   payoutMethod: text("payout_method"),
   payoutLocation: text("payout_location"),
   payoutDestinationJson: text("payout_destination_json"),
+  payoutPointId: integer("payout_point_id").references(() => exchangePayoutPoints.id, { onDelete: "set null" }),
   payoutCode: text("payout_code"),
   payoutCodeExpiresAt: integer("payout_code_expires_at"),
   status: text("status").notNull().default("quote"),
