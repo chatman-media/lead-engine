@@ -216,6 +216,90 @@ describe("ensureAndAdvanceLeadByPhase", () => {
     });
   });
 
+  it("без template-хинта: exchange-лид advance НЕ уходит в чужую воронку (gc)", async () => {
+    if (!enabled) return;
+    const [tenant] = await db
+      .insert(schema.tenants)
+      .values({ slug: `ladv-drift-${n}` })
+      .returning({ id: schema.tenants.id });
+    if (!tenant) throw new Error("tenant insert returned no row");
+    const tenantId = tenant.id;
+    const contactId = await freshContact(tenantId);
+
+    // green-corridor СНАЧАЛА (меньший id) — чтобы баг выбрал бы её clear-стадию.
+    const [greenFunnel] = await db
+      .insert(schema.funnels)
+      .values({
+        tenantId,
+        slug: "green-corridor",
+        verticalTemplateId: "green_corridor_v1",
+        isActive: true,
+        createdAt: n,
+        updatedAt: n,
+      })
+      .returning({ id: schema.funnels.id });
+    if (!greenFunnel) throw new Error("green funnel insert returned no row");
+    await makeStage(tenantId, greenFunnel.id, "gc_request", "intake", "qualify", 0);
+    await makeStage(tenantId, greenFunnel.id, "gc_clear", "active", "clear", 3);
+
+    const [exchangeFunnel] = await db
+      .insert(schema.funnels)
+      .values({
+        tenantId,
+        slug: "exchange",
+        verticalTemplateId: "exchange_v1",
+        isActive: true,
+        createdAt: n,
+        updatedAt: n,
+      })
+      .returning({ id: schema.funnels.id });
+    if (!exchangeFunnel) throw new Error("exchange funnel insert returned no row");
+    await makeStage(tenantId, exchangeFunnel.id, "exchange_request", "intake", "qualify", 0);
+    const quoteStageId = await makeStage(
+      tenantId,
+      exchangeFunnel.id,
+      "quote_calculated",
+      "active",
+      "offer",
+      2,
+    );
+    await makeStage(tenantId, exchangeFunnel.id, "kyc_collection", "active", "clear", 3);
+
+    await db.insert(schema.leads).values({
+      tenantId,
+      userId: contactId,
+      state: "quote_calculated",
+      stageDefinitionId: quoteStageId,
+      requestType: "exchange",
+      createdAt: n,
+      updatedAt: n,
+    });
+
+    const r = await ensureAndAdvanceLeadByPhase({
+      db,
+      tenantId,
+      contactId,
+      salesStage: "objection",
+      preferredVerticalTemplateId: null,
+      nowEpoch: n + 1,
+    });
+
+    // Остаётся в exchange (kyc_collection), НЕ дрейфует в gc_clear.
+    expect(r?.stageSlug).toBe("kyc_collection");
+    const [row] = await db
+      .select({
+        state: schema.leads.state,
+        funnelId: schema.stageDefinitions.funnelId,
+      })
+      .from(schema.leads)
+      .leftJoin(
+        schema.stageDefinitions,
+        eq(schema.leads.stageDefinitionId, schema.stageDefinitions.id),
+      )
+      .where(and(eq(schema.leads.tenantId, tenantId), eq(schema.leads.userId, contactId)));
+    expect(row).toMatchObject({ state: "kyc_collection", funnelId: exchangeFunnel.id });
+  });
+
   it("pitch → offer-фаза", async () => {
     if (!enabled) return;
     const contactId = await freshContact(tenantWithFunnel);

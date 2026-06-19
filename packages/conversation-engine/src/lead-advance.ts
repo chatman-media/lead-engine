@@ -130,7 +130,15 @@ export async function ensureAndAdvanceLeadByPhase(opts: {
   const targetPhase = SALES_STAGE_TO_PHASE[salesStage];
   if (!targetPhase) return { leadId, stageSlug: curSlug, created, advanced: false };
 
-  const curStage = curStageId != null ? scopedStages.find((s) => s.id === curStageId) : undefined;
+  // Воронка лида фиксируется его текущей стадией — advance НЕ должен прыгать в
+  // ДРУГУЮ воронку. Мульти-воронный тенант без template-хинта раньше выбирал
+  // стадию целевой фазы среди ВСЕХ воронок → exchange-лид дрейфовал в gc_request.
+  const leadFunnelId = existing?.stageFunnelId ?? initial.funnelId;
+  const advanceStages =
+    leadFunnelId != null ? stages.filter((s) => s.funnelId === leadFunnelId) : scopedStages;
+
+  const curStage =
+    curStageId != null ? advanceStages.find((s) => s.id === curStageId) : undefined;
   const curPos = curStage?.position ?? -1;
 
   // Эскалация до WON: если клиент закрывается (close) и лид уже в фазе
@@ -138,12 +146,12 @@ export async function ensureAndAdvanceLeadByPhase(opts: {
   // Так устойчивый close в конце диалога даёт «лид, прошедший всю воронку».
   let target =
     salesStage === "close" && curStage?.phase === "fulfill"
-      ? scopedStages.find((s) => s.kind === "terminal_won")
+      ? advanceStages.find((s) => s.kind === "terminal_won")
       : undefined;
 
   // Иначе — первая нетерминальная стадия целевой фазы.
   if (!target) {
-    target = scopedStages.find(
+    target = advanceStages.find(
       (s) => s.phase === targetPhase && s.kind !== "terminal_won" && s.kind !== "terminal_lost",
     );
   }
