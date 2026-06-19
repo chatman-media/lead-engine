@@ -166,6 +166,17 @@ export class FakeConversationsRepo {
     const row = this.rows.find((r) => r.id === conversationId);
     if (row) row.unreadCount = 0;
   }
+  async setDetectedLang(
+    conversationId: number,
+    lang: string | null,
+    locked: boolean,
+  ): Promise<void> {
+    const row = this.rows.find((r) => r.id === conversationId);
+    if (row) {
+      row.detectedLang = lang;
+      row.langLocked = locked;
+    }
+  }
   async setAssignee(conversationId: number, adminId: number | null): Promise<void> {
     const row = this.rows.find((r) => r.id === conversationId);
     if (row) row.assignedAdminId = adminId;
