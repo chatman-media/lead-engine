@@ -60,16 +60,22 @@ import { Textarea } from "@/components/ui/textarea";
 const ASSETS = ["USDT", "USDC", "BTC", "ETH", "LTC", "TRX", "TON", "RUB", "EUR", "USD", "THB"];
 const NETWORKS = ["", "trc20", "erc20", "bep20", "ton", "solana", "tron"];
 
-const EMPTY_RATE: ExchangeRateInput = {
-  asset: "USDT",
-  quoteAsset: "RUB",
-  network: "trc20",
-  baseRate: 0,
-  quoteMode: "multiply",
-  marginPct: 0,
-  isActive: true,
-  autoUpdate: false,
-};
+// Дефолт quoteAsset берётся ИЗ валюты тенанта через emptyRate(quoteCode):
+// статичный фикс `"RUB"` (THB-центризм) приводил к битой строке `→RUB`, которая
+// проваливается фильтром listActiveDirections (quoteAsset должен совпадать с
+// валютой тенанта). Поэтому используем фабрику и читаем `quoteCode` в компоненте.
+function emptyRate(quoteCode: string): ExchangeRateInput {
+  return {
+    asset: "USDT",
+    quoteAsset: quoteCode,
+    network: "trc20",
+    baseRate: 0,
+    quoteMode: "multiply",
+    marginPct: 0,
+    isActive: true,
+    autoUpdate: false,
+  };
+}
 
 const STATUS_VARIANT: Record<
   string,
@@ -539,7 +545,7 @@ export function SaasExchange() {
 
   // Произвольное направление обмена (помимо табло RUB/USDT→THB)
   const [addingRate, setAddingRate] = useState(false);
-  const [rateForm, setRateForm] = useState<ExchangeRateInput>(EMPTY_RATE);
+  const [rateForm, setRateForm] = useState<ExchangeRateInput>(() => emptyRate(quoteCode));
   const [savingRate, setSavingRate] = useState(false);
 
   // Реквизиты
@@ -606,7 +612,7 @@ export function SaasExchange() {
     try {
       await saas.saveExchangeRate(rateForm);
       toast.success("Направление сохранено");
-      setRateForm(EMPTY_RATE);
+      setRateForm(emptyRate(quoteCode));
       setAddingRate(false);
       load();
     } catch (err) {
@@ -1139,7 +1145,7 @@ export function SaasExchange() {
                     variant="ghost"
                     onClick={() => {
                       setAddingRate(false);
-                      setRateForm(EMPTY_RATE);
+                      setRateForm(emptyRate(quoteCode));
                     }}
                   >
                     Отмена
