@@ -3,10 +3,14 @@
 //   2. возвращают объект когда any tenant имеет нужный purpose
 //   3. resolveChat/resolveEmbed работают для tenants с config'ами
 
-import { LlmMemoryExtractor, LlmReplyStrategy, RagReplyStrategy } from "@chatman-media/conversation-engine";
+import { describe, expect, it } from "bun:test";
+import {
+  LlmMemoryExtractor,
+  LlmReplyStrategy,
+  RagReplyStrategy,
+} from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
-import { describe, expect, it } from "bun:test";
 import type { ApiConfig } from "./config.ts";
 import type { LoadedLlmConfigs } from "./lib/llm-config-loader.ts";
 import {
@@ -116,7 +120,10 @@ describe("makeReplyStrategy", () => {
       chat: { tenantIds: [2] },
       embed: { tenantIds: [1] },
     });
-    expect(makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB, FAKE_TEMPLATES)?.strategy instanceof RagReplyStrategy).toBe(true);
+    expect(
+      makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB, FAKE_TEMPLATES)?.strategy instanceof
+        RagReplyStrategy,
+    ).toBe(true);
   });
 });
 
@@ -146,7 +153,9 @@ describe("makeStageClassifier", () => {
     expect(cls instanceof LlmStageClassifier).toBe(true);
   });
   it("cfg.stageClassifier=off → null", () => {
-    expect(makeStageClassifier(refWith({ chat: { tenantIds: [1] } }), FAKE_CFG, FAKE_DB)).toBeNull();
+    expect(
+      makeStageClassifier(refWith({ chat: { tenantIds: [1] } }), FAKE_CFG, FAKE_DB),
+    ).toBeNull();
   });
 });
 
@@ -202,10 +211,11 @@ describe("buildExchangePolicyState", () => {
         payoutCode: "CODE-7",
         payoutCodeExpiresAt: null,
         requisitesJson: "{}",
-        proofJson: "{\"tx\":\"abc\"}",
+        proofJson: '{"tx":"abc"}',
         verificationId: "kyc-7",
         rateExpiresAt: null,
         idempotencyKey: "idem-7",
+        payoutPointId: null,
       },
     });
 
@@ -264,6 +274,7 @@ describe("buildExchangePolicyState", () => {
         verificationId: null,
         rateExpiresAt: null,
         idempotencyKey: "idem-8",
+        payoutPointId: null,
       },
     });
 

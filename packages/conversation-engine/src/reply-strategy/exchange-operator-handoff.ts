@@ -167,6 +167,7 @@ function buildOfficeHandoff(
 			`Подтвердить выбранный офис, окно получения, наличие ${QUOTE_CURRENCY.code}/код выдачи и отправить клиенту финальные инструкции.`,
 		priority: "high",
 		...(order?.id ? { orderId: order.id } : {}),
+		...(order?.payoutPointId != null ? { payoutPointId: order.payoutPointId } : {}),
 		...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
 		accepted: "payment_verified_or_payout_pending",
 		pending: "operator_office_confirmation",
