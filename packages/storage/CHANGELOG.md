@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.43.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.42.2...@chatman-media/storage-v1.43.0) (2026-06-19)
+
+
+### Features
+
+* **exchange:** каталог точек выдачи — фундамент ATM payout (B1) ([c68cdcb](https://github.com/chatman-media/lead-engine/commit/c68cdcb0c36bbb02206c356fa68ef5d5169f8b6d))
+
 # [@chatman-media/storage-v1.42.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.42.1...@chatman-media/storage-v1.42.2) (2026-06-19)
 
 
