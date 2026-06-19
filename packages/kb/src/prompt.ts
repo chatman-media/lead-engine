@@ -1,6 +1,6 @@
 import { PROMPT_FRAMEWORK_BLURB, PROMPT_HOOK_LABELS } from "./prompts/prompt.ts";
-import type { ComposeOptions, FunnelStage, Style } from "./styles.ts";
-import { renderSummaryBlock, renderUserFactsBlock } from "./system-prompt.ts";
+import type { ComposeOptions, FunnelStage, ReplyLang, Style } from "./styles.ts";
+import { REPLY_LANG_NAME, renderSummaryBlock, renderUserFactsBlock } from "./system-prompt.ts";
 
 function kbGroundingReminder(personaRole: Style["persona"]["role"]): string {
   const base = "Никогда не выдумывай цифры, суммы, сроки, условия. Если фактов нет в KB CONTEXT — ";
@@ -79,9 +79,13 @@ export function composeSystemPrompt(
         `Не упоминай «KB», «CONTEXT», файлы или «согласно предоставленной информации».`
       : `ФОРМА ОТВЕТА: коротко и по-бытовому для чата — без упоминания «KB CONTEXT» как источника.`;
 
-  const langName = voice.language === "ru" ? "русский" : "английский";
+  // Язык ответа (#730): динамический per-dialog `options.lang` перебивает
+  // `voice.language` Style. Fallback — язык Style (back-compat ru/en).
+  const replyLang: ReplyLang = options.lang ?? (voice.language === "en" ? "en" : "ru");
+  const langName = REPLY_LANG_NAME[replyLang];
   const voiceBlock =
-    `ТОН: ${voice.tone}. Язык: ${langName}.` +
+    `ТОН: ${voice.tone}. Язык ответа: ${langName}. ` +
+    `Отвечай клиенту ТОЛЬКО на этом языке, даже если его сообщение или CONTEXT на другом языке.` +
     (voice.forbid.length ? ` ЗАПРЕЩЕНО: ${voice.forbid.join("; ")}.` : "");
 
   const frameworkBlock = `ФРЕЙМВОРК: ${PROMPT_FRAMEWORK_BLURB[style.framework]}`;
@@ -96,7 +100,10 @@ export function composeSystemPrompt(
   // стадиях. Появляются ПЕРЕД universal skills — приоритет во внимании LLM.
   const directorHooksForStage =
     options.directorHooks?.filter(
-      (h) => !h.applicableStages || h.applicableStages.length === 0 || h.applicableStages.includes(stage),
+      (h) =>
+        !h.applicableStages ||
+        h.applicableStages.length === 0 ||
+        h.applicableStages.includes(stage),
     ) ?? [];
   const directorHooksBlock =
     directorHooksForStage.length > 0
@@ -133,9 +140,7 @@ export function composeSystemPrompt(
 
   // Динамический контекст текущего запроса гостя (multi-request): тип запроса +
   // сколько открыто — помогает боту не путать параллельные заявки.
-  const requestBlock = options.requestContext
-    ? `ЗАПРОС ГОСТЯ: ${options.requestContext}`
-    : "";
+  const requestBlock = options.requestContext ? `ЗАПРОС ГОСТЯ: ${options.requestContext}` : "";
 
   // Лид ждёт оператора (awaiting_operator): бот держит, не выдумывает цену/условия.
   const operatorBlock = options.awaitingOperator

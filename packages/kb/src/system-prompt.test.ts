@@ -66,6 +66,22 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain("краткие прилагательные");
   });
 
+  it("lang-параметр (#730): директива на языке ответа, дефолт ru (back-compat)", () => {
+    // Дефолт без аргумента — русский (back-compat).
+    const ru = buildSystemPrompt({ name: "Бот", role: "assistant" }, "CTX");
+    expect(ru).toContain("на языке ответа (русском)");
+    // Явный корейский: директива на 한국어, без «русском».
+    const ko = buildSystemPrompt(
+      { name: "Бот", role: "assistant" },
+      "CTX",
+      undefined,
+      undefined,
+      "ko",
+    );
+    expect(ko).toContain("на языке ответа (한국어)");
+    expect(ko).not.toContain("(русском)");
+  });
+
   it("persona.facts → блок ЛИЧНЫЕ ФАКТЫ (пустые отброшены)", () => {
     const p = buildSystemPrompt(
       { name: "Аня", role: "human", facts: { city: "Сочи", empty: "  " } },

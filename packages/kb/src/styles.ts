@@ -122,7 +122,20 @@ export interface DirectorHookForPrompt {
   applicableStages?: readonly string[];
 }
 
+/**
+ * Язык ответа клиенту (#730). Динамический per-dialog (из `conversations.
+ * detected_lang` через `effectiveLang`), в отличие от `voice.language` — тот
+ * описывает персону Style. Значения совпадают с набором языков conv-engine
+ * (SUPPORTED_LANGS); тип держим локальным, чтобы kb не зависел от conv-engine.
+ */
+export type ReplyLang = "ru" | "en" | "ko" | "zh";
+
 export interface ComposeOptions {
+  /**
+   * Язык ответа (#730). Перебивает `voice.language` Style: язык — свойство
+   * диалога, а не персоны. Если не задан — fallback на `voice.language`.
+   */
+  lang?: ReplyLang;
   includeFewShot?: boolean;
   userFacts?: Record<string, string>;
   conversationSummary?: string;
