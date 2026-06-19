@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.44.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.43.0...@chatman-media/storage-v1.44.0) (2026-06-19)
+
+
+### Features
+
+* **exchange:** модель покрытия операторов по точкам выдачи (B4a) ([#742](https://github.com/chatman-media/lead-engine/issues/742)) ([cdb5e1a](https://github.com/chatman-media/lead-engine/commit/cdb5e1ab413dfef6ccee8f52d49e3494439b8946))
+
 # [@chatman-media/storage-v1.43.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.42.2...@chatman-media/storage-v1.43.0) (2026-06-19)
 
 
