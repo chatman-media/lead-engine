@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.23.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.0...@chatman-media/conversation-engine-v3.23.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **exchange:** нужен оператор → бот замолкает + одно уведомление; intake спрашивает всё сразу ([1c5349e](https://github.com/chatman-media/lead-engine/commit/1c5349ed4763634eaed806b4c637c48ff5cd0d05))
+
 # [@chatman-media/conversation-engine-v3.23.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.22.0...@chatman-media/conversation-engine-v3.23.0) (2026-06-18)
 
 
