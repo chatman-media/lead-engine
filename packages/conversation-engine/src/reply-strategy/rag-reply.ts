@@ -385,6 +385,21 @@ function numberLike(value: unknown): number | null {
 	return Number.isFinite(n) ? n : null;
 }
 
+function formatExchangeRateNote(
+	amountTo: number,
+	amountFrom: number,
+	srcAsset: string,
+	quoteCode: string,
+): string {
+	const eff = amountTo / amountFrom; // котируемая валюта за 1 ед. источника
+	if (!Number.isFinite(eff) || eff <= 0) return "";
+	const r = (n: number) => Math.round(n * 100) / 100;
+	// Для фиата (eff < 1) инвертируем в привычный «1 PHP = X RUB». Округляем до 2.
+	return eff >= 1
+		? ` (курс 1 ${srcAsset} = ${r(eff)} ${quoteCode})`
+		: ` (курс 1 ${quoteCode} = ${r(1 / eff)} ${srcAsset})`;
+}
+
 function forcedExchangeQuoteText(
 	result: unknown,
 	networkAssumed = false,
@@ -421,10 +436,9 @@ function forcedExchangeQuoteText(
 			: "";
 	// Курс показываем только когда клиент его явно спросил (showRate) — иначе
 	// прячем спред. Число курса — из compute_quote (guard пропускает).
-	const rate = numberLike(row.rate);
 	const rateNote =
-		showRate && rate !== null && srcAsset
-			? ` (курс 1 ${srcAsset} = ${rate} ${currency.code})`
+		showRate && srcAsset && amountFrom !== null && amountFrom > 0
+			? formatExchangeRateNote(amountToThb, amountFrom, srcAsset, currency.code)
 			: "";
 	return amountFrom !== null && srcAsset
 		? `Готово! Отдаёте ${amountFrom} ${srcAsset}${rateNote} — получите ${amountToThb} ${currency.code} на руки${netNote}.`

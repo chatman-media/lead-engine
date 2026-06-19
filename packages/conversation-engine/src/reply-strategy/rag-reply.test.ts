@@ -689,7 +689,7 @@ describe("RagReplyStrategy.generate", () => {
 		const text = firstReplyText(r);
 		expect(text).toContain("получите 8126 PHP");
 		expect(text.toLowerCase()).toContain("курс");
-		expect(text).toContain("1.230575");
+		expect(text).toContain("1.23");
 		expect(chat.lastCall).toBeNull();
 	});
 
