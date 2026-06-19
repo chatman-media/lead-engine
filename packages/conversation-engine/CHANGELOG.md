@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.23.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.1...@chatman-media/conversation-engine-v3.23.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* **exchange:** не пере-котировать на quote_calculated — антиповтор ([#723](https://github.com/chatman-media/lead-engine/issues/723)) ([6df335f](https://github.com/chatman-media/lead-engine/commit/6df335f0b1eb4d1c4994318edec4bd02fde54c5e))
+
 # [@chatman-media/conversation-engine-v3.23.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.0...@chatman-media/conversation-engine-v3.23.1) (2026-06-19)
 
 
