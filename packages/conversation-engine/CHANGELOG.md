@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.23.4](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.3...@chatman-media/conversation-engine-v3.23.4) (2026-06-19)
+
+
+### Bug Fixes
+
+* **exchange:** курс в ответе — округление до 2 знаков + корректное направление ([ddae7fb](https://github.com/chatman-media/lead-engine/commit/ddae7fbefd8729c149df75b80b8bc56d21a6661c)), closes [#727](https://github.com/chatman-media/lead-engine/issues/727)
+
 # [@chatman-media/conversation-engine-v3.23.3](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.2...@chatman-media/conversation-engine-v3.23.3) (2026-06-19)
 
 
