@@ -402,6 +402,20 @@ const PayoutMethodEnum = z
   .describe(
     `Как клиент получает ${QUOTE_CURRENCY.code}: courier_cash, cardless_atm, thai_bank_transfer (перевод на местный банк), office_cash`,
   );
+// #741: валюта/актив выдачи для обратных направлений (например RUB при PHP→RUB).
+const PayoutAssetEnum = z
+  .string()
+  .optional()
+  .describe(
+    `Валюта/актив, которые клиент хочет ПОЛУЧИТЬ (например RUB для обратного PHP→RUB). По умолчанию — локальная валюта ${QUOTE_CURRENCY.code}. Точный список пар бери из list_exchange_directions.`,
+  );
+
+/** #741: достаёт валюту выдачи из строки направления заявки «PHP->RUB» → «RUB». */
+function quoteAssetFromDirection(direction?: string | null): string | null {
+  if (!direction) return null;
+  const parts = direction.split("->");
+  return parts.length === 2 && parts[1] ? parts[1].trim() : null;
+}
 
 const KNOWN_EXCHANGE_STAGES = new Set([
   "exchange_request",
@@ -586,6 +600,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         .string()
         .optional()
         .describe("Сеть для крипты: TRC20/ERC20/BEP20. Для USDT по умолчанию TRC20."),
+      payoutAsset: PayoutAssetEnum,
     }),
     execute: async (args) => {
       // Источник правды для НЕзаданных аргументов: сначала АКТИВНАЯ заявка
@@ -598,6 +613,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       const amount =
         args.amount ?? active?.requestedAmount ?? active?.amountFrom ?? collected.amount;
       const network = args.network ?? active?.network ?? collected.network;
+      // #741: валюта выдачи для обратных пар (PHP→RUB). Если LLM не передал —
+      // восстанавливаем из направления активной заявки (revive обратной сделки).
+      const payoutAsset = args.payoutAsset ?? quoteAssetFromDirection(active?.direction);
       if (!asset || amount === undefined) {
         return { error: "Не хватает данных для расчёта: уточните, что меняете и на какую сумму." };
       }
@@ -606,6 +624,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amount,
         amountMode: args.amountMode,
         network,
+        ...(payoutAsset ? { payoutAsset } : {}),
       });
       if (!q.ok) {
         if (q.guard?.tripped) onGuardTrip(asset, network, q.guard);
@@ -681,6 +700,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         ),
       amountMode: AmountModeEnum,
       network: z.string().optional(),
+      payoutAsset: PayoutAssetEnum,
       paymentMethod: PaymentMethodEnum,
       paymentRail: z
         .string()
@@ -720,6 +740,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       const paymentMethodArg =
         args.paymentMethod ?? active?.paymentMethod ?? collected.paymentMethod;
       const payoutMethodArg = args.payoutMethod ?? active?.payoutMethod ?? collected.payoutMethod;
+      // #741: валюта выдачи (обратные пары PHP→RUB) — из аргумента или из
+      // направления активной заявки.
+      const payoutAssetArg = args.payoutAsset ?? quoteAssetFromDirection(active?.direction);
       if (!assetArg || amountArg === undefined) {
         return { error: "Не хватает данных для заявки: уточните, что меняете и на какую сумму." };
       }
@@ -728,6 +751,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amount: amountArg,
         amountMode: args.amountMode,
         network: networkArg,
+        ...(payoutAssetArg ? { payoutAsset: payoutAssetArg } : {}),
       });
       if (!q.ok) {
         if (q.guard?.tripped) onGuardTrip(assetArg, networkArg, q.guard);
@@ -754,7 +778,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       const asset = normAsset(assetArg);
       const network = resolveNetwork(asset, networkArg);
       const amountMode = args.amountMode === "target_thb" ? "target_thb" : "source_amount";
-      const idempotencyKey = `conv:${conversationId}:${asset}:${network}:${amountMode}:${amountArg}`;
+      // #741: quoteAsset в ключе — иначе RUB→PHP и PHP→RUB на одну сумму
+      // схлопнулись бы в одну заявку.
+      const idempotencyKey = `conv:${conversationId}:${asset}:${q.quoteAsset}:${network}:${amountMode}:${amountArg}`;
 
       const existing = await getOrderByIdempotencyKey(db, tenantId, idempotencyKey);
       if (existing && isReusableOrderStatus(existing.status)) {
@@ -921,11 +947,16 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       if (!order) {
         const latest = await getLatestOrderForConversation(db, tenantId, conversationId);
         if (latest && isRevivableOrderStatus(latest.status)) {
+          // #741: реквотим под ту же пару — для обратных направлений (PHP→RUB)
+          // берём валюту выдачи из направления заявки, иначе резолв упадёт на
+          // валюту тенанта и оживит не ту сторону.
+          const revivePayoutAsset = quoteAssetFromDirection(latest.direction);
           const q = await computeQuote(db, tenantId, {
             asset: latest.assetFrom,
             amount: latest.requestedAmount ?? latest.amountFrom,
             amountMode: latest.amountMode as "source_amount" | "target_thb" | undefined,
             network: latest.network || undefined,
+            ...(revivePayoutAsset ? { payoutAsset: revivePayoutAsset } : {}),
           });
           if (q.ok) {
             const ttlMin = isCryptoAsset(latest.assetFrom) ? 15 : 20;
@@ -1295,7 +1326,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       "Вызывай в начале диалога, когда клиент спрашивает «что меняете / какие валюты / какие направления»,",
       "и ОБЯЗАТЕЛЬНО когда клиент назвал направление, которого нет, — чтобы сразу предложить альтернативу, а не упереться в тупик.",
       "НИКОГДА не перечисляй валюты по памяти — список валют только из этого инструмента.",
-      `Все направления идут в ${QUOTE_CURRENCY.code} (котируемая валюта тенанта).`,
+      `Обычно направление идёт в ${QUOTE_CURRENCY.code} (локальная валюта), но бывают и обратные пары`,
+      "(например PHP→RUB) — точную валюту выдачи смотри в поле quoteAsset каждого направления;",
+      "если клиент хочет получить НЕ локальную валюту, передай её в compute_exchange_quote как payoutAsset.",
     ].join(" "),
     parameters: z.object({}),
     execute: async () => {
@@ -1310,6 +1343,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         quoteAsset: currency.code,
         directions: directions.map((d) => ({
           asset: d.asset,
+          quoteAsset: d.quoteAsset,
           kind: d.isCrypto ? "crypto" : "fiat",
           networks: d.networks,
           ...(d.minAmountFrom != null ? { minAmountFrom: d.minAmountFrom } : {}),

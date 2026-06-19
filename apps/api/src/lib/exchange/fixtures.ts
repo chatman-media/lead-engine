@@ -335,6 +335,21 @@ const EXCHANGE_FIXTURE_RATES_PHP: ExchangeFixtureRate[] = [
 		maxAmountFrom: 100_000,
 		autoUpdate: true,
 	},
+		{
+			key: "php_to_rub",
+			asset: "PHP",
+			quoteAsset: "RUB",
+			network: "",
+			// RUB за 1 PHP (тот же кросс, что rub_card). multiply: gross = PHP * eff.
+			baseRate: 1.43,
+			quoteMode: "multiply",
+			marginPct: 2,
+			feeFixedThb: 0,
+			minAmountFrom: 5_000,
+			maxAmountFrom: 2_000_000,
+			// Фид не котирует PHP как source-актив → курс ведёт оператор вручную.
+			autoUpdate: false,
+		},
 ];
 
 export function exchangeFixtureRates(
@@ -475,6 +490,32 @@ const EXCHANGE_FIXTURE_RATE_TIERS_PHP: ExchangeFixtureRateTier[] = [
 		displayRate: 1.4422,
 		deviationPct: 0.85,
 	},
+		{
+			key: "php_to_rub_60k_240k",
+			asset: "PHP",
+			quoteAsset: "RUB",
+			network: "",
+			rangeBasis: "target_thb",
+			minAmount: 60_000,
+			maxAmount: 240_000,
+			marketRate: 1.43,
+			// eff = base*(1-0.015): клиент получает меньше RUB за PHP (спред обменнику).
+			displayRate: 1.4086,
+			deviationPct: -1.5,
+		},
+		{
+			key: "php_to_rub_240k_plus",
+			asset: "PHP",
+			quoteAsset: "RUB",
+			network: "",
+			rangeBasis: "target_thb",
+			minAmount: 240_000,
+			maxAmount: null,
+			marketRate: 1.43,
+			// Крупные суммы — спред уже (deviation ближе к 0).
+			displayRate: 1.4186,
+			deviationPct: -0.8,
+		},
 ];
 
 export function exchangeFixtureRateTiers(

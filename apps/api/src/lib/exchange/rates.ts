@@ -232,40 +232,39 @@ function round(n: number, dp: number): number {
  * (TRC20/ERC20/…) схлопываются в одно направление.
  */
 export async function listActiveDirections(db: Db, tenantId: number): Promise<ExchangeDirection[]> {
-  const currency = await getTenantQuoteCurrency(db, tenantId);
   return withTenant(db, tenantId, async (tx) => {
+    // #741: больше НЕ фильтруем по валюте тенанта — обратные пары (PHP→RUB)
+    // должны быть видны. Схлопываем по ПАРЕ asset|quoteAsset (сети одного актива
+    // в одну запись), чтобы прямое и обратное направления были разными.
     const rows = await tx
       .select({
         asset: exchangeRates.asset,
+        quoteAsset: exchangeRates.quoteAsset,
         network: exchangeRates.network,
         minAmountFrom: exchangeRates.minAmountFrom,
         maxAmountFrom: exchangeRates.maxAmountFrom,
       })
       .from(exchangeRates)
-      .where(
-        and(
-          eq(exchangeRates.tenantId, tenantId),
-          eq(exchangeRates.quoteAsset, currency.code),
-          eq(exchangeRates.isActive, true),
-        ),
-      )
+      .where(and(eq(exchangeRates.tenantId, tenantId), eq(exchangeRates.isActive, true)))
       .orderBy(asc(exchangeRates.asset));
-    const byAsset = new Map<string, ExchangeDirection>();
+    const byPair = new Map<string, ExchangeDirection>();
     for (const row of rows) {
       const asset = normAsset(row.asset);
-      const dir: ExchangeDirection = byAsset.get(asset) ?? {
+      const quoteAsset = normAsset(row.quoteAsset);
+      const key = `${asset}|${quoteAsset}`;
+      const dir: ExchangeDirection = byPair.get(key) ?? {
         asset,
         isCrypto: isCryptoAsset(asset),
         networks: [],
-        quoteAsset: currency.code,
+        quoteAsset,
         minAmountFrom: row.minAmountFrom === null ? null : Number(row.minAmountFrom),
         maxAmountFrom: row.maxAmountFrom === null ? null : Number(row.maxAmountFrom),
       };
       const net = normNetwork(row.network).toUpperCase();
       if (net && !dir.networks.includes(net)) dir.networks.push(net);
-      byAsset.set(asset, dir);
+      byPair.set(key, dir);
     }
-    return [...byAsset.values()];
+    return [...byPair.values()];
   });
 }
 
@@ -273,21 +272,31 @@ export async function listActiveDirections(db: Db, tenantId: number): Promise<Ex
  * Человекочитаемая строка доступных направлений для ответа клиенту: крипта (с
  * сетями) и фиат раздельно, всё → котируемая валюта. Пусто, если направлений нет.
  */
-export function formatDirectionsForClient(dirs: ExchangeDirection[], quoteAsset: string): string {
+export function formatDirectionsForClient(
+  dirs: ExchangeDirection[],
+  fallbackQuote: string,
+): string {
   if (dirs.length === 0) return "";
+  // #741: направления могут иметь РАЗНУЮ валюту выдачи (прямые → валюта тенанта,
+  // обратные PHP→RUB). Суффикс «→ выдача» рендерим per-direction, а не глобально.
+  const suffix = (d: ExchangeDirection) => `→${d.quoteAsset || fallbackQuote}`;
   const crypto = dirs.filter((d) => d.isCrypto);
   const fiat = dirs.filter((d) => !d.isCrypto);
   const parts: string[] = [];
   if (crypto.length > 0) {
     const list = crypto
-      .map((d) => (d.networks.length > 0 ? `${d.asset} (${d.networks.join("/")})` : d.asset))
+      .map((d) =>
+        d.networks.length > 0
+          ? `${d.asset} (${d.networks.join("/")})${suffix(d)}`
+          : `${d.asset}${suffix(d)}`,
+      )
       .join(", ");
     parts.push(`крипта: ${list}`);
   }
   if (fiat.length > 0) {
-    parts.push(`валюты: ${fiat.map((d) => d.asset).join(", ")}`);
+    parts.push(`валюты: ${fiat.map((d) => `${d.asset}${suffix(d)}`).join(", ")}`);
   }
-  return `${parts.join("; ")} → ${quoteAsset}`;
+  return parts.join("; ");
 }
 
 /**
@@ -303,6 +312,12 @@ export async function computeQuote(
     network?: string | null;
     amount: number;
     amountMode?: "source_amount" | "target_thb";
+    /**
+     * Валюта/актив, которые клиент хочет ПОЛУЧИТЬ (#741, обратные пары вроде
+     * PHP→RUB). По умолчанию — котируемая валюта тенанта (прямые направления,
+     * прежнее поведение). Резолвится из активной rate-row, не угадывается LLM.
+     */
+    payoutAsset?: string | null;
   },
   guardrails?: ExchangeGuardrails,
 ): Promise<QuoteResult | QuoteError> {
@@ -313,15 +328,27 @@ export async function computeQuote(
     return { ok: false, error: "Сумма должна быть положительным числом." };
   }
   const network = resolveNetwork(asset, input.network);
-  const currency = await getTenantQuoteCurrency(db, tenantId);
+  const tenantCurrency = await getTenantQuoteCurrency(db, tenantId);
 
-  const row = await findActiveRateRow(db, tenantId, asset, network, currency.code);
+  // Резолв валюты выдачи (#741): сперва явная payoutAsset (обратные пары
+  // PHP→RUB), потом валюта тенанта (прямые направления — прежнее поведение).
+  const payoutAsset = input.payoutAsset ? normAsset(input.payoutAsset) : null;
+  let quoteCode = tenantCurrency.code;
+  let row: RateRow | null = null;
+  if (payoutAsset && payoutAsset !== tenantCurrency.code) {
+    row = await findActiveRateRow(db, tenantId, asset, network, payoutAsset);
+    if (row) quoteCode = payoutAsset;
+  }
+  if (!row) {
+    row = await findActiveRateRow(db, tenantId, asset, network, tenantCurrency.code);
+    if (row) quoteCode = tenantCurrency.code;
+  }
   if (!row) {
     // НЕ тупик: вместо «не продолжай сбор данных» отдаём реальные доступные
     // направления, чтобы бот сразу предложил клиенту альтернативу и вёл сделку.
     const availableDirections = await listActiveDirections(db, tenantId);
-    const human = formatDirectionsForClient(availableDirections, currency.code);
-    const head = `Направление ${asset}${network ? ` (${network.toUpperCase()})` : ""}→${currency.code} не обслуживается.`;
+    const human = formatDirectionsForClient(availableDirections, tenantCurrency.code);
+    const head = `Направление ${asset}${network ? ` (${network.toUpperCase()})` : ""}→${quoteCode} не обслуживается.`;
     return {
       ok: false,
       error: human
@@ -345,7 +372,7 @@ export async function computeQuote(
   }
 
   const mode = row.quoteMode === "divide" ? "divide" : "multiply";
-  const tiers = await findActiveTierRows(db, tenantId, asset, network, currency.code);
+  const tiers = await findActiveTierRows(db, tenantId, asset, network, quoteCode);
   const marketGross =
     amountMode === "target_thb"
       ? amount
@@ -403,9 +430,9 @@ export async function computeQuote(
 
   return {
     ok: true,
-    direction: `${asset}->${currency.code}`,
+    direction: `${asset}->${quoteCode}`,
     asset,
-    quoteAsset: currency.code,
+    quoteAsset: quoteCode,
     network: network.toUpperCase(),
     amountMode,
     amountFrom,
