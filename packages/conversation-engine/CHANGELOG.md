@@ -1,3 +1,12 @@
+# [@chatman-media/conversation-engine-v3.25.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.24.0...@chatman-media/conversation-engine-v3.25.0) (2026-06-19)
+
+
+### Features
+
+* **i18n:** conversations.detected_lang storage layer ([#735](https://github.com/chatman-media/lead-engine/issues/735)) ([8a63206](https://github.com/chatman-media/lead-engine/commit/8a63206e8d6c13f8051502376cca3f8355c487b4)), closes [730/#731](https://github.com/chatman-media/lead-engine/issues/731)
+* **i18n:** language detection module + unit tests ([e477d94](https://github.com/chatman-media/lead-engine/commit/e477d9426f8182f38f543101cddbe2651405c2d4)), closes [#735](https://github.com/chatman-media/lead-engine/issues/735) [#730](https://github.com/chatman-media/lead-engine/issues/730) [#731](https://github.com/chatman-media/lead-engine/issues/731) [#735](https://github.com/chatman-media/lead-engine/issues/735)
+* **i18n:** tenant defaultLang + language detect in process-inbound tx1 ([1cfb6cb](https://github.com/chatman-media/lead-engine/commit/1cfb6cb709f33647ecb79eb400e95a8d5a734b33)), closes [#735](https://github.com/chatman-media/lead-engine/issues/735) [#730](https://github.com/chatman-media/lead-engine/issues/730) [#731](https://github.com/chatman-media/lead-engine/issues/731) [#735](https://github.com/chatman-media/lead-engine/issues/735)
+
 # [@chatman-media/conversation-engine-v3.24.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.5...@chatman-media/conversation-engine-v3.24.0) (2026-06-19)
 
 
