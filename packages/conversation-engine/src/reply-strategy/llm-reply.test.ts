@@ -575,6 +575,56 @@ describe("LlmReplyStrategy", () => {
     });
 	  });
 
+  it("exchange: «курс устраивает» после выданной котировки НЕ пере-котирует (#723)", async () => {
+    const chat = new CapturingChat("Отлично! Оформляем заявку?");
+    const repo = fakeMessagesRepo([
+      row(1, "user", "500 USDT TRC20 на баты, какой курс?"),
+      row(
+        2,
+        "assistant",
+        "Готово! Отдаёте 500 USDT — получите 15750 THB на руки. Как удобнее получить — наличными в офисе, в банкомате или на тайский счёт?",
+      ),
+      row(3, "user", "Курс устраивает. Наличными в офисе. Как подтвердить обмен?"),
+    ]);
+    const recorded: Array<
+      Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]
+    > = [];
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveTools: () => [exchangeQuoteTool()],
+        resolveExchangePolicyState: () => ({ stageSlug: "quote_calculated" }),
+        resolveExchangeCollected: () => ({
+          asset: "USDT",
+          amount: 500,
+          network: "TRC20",
+          payoutMethod: "office",
+          // НЕ свежая сумма — клиент подтверждает курс, а не запрашивает заново.
+          amountSetThisTurn: false,
+        }),
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "Курс устраивает. Наличными в офисе. Как подтвердить обмен?",
+    });
+
+    // Антиповтор #723: бот НЕ должен повторно задавать вопрос о способе выдачи
+    // («как удобнее получить») — это и есть зацикливание на quote_calculated.
+    const text = firstReplyText(result);
+    expect(text).not.toContain("как удобнее получить");
+  });
+
 	it("exchange: подтверждение на quote_calculated принудительно ведёт в create_exchange_order/KYC", async () => {
 		const chat = new CapturingChat("Повторно считаю сумму.");
 		const repo = fakeMessagesRepo([

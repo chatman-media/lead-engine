@@ -637,9 +637,25 @@ function exchangeMissingFieldsQuestion(
 	return `Подскажите, ${parts.join(", и ")}?`;
 }
 
+// #723 — антиповтор: бот уже давал котировку в недавней истории (число +
+// упоминание валюты выдачи). Тогда «курс устраивает»/повторное «сколько» НЕ
+// должны переотправлять ту же котировку — иначе бот зацикливается на
+// quote_calculated, игнорируя подтверждение и выбор выдачи.
+function hasRecentExchangeQuote(history: MessageRow[]): boolean {
+	return history
+		.slice(-8)
+		.some(
+			(item) =>
+				item.role === "assistant" &&
+				/\d/.test(item.text) &&
+				ANY_QUOTE_CURRENCY_MENTION_RE.test(item.text),
+		);
+}
+
 async function maybeForceExchangeQuoteReply(
 	userMessageText: string,
 	tools: AnyRagTool[],
+	history: MessageRow[],
 	injected?: ExchangeCollectedInput | null,
 ): Promise<ExchangeForcedReply | null> {
 	const quoteTool = tools.find(
@@ -649,12 +665,14 @@ async function maybeForceExchangeQuoteReply(
 	// Аргументы — из универсально собранного (leadFieldValues), не regex (#654).
 	const collected = buildExchangeCollected(injected);
 	if (!collected.asset || !collected.amount) return null;
-	// Считаем котировку, только если клиент назвал СВЕЖУЮ сумму этого хода
-	// (amountSetThisTurn) или это follow-up «посчитай/курс/сколько». Иначе («TRC20
-	// в банкомате» при готовой сделке) → сводка/оплата, не котировка.
+	// Котируем, только если клиент назвал СВЕЖУЮ сумму этого хода
+	// (amountSetThisTurn) ИЛИ это первый запрос курса (ещё не котировали).
+	// После выданной котировки «курс устраивает»/повторное «сколько» НЕ
+	// пере-котируем (#723) — отдаём дальше на подтверждение/сводку/LLM.
 	const freshAmount =
 		injected?.amountSetThisTurn === true ||
-		EXCHANGE_QUOTE_INTENT_RE.test(userMessageText);
+		(EXCHANGE_QUOTE_INTENT_RE.test(userMessageText) &&
+			!hasRecentExchangeQuote(history));
 	if (!freshAmount) return null;
 	const args: ExchangeQuoteArgs = {
 		asset: collected.asset,
@@ -1094,6 +1112,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
 				(await maybeForceExchangeQuoteReply(
 					input.userMessageText,
 					tools,
+					history,
 					exchangeCollected,
 				)) ??
 				maybeForceExchangePaymentMethodQuestion(
