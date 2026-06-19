@@ -1,3 +1,10 @@
+# [@chatman-media/channel-core-v1.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.9.0...@chatman-media/channel-core-v1.10.0) (2026-06-19)
+
+
+### Features
+
+* **i18n:** plumb telegram language_code via Inbound.channelLangHint ([f79ca3d](https://github.com/chatman-media/lead-engine/commit/f79ca3d5025c871833c4282a94606b880b231194)), closes [#735](https://github.com/chatman-media/lead-engine/issues/735)
+
 # [@chatman-media/channel-core-v1.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.8.0...@chatman-media/channel-core-v1.9.0) (2026-06-19)
 
 
