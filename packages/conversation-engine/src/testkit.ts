@@ -218,6 +218,7 @@ export class FakeMessagesRepo {
     externalMessageId?: string;
     metaJson?: string;
     stage?: string;
+    origLang?: string | null;
     nowEpoch: number;
   }): Promise<MessageRow> {
     const tgId = opts.externalMessageId !== undefined ? Number(opts.externalMessageId) : null;
@@ -232,9 +233,23 @@ export class FakeMessagesRepo {
       createdAt: opts.nowEpoch,
       stage: opts.stage ?? null,
       deletedAt: null,
+      origLang: opts.origLang ?? null,
+      translatedText: null,
+      translatedLang: null,
     };
     this.rows.push(row);
     return row;
+  }
+  async setTranslation(messageId: number, opts: { text: string; lang: string }): Promise<void> {
+    const row = this.rows.find((r) => r.id === messageId);
+    if (!row) return;
+    row.translatedText = opts.text;
+    row.translatedLang = opts.lang;
+  }
+  async getTranslation(messageId: number): Promise<{ text: string; lang: string } | null> {
+    const row = this.rows.find((r) => r.id === messageId);
+    if (!row || row.translatedText == null || row.translatedLang == null) return null;
+    return { text: row.translatedText, lang: row.translatedLang };
   }
   async findUserByExternalId(
     conversationId: number,

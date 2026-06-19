@@ -1,5 +1,5 @@
-import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import { beforeEach, describe, expect, it } from "bun:test";
+import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { ContactsRepo } from "./dal/contacts.ts";
 import type { MessagesRepo } from "./dal/messages.ts";
 import { LlmMemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
@@ -28,6 +28,9 @@ function fakeMessagesRepo(history: Array<{ role: "user" | "assistant"; text: str
         createdAt: 1700000000 + i,
         stage: null,
         deletedAt: null,
+        origLang: null,
+        translatedText: null,
+        translatedLang: null,
       })),
   } as unknown as MessagesRepo;
 }
@@ -35,13 +38,8 @@ function fakeMessagesRepo(history: Array<{ role: "user" | "assistant"; text: str
 describe("LlmMemoryExtractor", () => {
   it("вызывает chat.complete и парсит JSON-ответ", async () => {
     const chat = new FakeChatClient('{"name":"Алина","city":"Москва"}');
-    const repo = fakeMessagesRepo([
-      { role: "user", text: "Меня зовут Алина, я из Москвы" },
-    ]);
-    const extractor = new LlmMemoryExtractor(
-      { resolveChat: () => chat },
-      () => repo,
-    );
+    const repo = fakeMessagesRepo([{ role: "user", text: "Меня зовут Алина, я из Москвы" }]);
+    const extractor = new LlmMemoryExtractor({ resolveChat: () => chat }, () => repo);
     const facts = await extractor.extract({
       tenantId: 1,
       conversationId: 100,
@@ -83,11 +81,15 @@ describe("LlmMemoryExtractor", () => {
 
   it("prepared history → не читает MessagesRepo вне caller snapshot", async () => {
     const chat = new FakeChatClient('{"city":"Bangkok"}');
-    const extractor = new LlmMemoryExtractor({ resolveChat: () => chat }, () => ({
-      recent: async () => {
-        throw new Error("repo should not be called");
-      },
-    } as unknown as MessagesRepo));
+    const extractor = new LlmMemoryExtractor(
+      { resolveChat: () => chat },
+      () =>
+        ({
+          recent: async () => {
+            throw new Error("repo should not be called");
+          },
+        }) as unknown as MessagesRepo,
+    );
 
     const facts = await extractor.extract({
       tenantId: 1,
@@ -106,6 +108,9 @@ describe("LlmMemoryExtractor", () => {
           createdAt: 1700000000,
           stage: null,
           deletedAt: null,
+          origLang: null,
+          translatedText: null,
+          translatedLang: null,
         },
       ],
     });

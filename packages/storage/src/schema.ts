@@ -173,6 +173,11 @@ export const messages = pgTable("messages", {
   stage: text("stage"),
   // Soft-delete для удалённых оператором сообщений (рендерятся struck-through).
   deletedAt: integer("deleted_at"),
+  // i18n (#736): язык оригинала + перевод (для переводящего слоя оператору #731).
+  // Все nullable; null translatedText = ещё не переведено. Набор валидируется в коде.
+  origLang: text("orig_lang"),
+  translatedText: text("translated_text"),
+  translatedLang: text("translated_lang"),
 }, (t) => [
   check("messages_role_check", sql`${t.role} IN ('user', 'assistant', 'human', 'system')`),
   index("idx_msg_conv_created").on(t.conversationId, t.createdAt),
