@@ -210,14 +210,19 @@ export async function generateReplyAndEnqueue(
   const now = clock.nowEpoch();
   let count = 0;
   let escalatedReason: string | undefined;
+  let escalationChanged = false;
   await withTenant(deps.db, tenant.tenantId, async (tx) => {
     const repoCtx = { db: tx, tenantId: tenant.tenantId };
     const conversations = new ConversationsRepo(repoCtx);
     const messages = new MessagesRepo(repoCtx);
     const outbound = new OutboundQueueRepo({ db: tx, tenantId: tenant.tenantId });
-    const envelopesToSend = deps.splitReplies
-      ? splitReplyEnvelopes(baseEnvelopes)
-      : baseEnvelopes;
+    // Нужен оператор (handoff) → полный молчок: клиенту НЕ отвечаем, диалог
+    // уходит человеку. Иначе бот и отвечал, и слал «нужен оператор» каждый ход.
+    const envelopesToSend = needsAutoTakeover
+      ? []
+      : deps.splitReplies
+        ? splitReplyEnvelopes(baseEnvelopes)
+        : baseEnvelopes;
     // #653 — анти-дубль: свежие сообщения бота для сверки байт-в-байт.
     const recentForDedup = await messages.recent(result.conversationId, 5);
     const isRecentBotDuplicate = (txt: string): boolean =>
@@ -274,14 +279,15 @@ export async function generateReplyAndEnqueue(
     if (needsAutoTakeover) {
       const handoff = primaryOperatorHandoff(replyOutput.operatorHandoffs);
       if (handoff) {
-        await conversations.applyAutoHandoff({
+        const ho = await conversations.applyAutoHandoff({
           conversationId: result.conversationId,
           reason: handoff.reason,
           ...(handoff.orderId !== undefined ? { orderId: handoff.orderId } : {}),
           ...(handoff.stageSlug ? { stageSlug: handoff.stageSlug } : {}),
-          customerNoticeSent: replyOutput.customerNoticeSent === true,
+          customerNoticeSent: false,
           nowEpoch: now,
         });
+        escalationChanged = ho?.changed ?? false;
         escalatedReason = handoff.reason;
       }
     }
@@ -306,20 +312,24 @@ export async function generateReplyAndEnqueue(
       }
     }
   });
-  await emitOperatorHandoffNotifications({
-    tenantId: tenant.tenantId,
-    conversationId: result.conversationId,
-    contactId: result.contactId,
-    contactDisplayName: result.contactDisplayName,
-    userMessageText: text,
-    inbound,
-    envelopes: replyOutput.envelopes,
-    ...(replyOutput.operatorHandoffs
-      ? { operatorHandoffs: replyOutput.operatorHandoffs }
-      : {}),
-    notifications: deps.notifications ?? null,
-    ...(deps.sink ? { sink: deps.sink } : {}),
-  });
+  // Уведомляем оператора ОДИН раз — на первой эскалации (applyAutoHandoff.changed).
+  // Раньше дубль «нужен оператор» сыпался на каждое сообщение уже-эскалированного диалога.
+  if (escalationChanged) {
+    await emitOperatorHandoffNotifications({
+      tenantId: tenant.tenantId,
+      conversationId: result.conversationId,
+      contactId: result.contactId,
+      contactDisplayName: result.contactDisplayName,
+      userMessageText: text,
+      inbound,
+      envelopes: replyOutput.envelopes,
+      ...(replyOutput.operatorHandoffs
+        ? { operatorHandoffs: replyOutput.operatorHandoffs }
+        : {}),
+      notifications: deps.notifications ?? null,
+      ...(deps.sink ? { sink: deps.sink } : {}),
+    });
+  }
   // #627 — уведомить оператора о передаче по серии фолбэков.
   if (escalatedReason === "fallback_streak" && deps.notifications) {
     try {

@@ -203,7 +203,7 @@ describe("generateReplyAndEnqueue", () => {
     expect(txOpened).toBe(false);
   });
 
-  it("auto handoff with customer notice → enqueue fallback, audit and mode=human", async () => {
+  it("auto handoff → полный молчок (без outbound), audit, mode=human, уведомление один раз", async () => {
     const db = makeAutoHandoffDb();
     const notifications: Array<Record<string, unknown>> = [];
     const out = await generateReplyAndEnqueue({
@@ -244,20 +244,20 @@ describe("generateReplyAndEnqueue", () => {
       } as never,
     });
 
-    expect(out).toMatchObject({ outboundEnqueued: 1, escalatedReason: "payment_review" });
+    expect(out).toMatchObject({ outboundEnqueued: 0, escalatedReason: "payment_review" });
     expect(db.conversation).toMatchObject({
       mode: "human",
       status: "pending",
       escalatedAt: expect.any(Number),
     });
-    expect(db.messages).toHaveLength(1);
-    expect(db.outbound).toHaveLength(1);
+    expect(db.messages).toHaveLength(0);
+    expect(db.outbound).toHaveLength(0);
     expect(db.audit[0]?.action).toBe("conversation.mode.auto_handoff");
     expect(JSON.parse(String(db.audit[0]?.detailsJson))).toMatchObject({
       reason: "payment_review",
       orderId: 77,
       stageSlug: "payment_proof_waiting",
-      customerNoticeSent: true,
+      customerNoticeSent: false,
     });
     expect(notifications).toHaveLength(1);
   });
