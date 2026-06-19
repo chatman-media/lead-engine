@@ -131,6 +131,7 @@ export function topicEnabled(settings: OperatorSettings | undefined, topic: Info
 
 const OPS_TOPIC: Record<OpsAlertKind, InformerTopic> = {
   rate_anomaly: "system",
+  rate_proposal_pending: "system",
   rate_feed_stale: "system",
   channel_down: "system",
   order_stuck: "orders",
