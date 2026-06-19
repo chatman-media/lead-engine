@@ -2,10 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
+  admins,
   applyAllMigrations,
   createIsolatedDb,
   exchangeOrders,
   exchangePayoutPoints,
+  operatorPayoutCoverage,
   schema,
   tenants,
   tryConnectToPg,
@@ -13,7 +15,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
-import { listActivePayoutPoints } from "./payout-points.ts";
+import { listActivePayoutPoints, listCoveringOperatorAdminIds } from "./payout-points.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_payout_points_${Math.random().toString(36).slice(2, 10)}`;
@@ -198,5 +200,45 @@ describe("exchange payout points catalog", () => {
       return { pointId: point.id, order };
     });
     expect(linked.order?.payoutPointId).toBe(linked.pointId);
+  });
+
+  it("resolves operator coverage for a payout point, isolated per tenant", async () => {
+    if (!sql || !appSql) return;
+    const { pointId, coveringAdminId } = await withTenant(appDb as Db, tenantA, async (tx) => {
+      const adminRows = await tx
+        .insert(admins)
+        .values([
+          { tenantId: tenantA, email: "cover-a@demo.io", role: "manager", passwordHash: "x" },
+          { tenantId: tenantA, email: "cover-b@demo.io", role: "manager", passwordHash: "x" },
+        ])
+        .returning({ id: admins.id });
+      const [point] = await tx
+        .select({ id: exchangePayoutPoints.id })
+        .from(exchangePayoutPoints)
+        .where(
+          and(
+            eq(exchangePayoutPoints.tenantId, tenantA),
+            eq(exchangePayoutPoints.code, "scb_asok"),
+          ),
+        )
+        .limit(1);
+      const firstAdminId = adminRows[0]?.id;
+      if (!point || firstAdminId === undefined) throw new Error("seed for coverage missing");
+      // Покрывает точку только первый оператор.
+      await tx.insert(operatorPayoutCoverage).values({
+        tenantId: tenantA,
+        adminId: firstAdminId,
+        payoutPointId: point.id,
+        createdAt: NOW,
+      });
+      return { pointId: point.id, coveringAdminId: firstAdminId };
+    });
+
+    const ids = await listCoveringOperatorAdminIds(appDb as Db, tenantA, pointId);
+    expect(ids).toEqual([coveringAdminId]);
+
+    // RLS: под другим тенантом покрытие чужой точки не видно.
+    const other = await listCoveringOperatorAdminIds(appDb as Db, tenantB, pointId);
+    expect(other).toEqual([]);
   });
 });

@@ -9,7 +9,7 @@
  */
 
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import { exchangePayoutPoints } from "@chatman-media/storage";
+import { exchangePayoutPoints, operatorPayoutCoverage } from "@chatman-media/storage";
 import { and, asc, eq } from "drizzle-orm";
 
 export type PayoutPointKind = "atm" | "office" | "courier_zone";
@@ -96,5 +96,30 @@ export async function listActivePayoutPoints(
       city: r.city,
       address: r.address,
     }));
+  });
+}
+
+/**
+ * adminId операторов, которые могут выдать через указанную точку (покрытие).
+ * Основа маршрутизации хэндоффа выдачи (B4b): пул сужается до покрывающих точку,
+ * затем выбирается наименее загруженный. Пусто → покрытие не задано (fallback на
+ * общий пул решает вызывающий).
+ */
+export async function listCoveringOperatorAdminIds(
+  db: Db,
+  tenantId: number,
+  payoutPointId: number,
+): Promise<number[]> {
+  return withTenant(db, tenantId, async (tx) => {
+    const rows = await tx
+      .select({ adminId: operatorPayoutCoverage.adminId })
+      .from(operatorPayoutCoverage)
+      .where(
+        and(
+          eq(operatorPayoutCoverage.tenantId, tenantId),
+          eq(operatorPayoutCoverage.payoutPointId, payoutPointId),
+        ),
+      );
+    return rows.map((r) => r.adminId);
   });
 }

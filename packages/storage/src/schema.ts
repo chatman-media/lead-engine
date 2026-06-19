@@ -1738,6 +1738,21 @@ export const exchangePayoutPoints = pgTable("exchange_payout_points", {
   index("idx_exchange_payout_points_tenant_currency").on(t.tenantId, t.quoteAsset, t.isActive),
 ]);
 
+// Покрытие операторов по точкам выдачи: какой оператор может выдать через какую
+// точку (банкомат/офис/зону). Для маршрутизации хэндоффа выдачи на оператора,
+// способного выдать через выбранный клиентом банкомат (B4b). M:N admins×точки.
+export const operatorPayoutCoverage = pgTable("operator_payout_coverage", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
+  payoutPointId: integer("payout_point_id").notNull().references(() => exchangePayoutPoints.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_operator_payout_coverage").on(t.tenantId, t.adminId, t.payoutPointId),
+  index("idx_operator_payout_coverage_point").on(t.tenantId, t.payoutPointId),
+  index("idx_operator_payout_coverage_admin").on(t.tenantId, t.adminId),
+]);
+
 // Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.
 // Оборот считается агрегатом SUM(amount_to_thb) по completed.
 export const exchangeOrders = pgTable("exchange_orders", {
