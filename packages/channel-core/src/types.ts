@@ -76,6 +76,14 @@ export interface Inbound {
    */
   edited?: boolean;
   /**
+   * Слабый bootstrap-сигнал языка от канала (не язык переписки!).
+   * Telegram: `from.language_code` — язык интерфейса клиента (`en-US`, `ru`, …).
+   * WhatsApp / VK / web — обычно undefined. Conversation-engine использует
+   * это только если текстовый детект не дал результата (media-only, цифры).
+   * Никогда не перебивает confident-детект по тексту. См. #735 `language.ts`.
+   */
+  channelLangHint?: string;
+  /**
    * Escape-hatch: канал-специфичный raw payload. Conversation-engine не
    * должен на это смотреть — нужно только для audit/debug и адаптер-специфичных
    * расширений (например, MTProto reply-to-resolve).

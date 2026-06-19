@@ -16,7 +16,12 @@ describe("parseBotSettings", () => {
 
   it("клампит числа в допустимые диапазоны", () => {
     const s = parseBotSettings(
-      JSON.stringify({ temperature: 5, maxOutputTokens: 999999, compactAfterMessages: 1, autocloseHours: 9999 }),
+      JSON.stringify({
+        temperature: 5,
+        maxOutputTokens: 999999,
+        compactAfterMessages: 1,
+        autocloseHours: 9999,
+      }),
     );
     expect(s.temperature).toBe(1.5);
     expect(s.maxOutputTokens).toBe(4000);
@@ -25,18 +30,31 @@ describe("parseBotSettings", () => {
   });
 
   it("нормализует стоп-слова: строка/массив → уник, lowercase, без пустых", () => {
-    expect(parseBotSettings(JSON.stringify({ stopWords: "Оператор, человек\nЖАЛОБА, " })).stopWords).toEqual([
-      "оператор",
-      "человек",
-      "жалоба",
+    expect(
+      parseBotSettings(JSON.stringify({ stopWords: "Оператор, человек\nЖАЛОБА, " })).stopWords,
+    ).toEqual(["оператор", "человек", "жалоба"]);
+    expect(parseBotSettings(JSON.stringify({ stopWords: ["A", "a", " b "] })).stopWords).toEqual([
+      "a",
+      "b",
     ]);
-    expect(parseBotSettings(JSON.stringify({ stopWords: ["A", "a", " b "] })).stopWords).toEqual(["a", "b"]);
   });
 
   it("voiceStt по умолчанию true; пустые строки → null", () => {
     expect(parseBotSettings("{}").voiceStt).toBe(true);
     expect(parseBotSettings(JSON.stringify({ voiceStt: false })).voiceStt).toBe(false);
     expect(parseBotSettings(JSON.stringify({ greetingText: "   " })).greetingText).toBeNull();
+  });
+
+  // #735 — тенант-дефолт языка.
+  it("defaultLang: дефолт null, принимает ru/en/ko/zh, мусор → null", () => {
+    expect(parseBotSettings("{}").defaultLang).toBeNull();
+    expect(parseBotSettings(JSON.stringify({ defaultLang: "ru" })).defaultLang).toBe("ru");
+    expect(parseBotSettings(JSON.stringify({ defaultLang: "EN" })).defaultLang).toBe("en");
+    expect(parseBotSettings(JSON.stringify({ defaultLang: "ko" })).defaultLang).toBe("ko");
+    expect(parseBotSettings(JSON.stringify({ defaultLang: "zh" })).defaultLang).toBe("zh");
+    expect(parseBotSettings(JSON.stringify({ defaultLang: "ja" })).defaultLang).toBeNull();
+    expect(parseBotSettings(JSON.stringify({ defaultLang: "" })).defaultLang).toBeNull();
+    expect(parseBotSettings(JSON.stringify({ defaultLang: 42 })).defaultLang).toBeNull();
   });
 });
 
@@ -78,7 +96,12 @@ describe("isWithinBotHours", () => {
 
   it("невалидная таймзона → fail-open (true)", () => {
     const s = parseBotSettings(
-      JSON.stringify({ hoursEnabled: true, hoursStartMin: 540, hoursEndMin: 1080, hoursTz: "Nope/Nope" }),
+      JSON.stringify({
+        hoursEnabled: true,
+        hoursStartMin: 540,
+        hoursEndMin: 1080,
+        hoursTz: "Nope/Nope",
+      }),
     );
     expect(isWithinBotHours(s, at("2021-06-15T03:00:00Z"))).toBe(true);
   });

@@ -1132,4 +1132,128 @@ describe("processInbound", () => {
 		expect(res.outboundEnqueued).toBe(0);
 		expect(replyCalled).toBe(false);
 	});
+
+	describe("#735 language detection in tx1", () => {
+		it("первый ru-text детектится: detectedLang='ru', langLocked=true", async () => {
+			const inbound: Inbound = {
+				channelId: "tg-1",
+				externalMessageId: "lang-1",
+				externalUserId: "u-lang-1",
+				parts: [{ kind: "text", text: "Привет, сколько стоит обмен USDT?" }],
+				receivedAt: 1700000000,
+				raw: {},
+			};
+			await processInbound(inbound, deps);
+			const conv = deps._fakes.conversations.all()[0]!;
+			expect(conv.detectedLang).toBe("ru");
+			expect(conv.langLocked).toBe(true);
+		});
+
+		it("«ok» не сбивает залипший язык (короткий не-confident сигнал)", async () => {
+			// Первое сообщение — confident ru → залипает.
+			await processInbound(
+				{
+					channelId: "tg-1",
+					externalMessageId: "lang-2a",
+					externalUserId: "u-lang-2",
+					parts: [{ kind: "text", text: "Здравствуйте, хочу обменять" }],
+					receivedAt: 1700000000,
+					raw: {},
+				},
+				deps,
+			);
+			const convId = deps._fakes.conversations.all()[0]!.id;
+			expect(deps._fakes.conversations.all()[0]?.detectedLang).toBe("ru");
+
+			// Второе сообщение — короткий «ok»: не должен переключать.
+			await processInbound(
+				{
+					channelId: "tg-1",
+					externalMessageId: "lang-2b",
+					externalUserId: "u-lang-2",
+					parts: [{ kind: "text", text: "ok" }],
+					receivedAt: 1700000060,
+					raw: {},
+				},
+				deps,
+			);
+			const conv = deps._fakes.conversations.all().find((c) => c.id === convId)!;
+			expect(conv.detectedLang).toBe("ru");
+			expect(conv.langLocked).toBe(true);
+		});
+
+		it("confident en перебивает залипший ru (осознанная смена скрипта)", async () => {
+			await processInbound(
+				{
+					channelId: "tg-1",
+					externalMessageId: "lang-3a",
+					externalUserId: "u-lang-3",
+					parts: [{ kind: "text", text: "Здравствуйте, хочу обменять" }],
+					receivedAt: 1700000000,
+					raw: {},
+				},
+				deps,
+			);
+			expect(deps._fakes.conversations.all()[0]?.detectedLang).toBe("ru");
+
+			await processInbound(
+				{
+					channelId: "tg-1",
+					externalMessageId: "lang-3b",
+					externalUserId: "u-lang-3",
+					parts: [{ kind: "text", text: "Hello, can you switch to English please?" }],
+					receivedAt: 1700000060,
+					raw: {},
+				},
+				deps,
+			);
+			const conv = deps._fakes.conversations.all()[0]!;
+			expect(conv.detectedLang).toBe("en");
+			expect(conv.langLocked).toBe(true);
+		});
+
+		it("media-only берёт channelLangHint только на первом сообщении (locked=false)", async () => {
+			const inbound: Inbound = {
+				channelId: "tg-1",
+				externalMessageId: "lang-4",
+				externalUserId: "u-lang-4",
+				parts: [{ kind: "photo", mediaRef: { channelId: "tg-1", externalRef: "AgACAgI" } }],
+				receivedAt: 1700000000,
+				raw: {},
+				channelLangHint: "ko",
+			};
+			await processInbound(inbound, deps);
+			const conv = deps._fakes.conversations.all()[0]!;
+			expect(conv.detectedLang).toBe("ko");
+			// hint мягкий — locked=false, чтобы любой confident-сигнал переключал.
+			expect(conv.langLocked).toBe(false);
+		});
+
+		it("detected_lang сохраняется в tx1 до reply.generate (виден reply-стратегии)", async () => {
+			let snapshotDetectedLang: string | null | undefined;
+			let snapshotLocked: boolean | undefined;
+			const d = makeDeps();
+			const reply: ReplyStrategy = {
+				generate: async (opts) => {
+					// На момент reply.generate шаг 4a уже отработал внутри tx1 →
+					// conversation в репо хранит сохранённый detected_lang.
+					const row = d._fakes.conversations.all().find((c) => c.id === opts.conversationId);
+					snapshotDetectedLang = row?.detectedLang ?? undefined;
+					snapshotLocked = row?.langLocked ?? undefined;
+					return [];
+				},
+			};
+			const withReply = { ...d, reply };
+			await processInbound(
+				textInbound({
+					extUserId: "u-lang-5",
+					extMessageId: "lang-5",
+					text: "Привет, какой курс USDT?",
+				}),
+				withReply,
+			);
+			expect(snapshotDetectedLang).toBe("ru");
+			expect(snapshotLocked).toBe(true);
+		});
+	});
 });

@@ -85,10 +85,10 @@ export function parseUpdate(channelId: string, update: TgUpdate): Inbound | null
       externalMessageId: String(cb.message?.message_id ?? cb.id),
       externalUserId: String(cb.from.id),
       ...(cb.from.username ? { externalUsername: cb.from.username } : {}),
-      parts: [
-        { kind: "callback_query", data: cb.data, originalMessageId: String(messageId) },
-      ],
+      parts: [{ kind: "callback_query", data: cb.data, originalMessageId: String(messageId) }],
       receivedAt: Math.floor(Date.now() / 1000),
+      // #735 — слабый bootstrap-сигнал языка (язык интерфейса клиента, не переписки).
+      ...(cb.from.language_code ? { channelLangHint: cb.from.language_code } : {}),
       raw: update,
     };
   }
@@ -113,6 +113,8 @@ export function parseUpdate(channelId: string, update: TgUpdate): Inbound | null
     parts,
     receivedAt: msg.date,
     ...(isEdit ? { edited: true } : {}),
+    // #735 — слабый bootstrap-сигнал языка (язык интерфейса клиента, не переписки).
+    ...(msg.from.language_code ? { channelLangHint: msg.from.language_code } : {}),
     raw: update,
   };
 }
