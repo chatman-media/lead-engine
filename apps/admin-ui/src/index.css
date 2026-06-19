@@ -252,16 +252,6 @@
   color: var(--primary);
 }
 
-.funnel-flow-metric.is-hot .funnel-flow-metric-icon {
-  background: color-mix(in oklch, var(--warning) 16%, transparent);
-  color: var(--warning);
-}
-
-.funnel-flow-metric.is-idle .funnel-flow-metric-icon {
-  background: color-mix(in oklch, var(--destructive) 13%, transparent);
-  color: var(--destructive);
-}
-
 .funnel-flow-metric.is-won .funnel-flow-metric-icon {
   background: color-mix(in oklch, var(--success) 16%, transparent);
   color: var(--success);
@@ -271,16 +261,48 @@
   overflow: hidden;
   border: 1px solid color-mix(in oklch, var(--foreground) 12%, var(--border));
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, color-mix(in oklch, var(--card) 90%, var(--primary) 5%), var(--card));
+  background: linear-gradient(180deg, color-mix(in oklch, var(--card) 92%, var(--primary) 4%), var(--card));
 }
 
 .funnel-flow-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   border-bottom: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
-  padding: 12px 16px;
+  padding: 10px 16px;
+}
+
+.funnel-flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.funnel-flow-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.funnel-flow-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+}
+
+.funnel-flow-dot.is-hot {
+  background: var(--warning);
+}
+
+.funnel-flow-dot.is-active {
+  background: var(--primary);
+}
+
+.funnel-flow-dot.is-idle {
+  background: var(--destructive);
 }
 
 .funnel-flow-bottleneck {
@@ -293,210 +315,218 @@
   color: var(--destructive);
 }
 
-.funnel-flow-lane {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.funnel-flow-body {
   padding: 14px 16px;
 }
 
-.funnel-flow-col {
-  --flow-color: var(--primary);
+.funnel-flow-ribbon {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 12px;
+}
+
+.funnel-flow-slice {
+  fill: var(--primary);
+  stroke: color-mix(in oklch, var(--primary) 40%, transparent);
+  stroke-width: 0.5;
+}
+
+.funnel-flow-slice.is-bn {
+  fill: var(--destructive);
+  stroke: color-mix(in oklch, var(--destructive) 45%, transparent);
+}
+
+.funnel-flow-ribbon-dot {
+  fill: var(--muted-foreground);
+}
+
+.funnel-flow-ribbon-dot.is-selected {
+  fill: var(--primary);
+}
+
+.funnel-flow-ribbon-num {
+  fill: var(--foreground);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.funnel-flow-ribbon-conv {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.funnel-flow-ribbon-conv.is-good {
+  fill: var(--success);
+}
+
+.funnel-flow-ribbon-conv.is-warn {
+  fill: var(--warning);
+}
+
+.funnel-flow-ribbon-conv.is-bad {
+  fill: var(--destructive);
+}
+
+.funnel-flow-ribbon-idx {
+  fill: var(--muted-foreground);
+  font-size: 9.5px;
+}
+
+.funnel-flow-ribbon-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.funnel-flow-ribbon-hit:hover {
+  fill: color-mix(in oklch, var(--foreground) 5%, transparent);
+}
+
+.funnel-flow-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.funnel-flow-card {
   display: flex;
   width: 100%;
   flex-direction: column;
   gap: 8px;
-  border: 1px solid color-mix(in oklch, var(--flow-color) 24%, var(--border));
-  border-left: 3px solid var(--flow-color);
-  border-radius: var(--radius-md);
-  background: color-mix(in oklch, var(--card) 94%, black 6%);
-  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--card) 94%, black 4%);
+  padding: 11px 12px;
   color: inherit;
   text-align: left;
+  cursor: pointer;
   transition:
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
 }
 
-.funnel-flow-col:hover,
-.funnel-flow-col.is-selected {
-  border-color: color-mix(in oklch, var(--flow-color) 60%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--flow-color) 16%, transparent);
+.funnel-flow-card:hover {
+  border-color: color-mix(in oklch, var(--foreground) 22%, var(--border));
+  transform: translateY(-2px);
 }
 
-.funnel-flow-col.is-bottleneck {
-  border-color: color-mix(in oklch, var(--destructive) 55%, var(--border));
-  border-left-color: var(--destructive);
+.funnel-flow-card.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
 }
 
-.funnel-flow-col-head {
+.funnel-flow-card.is-bottleneck {
+  border-color: color-mix(in oklch, var(--destructive) 50%, var(--border));
+}
+
+.funnel-flow-card.is-dimmed {
+  opacity: 0.45;
+}
+
+.funnel-flow-card-head {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 
-.funnel-flow-col-index {
+.funnel-flow-card-index {
   display: inline-flex;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   flex: none;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  background: var(--flow-color);
-  color: white;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.funnel-flow-col.is-bottleneck .funnel-flow-col-index {
-  background: var(--destructive);
-}
-
-.funnel-flow-count {
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 1.05;
-}
-
-.funnel-flow-count small {
-  margin-left: 6px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--muted-foreground);
-}
-
-.funnel-flow-bar {
-  display: block;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 9999px;
   background: color-mix(in oklch, var(--foreground) 9%, transparent);
-}
-
-.funnel-flow-bar span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: color-mix(in oklch, var(--foreground) 42%, transparent);
-}
-
-.funnel-flow-col.is-bottleneck .funnel-flow-bar span {
-  background: var(--destructive);
-}
-
-.funnel-flow-meta {
-  display: flex;
-  min-height: 18px;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
   color: var(--muted-foreground);
   font-size: 11px;
   font-weight: 600;
 }
 
-.funnel-flow-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  border-radius: 9999px;
-  padding: 2px 6px;
-}
-
-.funnel-flow-tag.is-hot {
-  background: color-mix(in oklch, var(--warning) 15%, transparent);
-  color: var(--warning);
-}
-
-.funnel-flow-tag.is-idle {
-  background: color-mix(in oklch, var(--destructive) 13%, transparent);
-  color: var(--destructive);
-}
-
-.funnel-flow-chips {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.funnel-flow-chip,
-.funnel-flow-chip-more,
-.funnel-flow-empty {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
-  border-radius: 9999px;
-  background: color-mix(in oklch, var(--background) 46%, transparent);
-  padding: 3px 7px;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 1;
-}
-
-.funnel-flow-chip.is-selected {
-  border-color: color-mix(in oklch, var(--flow-color) 54%, var(--border));
-  background: color-mix(in oklch, var(--flow-color) 14%, transparent);
-  color: var(--foreground);
-}
-
-.funnel-flow-chip-dot {
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 9999px;
-  background: var(--flow-color);
-}
-
-.funnel-flow-connector {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 2px 0;
-  color: var(--muted-foreground);
-}
-
-.funnel-flow-connector-icon {
-  transform: rotate(90deg);
-}
-
-.funnel-flow-pill {
-  border-radius: 9999px;
-  padding: 1px 8px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.funnel-flow-connector.is-good .funnel-flow-pill {
-  background: color-mix(in oklch, var(--success) 16%, transparent);
-  color: var(--success);
-}
-
-.funnel-flow-connector.is-good .funnel-flow-connector-icon {
-  color: var(--success);
-}
-
-.funnel-flow-connector.is-warn .funnel-flow-pill {
-  background: color-mix(in oklch, var(--warning) 16%, transparent);
-  color: var(--warning);
-}
-
-.funnel-flow-connector.is-warn .funnel-flow-connector-icon {
-  color: var(--warning);
-}
-
-.funnel-flow-connector.is-bad .funnel-flow-pill {
+.funnel-flow-card.is-bottleneck .funnel-flow-card-index {
   background: color-mix(in oklch, var(--destructive) 16%, transparent);
   color: var(--destructive);
 }
 
-.funnel-flow-connector.is-bad .funnel-flow-connector-icon {
+.funnel-flow-card-name {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.15;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.funnel-flow-card-count {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.funnel-flow-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.funnel-flow-conv {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 9999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.funnel-flow-conv.is-good {
+  background: color-mix(in oklch, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.funnel-flow-conv.is-warn {
+  background: color-mix(in oklch, var(--warning) 18%, transparent);
+  color: var(--warning);
+}
+
+.funnel-flow-conv.is-bad {
+  background: color-mix(in oklch, var(--destructive) 16%, transparent);
   color: var(--destructive);
+}
+
+.funnel-flow-start {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.funnel-flow-health {
+  display: flex;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in oklch, var(--foreground) 9%, transparent);
+  gap: 1px;
+}
+
+.funnel-flow-health-seg.is-hot {
+  background: var(--warning);
+}
+
+.funnel-flow-health-seg.is-active {
+  background: var(--primary);
+}
+
+.funnel-flow-health-seg.is-idle {
+  background: var(--destructive);
 }
 
 .funnel-flow-outcomes {
@@ -510,8 +540,8 @@
   align-items: center;
   gap: 8px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  padding: 9px 11px;
 }
 
 .funnel-flow-outcome.is-won {
@@ -526,85 +556,153 @@
   color: var(--destructive);
 }
 
-.funnel-flow-panel {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 16px;
+.funnel-flow-drawer {
+  margin-top: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: color-mix(in oklch, var(--background) 28%, var(--card) 72%);
-  padding: 16px;
+  padding: 12px 14px;
 }
 
-.funnel-flow-action {
-  border: 1px solid color-mix(in oklch, var(--primary) 24%, var(--border));
-  border-radius: var(--radius-md);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--primary) 9%, transparent), transparent),
-    color-mix(in oklch, var(--card) 90%, transparent);
-  padding: 12px;
+.funnel-flow-drawer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.funnel-flow-row {
+.funnel-flow-drawer-close {
+  color: var(--primary);
+  font-size: 12px;
+}
+
+.funnel-flow-drawer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.funnel-flow-lead {
   display: flex;
   width: 100%;
-  min-width: 0;
   align-items: center;
   gap: 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   padding: 8px;
   color: inherit;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease;
+  transition: background-color 120ms ease;
 }
 
-.funnel-flow-row:hover,
-.funnel-flow-row.is-selected {
-  border-color: var(--border);
+.funnel-flow-lead:hover {
   background: color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 
-.funnel-flow-row-avatar {
+.funnel-flow-lead-av {
   display: inline-flex;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   flex: none;
   align-items: center;
   justify-content: center;
-  border: 2px solid color-mix(in oklch, white 50%, transparent);
+  border: 2px solid color-mix(in oklch, white 45%, transparent);
   border-radius: 9999px;
   color: white;
-  box-shadow: 0 8px 18px -12px currentColor;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.funnel-flow-lead-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 9999px;
+}
+
+.funnel-flow-lead-dot.is-hot {
+  background: var(--warning);
+}
+
+.funnel-flow-lead-dot.is-active {
+  background: var(--primary);
+}
+
+.funnel-flow-lead-dot.is-idle {
+  background: var(--destructive);
+}
+
+.funnel-flow-table-wrap {
+  overflow-x: auto;
+  padding: 4px 8px 8px;
+}
+
+.funnel-flow-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.funnel-flow-table th {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 10px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.funnel-flow-table th:first-child,
+.funnel-flow-table td:first-child {
+  text-align: left;
+}
+
+.funnel-flow-table td {
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: right;
+}
+
+.funnel-flow-table tbody tr {
+  cursor: pointer;
+}
+
+.funnel-flow-table tbody tr:hover td {
+  background: color-mix(in oklch, var(--foreground) 4%, transparent);
+}
+
+.funnel-flow-table-idx {
+  margin-right: 7px;
+  color: var(--muted-foreground);
+}
+
+.funnel-flow-num-hot {
+  color: var(--warning);
+}
+
+.funnel-flow-num-idle {
+  color: var(--destructive);
 }
 
 @media (min-width: 1024px) {
-  .funnel-flow-lane {
+  .funnel-flow-rail {
     flex-direction: row;
     align-items: stretch;
-    gap: 0;
     overflow-x: auto;
-    padding: 16px;
+    gap: 8px;
+    padding-bottom: 6px;
   }
 
-  .funnel-flow-col {
-    width: 168px;
-    flex: 0 0 168px;
-  }
-
-  .funnel-flow-connector {
-    flex: 0 0 52px;
-    flex-direction: column;
-  }
-
-  .funnel-flow-connector-icon {
-    transform: none;
+  .funnel-flow-card {
+    width: 160px;
+    flex: 0 0 160px;
   }
 
   .funnel-flow-outcomes {
-    flex: 0 0 150px;
+    flex: 0 0 132px;
     flex-direction: column;
   }
 }
