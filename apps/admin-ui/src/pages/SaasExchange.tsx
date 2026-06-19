@@ -21,6 +21,7 @@ import {
   type ExchangeRate,
   type ExchangeRateCardProposal,
   type ExchangeRateInput,
+  type ExchangeRateProposal,
   type ExchangeSettings,
   type ExchangeTurnover,
   saas,
@@ -511,6 +512,7 @@ const DEFAULT_SETTINGS: ExchangeSettings = {
   quoteAsset: "PHP",
   quoteAssetOptions: DEFAULT_QUOTE_ASSET_OPTIONS,
   handoffCustomerNotice: true,
+  requireRateConfirmation: false,
 };
 
 export function SaasExchange() {
@@ -528,6 +530,8 @@ export function SaasExchange() {
   const [cardSaving, setCardSaving] = useState(false);
   const [rateCardMessage, setRateCardMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [pendingProposals, setPendingProposals] = useState<ExchangeRateProposal[]>([]);
+  const [proposalActing, setProposalActing] = useState<number | null>(null);
   const [settings, setSettings] = useState<ExchangeSettings>(DEFAULT_SETTINGS);
   const [savingSettings, setSavingSettings] = useState(false);
   // Котируемая валюта тенанта — для подписи оборота, табло и дефолтов направлений.
@@ -562,13 +566,15 @@ export function SaasExchange() {
       saas.exchangeTurnover(),
       saas.exchangeRequisites().catch(() => ({ items: [] })),
       saas.exchangeSettings().catch(() => DEFAULT_SETTINGS),
+      saas.listRateProposals().catch(() => ({ proposals: [] })),
     ])
-      .then(([r, o, t, req, st]) => {
+      .then(([r, o, t, req, st, prop]) => {
         setRates(r.rates);
         setOrders(o.orders);
         setTurnover(t);
         setSavedRequisites(req.items);
         setSettings(st);
+        setPendingProposals(prop.proposals);
       })
       .catch((err) => {
         if (!handle401(err)) toast.error("Не удалось загрузить данные обменника");
@@ -622,6 +628,38 @@ export function SaasExchange() {
       if (!handle401(err)) toast.error("Не удалось обновить курсы с рынка");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function confirmProposal(id: number) {
+    setProposalActing(id);
+    try {
+      await saas.confirmRateProposal(id);
+      toast.success("Курс обновлён");
+      load();
+    } catch (err) {
+      if (!handle401(err)) {
+        toast.error(
+          err instanceof ApiError && err.status === 409
+            ? "Курс уже изменился — обновите страницу и подтвердите заново"
+            : "Не удалось подтвердить курс",
+        );
+      }
+    } finally {
+      setProposalActing(null);
+    }
+  }
+
+  async function rejectProposal(id: number) {
+    setProposalActing(id);
+    try {
+      await saas.rejectRateProposal(id);
+      toast.success("Предложение отклонено, курс прежний");
+      load();
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось отклонить предложение");
+    } finally {
+      setProposalActing(null);
     }
   }
 
@@ -905,6 +943,22 @@ export function SaasExchange() {
                   </p>
                 </div>
               </div>
+              <div className="flex items-center gap-3 rounded-md border px-3 py-2 sm:max-w-xl">
+                <Switch
+                  checked={settings.requireRateConfirmation ?? false}
+                  onCheckedChange={(checked) =>
+                    setSettings((s) => ({ ...s, requireRateConfirmation: checked }))
+                  }
+                />
+                <div className="space-y-0.5">
+                  <Label>Требовать подтверждение обновлений курса</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Если включено, любое обновление курса от рынка попадёт в карточку «Обновлённые
+                    курсы» и применится только после вашего подтверждения. По умолчанию мелкие
+                    изменения применяются автоматически.
+                  </p>
+                </div>
+              </div>
               <Button
                 type="button"
                 onClick={saveSettings}
@@ -916,6 +970,74 @@ export function SaasExchange() {
               </Button>
             </CardContent>
           </Card>
+
+          {pendingProposals.length > 0 && (
+            <Card className="border-amber-500/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <AlertTriangleIcon className="size-4 text-amber-500" />
+                  Обновлённые курсы — подтвердите
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Рынок дал новые значения курса. До подтверждения бот считает по прежнему курсу.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {pendingProposals.map((p) => {
+                  const dir = `${p.asset}${p.network ? ` (${p.network})` : ""} → ${p.quoteAsset}`;
+                  const acting = proposalActing === p.id;
+                  const up = p.deviationPct >= 0;
+                  return (
+                    <div
+                      key={p.id}
+                      className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{dir}</span>
+                          <Badge variant={p.severity === "hard" ? "destructive" : "outline"}>
+                            {p.severity === "hard" ? "резкое" : "плавное"}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          было {formatRate(p.prevBaseRate)} → стало{" "}
+                          <span className={up ? "text-emerald-600" : "text-red-600"}>
+                            {formatRate(p.nextBaseRate)} ({up ? "+" : ""}
+                            {p.deviationPct.toFixed(2)}%)
+                          </span>
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => confirmProposal(p.id)}
+                          disabled={acting}
+                        >
+                          {acting ? (
+                            <Loader2Icon className="size-4 animate-spin" />
+                          ) : (
+                            <CheckIcon className="size-4" />
+                          )}
+                          Подтвердить
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => rejectProposal(p.id)}
+                          disabled={acting}
+                        >
+                          <XCircleIcon className="size-4" />
+                          Отклонить
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
@@ -1445,7 +1567,9 @@ export function SaasExchange() {
                                   OK
                                 </Button>
                               </div>
-                              {item.hint && <p className="text-xs text-muted-foreground">{item.hint}</p>}
+                              {item.hint && (
+                                <p className="text-xs text-muted-foreground">{item.hint}</p>
+                              )}
                             </div>
                           );
                         })}

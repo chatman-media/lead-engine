@@ -1549,10 +1549,7 @@ export interface QualityToolCallFeedbackSummary {
   }>;
 }
 
-export type QualityToolCallImprovementKind =
-  | "schema_fix"
-  | "routing_prompt_fix"
-  | "tool_candidate";
+export type QualityToolCallImprovementKind = "schema_fix" | "routing_prompt_fix" | "tool_candidate";
 
 export type QualityToolCallImprovementSeverity = "high" | "medium" | "low";
 export type QualityToolCallImprovementStatus = "pending" | "applied" | "dismissed";
@@ -2250,6 +2247,36 @@ export interface ExchangeSettings {
   quoteAssetOptions?: string[];
   /** Отправлять клиенту сообщение при автоматической передаче оператору. */
   handoffCustomerNotice: boolean;
+  /**
+   * Требовать ручное подтверждение даже мелких изменений курса (issue #732).
+   * Если включено — каждый обновлённый baseRate от фида падает в pending-карточку
+   * и не применяется до клика «Подтвердить». Дефолт false (back-compat).
+   */
+  requireRateConfirmation?: boolean;
+}
+
+/**
+ * Pending-предложение от фида: текущий курс vs предложенный, для карточки
+ * «Обновлённые курсы — подтвердите» (issue #732).
+ */
+export interface ExchangeRateProposal {
+  id: number;
+  rateId: number | null;
+  asset: string;
+  quoteAsset: string;
+  network: string;
+  quoteMode: "multiply" | "divide";
+  prevBaseRate: number;
+  nextBaseRate: number;
+  /** Знаковое отклонение в процентах. */
+  deviationPct: number;
+  severity: "soft" | "hard";
+  status: "pending" | "confirmed" | "rejected" | "superseded";
+  source: "feed" | "manual";
+  decidedByAdminId: number | null;
+  decidedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface ExchangeRateCardProposal {
@@ -2786,10 +2813,7 @@ export const saas = {
       intervalSec: number;
       targetFunnelId?: number;
       targetCatalogItemId?: number;
-    }>(
-      "/api/admin/sim/stream",
-      { method: "POST", body: JSON.stringify(opts) },
-    );
+    }>("/api/admin/sim/stream", { method: "POST", body: JSON.stringify(opts) });
   },
   listSimStreams() {
     return request<{
@@ -2808,17 +2832,14 @@ export const saas = {
     });
   },
   walkSim(count = 1, displayName?: string, funnelId?: number) {
-    return request<{ ok: boolean; leads: number[]; finalStage: string }>(
-      "/api/admin/sim/walk",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          count,
-          ...(displayName ? { displayName } : {}),
-          ...(funnelId ? { funnelId } : {}),
-        }),
-      },
-    );
+    return request<{ ok: boolean; leads: number[]; finalStage: string }>("/api/admin/sim/walk", {
+      method: "POST",
+      body: JSON.stringify({
+        count,
+        ...(displayName ? { displayName } : {}),
+        ...(funnelId ? { funnelId } : {}),
+      }),
+    });
   },
   advanceConversation(id: number, text?: string) {
     return request<{
@@ -2938,10 +2959,10 @@ export const saas = {
   },
   /** Частичный patch настроек поведения бота (#623). Возвращает нормализованный объект. */
   updateBotSettings(patch: Partial<BotSettings>) {
-    return request<{ ok: boolean; botSettings: BotSettings }>(
-      "/api/admin/tenant/bot-settings",
-      { method: "PUT", body: JSON.stringify(patch) },
-    );
+    return request<{ ok: boolean; botSettings: BotSettings }>("/api/admin/tenant/bot-settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
   },
 
   // ── Multi-admin (M4) ─────────────────────────────────────────────────
@@ -3366,7 +3387,9 @@ export const saas = {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
   },
   previewExperiment(id: number, sampleSize = 20) {
-    return request<ExperimentPreview>(`/api/admin/experiments/${id}/preview?sampleSize=${sampleSize}`);
+    return request<ExperimentPreview>(
+      `/api/admin/experiments/${id}/preview?sampleSize=${sampleSize}`,
+    );
   },
   createExperiment(data: { slug: string; allocationJson: string; successMetric: string }) {
     return request<ExperimentItem>("/api/admin/experiments", {
@@ -3506,10 +3529,13 @@ export const saas = {
       ok: boolean;
       case: QualityToolCallRegressionCase;
       proposal: QualityPersistedToolCallImprovementProposal;
-    }>(`/api/admin/quality/tool-call-feedback/improvement-proposals/${proposalId}/regression-cases`, {
-      method: "POST",
-      body: JSON.stringify(opts),
-    });
+    }>(
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${proposalId}/regression-cases`,
+      {
+        method: "POST",
+        body: JSON.stringify(opts),
+      },
+    );
   },
   setQualityToolCallRegressionCaseStatus(
     id: number,
@@ -3567,7 +3593,10 @@ export const saas = {
       method: "POST",
     });
   },
-  getQualityShadowPreview(id: number, opts: Omit<QualityShadowEvaluationOptions, "pairsPlanned"> = {}) {
+  getQualityShadowPreview(
+    id: number,
+    opts: Omit<QualityShadowEvaluationOptions, "pairsPlanned"> = {},
+  ) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.newStyleSlug) params.set("newStyleSlug", opts.newStyleSlug);
@@ -4333,6 +4362,23 @@ export const saas = {
       body: JSON.stringify(input),
     });
   },
+  // Pending-предложения обновлённого курса от рыночного фида (issue #732).
+  // Открыты по одному на направление (partial-unique pending).
+  listRateProposals() {
+    return request<{ proposals: ExchangeRateProposal[] }>("/api/admin/exchange/rate-proposals");
+  },
+  confirmRateProposal(id: number) {
+    return request<{ ok: boolean; proposal: ExchangeRateProposal }>(
+      `/api/admin/exchange/rate-proposals/${id}/confirm`,
+      { method: "POST" },
+    );
+  },
+  rejectRateProposal(id: number) {
+    return request<{ ok: boolean; proposal: ExchangeRateProposal }>(
+      `/api/admin/exchange/rate-proposals/${id}/reject`,
+      { method: "POST" },
+    );
+  },
   previewExchangeRateCard() {
     return request<{ ok: boolean; proposals: ExchangeRateCardProposal[]; message: string }>(
       "/api/admin/exchange/rate-card/preview",
@@ -4352,9 +4398,9 @@ export const saas = {
     });
   },
   exchangeRequisites() {
-    return request<{ items: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }> }>(
-      "/api/admin/exchange/requisites",
-    );
+    return request<{
+      items: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }>;
+    }>("/api/admin/exchange/requisites");
   },
   exchangeOrders(status?: string, limit?: number) {
     const p = new URLSearchParams();
