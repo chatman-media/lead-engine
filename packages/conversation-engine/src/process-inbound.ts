@@ -16,17 +16,18 @@ import type {
   MessagesRepo,
   OutboundQueueRepo,
 } from "./dal/index.ts";
+import { detectScriptLang, mapChannelLangHint, resolveConversationLang } from "./language.ts";
 import { ensureAndAdvanceLeadByPhase } from "./lead-advance.ts";
 import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
-import { dispatchOutbound } from "./outbound-dispatch.ts";
+import type { NotificationService } from "./notifications.ts";
 import {
   emitOperatorHandoffNotifications,
   operatorMediaNotificationData,
   primaryOperatorHandoff,
 } from "./operator-handoff.ts";
+import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
 import type { ITranscriber } from "./transcriber.ts";
-import type { NotificationService } from "./notifications.ts";
 import {
   type ChannelContext,
   type Clock,
@@ -287,35 +288,32 @@ function inboundText(inbound: Inbound): { text: string; mediaOnly: boolean } {
 }
 
 function exchangeMediaHandoffData(input: {
-	text: string;
-	currentStage?: string | null;
-	hasVideoNote: boolean;
+  text: string;
+  currentStage?: string | null;
+  hasVideoNote: boolean;
 }): OperatorHandoffMeta {
-	const signal = `${input.text}\n${input.currentStage ?? ""}`.toLowerCase();
-	const paymentLike =
-		/(?:чек|оплат|receipt|proof|перевод|плат[её]ж|payment)/iu.test(signal);
-	if (paymentLike && !input.hasVideoNote) {
-		return {
-			reason: "payment_review",
-			title: "Проверить оплату по чеку",
-			action:
-				"Сверить чек/поступление, сумму, банк/rail и отправителя. После проверки подтвердить оплату или отметить проблему.",
-			priority: "high",
-			pending: "operator_payment_review",
-			reviewPath:
-				"operator_bot: payment_confirmed / payment_under_review / payment_problem",
-		};
-	}
-	return {
-		reason: "kyc_review",
-		title: "Проверить KYC клиента",
-		action:
-			"Проверить документ/фото/видео клиента, принять решение: KYC OK, запросить материалы или отклонить.",
-		priority: "high",
-		pending: "operator_kyc_decision",
-		reviewPath:
-			"operator_bot: kyc_approved / kyc_request_materials / kyc_rejected",
-	};
+  const signal = `${input.text}\n${input.currentStage ?? ""}`.toLowerCase();
+  const paymentLike = /(?:чек|оплат|receipt|proof|перевод|плат[её]ж|payment)/iu.test(signal);
+  if (paymentLike && !input.hasVideoNote) {
+    return {
+      reason: "payment_review",
+      title: "Проверить оплату по чеку",
+      action:
+        "Сверить чек/поступление, сумму, банк/rail и отправителя. После проверки подтвердить оплату или отметить проблему.",
+      priority: "high",
+      pending: "operator_payment_review",
+      reviewPath: "operator_bot: payment_confirmed / payment_under_review / payment_problem",
+    };
+  }
+  return {
+    reason: "kyc_review",
+    title: "Проверить KYC клиента",
+    action:
+      "Проверить документ/фото/видео клиента, принять решение: KYC OK, запросить материалы или отклонить.",
+    priority: "high",
+    pending: "operator_kyc_decision",
+    reviewPath: "operator_bot: kyc_approved / kyc_request_materials / kyc_rejected",
+  };
 }
 
 /**
@@ -407,15 +405,13 @@ export async function processInbound(
   // только если текст реально изменился. Это идемпотентно к ретраям самого
   // edited_message и к «техническим» правкам (превью ссылки и т.п.), не
   // меняющим наш текст — иначе бот переотвечал бы на каждый дубль.
-  const isRealEdit =
-    Boolean(inbound.edited) && existingMsg !== null && existingMsg.text !== text;
+  const isRealEdit = Boolean(inbound.edited) && existingMsg !== null && existingMsg.text !== text;
   // «Новый ход» диалога: либо первое появление сообщения, либо значимая правка.
   // Заменяет смысл `!existingMsg` для downstream-шагов (инбокс, уведомления,
   // extractFields, stage, memory, persisted, reply).
   const isNewTurn = !existingMsg || isRealEdit;
 
-  const postProcessingDeferred =
-    Boolean(deps.deferPostProcessing) && isNewTurn && text.length > 0;
+  const postProcessingDeferred = Boolean(deps.deferPostProcessing) && isNewTurn && text.length > 0;
   const hasNonTextPart = inbound.parts.some((p) => p.kind !== "text");
   let messageId: number;
   if (existingMsg && isRealEdit) {
@@ -496,6 +492,26 @@ export async function processInbound(
     });
   }
 
+  // 4a. #735 — детект и сохранение языка диалога (внутри tx1). Это фундамент
+  //     мультиязыка эпика #728: #730 (роутинг ответа) и #731 (перевод оператору)
+  //     читают conversation.detected_lang. Детект синхронный, дешёвый — никаких
+  //     LLM-вызовов (не дёргать prompt-cache + не держать tx). Confident-сигнал
+  //     по тексту перебивает channelHint; короткие реплики не сбивают залипание.
+  if (isNewTurn) {
+    const detected =
+      text.length > 0 ? detectScriptLang(text) : { lang: null, confident: false as const };
+    const resolved = resolveConversationLang({
+      current: (conversation.detectedLang ?? null) as import("./language.ts").Lang | null,
+      locked: conversation.langLocked,
+      detected,
+      channelHint: mapChannelLangHint(inbound.channelLangHint),
+      isFirstMessage: conversationCreated,
+    });
+    if (resolved.changed) {
+      await deps.conversations.setDetectedLang(conversation.id, resolved.lang, resolved.locked);
+    }
+  }
+
   // 4b. Notifications (Human takeover / Verification video / Document upload).
   const hasMedia = inbound.parts.some((p) => p.kind !== "text" && p.kind !== "callback_query");
   // «Кружок» (video_note) — опциональная видео-верификация: уходит оператору
@@ -548,9 +564,7 @@ export async function processInbound(
           // видео). Помечаем reason=kyc_review, чтобы в операторском боте под
           // уведомлением появились быстрые кнопки ✅ KYC OK / 📎 Дослать /
           // ⛔ Отклонить (иначе оператор видит только «Открыть/Взять/Вернуть AI»).
-          ...(deps.template?.slug === "exchange_v1" && hasMedia
-            ? { reason: "kyc_review" }
-            : {}),
+          ...(deps.template?.slug === "exchange_v1" && hasMedia ? { reason: "kyc_review" } : {}),
           // Клиент мог прислать паспорт/видео уже после передачи диалога оператору
           // (mode=human/queued). Прикладываем медиа-рефы, чтобы оператор видел сам
           // файл, а не только «(Медиа)» — как в verification_requested/document_uploaded.
@@ -566,8 +580,7 @@ export async function processInbound(
         data: {
           displayName: contact.displayName || "Без имени",
           text: text || "(Видео-кружок для верификации)",
-          action:
-            "Необходимо верифицировать клиента и документы перед выдачей реквизитов.",
+          action: "Необходимо верифицировать клиента и документы перед выдачей реквизитов.",
           ...operatorMediaNotificationData(inbound),
         },
       });
@@ -614,13 +627,7 @@ export async function processInbound(
   // 5a-bis. Stage classification (если classifier задан). Идёт ПОСЛЕ
   // extractFields и ПЕРЕД memory + reply: новая current_stage будет
   // прочитана reply-strategy'ей если она инжектит её в composeSystemPrompt.
-  if (
-    !postProcessingDeferred &&
-    deps.stageClassifier &&
-    deps.db &&
-    isNewTurn &&
-    text.length > 0
-  ) {
+  if (!postProcessingDeferred && deps.stageClassifier && deps.db && isNewTurn && text.length > 0) {
     try {
       const newStage = await deps.stageClassifier.classify({
         tenantId: deps.tenant.tenantId,
@@ -823,9 +830,7 @@ export async function processInbound(
         userMessageText: text,
         inbound,
         envelopes,
-        ...(replyOutput.operatorHandoffs
-          ? { operatorHandoffs: replyOutput.operatorHandoffs }
-          : {}),
+        ...(replyOutput.operatorHandoffs ? { operatorHandoffs: replyOutput.operatorHandoffs } : {}),
         notifications: deps.notifications ?? null,
         ...(deps.sink ? { sink: deps.sink } : {}),
       });
