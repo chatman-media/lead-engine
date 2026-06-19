@@ -485,7 +485,11 @@ describe("computeQuote — validation branches", () => {
 
     const missing = await computeQuote(db, tenantId, { asset: "LTC", amount: 1 });
     expect(missing.ok).toBe(false);
-    if (!missing.ok) expect(missing.error).toContain("не поддерживается");
+    if (!missing.ok) {
+      // Отказ больше не тупик: несёт реальные доступные направления.
+      expect(missing.error).toContain("не обслуживается");
+      expect(missing.availableDirections?.length ?? 0).toBeGreaterThan(0);
+    }
 
     const belowMin = await computeQuote(db, tenantId, { asset: "TRX", amount: 50 });
     expect(belowMin.ok).toBe(false);

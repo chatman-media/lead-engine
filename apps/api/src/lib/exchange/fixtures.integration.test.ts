@@ -302,4 +302,40 @@ describe("exchange deterministic fixtures", () => {
 		expect(info.payoutMethods).toContain("Cardless ATM code");
 		expect(info.kycPolicy).toContain("KYC is required");
 	});
+
+	it("lists only real configured directions and rejects unknown pair with alternatives", async () => {
+		if (!sql || !appSql) return;
+		await seedExchangeFixtures({
+			db: appDb as Db,
+			tenantId,
+			masterKeyHex: MASTER_KEY,
+			nowEpoch: NOW,
+		});
+		const conversationId = await createVerifiedConversation();
+		const tools = toolsFor(conversationId);
+
+		const list = (await tools.list_exchange_directions?.execute({})) as {
+			quoteAsset: string;
+			directions: Array<{ asset: string; kind: string; networks: string[] }>;
+			display: string;
+		};
+		expect(list.quoteAsset).toBe("PHP");
+		// Реальные направления PHP-набора — USDT/RUB/USD. BTC/ETH/EUR из старого
+		// захардкоженного списка отсутствуют (это и был баг со скриншота).
+		expect(list.directions.map((d) => d.asset).sort()).toEqual(["RUB", "USD", "USDT"]);
+		const usdt = list.directions.find((d) => d.asset === "USDT");
+		expect(usdt?.kind).toBe("crypto");
+		expect(usdt?.networks).toEqual(expect.arrayContaining(["TRC20", "ERC20", "BEP20"]));
+		expect(list.display).toContain("USDT");
+		expect(list.display).not.toContain("BTC");
+
+		// Неподдерживаемое направление больше не тупик: ошибка несёт альтернативы.
+		const rejected = (await tools.compute_exchange_quote?.execute({
+			asset: "BTC",
+			amount: 1,
+		})) as { error?: string; availableDirections?: Array<{ asset: string }> };
+		expect(rejected.error).toContain("не обслуживается");
+		expect(rejected.error).not.toContain("не продолжай");
+		expect(rejected.availableDirections?.map((d) => d.asset)).toContain("USDT");
+	});
 });

@@ -47,7 +47,15 @@ import {
   updateOrder,
 } from "./orders.ts";
 import { getPaymentProvider, verifyWestWalletInvoicePayment } from "./providers.ts";
-import { computeQuote, isCryptoAsset, normAsset, resolveNetwork } from "./rates.ts";
+import {
+  computeQuote,
+  formatDirectionsForClient,
+  getTenantQuoteCurrency,
+  isCryptoAsset,
+  listActiveDirections,
+  normAsset,
+  resolveNetwork,
+} from "./rates.ts";
 import { assessOrderRisk } from "./risk.ts";
 import { getExchangeVerificationStatus } from "./verification.ts";
 
@@ -376,7 +384,7 @@ export interface ExchangeToolsDeps {
 const AssetEnum = z
   .string()
   .describe(
-    `Актив, который отдаёт клиент: USDT, BTC, ETH, RUB, EUR или USD. Если клиент хочет отдать ${QUOTE_CURRENCY.code} (баты) — это направление мы не обслуживаем, сообщи об этом сразу и не продолжай сбор данных.`,
+    `Актив, который отдаёт клиент (например USDT, BTC, RUB — точный список направлений бери из list_exchange_directions, не из этого перечня). Если клиент хочет отдать ${QUOTE_CURRENCY.code} — это направление недоступно: не упирайся в тупик, предложи доступные направления (list_exchange_directions) и спроси, что подходит.`,
   );
 const AmountModeEnum = z
   .enum(["source_amount", "target_thb"])
@@ -410,6 +418,9 @@ const KNOWN_EXCHANGE_STAGES = new Set([
 ]);
 
 const TOOL_STAGE_MATRIX: Record<string, Set<string> | "any"> = {
+  // Список доступных направлений можно показать на любой стадии (клиент вправе
+  // переспросить «а что ещё меняете» хоть перед оплатой).
+  list_exchange_directions: "any",
   compute_exchange_quote: new Set([
     "exchange_request",
     "quote_calculated",
@@ -598,7 +609,11 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       });
       if (!q.ok) {
         if (q.guard?.tripped) onGuardTrip(asset, network, q.guard);
-        return { error: q.error };
+        // Неподдерживаемое направление: прокидываем реальные альтернативы, чтобы
+        // бот сразу предложил их клиенту, а не упёрся в тупик.
+        return q.availableDirections
+          ? { error: q.error, availableDirections: q.availableDirections }
+          : { error: q.error };
       }
 
       // Перекотировка до оплаты: клиент назвал ДРУГУЮ сумму/актив/режим, чем в
@@ -1273,6 +1288,38 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
   // оператора, способы выдачи, KYC-политика, адреса офисов. Бот отвечает
   // «когда работаете / какие документы / как получить / куда подойти» из
   // настроек, не выдумывая.
+  const listDirectionsTool: AnyRagTool = {
+    name: "list_exchange_directions",
+    description: [
+      "Вернуть РЕАЛЬНО доступные направления обмена тенанта (что можно котировать прямо сейчас).",
+      "Вызывай в начале диалога, когда клиент спрашивает «что меняете / какие валюты / какие направления»,",
+      "и ОБЯЗАТЕЛЬНО когда клиент назвал направление, которого нет, — чтобы сразу предложить альтернативу, а не упереться в тупик.",
+      "НИКОГДА не перечисляй валюты по памяти — список валют только из этого инструмента.",
+      `Все направления идут в ${QUOTE_CURRENCY.code} (котируемая валюта тенанта).`,
+    ].join(" "),
+    parameters: z.object({}),
+    execute: async () => {
+      const directions = await listActiveDirections(db, tenantId);
+      if (directions.length === 0) {
+        return {
+          note: "Активных направлений нет. Не выдумывай валюты — подключи оператора.",
+        };
+      }
+      const currency = await getTenantQuoteCurrency(db, tenantId);
+      return {
+        quoteAsset: currency.code,
+        directions: directions.map((d) => ({
+          asset: d.asset,
+          kind: d.isCrypto ? "crypto" : "fiat",
+          networks: d.networks,
+          ...(d.minAmountFrom != null ? { minAmountFrom: d.minAmountFrom } : {}),
+          ...(d.maxAmountFrom != null ? { maxAmountFrom: d.maxAmountFrom } : {}),
+        })),
+        display: formatDirectionsForClient(directions, currency.code),
+      };
+    },
+  };
+
   const businessInfoTool: AnyRagTool = {
     name: "get_exchange_business_info",
     description: [
@@ -1408,6 +1455,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       typeof r.orderId === "number" && !r.error ? "payout_or_completion" : null,
     ),
     businessInfoTool,
+    listDirectionsTool,
   ].map((tool) => withExchangeStageGuard(tool, stageSlug, resolveCurrentStage));
 
   // Policy-текст (текущая стадия + разрешённые инструменты) добавляем ОДИН раз —

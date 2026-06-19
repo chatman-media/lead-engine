@@ -68,6 +68,22 @@ export interface QuoteError {
   error: string;
   /** Заполнено, если котировку заблокировал guardrail (а не обычная валидация). */
   guard?: RateGuardTrip;
+  /**
+   * Заполнено при отказе из-за неподдерживаемого направления: реальные активные
+   * направления тенанта, чтобы бот сразу предложил их вместо тупика.
+   */
+  availableDirections?: ExchangeDirection[];
+}
+
+/** Одно активное направление обмена тенанта (что РЕАЛЬНО можно котировать). */
+export interface ExchangeDirection {
+  asset: string; // "USDT"
+  isCrypto: boolean;
+  /** Сети для крипты (uppercase), напр. ["TRC20","ERC20"]; для фиата — пусто. */
+  networks: string[];
+  quoteAsset: string; // "PHP"
+  minAmountFrom: number | null;
+  maxAmountFrom: number | null;
 }
 
 export function normAsset(a: string): string {
@@ -210,6 +226,71 @@ function round(n: number, dp: number): number {
 }
 
 /**
+ * Активные направления обмена тенанта в текущей котируемой валюте. ЕДИНЫЙ источник
+ * правды с computeQuote: тот же фильтр (isActive + quoteAsset тенанта), поэтому
+ * «что предлагаем клиенту» === «что реально посчитается». Сети одного актива
+ * (TRC20/ERC20/…) схлопываются в одно направление.
+ */
+export async function listActiveDirections(db: Db, tenantId: number): Promise<ExchangeDirection[]> {
+  const currency = await getTenantQuoteCurrency(db, tenantId);
+  return withTenant(db, tenantId, async (tx) => {
+    const rows = await tx
+      .select({
+        asset: exchangeRates.asset,
+        network: exchangeRates.network,
+        minAmountFrom: exchangeRates.minAmountFrom,
+        maxAmountFrom: exchangeRates.maxAmountFrom,
+      })
+      .from(exchangeRates)
+      .where(
+        and(
+          eq(exchangeRates.tenantId, tenantId),
+          eq(exchangeRates.quoteAsset, currency.code),
+          eq(exchangeRates.isActive, true),
+        ),
+      )
+      .orderBy(asc(exchangeRates.asset));
+    const byAsset = new Map<string, ExchangeDirection>();
+    for (const row of rows) {
+      const asset = normAsset(row.asset);
+      const dir: ExchangeDirection = byAsset.get(asset) ?? {
+        asset,
+        isCrypto: isCryptoAsset(asset),
+        networks: [],
+        quoteAsset: currency.code,
+        minAmountFrom: row.minAmountFrom === null ? null : Number(row.minAmountFrom),
+        maxAmountFrom: row.maxAmountFrom === null ? null : Number(row.maxAmountFrom),
+      };
+      const net = normNetwork(row.network).toUpperCase();
+      if (net && !dir.networks.includes(net)) dir.networks.push(net);
+      byAsset.set(asset, dir);
+    }
+    return [...byAsset.values()];
+  });
+}
+
+/**
+ * Человекочитаемая строка доступных направлений для ответа клиенту: крипта (с
+ * сетями) и фиат раздельно, всё → котируемая валюта. Пусто, если направлений нет.
+ */
+export function formatDirectionsForClient(dirs: ExchangeDirection[], quoteAsset: string): string {
+  if (dirs.length === 0) return "";
+  const crypto = dirs.filter((d) => d.isCrypto);
+  const fiat = dirs.filter((d) => !d.isCrypto);
+  const parts: string[] = [];
+  if (crypto.length > 0) {
+    const list = crypto
+      .map((d) => (d.networks.length > 0 ? `${d.asset} (${d.networks.join("/")})` : d.asset))
+      .join(", ");
+    parts.push(`крипта: ${list}`);
+  }
+  if (fiat.length > 0) {
+    parts.push(`валюты: ${fiat.map((d) => d.asset).join(", ")}`);
+  }
+  return `${parts.join("; ")} → ${quoteAsset}`;
+}
+
+/**
  * Считает котировку. Чистая функция поверх активного курса тенанта.
  * Возвращает QuoteError при отсутствии курса, неположительной сумме или
  * нарушении лимитов (min/max).
@@ -236,9 +317,17 @@ export async function computeQuote(
 
   const row = await findActiveRateRow(db, tenantId, asset, network, currency.code);
   if (!row) {
+    // НЕ тупик: вместо «не продолжай сбор данных» отдаём реальные доступные
+    // направления, чтобы бот сразу предложил клиенту альтернативу и вёл сделку.
+    const availableDirections = await listActiveDirections(db, tenantId);
+    const human = formatDirectionsForClient(availableDirections, currency.code);
+    const head = `Направление ${asset}${network ? ` (${network.toUpperCase()})` : ""}→${currency.code} не обслуживается.`;
     return {
       ok: false,
-      error: `Направление ${asset}${network ? ` (${network.toUpperCase()})` : ""}→${currency.code} не поддерживается: мы не работаем с этой парой. Сообщи клиенту: «Это направление обмена мы не обслуживаем» — и не продолжай сбор данных.`,
+      error: human
+        ? `${head} Сразу предложи клиенту доступные направления и спроси, что из этого подходит и на какую сумму: ${human}.`
+        : `${head} Сообщи клиенту, что направление недоступно, и подключи оператора.`,
+      availableDirections,
     };
   }
 

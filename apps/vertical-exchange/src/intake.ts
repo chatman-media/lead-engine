@@ -7,16 +7,16 @@ import { QUOTE_CURRENCY, type QuestionnaireSchema } from "@chatman-media/vertica
  */
 export const EXCHANGE_INTAKE: QuestionnaireSchema = {
 	stageSlug: "exchange_request",
-	introMessage: `Здравствуйте! Я менеджер обменного пункта. Подскажите, что меняете, сумму и как хотите получить ${QUOTE_CURRENCY.code}.`,
+	introMessage: `Здравствуйте! Я менеджер обменного пункта. Скажите, что хотите обменять и на какую сумму, — или спросите, какие направления доступны, и я покажу актуальный список и как удобнее получить ${QUOTE_CURRENCY.code}.`,
 	completionMessage: "Понял параметры обмена. Сейчас рассчитаю курс и сумму к получению.",
 	fields: [
 		{
 			slug: "asset_from",
-			question: "Что отдаёте: USDT, BTC, ETH, RUB или другую валюту?",
+			question: "Что отдаёте? Если не уверены в направлении — покажу актуальный список доступных.",
 			kind: "enum",
 			required: true,
 			options: ["USDT", "BTC", "ETH", "RUB", "EUR", "USD"],
-			hint: "Актив или валюта, которую клиент отдаёт.",
+			hint: "Актив/валюта, которую отдаёт клиент. Реальный список направлений — из list_exchange_directions, не из этого перечня.",
 		},
 		{
 			slug: "network",
