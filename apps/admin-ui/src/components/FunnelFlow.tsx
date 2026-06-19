@@ -1,32 +1,38 @@
 import {
   ArrowRightIcon,
   Building2Icon,
+  ChevronRightIcon,
+  CircleCheckIcon,
   CircleDotIcon,
+  CircleXIcon,
   Clock3Icon,
   FlameIcon,
   GitBranchIcon,
-  MapIcon,
+  HourglassIcon,
   RouteIcon,
+  TriangleAlertIcon,
   TrophyIcon,
   UsersRoundIcon,
 } from "lucide-react";
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 
-import type { LeadListItem, StageDefinition } from "@/api/saas";
+import type { FunnelAnalytics, LeadListItem, StageDefinition } from "@/api/saas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
-type CityFilter = "all" | "hot" | "idle";
+type FlowFilter = "all" | "hot" | "idle";
 
-interface PipelineMap3dProps {
+interface FunnelFlowProps {
   stages: StageDefinition[];
   leads: LeadListItem[];
+  /** Сквозная аналитика воронки (конверсия + скорость). null у необменных тенантов. */
+  analytics: FunnelAnalytics | null;
   onOpenLead: (leadId: number) => void;
   onOpenLeads: () => void;
   onOpenFunnel: () => void;
 }
 
-interface CityStage {
+interface FlowStage {
   id: number | "unassigned";
   displayName: string;
   kind: StageDefinition["kind"] | "unassigned";
@@ -34,16 +40,17 @@ interface CityStage {
   color: string;
   fields: StageDefinition["fields"];
   leads: LeadListItem[];
+  /** Сколько лидов когда-либо вошло в этап (из аналитики). */
+  entered: number | null;
+  /** Среднее время в этапе, дни (из аналитики). */
+  avgDays: number | null;
+  /** Конверсия из предыдущего активного этапа, %. null = нет входящего / нет данных. */
+  conversion: number | null;
+  /** Отток лидов на входе в этап (entered[prev] - entered[this]). */
+  drop: number | null;
 }
 
-interface FlowNode {
-  stage: CityStage;
-  index: number;
-  x: number;
-  y: number;
-}
-
-const FILTER_LABEL: Record<CityFilter, string> = {
+const FILTER_LABEL: Record<FlowFilter, string> = {
   all: "Все",
   hot: "Горячие",
   idle: "Застряли",
@@ -93,6 +100,20 @@ function formatAge(lead: LeadListItem): string {
   return `${Math.round(hours / 24)} д назад`;
 }
 
+function formatDays(days: number): string {
+  if (days <= 0) return "0 д";
+  if (days < 1) return `${Math.max(1, Math.round(days * 24))} ч`;
+  return `${Math.round(days * 10) / 10} д`;
+}
+
+function pluralLeads(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "лид";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "лида";
+  return "лидов";
+}
+
 function usableColor(color: string | null | undefined, index: number): string {
   const clean = color?.trim();
   return clean && /^#[0-9a-f]{6}$/i.test(clean)
@@ -109,18 +130,19 @@ function leadProgress(lead: LeadListItem): number {
   return Math.round((lead.requiredFieldsFilled / lead.requiredFieldsTotal) * 100);
 }
 
-function isTerminalStage(stage: CityStage | StageDefinition | null | undefined): boolean {
+function isTerminalStage(stage: FlowStage | StageDefinition | null | undefined): boolean {
   return stage?.kind === "terminal_won" || stage?.kind === "terminal_lost";
 }
 
-function isWonLead(lead: LeadListItem, stage: CityStage | StageDefinition | null | undefined) {
+function isWonLead(lead: LeadListItem, stage: StageDefinition | null | undefined) {
   return lead.state === "won" || stage?.kind === "terminal_won";
 }
 
-function isTerminalLead(
-  lead: LeadListItem,
-  stageById: Map<number, StageDefinition> | Map<number, CityStage>,
-): boolean {
+function isLostLead(lead: LeadListItem, stage: StageDefinition | null | undefined) {
+  return lead.state === "lost" || stage?.kind === "terminal_lost";
+}
+
+function isTerminalLead(lead: LeadListItem, stageById: Map<number, StageDefinition>): boolean {
   const stage = lead.stageDefinitionId ? stageById.get(lead.stageDefinitionId) : null;
   return lead.state === "won" || lead.state === "lost" || isTerminalStage(stage);
 }
@@ -143,7 +165,7 @@ function stateLabel(lead: LeadListItem | null): string {
   return "в работе";
 }
 
-function questionForStage(stage: CityStage | null, lead: LeadListItem | null): string {
+function questionForStage(stage: FlowStage | null, lead: LeadListItem | null): string {
   if (!stage) return "выбрать этап";
   const missingField = stage.fields.find((field) => field.required);
   if (missingField) return `спросить: ${missingField.displayName}`;
@@ -153,7 +175,7 @@ function questionForStage(stage: CityStage | null, lead: LeadListItem | null): s
 
 function filterLead(
   lead: LeadListItem,
-  filter: CityFilter,
+  filter: FlowFilter,
   stageById: Map<number, StageDefinition>,
 ): boolean {
   if (filter === "hot") return isHotLead(lead, stageById);
@@ -161,61 +183,8 @@ function filterLead(
   return true;
 }
 
-function buildCityStages(stages: StageDefinition[], leads: LeadListItem[]): CityStage[] {
-  const sorted = [...stages].sort((a, b) => a.position - b.position || a.id - b.id);
-  const stageIds = new Set(sorted.map((stage) => stage.id));
-  const unassignedLeads = leads.filter(
-    (lead) => !lead.stageDefinitionId || !stageIds.has(lead.stageDefinitionId),
-  );
-  const mapped = sorted.map((stage, index) => ({
-    id: stage.id,
-    displayName: stage.displayName,
-    kind: stage.kind,
-    stageType: stage.stageType,
-    color: usableColor(stage.color, index),
-    fields: stage.fields,
-    leads: leads.filter((lead) => lead.stageDefinitionId === stage.id),
-  }));
-
-  if (unassignedLeads.length > 0 || mapped.length === 0) {
-    return [
-      {
-        id: "unassigned",
-        displayName: "Входящие",
-        kind: "unassigned",
-        stageType: "unassigned",
-        color: "#64748b",
-        fields: [],
-        leads: unassignedLeads,
-      },
-      ...mapped,
-    ];
-  }
-
-  return mapped;
-}
-
-function createFlowNodes(cityStages: CityStage[]): FlowNode[] {
-  const total = cityStages.length;
-  const columns = Math.max(1, Math.ceil(total / 2));
-  const xStep = columns <= 1 ? 0 : 72 / (columns - 1);
-  return cityStages.map((stage, index) => ({
-    stage,
-    index,
-    x: total === 1 ? 50 : index < columns ? 14 + index * xStep : 86 - (index - columns) * xStep,
-    y: index < columns ? 28 : 70,
-  }));
-}
-
-function stageCompletion(stage: CityStage): number {
-  const total = stage.leads.reduce((sum, lead) => sum + lead.requiredFieldsTotal, 0);
-  if (total <= 0) return stage.leads.length > 0 ? 20 : 0;
-  const filled = stage.leads.reduce((sum, lead) => sum + lead.requiredFieldsFilled, 0);
-  return Math.round((filled / total) * 100);
-}
-
 function stageLoadTone(
-  stage: CityStage,
+  stage: FlowStage,
   stageById: Map<number, StageDefinition>,
 ): "hot" | "idle" | "ok" {
   if (stage.leads.some((lead) => isIdleLead(lead, stageById))) return "idle";
@@ -223,35 +192,100 @@ function stageLoadTone(
   return "ok";
 }
 
-function stageStyle(stage: CityStage): CSSProperties {
+function stageStyle(stage: FlowStage): CSSProperties {
   return { "--flow-color": stage.color } as CSSProperties;
 }
 
-function flowPoint(node: FlowNode): { x: number; y: number } {
-  return { x: node.x * 10, y: 34 + node.y * 2.6 };
+interface BuiltFunnel {
+  /** Активные этапы слева-направо (с буфером «Входящие» при наличии). */
+  active: FlowStage[];
+  won: number;
+  lost: number;
 }
 
-function flowPath(nodes: FlowNode[]): string {
-  if (nodes.length === 0) return "";
-  const first = flowPoint(nodes[0]);
-  const parts = [`M ${first.x} ${first.y}`];
-  for (let index = 1; index < nodes.length; index += 1) {
-    const prev = flowPoint(nodes[index - 1]);
-    const next = flowPoint(nodes[index]);
-    const mid = (prev.x + next.x) / 2;
-    parts.push(`C ${mid} ${prev.y}, ${mid} ${next.y}, ${next.x} ${next.y}`);
+/**
+ * Строит ленту активных этапов с конверсией/скоростью и считает исходы.
+ * Конверсия/время берутся из сквозной аналитики (не зависят от фильтра),
+ * текущие лиды/чипы — из переданного (отфильтрованного) списка.
+ */
+function buildFunnel(
+  stages: StageDefinition[],
+  leads: LeadListItem[],
+  analytics: FunnelAnalytics | null,
+): BuiltFunnel {
+  const sorted = [...stages].sort((a, b) => a.position - b.position || a.id - b.id);
+  const stageIds = new Set(sorted.map((stage) => stage.id));
+  const analyticsById = new Map((analytics?.stages ?? []).map((stage) => [stage.id, stage]));
+  const unassignedLeads = leads.filter(
+    (lead) => !lead.stageDefinitionId || !stageIds.has(lead.stageDefinitionId),
+  );
+
+  const mapped: FlowStage[] = sorted.map((stage, index) => {
+    const a = analyticsById.get(stage.id) ?? null;
+    return {
+      id: stage.id,
+      displayName: stage.displayName,
+      kind: stage.kind,
+      stageType: stage.stageType,
+      color: usableColor(stage.color, index),
+      fields: stage.fields,
+      leads: leads.filter((lead) => lead.stageDefinitionId === stage.id),
+      entered: a?.leadsEntered ?? null,
+      avgDays: a?.avgDaysInStage ?? null,
+      conversion: null,
+      drop: null,
+    };
+  });
+
+  // Цепочка конверсии — только проходные этапы (терминалы — это исходы, не шаги).
+  const chain = mapped.filter((stage) => stage.kind === "intake" || stage.kind === "active");
+  let prevEntered: number | null = null;
+  for (const stage of chain) {
+    if (prevEntered != null && prevEntered > 0 && stage.entered != null) {
+      stage.conversion = Math.round((stage.entered / prevEntered) * 100);
+      stage.drop = Math.max(0, prevEntered - stage.entered);
+    }
+    if (stage.entered != null) prevEntered = stage.entered;
   }
-  return parts.join(" ");
+
+  const active: FlowStage[] = [];
+  if (unassignedLeads.length > 0 || chain.length === 0) {
+    active.push({
+      id: "unassigned",
+      displayName: "Входящие",
+      kind: "unassigned",
+      stageType: "unassigned",
+      color: "#64748b",
+      fields: [],
+      leads: unassignedLeads,
+      entered: null,
+      avgDays: null,
+      conversion: null,
+      drop: null,
+    });
+  }
+  active.push(...chain);
+
+  const stageById = new Map(stages.map((stage) => [stage.id, stage]));
+  const won = leads.filter((lead) =>
+    isWonLead(lead, lead.stageDefinitionId ? stageById.get(lead.stageDefinitionId) : null),
+  ).length;
+  const lost = leads.filter((lead) =>
+    isLostLead(lead, lead.stageDefinitionId ? stageById.get(lead.stageDefinitionId) : null),
+  ).length;
+
+  return { active, won, lost };
 }
 
-export function PipelineMap3d({
+export function FunnelFlow({
   stages,
   leads,
+  analytics,
   onOpenLead,
   onOpenLeads,
   onOpenFunnel,
-}: PipelineMap3dProps) {
-  const [filter, setFilter] = useState<CityFilter>("all");
+}: FunnelFlowProps) {
+  const [filter, setFilter] = useState<FlowFilter>("all");
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
 
   const stageById = useMemo(() => new Map(stages.map((stage) => [stage.id, stage])), [stages]);
@@ -261,16 +295,42 @@ export function PipelineMap3d({
     [filter, leads, stageById],
   );
 
-  const cityStages = useMemo(() => buildCityStages(stages, filteredLeads), [filteredLeads, stages]);
-  const flowNodes = useMemo(() => createFlowNodes(cityStages), [cityStages]);
+  const funnel = useMemo(
+    () => buildFunnel(stages, filteredLeads, analytics),
+    [stages, filteredLeads, analytics],
+  );
+  const active = funnel.active;
+  const maxCurrent = useMemo(
+    () => Math.max(1, ...active.map((stage) => stage.leads.length)),
+    [active],
+  );
 
-  const cityStageById = useMemo(() => {
-    const map = new Map<number, CityStage>();
-    for (const stage of cityStages) {
+  // Сквозные номера присваиваем только проходным этапам, буфер «Входящие» — без номера.
+  const stageNumbers = useMemo(() => {
+    let n = 0;
+    return active.map((stage) => (typeof stage.id === "number" ? ++n : null));
+  }, [active]);
+
+  const flowStageById = useMemo(() => {
+    const map = new Map<number, FlowStage>();
+    for (const stage of active) {
       if (typeof stage.id === "number") map.set(stage.id, stage);
     }
     return map;
-  }, [cityStages]);
+  }, [active]);
+
+  // Узкое место: проходной этап с минимальной конверсией (тай-брейк — медленнее).
+  const bottleneck = useMemo(() => {
+    const candidates = active.filter((stage) => stage.conversion != null);
+    if (candidates.length === 0) return null;
+    return candidates.reduce((worst, stage) => {
+      const c = stage.conversion ?? 100;
+      const wc = worst.conversion ?? 100;
+      if (c < wc) return stage;
+      if (c === wc && (stage.avgDays ?? 0) > (worst.avgDays ?? 0)) return stage;
+      return worst;
+    });
+  }, [active]);
 
   useEffect(() => {
     if (filteredLeads.length === 0) {
@@ -284,9 +344,9 @@ export function PipelineMap3d({
 
   const selectedLead = filteredLeads.find((lead) => lead.id === selectedLeadId) ?? null;
   const selectedStage =
-    (selectedLead?.stageDefinitionId ? cityStageById.get(selectedLead.stageDefinitionId) : null) ??
-    cityStages.find((stage) => stage.id === "unassigned") ??
-    cityStages[0] ??
+    (selectedLead?.stageDefinitionId ? flowStageById.get(selectedLead.stageDefinitionId) : null) ??
+    active.find((stage) => stage.id === "unassigned") ??
+    active[0] ??
     null;
   const selectedQuestion = questionForStage(selectedStage, selectedLead);
   const selectedRequiredTotal = selectedLead?.requiredFieldsTotal ?? 0;
@@ -305,26 +365,47 @@ export function PipelineMap3d({
     [leads, stageById],
   );
 
+  const stageCount = active.filter((stage) => typeof stage.id === "number").length;
+  const firstEntered = active.find(
+    (stage) => stage.kind !== "unassigned" && stage.entered != null,
+  )?.entered;
+  const overall =
+    firstEntered && firstEntered > 0 ? Math.round((funnel.won / firstEntered) * 100) : null;
+  const subtitle =
+    `${stageCount} ${stageCount === 1 ? "этап" : "этапов"} в потоке` +
+    (overall != null ? ` · сквозная конверсия ${overall}%` : "");
+
+  function focusBottleneck() {
+    if (!bottleneck) return;
+    const target =
+      bottleneck.leads.find((lead) => isIdleLead(lead, stageById)) ?? bottleneck.leads[0];
+    if (target) {
+      setSelectedLeadId(target.id);
+    } else {
+      onOpenLeads();
+    }
+  }
+
   const visibleLeadRows = filteredLeads.slice(0, 8);
 
   return (
-    <section className="lead-city-shell">
+    <section className="funnel-flow-shell">
       <div className="flex flex-col gap-4 p-4 sm:p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <MapIcon className="size-4" />
-              Карта пути лида
+              <RouteIcon className="size-4" />
+              Поток воронки
             </div>
-            <h2 className="mt-1 text-xl font-semibold tracking-tight">Lead Flow Board</h2>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight">Где сейчас лиды</h2>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Схема этапов, нагрузки и следующего действия по каждому лиду.
+              Объём, конверсия между этапами и узкое место — слева направо по воронке.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-lg border p-0.5">
-              {(Object.keys(FILTER_LABEL) as CityFilter[]).map((value) => (
+              {(Object.keys(FILTER_LABEL) as FlowFilter[]).map((value) => (
                 <button
                   key={value}
                   type="button"
@@ -347,37 +428,38 @@ export function PipelineMap3d({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <CityMetric
+          <FlowMetric
             icon={<UsersRoundIcon className="size-4" />}
             label="Лидов в схеме"
             value={metrics.total}
           />
-          <CityMetric
+          <FlowMetric
             icon={<FlameIcon className="size-4" />}
             label="Горячих"
             value={metrics.hot}
             tone="hot"
           />
-          <CityMetric
-            icon={<Clock3Icon className="size-4" />}
+          <FlowMetric
+            icon={<HourglassIcon className="size-4" />}
             label="Застряли"
             value={metrics.idle}
             tone="idle"
           />
-          <CityMetric
+          <FlowMetric
             icon={<TrophyIcon className="size-4" />}
-            label="Дошли до финиша"
+            label="Выдано"
             value={metrics.won}
+            tone="won"
           />
         </div>
 
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
-          <div className="lead-city-board">
-            <div className="lead-flow-toolbar">
+          <div className="funnel-flow-board">
+            <div className="funnel-flow-toolbar">
               <div>
-                <p className="text-sm font-semibold">Pipeline topology</p>
+                <p className="text-sm font-semibold">{subtitle}</p>
                 <p className="text-xs text-muted-foreground">
-                  {cityStages.length} этапов · {filteredLeads.length} лидов в текущем фильтре
+                  {filteredLeads.length} {pluralLeads(filteredLeads.length)} в текущем фильтре
                 </p>
               </div>
               <Badge variant="secondary">
@@ -386,25 +468,49 @@ export function PipelineMap3d({
               </Badge>
             </div>
 
-            <div className="lead-flow-viewport">
-              <div className="lead-flow-plane">
-                <FlowRail nodes={flowNodes} />
-                {flowNodes.map((node) => (
-                  <StageNode
-                    key={node.stage.id}
-                    node={node}
+            {bottleneck && (
+              <div className="funnel-flow-bottleneck">
+                <TriangleAlertIcon className="size-4 shrink-0" />
+                <p className="min-w-0 flex-1 text-sm">
+                  Узкое место: <span className="font-semibold">{bottleneck.displayName}</span> —
+                  конверсия {bottleneck.conversion}%
+                  {bottleneck.drop != null && bottleneck.drop > 0
+                    ? `, теряется ${bottleneck.drop} ${pluralLeads(bottleneck.drop)}`
+                    : ""}
+                  {bottleneck.avgDays != null
+                    ? `, ср. ожидание ${formatDays(bottleneck.avgDays)}`
+                    : ""}
+                  .
+                </p>
+                <Button size="sm" variant="outline" onClick={focusBottleneck}>
+                  Разобрать
+                </Button>
+              </div>
+            )}
+
+            <div className="funnel-flow-lane">
+              {active.map((stage, index) => (
+                <Fragment key={stage.id}>
+                  {index > 0 && <StageConnector conversion={stage.conversion} />}
+                  <StageColumn
+                    stage={stage}
+                    number={stageNumbers[index]}
+                    maxCurrent={maxCurrent}
                     stageById={stageById}
+                    isBottleneck={bottleneck?.id === stage.id}
                     selectedStageId={selectedStage?.id ?? null}
                     selectedLeadId={selectedLeadId}
-                    onSelectStage={(stage) => setSelectedLeadId(stage.leads[0]?.id ?? null)}
+                    onSelectStage={(target) => setSelectedLeadId(target.leads[0]?.id ?? null)}
                     onSelectLead={setSelectedLeadId}
                   />
-                ))}
-              </div>
+                </Fragment>
+              ))}
+              <StageConnector outcome />
+              <OutcomeTiles won={funnel.won} lost={funnel.lost} />
             </div>
           </div>
 
-          <aside className="lead-city-panel">
+          <aside className="funnel-flow-panel">
             {selectedLead ? (
               <>
                 <div className="flex items-start justify-between gap-3">
@@ -419,7 +525,7 @@ export function PipelineMap3d({
                   </Badge>
                 </div>
 
-                <div className="lead-city-action">
+                <div className="funnel-flow-action">
                   <p className="text-xs font-medium uppercase text-muted-foreground">
                     Следующий шаг
                   </p>
@@ -474,17 +580,20 @@ export function PipelineMap3d({
               <div className="space-y-1.5">
                 {visibleLeadRows.map((lead) => {
                   const stage = lead.stageDefinitionId
-                    ? cityStageById.get(lead.stageDefinitionId)
+                    ? flowStageById.get(lead.stageDefinitionId)
                     : null;
                   const leadColor = stage?.color ?? "#64748b";
                   return (
                     <button
                       key={lead.id}
                       type="button"
-                      className={`lead-city-row ${lead.id === selectedLeadId ? "is-selected" : ""}`}
+                      className={`funnel-flow-row ${lead.id === selectedLeadId ? "is-selected" : ""}`}
                       onClick={() => setSelectedLeadId(lead.id)}
                     >
-                      <span className="lead-city-row-avatar" style={{ backgroundColor: leadColor }}>
+                      <span
+                        className="funnel-flow-row-avatar"
+                        style={{ backgroundColor: leadColor }}
+                      >
                         <CircleDotIcon className="size-3" />
                       </span>
                       <span className="min-w-0 flex-1 text-left">
@@ -508,109 +617,150 @@ export function PipelineMap3d({
   );
 }
 
-function FlowRail({ nodes }: { nodes: FlowNode[] }) {
-  const path = flowPath(nodes);
+function StageConnector({
+  conversion,
+  outcome,
+}: {
+  conversion?: number | null;
+  outcome?: boolean;
+}) {
+  if (outcome) {
+    return (
+      <div className="funnel-flow-connector is-outcome" aria-hidden="true">
+        <ChevronRightIcon className="funnel-flow-connector-icon size-4" />
+      </div>
+    );
+  }
+  const tone =
+    conversion == null ? "na" : conversion >= 75 ? "good" : conversion >= 50 ? "warn" : "bad";
   return (
-    <svg className="lead-flow-rail" viewBox="0 0 1000 320" aria-hidden="true">
-      <defs>
-        <linearGradient id="lead-flow-gradient" x1="0" x2="1" y1="0" y2="0">
-          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.5" />
-          <stop offset="50%" stopColor="#a78bfa" stopOpacity="0.55" />
-          <stop offset="100%" stopColor="#22c55e" stopOpacity="0.48" />
-        </linearGradient>
-      </defs>
-      <path className="lead-flow-rail-shadow" d={path} />
-      <path className="lead-flow-rail-line" d={path} />
-      {nodes.map((node) => {
-        const point = flowPoint(node);
-        return (
-          <g key={node.stage.id}>
-            <circle className="lead-flow-rail-dot-glow" cx={point.x} cy={point.y} r="22" />
-            <circle className="lead-flow-rail-dot" cx={point.x} cy={point.y} r="6" />
-          </g>
-        );
-      })}
-    </svg>
+    <div className={`funnel-flow-connector is-${tone}`}>
+      <ChevronRightIcon className="funnel-flow-connector-icon size-4" />
+      {conversion != null && <span className="funnel-flow-pill">{conversion}%</span>}
+    </div>
   );
 }
 
-function StageNode({
-  node,
+function StageColumn({
+  stage,
+  number,
+  maxCurrent,
   stageById,
+  isBottleneck,
   selectedStageId,
   selectedLeadId,
   onSelectStage,
   onSelectLead,
 }: {
-  node: FlowNode;
+  stage: FlowStage;
+  number: number | null;
+  maxCurrent: number;
   stageById: Map<number, StageDefinition>;
-  selectedStageId: CityStage["id"] | null;
+  isBottleneck: boolean;
+  selectedStageId: FlowStage["id"] | null;
   selectedLeadId: number | null;
-  onSelectStage: (stage: CityStage) => void;
+  onSelectStage: (stage: FlowStage) => void;
   onSelectLead: (leadId: number) => void;
 }) {
-  const { stage } = node;
+  const current = stage.leads.length;
   const hotCount = stage.leads.filter((lead) => isHotLead(lead, stageById)).length;
   const idleCount = stage.leads.filter((lead) => isIdleLead(lead, stageById)).length;
-  const completion = stageCompletion(stage);
   const tone = stageLoadTone(stage, stageById);
-  const requiredFields = stage.fields.filter((field) => field.required).length;
+  const barWidth = current > 0 ? Math.max(8, Math.round((current / maxCurrent) * 100)) : 0;
 
   return (
     <button
       type="button"
-      className={`lead-flow-node is-${tone} ${stage.id === selectedStageId ? "is-selected" : ""}`}
-      style={{
-        ...stageStyle(stage),
-        left: `${node.x}%`,
-        top: `${node.y}%`,
-      }}
+      className={`funnel-flow-col is-${tone} ${isBottleneck ? "is-bottleneck" : ""} ${
+        stage.id === selectedStageId ? "is-selected" : ""
+      }`}
+      style={stageStyle(stage)}
       onClick={() => onSelectStage(stage)}
     >
-      <span className="lead-flow-node-head">
-        <span className="lead-flow-node-index">{node.index + 1}</span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold">{stage.displayName}</span>
-          <span className="block truncate text-[11px] text-muted-foreground">
-            {stage.leads.length} лидов · {requiredFields} полей
-          </span>
+      <span className="funnel-flow-col-head">
+        <span className="funnel-flow-col-index">
+          {number ?? <CircleDotIcon className="size-3" />}
+        </span>
+        <span className="block min-w-0 flex-1 text-sm font-semibold leading-tight">
+          {stage.displayName}
         </span>
       </span>
 
-      <span className="lead-flow-progress">
-        <span style={{ width: `${completion}%` }} />
+      <span className="funnel-flow-count">
+        {current}
+        <small>сейчас</small>
       </span>
 
-      <span className="lead-flow-node-meta">
-        <span>{completion}%</span>
-        {hotCount > 0 && <span className="lead-flow-hot">{hotCount} hot</span>}
-        {idleCount > 0 && <span className="lead-flow-idle">{idleCount} idle</span>}
+      <span className="funnel-flow-bar">
+        <span style={{ width: `${barWidth}%` }} />
       </span>
 
-      <span className="lead-flow-chip-row">
+      <span className="funnel-flow-meta">
+        {stage.avgDays != null && (
+          <span className="inline-flex items-center gap-1">
+            <Clock3Icon className="size-3" />
+            {formatDays(stage.avgDays)}
+          </span>
+        )}
+        {hotCount > 0 && (
+          <span className="funnel-flow-tag is-hot">
+            <FlameIcon className="size-3" />
+            {hotCount}
+          </span>
+        )}
+        {idleCount > 0 && (
+          <span className="funnel-flow-tag is-idle">
+            <HourglassIcon className="size-3" />
+            {idleCount}
+          </span>
+        )}
+      </span>
+
+      <span className="funnel-flow-chips">
         {stage.leads.slice(0, 3).map((lead) => (
           <span
             key={lead.id}
-            className={`lead-flow-chip ${lead.id === selectedLeadId ? "is-selected" : ""}`}
+            className={`funnel-flow-chip ${lead.id === selectedLeadId ? "is-selected" : ""}`}
             onClick={(event) => {
               event.stopPropagation();
               onSelectLead(lead.id);
             }}
           >
-            <span className="lead-flow-chip-dot" />
+            <span className="funnel-flow-chip-dot" />
             <span className="truncate">{shortName(lead)}</span>
           </span>
         ))}
         {stage.leads.length > 3 && (
-          <span className="lead-flow-chip-more">+{stage.leads.length - 3}</span>
+          <span className="funnel-flow-chip-more">+{stage.leads.length - 3}</span>
         )}
-        {stage.leads.length === 0 && <span className="lead-flow-empty">пусто</span>}
+        {stage.leads.length === 0 && <span className="funnel-flow-empty">пусто</span>}
       </span>
     </button>
   );
 }
 
-function CityMetric({
+function OutcomeTiles({ won, lost }: { won: number; lost: number }) {
+  return (
+    <div className="funnel-flow-outcomes">
+      <div className="funnel-flow-outcome is-won">
+        <CircleCheckIcon className="size-4 shrink-0" />
+        <span className="min-w-0">
+          <span className="block text-lg font-semibold tabular-nums">{won}</span>
+          <span className="block text-xs">Выдано</span>
+        </span>
+      </div>
+      <div className="funnel-flow-outcome is-lost">
+        <CircleXIcon className="size-4 shrink-0" />
+        <span className="min-w-0">
+          <span className="block text-lg font-semibold tabular-nums">{lost}</span>
+          <span className="block text-xs">Отменено</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function FlowMetric({
   icon,
   label,
   value,
@@ -619,11 +769,11 @@ function CityMetric({
   icon: ReactNode;
   label: string;
   value: number;
-  tone?: "hot" | "idle";
+  tone?: "hot" | "idle" | "won";
 }) {
   return (
-    <div className={`lead-city-metric ${tone ? `is-${tone}` : ""}`}>
-      <span className="lead-city-metric-icon">{icon}</span>
+    <div className={`funnel-flow-metric ${tone ? `is-${tone}` : ""}`}>
+      <span className="funnel-flow-metric-icon">{icon}</span>
       <span className="min-w-0">
         <span className="block text-lg font-semibold tabular-nums">{value}</span>
         <span className="block truncate text-xs text-muted-foreground">{label}</span>
