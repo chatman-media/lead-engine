@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.23.3](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.2...@chatman-media/conversation-engine-v3.23.3) (2026-06-19)
+
+
+### Bug Fixes
+
+* **exchange:** показывать курс, когда клиент явно его спрашивает + анти-повтор в rag ([5a488cf](https://github.com/chatman-media/lead-engine/commit/5a488cf55a2ae7a8b2b9949a532e827acbc30df5)), closes [#724](https://github.com/chatman-media/lead-engine/issues/724)
+
 # [@chatman-media/conversation-engine-v3.23.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.23.1...@chatman-media/conversation-engine-v3.23.2) (2026-06-19)
 
 
