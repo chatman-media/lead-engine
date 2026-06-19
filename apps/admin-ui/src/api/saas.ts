@@ -1549,10 +1549,7 @@ export interface QualityToolCallFeedbackSummary {
   }>;
 }
 
-export type QualityToolCallImprovementKind =
-  | "schema_fix"
-  | "routing_prompt_fix"
-  | "tool_candidate";
+export type QualityToolCallImprovementKind = "schema_fix" | "routing_prompt_fix" | "tool_candidate";
 
 export type QualityToolCallImprovementSeverity = "high" | "medium" | "low";
 export type QualityToolCallImprovementStatus = "pending" | "applied" | "dismissed";
@@ -2252,6 +2249,34 @@ export interface ExchangeSettings {
   handoffCustomerNotice: boolean;
 }
 
+export interface PayoutPoint {
+  id: number;
+  kind: "atm" | "office" | "courier_zone";
+  code: string;
+  label: string;
+  bankName: string | null;
+  quoteAsset: string;
+  denomination: number | null;
+  perWithdrawalMax: number | null;
+  feeFixed: number;
+  feePct: number;
+  codeTtlSec: number | null;
+  city: string | null;
+  address: string | null;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type PayoutPointInput = Omit<PayoutPoint, "id" | "createdAt" | "updatedAt">;
+
+export interface PayoutCoverageOperator {
+  adminId: number;
+  name: string | null;
+  email: string;
+  covering: boolean;
+}
+
 export interface ExchangeRateCardProposal {
   asset: string;
   network: string;
@@ -2786,10 +2811,7 @@ export const saas = {
       intervalSec: number;
       targetFunnelId?: number;
       targetCatalogItemId?: number;
-    }>(
-      "/api/admin/sim/stream",
-      { method: "POST", body: JSON.stringify(opts) },
-    );
+    }>("/api/admin/sim/stream", { method: "POST", body: JSON.stringify(opts) });
   },
   listSimStreams() {
     return request<{
@@ -2808,17 +2830,14 @@ export const saas = {
     });
   },
   walkSim(count = 1, displayName?: string, funnelId?: number) {
-    return request<{ ok: boolean; leads: number[]; finalStage: string }>(
-      "/api/admin/sim/walk",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          count,
-          ...(displayName ? { displayName } : {}),
-          ...(funnelId ? { funnelId } : {}),
-        }),
-      },
-    );
+    return request<{ ok: boolean; leads: number[]; finalStage: string }>("/api/admin/sim/walk", {
+      method: "POST",
+      body: JSON.stringify({
+        count,
+        ...(displayName ? { displayName } : {}),
+        ...(funnelId ? { funnelId } : {}),
+      }),
+    });
   },
   advanceConversation(id: number, text?: string) {
     return request<{
@@ -2938,10 +2957,10 @@ export const saas = {
   },
   /** Частичный patch настроек поведения бота (#623). Возвращает нормализованный объект. */
   updateBotSettings(patch: Partial<BotSettings>) {
-    return request<{ ok: boolean; botSettings: BotSettings }>(
-      "/api/admin/tenant/bot-settings",
-      { method: "PUT", body: JSON.stringify(patch) },
-    );
+    return request<{ ok: boolean; botSettings: BotSettings }>("/api/admin/tenant/bot-settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
   },
 
   // ── Multi-admin (M4) ─────────────────────────────────────────────────
@@ -3366,7 +3385,9 @@ export const saas = {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
   },
   previewExperiment(id: number, sampleSize = 20) {
-    return request<ExperimentPreview>(`/api/admin/experiments/${id}/preview?sampleSize=${sampleSize}`);
+    return request<ExperimentPreview>(
+      `/api/admin/experiments/${id}/preview?sampleSize=${sampleSize}`,
+    );
   },
   createExperiment(data: { slug: string; allocationJson: string; successMetric: string }) {
     return request<ExperimentItem>("/api/admin/experiments", {
@@ -3506,10 +3527,13 @@ export const saas = {
       ok: boolean;
       case: QualityToolCallRegressionCase;
       proposal: QualityPersistedToolCallImprovementProposal;
-    }>(`/api/admin/quality/tool-call-feedback/improvement-proposals/${proposalId}/regression-cases`, {
-      method: "POST",
-      body: JSON.stringify(opts),
-    });
+    }>(
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${proposalId}/regression-cases`,
+      {
+        method: "POST",
+        body: JSON.stringify(opts),
+      },
+    );
   },
   setQualityToolCallRegressionCaseStatus(
     id: number,
@@ -3567,7 +3591,10 @@ export const saas = {
       method: "POST",
     });
   },
-  getQualityShadowPreview(id: number, opts: Omit<QualityShadowEvaluationOptions, "pairsPlanned"> = {}) {
+  getQualityShadowPreview(
+    id: number,
+    opts: Omit<QualityShadowEvaluationOptions, "pairsPlanned"> = {},
+  ) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.newStyleSlug) params.set("newStyleSlug", opts.newStyleSlug);
@@ -4318,6 +4345,43 @@ export const saas = {
   deleteExchangeRate(id: number) {
     return request<{ ok: boolean }>(`/api/admin/exchange/rates/${id}`, { method: "DELETE" });
   },
+  listPayoutPoints() {
+    return request<{ points: PayoutPoint[] }>("/api/admin/exchange/payout-points");
+  },
+  createPayoutPoint(input: PayoutPointInput) {
+    return request<{ ok: boolean; point: PayoutPoint }>("/api/admin/exchange/payout-points", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updatePayoutPoint(id: number, input: Partial<PayoutPointInput>) {
+    return request<{ ok: boolean; point: PayoutPoint }>(`/api/admin/exchange/payout-points/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  deletePayoutPoint(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/exchange/payout-points/${id}`, {
+      method: "DELETE",
+    });
+  },
+  listPayoutCoverage(pointId: number) {
+    return request<{ operators: PayoutCoverageOperator[] }>(
+      `/api/admin/exchange/payout-points/${pointId}/coverage`,
+    );
+  },
+  addPayoutCoverage(pointId: number, adminId: number) {
+    return request<{ ok: boolean }>(`/api/admin/exchange/payout-points/${pointId}/coverage`, {
+      method: "POST",
+      body: JSON.stringify({ adminId }),
+    });
+  },
+  removePayoutCoverage(pointId: number, adminId: number) {
+    return request<{ ok: boolean }>(
+      `/api/admin/exchange/payout-points/${pointId}/coverage/${adminId}`,
+      { method: "DELETE" },
+    );
+  },
   refreshExchangeRates() {
     return request<{ ok: boolean; updated: number; skipped: number; failed: number }>(
       "/api/admin/exchange/rates/refresh",
@@ -4352,9 +4416,9 @@ export const saas = {
     });
   },
   exchangeRequisites() {
-    return request<{ items: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }> }>(
-      "/api/admin/exchange/requisites",
-    );
+    return request<{
+      items: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }>;
+    }>("/api/admin/exchange/requisites");
   },
   exchangeOrders(status?: string, limit?: number) {
     const p = new URLSearchParams();
