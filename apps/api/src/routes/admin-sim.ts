@@ -873,6 +873,8 @@ export function makeAdminSimRoutes(opts: {
       targetCatalogItemId?: number;
       /** Засидировать контакт как KYC-верифицированный до первого ответа бота. */
       kycVerified?: boolean;
+      /** BCP-47 код языка клиента (ru/en/ko/zh), пробрасывается как channelLangHint. */
+      languageCode?: string;
     },
   ): Promise<number> {
     const { tenantId, adminId } = ctx;
@@ -920,6 +922,7 @@ export function makeAdminSimRoutes(opts: {
         externalUsername: params.displayName,
         parts: [{ kind: "text", text: userText }, ...kycMedia],
         receivedAt: now,
+        ...(params.languageCode ? { channelLangHint: params.languageCode } : {}),
         raw: {
           _sim: true,
           adminId,
@@ -1338,6 +1341,7 @@ export function makeAdminSimRoutes(opts: {
       maxTurns?: number;
       targetFunnelId?: number;
       targetCatalogItemId?: number;
+      languageCode?: string;
     };
     try {
       body = await c.req.json();
@@ -1358,6 +1362,8 @@ export function makeAdminSimRoutes(opts: {
     const maxTurns = Math.min(Math.max(1, body.maxTurns ?? DEFAULT_MAX_TURNS), MAX_TURNS_CAP);
     const targetFunnelId = positiveInt(body.targetFunnelId);
     const targetCatalogItemId = positiveInt(body.targetCatalogItemId);
+    const languageCode =
+      typeof body.languageCode === "string" && body.languageCode ? body.languageCode : undefined;
 
     const ctx = await buildCtx(tenantId, adminId);
     if (typeof ctx === "string") return c.json({ error: ctx }, 400);
@@ -1370,6 +1376,7 @@ export function makeAdminSimRoutes(opts: {
         ...(targetFunnelId ? { targetFunnelId } : {}),
         ...(targetCatalogItemId ? { targetCatalogItemId } : {}),
         kycVerified: persona != null && KYC_SEEDED_PERSONAS.has(persona.id),
+        languageCode,
       });
       return c.json({
         ok: true,

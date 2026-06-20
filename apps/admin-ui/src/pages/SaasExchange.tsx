@@ -523,7 +523,9 @@ const DEFAULT_SETTINGS: ExchangeSettings = {
   quoteAssetOptions: DEFAULT_QUOTE_ASSET_OPTIONS,
   handoffCustomerNotice: true,
   requireRateConfirmation: false,
-  quoteRoundStep: null,
+  roundStepAtm: null,
+  roundStepCash: null,
+  roundStepBank: null,
 };
 
 export function SaasExchange() {
@@ -973,29 +975,48 @@ export function SaasExchange() {
               </div>
               <div className="space-y-1.5">
                 <Label>Шаг округления суммы к получению</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min={1}
-                    step={1}
-                    placeholder="авто (PHP/THB → 100)"
-                    value={settings.quoteRoundStep ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setSettings((s) => ({
-                        ...s,
-                        quoteRoundStep: v === "" ? null : Math.max(1, Math.floor(Number(v))),
-                      }));
-                    }}
-                    className="w-36"
-                  />
-                  {settings.quoteRoundStep == null && (
-                    <span className="text-xs text-muted-foreground">авто</span>
-                  )}
+                <div className="grid grid-cols-3 gap-3">
+                  {(
+                    [
+                      {
+                        key: "roundStepAtm" as const,
+                        label: "Банкомат (ATM)",
+                        placeholder: "авто (PHP→100, THB→500)",
+                      },
+                      {
+                        key: "roundStepCash" as const,
+                        label: "Наличные",
+                        placeholder: "авто (PHP/THB→100)",
+                      },
+                      {
+                        key: "roundStepBank" as const,
+                        label: "Банк / перевод",
+                        placeholder: "авто (→1)",
+                      },
+                    ] as const
+                  ).map(({ key, label, placeholder }) => (
+                    <div key={key} className="space-y-1">
+                      <span className="text-xs text-muted-foreground">{label}</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        step={1}
+                        placeholder={placeholder}
+                        value={settings[key] ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSettings((s) => ({
+                            ...s,
+                            [key]: v === "" ? null : Math.max(1, Math.floor(Number(v))),
+                          }));
+                        }}
+                        className="w-full"
+                      />
+                    </div>
+                  ))}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Округление вниз до ближайшего кратного (floor). 100 → 7911 PHP становится 7900.
-                  Пусто = берётся из словаря валют (PHP/THB → 100, VND → 10 000).
+                  Округление вниз до кратного по способу выдачи. Пусто = авто из словаря валют.
                 </p>
               </div>
               <Button

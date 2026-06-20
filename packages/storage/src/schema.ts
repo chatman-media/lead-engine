@@ -2262,8 +2262,11 @@ export const exchangeSettings = pgTable(
     // (даже мелких тиков). По дефолту выкл — фид авто-применяет в пределах soft.
     // См. exchange_rate_proposals + apps/api/src/lib/exchange/rate-feed.ts.
     requireRateConfirmation: boolean("require_rate_confirmation").notNull().default(false),
-    // Шаг округления вниз суммы к получению (floor). NULL → из словаря валют (PHP/THB→100).
-    quoteRoundStep: integer("quote_round_step"),
+    // Шаг округления вниз суммы к получению (floor) по способу выдачи.
+    // NULL → берётся из словаря валют: PHP/THB→100, VND/IDR→50000 (ATM), 1 (bank).
+    roundStepAtm: integer("round_step_atm"),
+    roundStepCash: integer("round_step_cash"),
+    roundStepBank: integer("round_step_bank"),
     createdAt: integer("created_at").notNull().default(epochNow()),
     updatedAt: integer("updated_at").notNull().default(epochNow()),
   },
@@ -2278,8 +2281,16 @@ export const exchangeSettings = pgTable(
     ),
     check("exchange_settings_quote_asset_check", sql`${t.quoteAsset} ~ '^[A-Z]{3}$'`),
     check(
-      "exchange_settings_round_step_check",
-      sql`${t.quoteRoundStep} IS NULL OR ${t.quoteRoundStep} >= 1`,
+      "exchange_settings_atm_step_check",
+      sql`${t.roundStepAtm} IS NULL OR ${t.roundStepAtm} >= 1`,
+    ),
+    check(
+      "exchange_settings_cash_step_check",
+      sql`${t.roundStepCash} IS NULL OR ${t.roundStepCash} >= 1`,
+    ),
+    check(
+      "exchange_settings_bank_step_check",
+      sql`${t.roundStepBank} IS NULL OR ${t.roundStepBank} >= 1`,
     ),
   ],
 );
