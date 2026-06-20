@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.49.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.48.1...@chatman-media/storage-v1.49.0) (2026-06-20)
+
+
+### Features
+
+* **exchange:** per-currency round steps + redesign settings UI ([b7ba1bd](https://github.com/chatman-media/lead-engine/commit/b7ba1bd06b86efb5aeb085d9515ff81b873d9e88))
+
 # [@chatman-media/storage-v1.48.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.48.0...@chatman-media/storage-v1.48.1) (2026-06-20)
 
 
