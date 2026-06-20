@@ -13,6 +13,9 @@ export interface MessageRow {
   createdAt: number;
   stage: string | null;
   deletedAt: number | null;
+  origLang: string | null;
+  translatedText: string | null;
+  translatedLang: string | null;
 }
 
 export class MessagesRepo {
@@ -25,10 +28,11 @@ export class MessagesRepo {
     externalMessageId?: string;
     metaJson?: string;
     stage?: string;
+    /** Язык оригинала text (#736). Пишется, если известен из детекта (#735). */
+    origLang?: string | null;
     nowEpoch: number;
   }): Promise<MessageRow> {
-    const externalId =
-      opts.externalMessageId !== undefined ? Number(opts.externalMessageId) : null;
+    const externalId = opts.externalMessageId !== undefined ? Number(opts.externalMessageId) : null;
     const [row] = await this.ctx.db
       .insert(messagesTable)
       .values({
@@ -39,11 +43,41 @@ export class MessagesRepo {
         ...(externalId !== null && !Number.isNaN(externalId) ? { tgMessageId: externalId } : {}),
         ...(opts.metaJson !== undefined ? { metaJson: opts.metaJson } : {}),
         ...(opts.stage !== undefined ? { stage: opts.stage } : {}),
+        ...(opts.origLang != null ? { origLang: opts.origLang } : {}),
         createdAt: opts.nowEpoch,
       })
       .returning();
     if (!row) throw new Error("messages.insert: insert returned no row");
     return row as MessageRow;
+  }
+
+  /**
+   * Записывает перевод сообщения (#736): translated_text + язык перевода.
+   * Кэш для переводящего слоя оператора (#731) — чтобы не переводить повторно.
+   * Tenant-scoped UPDATE (RLS-инвариант), по образцу setDetectedLang.
+   */
+  async setTranslation(messageId: number, opts: { text: string; lang: string }): Promise<void> {
+    await this.ctx.db
+      .update(messagesTable)
+      .set({ translatedText: opts.text, translatedLang: opts.lang })
+      .where(and(eq(messagesTable.tenantId, this.ctx.tenantId), eq(messagesTable.id, messageId)));
+  }
+
+  /**
+   * Читает закэшированный перевод сообщения (#736) или null, если его ещё нет.
+   * #731 использует это, чтобы не звать LLM-перевод повторно.
+   */
+  async getTranslation(messageId: number): Promise<{ text: string; lang: string } | null> {
+    const [row] = await this.ctx.db
+      .select({
+        translatedText: messagesTable.translatedText,
+        translatedLang: messagesTable.translatedLang,
+      })
+      .from(messagesTable)
+      .where(and(eq(messagesTable.tenantId, this.ctx.tenantId), eq(messagesTable.id, messageId)))
+      .limit(1);
+    if (!row || row.translatedText == null || row.translatedLang == null) return null;
+    return { text: row.translatedText, lang: row.translatedLang };
   }
 
   /**
