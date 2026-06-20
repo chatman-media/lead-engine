@@ -350,7 +350,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
     }
   });
 
-  // Per-tenant настройки обновления курсов (нет строки → дефолты 180с / авто-порог)
+  // Per-tenant настройки обновления курсов (нет строки → дефолты 300с / авто-порог)
   // + котируемая валюта выдачи (quoteAsset; дефолт платформы — PHP).
   app.get("/api/admin/exchange/settings", async (c) => {
     const tenantId = c.var.tenantId;
@@ -369,7 +369,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
         .limit(1),
     );
     return c.json({
-      rateRefreshSec: row?.rateRefreshSec ?? 180,
+      rateRefreshSec: row?.rateRefreshSec ?? 300,
       feedStaleSec: row?.feedStaleSec ?? null,
       quoteAsset: row?.quoteAsset ?? QUOTE_CURRENCY.code,
       quoteAssetOptions: QUOTE_CURRENCY_CODES,

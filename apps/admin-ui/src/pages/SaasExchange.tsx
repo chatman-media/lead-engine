@@ -498,18 +498,20 @@ function renderRateCardMessage(proposals: ExchangeRateCardProposal[], quote: str
 }
 
 const REFRESH_PRESETS = [
-  { sec: 180, label: "Каждые 3 мин" },
   { sec: 300, label: "Каждые 5 мин" },
   { sec: 600, label: "Каждые 10 мин" },
   { sec: 900, label: "Каждые 15 мин" },
   { sec: 1800, label: "Каждые 30 мин" },
   { sec: 3600, label: "Каждый час" },
+  { sec: 7200, label: "Каждые 2 часа" },
+  { sec: 14400, label: "Каждые 4 часа" },
 ];
 const STALE_PRESETS = [
   { sec: 600, label: "10 мин" },
-  { sec: 1200, label: "20 мин" },
   { sec: 1800, label: "30 мин" },
   { sec: 3600, label: "1 час" },
+  { sec: 7200, label: "2 часа" },
+  { sec: 14400, label: "4 часа" },
 ];
 const QUOTE_ASSET_LABELS: Record<string, string> = {
   PHP: "🇵🇭 PHP — песо (Филиппины)",
@@ -528,7 +530,7 @@ const ROUND_STEP_AUTO: Record<string, { atm: number; cash: number; bank: number 
 };
 
 const DEFAULT_SETTINGS: ExchangeSettings = {
-  rateRefreshSec: 180,
+  rateRefreshSec: 300,
   feedStaleSec: null,
   quoteAsset: "PHP",
   quoteAssetOptions: DEFAULT_QUOTE_ASSET_OPTIONS,
@@ -558,9 +560,24 @@ export function SaasExchange() {
   const [pendingProposals, setPendingProposals] = useState<ExchangeRateProposal[]>([]);
   const [proposalActing, setProposalActing] = useState<number | null>(null);
   const [settings, setSettings] = useState<ExchangeSettings>(DEFAULT_SETTINGS);
+  // Снимок последних сохранённых настроек — сравниваем с ним, чтобы показать
+  // «есть несохранённые изменения» у карточек с ручной кнопкой «Сохранить».
+  const [savedSettings, setSavedSettings] = useState<ExchangeSettings>(DEFAULT_SETTINGS);
   const [savingSettings, setSavingSettings] = useState(false);
+  // Статус автосохранения свитчера уведомлений (он сохраняется сразу по клику).
+  const [handoffStatus, setHandoffStatus] = useState<"idle" | "saving" | "saved">("idle");
   // Котируемая валюта тенанта — для подписи оборота, табло и дефолтов направлений.
   const quoteCode = settings.quoteAsset ?? "PHP";
+  // Несохранённые изменения в полях с ручной кнопкой «Сохранить» (свитчер
+  // handoffCustomerNotice исключён — он автосохраняется отдельно).
+  const settingsDirty =
+    settings.quoteAsset !== savedSettings.quoteAsset ||
+    settings.rateRefreshSec !== savedSettings.rateRefreshSec ||
+    (settings.feedStaleSec ?? null) !== (savedSettings.feedStaleSec ?? null) ||
+    (settings.requireRateConfirmation ?? false) !==
+      (savedSettings.requireRateConfirmation ?? false) ||
+    JSON.stringify(settings.roundSteps ?? null) !==
+      JSON.stringify(savedSettings.roundSteps ?? null);
 
   // Список валют в таблице округления: активные направления + сохранённые + основная.
   const [roundCurrencies, setRoundCurrencies] = useState<string[]>([quoteCode]);
@@ -626,6 +643,7 @@ export function SaasExchange() {
         setTurnover(t);
         setSavedRequisites(req.items);
         setSettings(st);
+        setSavedSettings(st);
         setPendingProposals(prop.proposals);
         const tmpl = req.items.find((i) => i.key === "exchange_rate_post_template");
         if (tmpl?.value) setPostTemplate(tmpl.value);
@@ -721,10 +739,12 @@ export function SaasExchange() {
     setSavingSettings(true);
     try {
       const r = await saas.saveExchangeSettings(settings);
-      setSettings((s) => ({
+      const merge = (s: ExchangeSettings) => ({
         ...r.settings,
         quoteAssetOptions: s.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS,
-      }));
+      });
+      setSettings(merge);
+      setSavedSettings(merge);
       toast.success("Настройки сохранены");
     } catch (err) {
       if (!handle401(err)) {
@@ -738,10 +758,18 @@ export function SaasExchange() {
   async function saveHandoff(checked: boolean) {
     const next = { ...settings, handoffCustomerNotice: checked };
     setSettings((s) => ({ ...s, handoffCustomerNotice: checked }));
+    setHandoffStatus("saving");
     try {
-      await saas.saveExchangeSettings(next);
+      const r = await saas.saveExchangeSettings(next);
+      setSavedSettings((s) => ({
+        ...r.settings,
+        quoteAssetOptions: s.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS,
+      }));
+      setHandoffStatus("saved");
+      toast.success(checked ? "Включено и сохранено" : "Выключено и сохранено");
     } catch (err) {
       setSettings((s) => ({ ...s, handoffCustomerNotice: !checked }));
+      setHandoffStatus("idle");
       if (!handle401(err)) toast.error("Не удалось сохранить");
     }
   }
@@ -1073,8 +1101,24 @@ export function SaasExchange() {
                 )}
               </div>
 
-              <div className="flex justify-end">
-                <Button type="button" onClick={saveSettings} disabled={savingSettings} size="sm">
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {settingsDirty ? (
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                    <span className="size-2 animate-pulse rounded-full bg-amber-500" />
+                    Есть несохранённые изменения
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <CheckIcon className="size-3.5 text-emerald-600" />
+                    Все изменения сохранены
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  onClick={saveSettings}
+                  disabled={savingSettings || !settingsDirty}
+                  size="sm"
+                >
                   <SaveIcon className="size-4" />
                   {savingSettings ? "Сохранение…" : "Сохранить"}
                 </Button>
@@ -1111,7 +1155,16 @@ export function SaasExchange() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {REFRESH_PRESETS.map((p) => (
+                      {(REFRESH_PRESETS.some((p) => p.sec === settings.rateRefreshSec)
+                        ? REFRESH_PRESETS
+                        : [
+                            {
+                              sec: settings.rateRefreshSec,
+                              label: `Каждые ${Math.round(settings.rateRefreshSec / 60)} мин`,
+                            },
+                            ...REFRESH_PRESETS,
+                          ]
+                      ).map((p) => (
                         <SelectItem key={p.sec} value={String(p.sec)}>
                           {p.label}
                         </SelectItem>
@@ -1159,8 +1212,24 @@ export function SaasExchange() {
                   </p>
                 </div>
               </div>
-              <div className="flex justify-end">
-                <Button type="button" onClick={saveSettings} disabled={savingSettings} size="sm">
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {settingsDirty ? (
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                    <span className="size-2 animate-pulse rounded-full bg-amber-500" />
+                    Есть несохранённые изменения
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <CheckIcon className="size-3.5 text-emerald-600" />
+                    Все изменения сохранены
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  onClick={saveSettings}
+                  disabled={savingSettings || !settingsDirty}
+                  size="sm"
+                >
                   <SaveIcon className="size-4" />
                   {savingSettings ? "Сохранение…" : "Сохранить"}
                 </Button>
@@ -1175,13 +1244,28 @@ export function SaasExchange() {
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-3 rounded-md border px-3 py-2 sm:max-w-xl">
-                <Switch checked={settings.handoffCustomerNotice} onCheckedChange={saveHandoff} />
+                <Switch
+                  checked={settings.handoffCustomerNotice}
+                  onCheckedChange={saveHandoff}
+                  disabled={handoffStatus === "saving"}
+                />
                 <div className="space-y-0.5">
                   <Label>Писать клиенту при авто-передаче оператору</Label>
                   <p className="text-xs text-muted-foreground">
                     Если выключено, бот молча остановится, а оператор всё равно получит задачу.
                   </p>
                 </div>
+                {handoffStatus === "saving" ? (
+                  <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                    Сохранение…
+                  </span>
+                ) : handoffStatus === "saved" ? (
+                  <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-emerald-600">
+                    <CheckIcon className="size-3.5" />
+                    Сохранено
+                  </span>
+                ) : null}
               </div>
             </CardContent>
           </Card>
