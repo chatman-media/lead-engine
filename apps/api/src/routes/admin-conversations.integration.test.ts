@@ -1311,5 +1311,138 @@ describe("DELETE /api/admin/conversations/:id/messages/:msgId (#697)", () => {
   });
 });
 
+
+describe("#731 переводящий слой оператору", () => {
+  function makeChat() {
+    let calls = 0;
+    const chat = {
+      complete: async (msgs: Array<{ content: string | null }>) => {
+        calls++;
+        return `[T]${msgs[msgs.length - 1]?.content ?? ""}`;
+      },
+    };
+    return { chat, calls: () => calls };
+  }
+
+  async function seedLangConversation(detectedLang: string, incoming: string) {
+    const now = Math.floor(Date.now() / 1000);
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "i18n client" })
+      .returning({ id: contacts.id });
+    const [conv] = await db
+      .insert(conversations)
+      .values({
+        tenantId: tenantA,
+        userId: contact!.id,
+        source: "bot",
+        mode: "ai",
+        detectedLang,
+        lastMessageAt: now,
+        createdAt: now,
+      })
+      .returning({ id: conversations.id });
+    const [ch] = await db
+      .insert(channels)
+      .values({
+        tenantId: tenantA,
+        kind: "telegram_bot",
+        externalId: `i18nbot-${conv!.id}`,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: channels.id });
+    await db.insert(channelIdentities).values({
+      contactId: contact!.id,
+      channelId: ch!.id,
+      externalUserId: `tg-i18n-${conv!.id}`,
+      createdAt: now,
+    });
+    const [msg] = await db
+      .insert(messages)
+      .values({ tenantId: tenantA, conversationId: conv!.id, role: "user", text: incoming, createdAt: now })
+      .returning({ id: messages.id });
+    return { conversationId: conv!.id, messageId: msg!.id };
+  }
+
+  function appWithChat(resolveChat: () => unknown) {
+    const a = new Hono();
+    a.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    a.route("/", makeAdminConversationsRoutes({ db, resolveChat: resolveChat as never }));
+    return a;
+  }
+
+  it("GET лениво переводит входящее клиента на русский и кэширует в messages", async () => {
+    if (!sql) return;
+    const { conversationId, messageId } = await seedLangConversation("en", "Hello, what is the rate?");
+    const fake = makeChat();
+    const res = await appWithChat(() => fake.chat).request(`/api/admin/conversations/${conversationId}`, {
+      headers: { Authorization: `Bearer ${tokenA}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      messages: Array<{ id: number; translatedText: string | null; translatedLang: string | null }>;
+    };
+    const incoming = body.messages.find((m) => m.id === messageId);
+    expect(incoming?.translatedText).toBe("[T]Hello, what is the rate?");
+    expect(incoming?.translatedLang).toBe("ru");
+    const [stored] = await db
+      .select({ translatedText: messages.translatedText })
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    expect(stored!.translatedText).toBe("[T]Hello, what is the rate?");
+  });
+
+  it("POST /reply переводит ответ оператора (RU) на язык клиента; оператор видит RU-оригинал", async () => {
+    if (!sql) return;
+    const { conversationId } = await seedLangConversation("en", "Hi");
+    const fake = makeChat();
+    const res = await appWithChat(() => fake.chat).request(
+      `/api/admin/conversations/${conversationId}/reply`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokenA}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Курс 90 рублей" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { messageId: number };
+    const [msg] = await db
+      .select({
+        text: messages.text,
+        translatedText: messages.translatedText,
+        translatedLang: messages.translatedLang,
+      })
+      .from(messages)
+      .where(eq(messages.id, body.messageId));
+    expect(msg!.text).toBe("Курс 90 рублей");
+    expect(msg!.translatedText).toBe("[T]Курс 90 рублей");
+    expect(msg!.translatedLang).toBe("en");
+    const [out] = await db
+      .select({ payloadJson: outboundQueue.payloadJson })
+      .from(outboundQueue)
+      .where(eq(outboundQueue.idempotencyKey, `admin-reply-${body.messageId}`));
+    const payload = JSON.parse(out!.payloadJson) as { parts: Array<{ text: string }> };
+    expect(payload.parts[0]!.text).toBe("[T]Курс 90 рублей");
+  });
+
+  it("ru-диалог → no-op (LLM-перевод не вызывается)", async () => {
+    if (!sql) return;
+    const { conversationId } = await seedLangConversation("ru", "Привет");
+    const fake = makeChat();
+    const res = await appWithChat(() => fake.chat).request(
+      `/api/admin/conversations/${conversationId}/reply`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokenA}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Готово" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(fake.calls()).toBe(0);
+  });
+});
+
 // tenantB used only as cross-tenant guard
 void tenants;

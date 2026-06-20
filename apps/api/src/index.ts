@@ -540,6 +540,8 @@ async function main() {
 		"/",
 		makeAdminConversationsRoutes({
 			db,
+			// #731: перевод входящих клиента → RU (инбокс) и ответа оператора → язык клиента.
+			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
 			notifications: notificationService,
 			partnerPing: {
 				appUrl: cfg.mailer.appUrl,
