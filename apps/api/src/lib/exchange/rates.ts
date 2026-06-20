@@ -424,12 +424,19 @@ export async function computeQuote(
 
   const gross = mode === "divide" ? amountFrom / eff : amountFrom * eff;
   const quoteCurrency = resolveQuoteCurrency(quoteCode);
-  const step = quoteCurrency.denomStep > 1 ? quoteCurrency.denomStep : 1;
+  // Шаг округления: сначала из exchange_settings (per-tenant), иначе из словаря валют.
+  const [settingsRow] = await withTenant(db, tenantId, async (tx) =>
+    tx
+      .select({ quoteRoundStep: exchangeSettings.quoteRoundStep })
+      .from(exchangeSettings)
+      .where(eq(exchangeSettings.tenantId, tenantId))
+      .limit(1),
+  );
+  const step = settingsRow?.quoteRoundStep ?? quoteCurrency.denomStep;
   const rawAmount =
     amountMode === "target_thb"
       ? Math.round(amount)
       : Math.max(0, Math.round(gross - row.feeFixedThb));
-  // Округляем вниз до ближайшего шага номинала (100 для PHP/THB, etc.)
   const amountToThb = step > 1 ? Math.floor(rawAmount / step) * step : rawAmount;
 
   return {
