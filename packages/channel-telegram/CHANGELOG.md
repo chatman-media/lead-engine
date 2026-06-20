@@ -1,3 +1,10 @@
+# [@chatman-media/channel-telegram-v1.11.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.10.0...@chatman-media/channel-telegram-v1.11.0) (2026-06-20)
+
+
+### Features
+
+* **exchange:** геолокация клиента → ближайшие банкоматы + OSM-фид PH ([2510e5b](https://github.com/chatman-media/lead-engine/commit/2510e5bc39ed359dadc34c166c6072b82d798199))
+
 # [@chatman-media/channel-telegram-v1.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.9.0...@chatman-media/channel-telegram-v1.10.0) (2026-06-19)
 
 
