@@ -78,6 +78,8 @@ export interface SimPersona {
   displayName: string;
   /** Системный промпт для LLM-«клиента» — кого он играет. */
   brief: string;
+  /** Засидировать контакт с верифицированным KYC перед первым ответом бота. */
+  kycVerified?: boolean;
 }
 
 // Котируемая валюта в текстах персон зависит от ТЕНАНТА (THB→«баты», PHP→«песо»,
@@ -158,6 +160,7 @@ function buildPersonas(qc: QuoteCurrency): SimPersona[] {
       brief:
         "Ты — постоянный клиент обменника, уже менял раньше. Пишешь по-деловому: «привет, как обычно, " +
         `поменяй 1500 USDT на ${QW_PL}, выдача в офисе по коду». Ждёшь быстрый курс и реквизиты без лишних вопросов.`,
+      kycVerified: true,
     },
     {
       id: "exchange_rub_card",
@@ -306,6 +309,10 @@ function buildPersonas(qc: QuoteCurrency): SimPersona[] {
     },
   ];
 }
+
+/** Персоны, для которых симулятор засидировывает KYC-верификацию контакта
+ *  ДО первого ответа бота — чтобы не триггерить KYC-шаг для «повторных клиентов». */
+const KYC_SEEDED_PERSONAS = new Set(["exchange_repeat"]);
 
 // Пул имён для потоковых клиентов — чтобы в инбоксе они выглядели как разные люди.
 const FIRST_NAMES = [
@@ -864,6 +871,8 @@ export function makeAdminSimRoutes(opts: {
       background?: boolean;
       targetFunnelId?: number;
       targetCatalogItemId?: number;
+      /** Засидировать контакт как KYC-верифицированный до первого ответа бота. */
+      kycVerified?: boolean;
     },
   ): Promise<number> {
     const { tenantId, adminId } = ctx;
@@ -967,6 +976,38 @@ export function makeAdminSimRoutes(opts: {
         } catch {
           /* извлечение полей не критично для диалога */
         }
+      }
+
+      // Для персон с kycVerified (напр. exchange_repeat) засидировываем KYC-статус
+      // контакта ДО ответа бота. Иначе свежесозданный контакт никогда не верифицирован
+      // и бот всегда просит KYC, хотя бриф говорит «уже менял раньше».
+      if (params.kycVerified && exchanges.length === 0) {
+        await withTenant(opts.db, tenantId, async (tx) => {
+          const [row] = await tx
+            .select({ attributesJson: contacts.attributesJson })
+            .from(contacts)
+            .where(eq(contacts.id, pi.contactId));
+          const prev = row?.attributesJson
+            ? (JSON.parse(row.attributesJson) as Record<string, unknown>)
+            : {};
+          await tx
+            .update(contacts)
+            .set({
+              attributesJson: JSON.stringify({
+                ...prev,
+                isVerified: true,
+                verificationStatus: "verified",
+                exchangeKyc: {
+                  verified: true,
+                  status: "verified",
+                  needsVerification: false,
+                  verificationId: `kyc-sim-${pi.contactId}`,
+                  source: "sim_seed",
+                },
+              }),
+            })
+            .where(eq(contacts.id, pi.contactId));
+        });
       }
 
       let botReply = "";
@@ -1268,6 +1309,7 @@ export function makeAdminSimRoutes(opts: {
           displayName: s.displayName,
           maxTurns,
           background: false,
+          kycVerified: KYC_SEEDED_PERSONAS.has(s.id),
         });
         const score = await scoreExchangeDialog(opts.db, tenantId, conversationId);
         report.push({ id: s.id, displayName: s.displayName, ...score });
@@ -1327,6 +1369,7 @@ export function makeAdminSimRoutes(opts: {
         maxTurns,
         ...(targetFunnelId ? { targetFunnelId } : {}),
         ...(targetCatalogItemId ? { targetCatalogItemId } : {}),
+        kycVerified: persona != null && KYC_SEEDED_PERSONAS.has(persona.id),
       });
       return c.json({
         ok: true,
@@ -1403,6 +1446,7 @@ export function makeAdminSimRoutes(opts: {
         isCancelled: () => state.cancelled, // стоп потока обрывает и идущие диалоги
         ...(targetFunnelId ? { targetFunnelId } : {}),
         ...(targetCatalogItemId ? { targetCatalogItemId } : {}),
+        kycVerified: KYC_SEEDED_PERSONAS.has(persona.id),
       }).catch(() => {
         /* отдельный клиент упал — поток продолжается */
       });
