@@ -195,6 +195,7 @@ export {
   type TranscribeInboundVoiceDeps,
   transcribeInboundVoice,
 } from "./process-inbound.ts";
+export { buildTranslationSystemPrompt } from "./prompts/translation.ts";
 export {
   type CreatePaymentIntentInput,
   type PaymentLedgerResult,
@@ -290,6 +291,7 @@ export {
   type TenantFeatureKey,
 } from "./tenant-feature-flags.ts";
 export type { ITranscriber } from "./transcriber.ts";
+export { needsTranslation, OPERATOR_LANG, translateText } from "./translation.ts";
 export {
   type ChannelContext,
   type Clock,
