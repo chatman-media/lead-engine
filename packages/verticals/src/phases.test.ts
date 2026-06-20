@@ -36,6 +36,25 @@ describe("deriveDefaultPhase", () => {
     expect(deriveDefaultPhase("assessment", "offer")).toBe("clear");
     expect(deriveDefaultPhase("form_fill", null)).toBe("qualify");
   });
+
+  it("waiting: до fulfill → clear, после/на fulfill → fulfill", () => {
+    expect(deriveDefaultPhase("waiting", null)).toBe("clear");
+    expect(deriveDefaultPhase("waiting", "clear")).toBe("clear");
+    expect(deriveDefaultPhase("waiting", "fulfill")).toBe("fulfill");
+  });
+
+  it("interaction: до offer → qualify, после offer → fulfill", () => {
+    expect(deriveDefaultPhase("interaction", null)).toBe("qualify");
+    expect(deriveDefaultPhase("interaction", "qualify")).toBe("qualify");
+    expect(deriveDefaultPhase("interaction", "offer")).toBe("fulfill");
+  });
+
+  it("milestone: продвигает фазу на одну ступень вперёд", () => {
+    expect(deriveDefaultPhase("milestone", null)).toBe("qualify");
+    expect(deriveDefaultPhase("milestone", "qualify")).toBe("offer");
+    expect(deriveDefaultPhase("milestone", "offer")).toBe("fulfill");
+    expect(deriveDefaultPhase("milestone", "fulfill")).toBe("fulfill");
+  });
 });
 
 describe("validateBackbone", () => {
@@ -104,11 +123,45 @@ describe("validateBackbone", () => {
   it("битая ссылка nextStages → ошибка", () => {
     const v = validateBackbone([
       intakeTo(["o"]),
-      { slug: "o", kind: "active", phase: "offer", position: 1, nextStages: ["nope", "won", "lost"] },
+      {
+        slug: "o",
+        kind: "active",
+        phase: "offer",
+        position: 1,
+        nextStages: ["nope", "won", "lost"],
+      },
       won,
       lost,
     ]);
     expect(v.errors.some((e) => e.includes("nextStages"))).toBe(true);
+  });
+
+  it("нет стадии intake (intakeCount=0) → ошибка про intake", () => {
+    const v = validateBackbone([
+      { slug: "o", kind: "active", phase: "offer", position: 1, nextStages: ["won", "lost"] },
+      won,
+      lost,
+    ]);
+    expect(v.errors.some((e) => e.includes("intake"))).toBe(true);
+  });
+
+  it("нет terminal_lost → ошибка", () => {
+    const v = validateBackbone([
+      intakeTo(["o"]),
+      { slug: "o", kind: "active", phase: "offer", position: 1, nextStages: ["won"] },
+      won,
+    ]);
+    expect(v.errors.some((e) => e.includes("terminal_lost"))).toBe(true);
+  });
+
+  it("active-стадия без валидной phase → ошибка про классификацию", () => {
+    const v = validateBackbone([
+      intakeTo(["x"]),
+      { slug: "x", kind: "active", phase: undefined, position: 1, nextStages: ["won", "lost"] },
+      won,
+      lost,
+    ]);
+    expect(v.errors.some((e) => e.includes("классифицируется"))).toBe(true);
   });
 });
 

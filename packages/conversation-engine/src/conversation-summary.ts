@@ -121,11 +121,10 @@ function withoutCurrentMessage(
 	if (!text) return rows;
 
 	let idx = -1;
-	for (let i = rows.length - 1; i >= 0; i -= 1) {
+	for (let i = rows.length - 1; i >= 0 && idx < 0; i -= 1) {
 		const row = rows[i];
 		if (row?.role === "user" && row.text.trim() === text) {
 			idx = i;
-			break;
 		}
 	}
 	if (idx < 0) return rows;

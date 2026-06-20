@@ -3,6 +3,7 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import {
   loadRollingConversationContext,
   parseConversationSummaryPayload,
+  renderConversationSummaryBlock,
 } from "./conversation-summary.ts";
 import type { MessageRow, MessagesRepo } from "./dal/messages.ts";
 
@@ -51,6 +52,24 @@ function chatReturning(reply: string, captured: ChatMessage[][] = []): ChatClien
     },
   } as unknown as ChatClient;
 }
+
+describe("renderConversationSummaryBlock", () => {
+  it("пустая/отсутствующая строка → пустой блок", () => {
+    expect(renderConversationSummaryBlock(undefined)).toBe("");
+    expect(renderConversationSummaryBlock("  ")).toBe("");
+  });
+  it("непустая строка → блок с заголовком", () => {
+    expect(renderConversationSummaryBlock("факты")).toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
+    expect(renderConversationSummaryBlock("факты")).toContain("факты");
+  });
+});
+
+describe("parseConversationSummaryPayload edge cases", () => {
+  it("JSON-число (не строка/объект) → legacy payload из исходной строки", () => {
+    expect(parseConversationSummaryPayload("42")).toMatchObject({ summary: "42" });
+    expect(parseConversationSummaryPayload("true")).toMatchObject({ summary: "true" });
+  });
+});
 
 describe("conversation rolling summary", () => {
   it("parses structured, JSON-string, and plain legacy summary values", () => {
@@ -154,6 +173,142 @@ describe("conversation rolling summary", () => {
       throughMessageId: 4,
       updatedAt: 200,
     });
+  });
+
+  it("ошибка при загрузке snapshot → возврат истории без summary (best-effort)", async () => {
+    const warned: unknown[] = [];
+    const ctx = await loadRollingConversationContext({
+      conversationId: 100,
+      messages: messagesRepo([row(1, "a"), row(2, "current")]),
+      conversations: {
+        findById: async () => {
+          throw new Error("db down");
+        },
+        setSummaryJson: async () => {},
+      },
+      chat: chatReturning("ignored"),
+      currentMessageId: 2,
+      options: { recentWindow: 1, summarizeAfterMessages: 1 },
+      onWarn: (_msg, err) => warned.push(err),
+    });
+    expect(ctx.conversationSummary).toBeUndefined();
+    expect(warned).toHaveLength(1);
+  });
+
+  it("мало сообщений (totalCount < threshold) → ранний выход без summary", async () => {
+    const ctx = await loadRollingConversationContext({
+      conversationId: 100,
+      messages: messagesRepo([row(1, "only message")]),
+      conversations: {
+        findById: async () => ({ summaryJson: null }),
+        setSummaryJson: async () => {},
+      },
+      chat: chatReturning("ignored"),
+      currentMessageId: 1,
+      options: { recentWindow: 2, summarizeAfterMessages: 10 },
+    });
+    expect(ctx.conversationSummary).toBeUndefined();
+  });
+
+  it("нет beforeMessageId (recentWindow=0, без currentMessageId) → ранний выход", async () => {
+    const ctx = await loadRollingConversationContext({
+      conversationId: 100,
+      messages: messagesRepo([row(1, "a"), row(2, "b"), row(3, "c")]),
+      conversations: {
+        findById: async () => ({ summaryJson: null }),
+        setSummaryJson: async () => {},
+      },
+      chat: chatReturning("ignored"),
+      options: { recentWindow: 0, summarizeAfterMessages: 2 },
+    });
+    expect(ctx.history).toEqual([]);
+    expect(ctx.conversationSummary).toBeUndefined();
+  });
+
+  it("currentMessageText-деdup удаляет последнее совпадение из истории по тексту", async () => {
+    const ctx = await loadRollingConversationContext({
+      conversationId: 100,
+      messages: messagesRepo([
+        row(1, "привет"),
+        row(2, "как дела", "assistant"),
+        row(3, "подробнее"),
+      ]),
+      conversations: {
+        findById: async () => ({ summaryJson: null }),
+        setSummaryJson: async () => {},
+      },
+      chat: chatReturning("ignored"),
+      currentMessageText: "подробнее",
+      options: { recentWindow: 3, summarizeAfterMessages: 100 },
+    });
+    expect(ctx.history.map((m) => m.id)).toEqual([1, 2]);
+  });
+
+  it("throughMessageId=0 (falsy) → ранний выход без сохранения", async () => {
+    let saved = false;
+    const ctx = await loadRollingConversationContext({
+      conversationId: 100,
+      messages: {
+        ...messagesRepo([row(1, "old"), row(2, "raw"), row(3, "current")]),
+        forConversationSummary: async () => [{ ...row(1, "old"), id: 0 }],
+      },
+      conversations: {
+        findById: async () => ({ summaryJson: null }),
+        setSummaryJson: async () => {
+          saved = true;
+        },
+      },
+      chat: chatReturning("new summary"),
+      currentMessageId: 3,
+      options: { recentWindow: 1, summarizeAfterMessages: 2 },
+    });
+    expect(saved).toBe(false);
+    expect(ctx.conversationSummary).toBeUndefined();
+  });
+
+  it("LLM вернул пустое summary → ранний выход без сохранения", async () => {
+    let saved = false;
+    const ctx = await loadRollingConversationContext({
+      conversationId: 100,
+      messages: {
+        ...messagesRepo([row(1, "old"), row(2, "raw"), row(3, "current")]),
+        forConversationSummary: async () => [row(1, "old")],
+      },
+      conversations: {
+        findById: async () => ({ summaryJson: null }),
+        setSummaryJson: async () => {
+          saved = true;
+        },
+      },
+      chat: chatReturning(""),
+      currentMessageId: 3,
+      options: { recentWindow: 1, summarizeAfterMessages: 2 },
+    });
+    expect(saved).toBe(false);
+    expect(ctx.conversationSummary).toBeUndefined();
+  });
+
+  it("ошибка при сохранении summary → продолжает работу, onWarn вызывается", async () => {
+    const warned: unknown[] = [];
+    const ctx = await loadRollingConversationContext({
+      conversationId: 100,
+      messages: {
+        ...messagesRepo([row(1, "old"), row(2, "raw"), row(3, "current")]),
+        forConversationSummary: async () => [row(1, "old")],
+      },
+      conversations: {
+        findById: async () => ({ summaryJson: null }),
+        setSummaryJson: async () => {
+          throw new Error("db write failed");
+        },
+      },
+      chat: chatReturning("new summary text"),
+      currentMessageId: 3,
+      options: { recentWindow: 1, summarizeAfterMessages: 2 },
+      onWarn: (_msg, err) => warned.push(err),
+    });
+    expect(ctx.conversationSummary).toBe("new summary text");
+    expect(warned).toHaveLength(1);
   });
 
   it("returns legacy summary when there are no new old messages", async () => {
