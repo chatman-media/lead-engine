@@ -423,10 +423,14 @@ export async function computeQuote(
   }
 
   const gross = mode === "divide" ? amountFrom / eff : amountFrom * eff;
-  const amountToThb =
+  const quoteCurrency = resolveQuoteCurrency(quoteCode);
+  const step = quoteCurrency.denomStep > 1 ? quoteCurrency.denomStep : 1;
+  const rawAmount =
     amountMode === "target_thb"
       ? Math.round(amount)
       : Math.max(0, Math.round(gross - row.feeFixedThb));
+  // Округляем вниз до ближайшего шага номинала (100 для PHP/THB, etc.)
+  const amountToThb = step > 1 ? Math.floor(rawAmount / step) * step : rawAmount;
 
   return {
     ok: true,
