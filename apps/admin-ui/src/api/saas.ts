@@ -2308,6 +2308,9 @@ export interface PayoutPoint {
   codeTtlSec: number | null;
   city: string | null;
   address: string | null;
+  /** Координаты (из OSM-синка); у ручных точек могут отсутствовать. */
+  lat?: number | null;
+  lng?: number | null;
   isActive: boolean;
   createdAt: number;
   updatedAt: number;
