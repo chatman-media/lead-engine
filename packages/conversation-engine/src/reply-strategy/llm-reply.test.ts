@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { type AnyRagTool, makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
+import type { ConversationsRepo } from "../dal/conversations.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import { resolveQuoteCurrency } from "../exchange-quote-currency.ts";
 import { normalizeReplyStrategyResult } from "../process-inbound.ts";
@@ -1501,6 +1502,86 @@ describe("LlmReplyStrategy", () => {
       result: { url: "https://calendly.example/demo" },
       cycle: 0,
     });
+  });
+
+  it("exchange: resolveExchangeCollected упал → catch-путь, ответ продолжается", async () => {
+    const chat = new CapturingChat("Курс 31.5, получите 10553 THB.");
+    const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveExchangeCollected: () => Promise.reject(new Error("collected db down")),
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "сколько за 335 usdt?",
+    });
+
+    expect(result).not.toBeNull();
+  });
+
+  it("exchange: resolveExchangeCustomerNoticeEnabled упал → catch-путь, ответ продолжается", async () => {
+    const chat = new CapturingChat("Курс 31.5, получите 10553 THB.");
+    const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveExchangeCustomerNoticeEnabled: () =>
+          Promise.reject(new Error("notice flag db down")),
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "сколько за 335 usdt?",
+    });
+
+    expect(result).not.toBeNull();
+  });
+
+  it("ошибка загрузки conversation summary → onWarn, ответ не роняется", async () => {
+    const chat = new CapturingChat("ok");
+    const repo = fakeMessagesRepo([row(1, "user", "hi")]);
+    const strategy = new LlmReplyStrategy(
+      {
+        template: TEMPLATE,
+        resolveChat: () => chat,
+        resolveGenerationParams: async () => ({ compactAfterMessages: 2 }),
+      },
+      () => repo,
+      () =>
+        ({
+          findById: async () => {
+            throw new Error("summary db down");
+          },
+          setSummaryJson: async () => {},
+        }) as unknown as ConversationsRepo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "hi",
+    });
+
+    expect(result).not.toBeNull();
   });
 
   it("резолвит ChatClient per-call с tenantId — позволяет invalidate router", async () => {

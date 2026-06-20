@@ -836,6 +836,112 @@ describe("NotificationService.notify", () => {
 		expect(sent).toContain("other-chat"); // не-владельцу шлём как раньше
 		expect(sent).not.toContain("owner-chat"); // владельца пропустили (без дублей)
 	});
+	// media preview: sendReferencedMedia (no downloader) and catch/defaultContentType
+	it("sendReferencedMedia: no downloader → sendPhoto/Video/VideoNote/Document fileId paths", async () => {
+		const calls: TelegramCall[] = [];
+		const svc = new NotificationService(
+			makeRepo([], [makeOperatorSettings({ telegramChatId: "chat-r" })]),
+			"tok",
+			"http://a",
+		);
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramMediaClient((c) => calls.push(c));
+		await svc.notify({
+			tenantId: 1,
+			eventType: "operator_handoff_required",
+			conversationId: 1,
+			contactId: 1,
+			data: {
+				displayName: "X",
+				reason: "kyc_review",
+				title: "T",
+				action: "A",
+				mediaRefsJson: JSON.stringify([
+					{ kind: "photo", channelId: "7", externalRef: "p1" },
+					{ kind: "video", channelId: "7", externalRef: "v1" },
+					{ kind: "video_note", channelId: "7", externalRef: "vn1" },
+					{ kind: "document", channelId: "7", externalRef: "d1" },
+				]),
+			},
+		});
+		const methods = calls.map((c) => c.method);
+		expect(methods).toContain("sendPhoto");
+		expect(methods).toContain("sendVideo");
+		expect(methods).toContain("sendVideoNote");
+		expect(methods).toContain("sendDocument");
+	});
+
+	it("downloadPreviewMedia: 500 response → catch fires, falls through to sendReferencedMedia", async () => {
+		const calls: TelegramCall[] = [];
+		const svc = new NotificationService(
+			makeRepo([], [makeOperatorSettings({ telegramChatId: "chat-r" })]),
+			"tok",
+			"http://a",
+			undefined,
+			async () => new Response("err", { status: 500 }),
+		);
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramMediaClient((c) => calls.push(c));
+		const orig = console.error;
+		console.error = () => {};
+		try {
+			await svc.notify({
+				tenantId: 1,
+				eventType: "operator_handoff_required",
+				conversationId: 1,
+				contactId: 1,
+				data: {
+					displayName: "X",
+					reason: "kyc_review",
+					title: "T",
+					action: "A",
+					mediaRefsJson: JSON.stringify([{ kind: "photo", channelId: "7", externalRef: "p1" }]),
+				},
+			});
+		} finally {
+			console.error = orig;
+		}
+		// Download failed → upload=null → sendReferencedMedia called
+		expect(calls.some((c) => c.method === "sendPhoto")).toBe(true);
+	});
+
+	it("downloadPreviewMedia: response без content-type → defaultContentType fallback", async () => {
+		const calls: TelegramCall[] = [];
+		const svc = new NotificationService(
+			makeRepo([], [makeOperatorSettings({ telegramChatId: "chat-r" })]),
+			"tok",
+			"http://a",
+			undefined,
+			async () => new Response("bytes"),
+		);
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramMediaClient((c) => calls.push(c));
+		await svc.notify({
+			tenantId: 1,
+			eventType: "operator_handoff_required",
+			conversationId: 1,
+			contactId: 1,
+			data: {
+				displayName: "X",
+				reason: "kyc_review",
+				title: "T",
+				action: "A",
+				mediaRefsJson: JSON.stringify([
+					{ kind: "photo", channelId: "7", externalRef: "p1" },
+					{ kind: "video", channelId: "7", externalRef: "v1" },
+					{ kind: "video_note", channelId: "7", externalRef: "vn1" },
+					{ kind: "document", channelId: "7", externalRef: "d1" },
+				]),
+			},
+		});
+		// All uploaded via defaultContentType (photo→jpeg, video→mp4, note→mp4, doc→octet-stream)
+		const methods = calls.map((c) => c.method);
+		expect(methods).toContain("sendPhotoUpload");
+		expect(methods).toContain("sendVideoUpload");
+		expect(methods).toContain("sendVideoNoteUpload");
+		expect(methods).toContain("sendDocumentUpload");
+	});
+
 });
 
 // ── notify — форум-топики (#651) ─────────────────────────────────────────────
