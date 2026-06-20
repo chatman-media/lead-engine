@@ -523,6 +523,7 @@ const DEFAULT_SETTINGS: ExchangeSettings = {
   quoteAssetOptions: DEFAULT_QUOTE_ASSET_OPTIONS,
   handoffCustomerNotice: true,
   requireRateConfirmation: false,
+  quoteRoundStep: null,
 };
 
 export function SaasExchange() {
@@ -969,6 +970,33 @@ export function SaasExchange() {
                     изменения применяются автоматически.
                   </p>
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Шаг округления суммы к получению</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    placeholder="авто (PHP/THB → 100)"
+                    value={settings.quoteRoundStep ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setSettings((s) => ({
+                        ...s,
+                        quoteRoundStep: v === "" ? null : Math.max(1, Math.floor(Number(v))),
+                      }));
+                    }}
+                    className="w-36"
+                  />
+                  {settings.quoteRoundStep == null && (
+                    <span className="text-xs text-muted-foreground">авто</span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Округление вниз до ближайшего кратного (floor). 100 → 7911 PHP становится 7900.
+                  Пусто = берётся из словаря валют (PHP/THB → 100, VND → 10 000).
+                </p>
               </div>
               <Button
                 type="button"

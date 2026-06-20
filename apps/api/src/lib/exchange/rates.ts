@@ -423,10 +423,21 @@ export async function computeQuote(
   }
 
   const gross = mode === "divide" ? amountFrom / eff : amountFrom * eff;
-  const amountToThb =
+  const quoteCurrency = resolveQuoteCurrency(quoteCode);
+  // Шаг округления: сначала из exchange_settings (per-tenant), иначе из словаря валют.
+  const [settingsRow] = await withTenant(db, tenantId, async (tx) =>
+    tx
+      .select({ quoteRoundStep: exchangeSettings.quoteRoundStep })
+      .from(exchangeSettings)
+      .where(eq(exchangeSettings.tenantId, tenantId))
+      .limit(1),
+  );
+  const step = settingsRow?.quoteRoundStep ?? quoteCurrency.denomStep;
+  const rawAmount =
     amountMode === "target_thb"
       ? Math.round(amount)
       : Math.max(0, Math.round(gross - row.feeFixedThb));
+  const amountToThb = step > 1 ? Math.floor(rawAmount / step) * step : rawAmount;
 
   return {
     ok: true,

@@ -22,6 +22,8 @@ export interface QuoteCurrency {
 	mentionRe: RegExp;
 	/** Локальный банковский рельс в текстах: «тайский банк», «местный банк». */
 	bankLabel: string;
+	/** Шаг округления вниз (floor) при расчёте котировки: 100 для PHP/THB, 10000 для VND. */
+	denomStep: number;
 }
 
 export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
@@ -33,6 +35,7 @@ export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
 		flag: "🇵🇭",
 		mentionRe: /php|песо|peso|₱/i,
 		bankLabel: "местный банк (BDO/BPI/GCash)",
+		denomStep: 100,
 	},
 	THB: {
 		code: "THB",
@@ -42,6 +45,7 @@ export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
 		flag: "🇹🇭",
 		mentionRe: /thb|бат|bhat|฿/i,
 		bankLabel: "тайский банк",
+		denomStep: 100,
 	},
 	VND: {
 		code: "VND",
@@ -51,6 +55,7 @@ export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
 		flag: "🇻🇳",
 		mentionRe: /vnd|донг|dong|₫/i,
 		bankLabel: "вьетнамский банк",
+		denomStep: 10000,
 	},
 	IDR: {
 		code: "IDR",
@@ -60,6 +65,7 @@ export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
 		flag: "🇮🇩",
 		mentionRe: /idr|рупи|rupiah|rp\b/i,
 		bankLabel: "индонезийский банк",
+		denomStep: 1000,
 	},
 };
 
@@ -86,6 +92,7 @@ export function resolveQuoteCurrency(code?: string | null): QuoteCurrency {
 		flag: "",
 		mentionRe: new RegExp(normalized.replace(/[^A-Z]/g, ""), "i"),
 		bankLabel: "местный банк",
+		denomStep: 1,
 	};
 }
 

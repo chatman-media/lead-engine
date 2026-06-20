@@ -2259,6 +2259,8 @@ export interface ExchangeSettings {
    * и не применяется до клика «Подтвердить». Дефолт false (back-compat).
    */
   requireRateConfirmation?: boolean;
+  /** Шаг округления вниз котировки (floor). null = авто из словаря валют (PHP/THB→100). */
+  quoteRoundStep?: number | null;
 }
 
 /**

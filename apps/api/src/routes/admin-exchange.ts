@@ -360,6 +360,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: exchangeSettings.quoteAsset,
           handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
           requireRateConfirmation: exchangeSettings.requireRateConfirmation,
+          quoteRoundStep: exchangeSettings.quoteRoundStep,
         })
         .from(exchangeSettings)
         .where(eq(exchangeSettings.tenantId, tenantId))
@@ -372,6 +373,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
       quoteAssetOptions: QUOTE_CURRENCY_CODES,
       handoffCustomerNotice: row?.handoffCustomerNotice ?? true,
       requireRateConfirmation: row?.requireRateConfirmation ?? false,
+      quoteRoundStep: row?.quoteRoundStep ?? null,
     });
   });
 
@@ -409,6 +411,15 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
     // Тумблер «требовать подтверждение оператором при обновлении базового курса»
     // (даже мелких тиков). Дефолт false — back-compat.
     const requireRateConfirmation = body?.requireRateConfirmation === true;
+    // Шаг округления котировки вниз (1..10000). null = авто из словаря валют.
+    let quoteRoundStep: number | null = null;
+    if (body?.quoteRoundStep != null && body.quoteRoundStep !== "") {
+      const step = Math.floor(Number(body.quoteRoundStep));
+      if (!Number.isFinite(step) || step < 1) {
+        return c.json({ error: "quoteRoundStep должен быть ≥ 1" }, 400);
+      }
+      quoteRoundStep = step;
+    }
     const now = Math.floor(Date.now() / 1000);
     const [row] = await withTenant(opts.db, tenantId, async (tx) =>
       tx
@@ -420,6 +431,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: quoteAssetRaw,
           handoffCustomerNotice,
           requireRateConfirmation,
+          quoteRoundStep,
           createdAt: now,
           updatedAt: now,
         })
@@ -431,6 +443,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
             quoteAsset: quoteAssetRaw,
             handoffCustomerNotice,
             requireRateConfirmation,
+            quoteRoundStep,
             updatedAt: now,
           },
         })
@@ -440,6 +453,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: exchangeSettings.quoteAsset,
           handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
           requireRateConfirmation: exchangeSettings.requireRateConfirmation,
+          quoteRoundStep: exchangeSettings.quoteRoundStep,
         }),
     );
     return c.json({ ok: true, settings: row });
