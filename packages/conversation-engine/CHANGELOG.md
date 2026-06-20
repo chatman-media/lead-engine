@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.27.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.27.0...@chatman-media/conversation-engine-v3.27.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **exchange:** «тайский счёт» → bankLabel тенанта в ответах бота ([c7e49f7](https://github.com/chatman-media/lead-engine/commit/c7e49f70c6badf88b33d8d5af271bb74898927cc))
+
 # [@chatman-media/conversation-engine-v3.27.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.26.0...@chatman-media/conversation-engine-v3.27.0) (2026-06-20)
 
 
