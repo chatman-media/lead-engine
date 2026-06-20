@@ -538,7 +538,9 @@ export function SaasConversations() {
   const [simTurns, setSimTurns] = useState("6");
   const [simStarting, setSimStarting] = useState(false);
   const [simPersonasOpen, setSimPersonasOpen] = useState(false);
-  const [simLanguage, setSimLanguage] = useState("");
+  // "auto" — sentinel «не задавать язык» (Radix Select запрещает value=""). При
+  // сборке запроса маппится в отсутствие languageCode (детект по сообщению).
+  const [simLanguage, setSimLanguage] = useState("auto");
   // Режим симулятора: persona = LLM играет клиента; script = прогон записанного
   // диалога (реальные реплики); stream = «боевой режим», N клиентов по интервалу.
   const [simMode, setSimMode] = useState<"persona" | "script" | "stream">("persona");
@@ -652,7 +654,7 @@ export function SaasConversations() {
         const res = await saas.replaySim({
           scriptId: simScriptId,
           currency: simCurrency,
-          ...(simLanguage ? { languageCode: simLanguage } : {}),
+          ...(simLanguage && simLanguage !== "auto" ? { languageCode: simLanguage } : {}),
         });
         setSimOpen(false);
         await refreshList();
@@ -673,7 +675,7 @@ export function SaasConversations() {
           personaId: simPersonaId,
           maxTurns,
           ...target,
-          ...(simLanguage ? { languageCode: simLanguage } : {}),
+          ...(simLanguage && simLanguage !== "auto" ? { languageCode: simLanguage } : {}),
         });
         setSimOpen(false);
         await refreshList();
@@ -1181,7 +1183,7 @@ export function SaasConversations() {
                   <SelectValue placeholder="Авто" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Авто</SelectItem>
+                  <SelectItem value="auto">Авто</SelectItem>
                   <SelectItem value="ru">RU — Русский</SelectItem>
                   <SelectItem value="en">EN — English</SelectItem>
                   <SelectItem value="ko">KO — 한국어</SelectItem>
