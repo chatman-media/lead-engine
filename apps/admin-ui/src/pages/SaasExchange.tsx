@@ -474,24 +474,14 @@ function renderRateCardMessage(proposals: ExchangeRateCardProposal[], quote: str
         `🇷🇺RUB // ${q.tablo} - ${formatRate(tier.displayRate)} ${marker} (${renderRange(tier.minThb, tier.maxThb, q.word)}${q.flag}`,
       );
     });
-    lines.push("***", "", "🏪💲———💳💳 💰 💳💳———💲🏪", "");
   }
+  if (rub && usdt) lines.push("");
   if (usdt) {
     usdt.tiers.forEach((tier) => {
       lines.push(
         `💲USDT // ${q.tablo} < ${formatRate(tier.displayRate)} - (${renderRange(tier.minThb, tier.maxThb, q.word)})${q.flag}`,
       );
     });
-    lines.push(
-      "",
-      "💲💲💲💲💲💲без карты(Инструкция)",
-      "",
-      "📞 LINE",
-      "📞 WhatsApp",
-      "📞 WeChat",
-      "",
-      "💬Отзывы о Нашей Работе 📨",
-    );
   }
   return lines.join("\n");
 }
