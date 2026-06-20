@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.46.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.45.0...@chatman-media/storage-v1.46.0) (2026-06-20)
+
+
+### Features
+
+* **i18n:** схема — оригинал, язык и перевод сообщения в messages ([#736](https://github.com/chatman-media/lead-engine/issues/736)) ([ba7dc22](https://github.com/chatman-media/lead-engine/commit/ba7dc2229bc84cea96fccd6136a9cbb75a32e2aa)), closes [#731](https://github.com/chatman-media/lead-engine/issues/731) [#731](https://github.com/chatman-media/lead-engine/issues/731)
+
 # [@chatman-media/storage-v1.45.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.44.0...@chatman-media/storage-v1.45.0) (2026-06-19)
 
 
