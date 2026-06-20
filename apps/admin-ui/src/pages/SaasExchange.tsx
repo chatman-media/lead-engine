@@ -2,7 +2,9 @@ import {
   AlertTriangleIcon,
   CheckCircleIcon,
   CheckIcon,
+  CopyIcon,
   Loader2Icon,
+  MapIcon,
   PlusIcon,
   RefreshCwIcon,
   SaveIcon,
@@ -473,24 +475,14 @@ function renderRateCardMessage(proposals: ExchangeRateCardProposal[], quote: str
         `🇷🇺RUB // ${q.tablo} - ${formatRate(tier.displayRate)} ${marker} (${renderRange(tier.minThb, tier.maxThb, q.word)}${q.flag}`,
       );
     });
-    lines.push("***", "", "🏪💲———💳💳 💰 💳💳———💲🏪", "");
   }
+  if (rub && usdt) lines.push("");
   if (usdt) {
     usdt.tiers.forEach((tier) => {
       lines.push(
         `💲USDT // ${q.tablo} < ${formatRate(tier.displayRate)} - (${renderRange(tier.minThb, tier.maxThb, q.word)})${q.flag}`,
       );
     });
-    lines.push(
-      "",
-      "💲💲💲💲💲💲без карты(Инструкция)",
-      "",
-      "📞 LINE",
-      "📞 WhatsApp",
-      "📞 WeChat",
-      "",
-      "💬Отзывы о Нашей Работе 📨",
-    );
   }
   return lines.join("\n");
 }
@@ -555,6 +547,10 @@ export function SaasExchange() {
   const [rateForm, setRateForm] = useState<ExchangeRateInput>(() => emptyRate(quoteCode));
   const [savingRate, setSavingRate] = useState(false);
 
+  // Шаблон поста с курсами (ссылки, контакты, украшения)
+  const [postTemplate, setPostTemplate] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+
   // Реквизиты
   const [savedRequisites, setSavedRequisites] = useState<
     Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }>
@@ -588,6 +584,8 @@ export function SaasExchange() {
         setSavedRequisites(req.items);
         setSettings(st);
         setPendingProposals(prop.proposals);
+        const tmpl = req.items.find((i) => i.key === "exchange_rate_post_template");
+        if (tmpl?.value) setPostTemplate(tmpl.value);
       })
       .catch((err) => {
         if (!handle401(err)) toast.error("Не удалось загрузить данные обменника");
@@ -731,6 +729,24 @@ export function SaasExchange() {
     } finally {
       setCardSaving(false);
     }
+  }
+
+  async function saveTemplate() {
+    setSavingTemplate(true);
+    try {
+      await saas.saveExchangeRequisite("exchange_rate_post_template", postTemplate);
+      toast.success("Шаблон сохранён");
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось сохранить шаблон");
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
+
+  async function copyPost() {
+    const full = postTemplate ? `${rateCardMessage}\n\n${postTemplate}` : rateCardMessage;
+    await navigator.clipboard.writeText(full);
+    toast.success("Пост скопирован в буфер");
   }
 
   async function handleSaveRequisite(key: string) {
@@ -1144,9 +1160,42 @@ export function SaasExchange() {
                         {cardLoading ? "Обновляем…" : "Сбросить к рынку"}
                       </Button>
                     </div>
+                    <div className="space-y-1.5 pt-2">
+                      <Label className="text-xs">Шаблон поста (ссылки, контакты, украшения)</Label>
+                      <Textarea
+                        rows={6}
+                        value={postTemplate}
+                        onChange={(e) => setPostTemplate(e.target.value)}
+                        placeholder={
+                          "💲💲💲💲💲💲без карты(Инструкция)\n\n📞 LINE: @example\n📞 WhatsApp: +63...\n\n💬Отзывы о Нашей Работе 📨"
+                        }
+                        className="resize-y font-mono text-xs"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={saveTemplate}
+                          disabled={savingTemplate}
+                        >
+                          <SaveIcon className="size-3.5" />
+                          {savingTemplate ? "Сохраняем…" : "Сохранить шаблон"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={copyPost}
+                          disabled={!rateCardMessage}
+                        >
+                          <CopyIcon className="size-3.5" />
+                          Скопировать пост
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <pre className="max-h-[460px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs">
-                    {rateCardMessage}
+                  <pre className="max-h-[560px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs">
+                    {postTemplate ? `${rateCardMessage}\n\n${postTemplate}` : rateCardMessage}
                   </pre>
                 </div>
               )}
@@ -1684,6 +1733,7 @@ function PayoutPointsTab() {
   const [coverage, setCoverage] = useState<PayoutCoverageOperator[]>([]);
   const [coverageLoading, setCoverageLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "map">("list");
 
   const load = () => {
     setLoading(true);
@@ -1801,6 +1851,14 @@ function PayoutPointsTab() {
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Каталог точек выдачи</CardTitle>
           <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant={viewMode === "map" ? "secondary" : "outline"}
+              onClick={() => setViewMode((v) => (v === "list" ? "map" : "list"))}
+            >
+              <MapIcon className="mr-1 h-4 w-4" />
+              {viewMode === "map" ? "Список" : "Карта"}
+            </Button>
             <Button size="sm" variant="outline" onClick={syncOsm} disabled={syncing}>
               {syncing ? "Синхронизация…" : "Синк OSM"}
             </Button>
@@ -1813,6 +1871,8 @@ function PayoutPointsTab() {
         <CardContent>
           {loading ? (
             <Skeleton className="h-24 w-full" />
+          ) : viewMode === "map" ? (
+            <PayoutPointsMap points={points} />
           ) : points.length === 0 ? (
             <p className="text-sm text-muted-foreground">Точки выдачи не настроены.</p>
           ) : (
@@ -2093,6 +2153,161 @@ function PayoutPointsTab() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+// ── ATM dot-map (SVG, no external lib) ────────────────────────────────────────
+
+const BANK_COLORS: Record<string, string> = {
+  BDO: "#2563eb",
+  BPI: "#16a34a",
+  Metrobank: "#dc2626",
+  UnionBank: "#ea580c",
+  Landbank: "#92400e",
+  PNB: "#7c3aed",
+  RCBC: "#0891b2",
+  EastWest: "#db2777",
+  Chinabank: "#d97706",
+  "Security Bank": "#059669",
+  PSBank: "#4f46e5",
+  HSBC: "#b91c1c",
+  AUB: "#0369a1",
+  "Bank of Commerce": "#854d0e",
+  Citibank: "#1d4ed8",
+  "Robinsons Bank": "#15803d",
+  DBP: "#6d28d9",
+  UCPB: "#be185d",
+};
+
+function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
+  const [hovered, setHovered] = useState<PayoutPoint | null>(null);
+
+  const geoPoints = points.filter((p) => p.lat != null && p.lng != null);
+
+  if (geoPoints.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        Нет точек с координатами — запустите «Синк OSM».
+      </p>
+    );
+  }
+
+  const lats = geoPoints.map((p) => p.lat!);
+  const lngs = geoPoints.map((p) => p.lng!);
+  const pad = 0.008;
+  const minLat = Math.min(...lats) - pad;
+  const maxLat = Math.max(...lats) + pad;
+  const minLng = Math.min(...lngs) - pad;
+  const maxLng = Math.max(...lngs) + pad;
+
+  const W = 700;
+  const H = 480;
+  const toX = (lng: number) => ((lng - minLng) / (maxLng - minLng)) * W;
+  const toY = (lat: number) => H - ((lat - minLat) / (maxLat - minLat)) * H;
+  const getColor = (bank: string | null) => BANK_COLORS[bank ?? ""] ?? "#6b7280";
+
+  const banks = [
+    ...new Set(geoPoints.map((p) => p.bankName).filter((b): b is string => b != null)),
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-hidden rounded-md border bg-muted/30">
+        <svg viewBox={`0 0 ${W} ${H}`} className="h-[440px] w-full">
+          {Array.from({ length: 6 }, (_, i) => (
+            <line
+              key={`h${i}`}
+              x1={0}
+              y1={((i + 1) * H) / 7}
+              x2={W}
+              y2={((i + 1) * H) / 7}
+              stroke="#e2e8f0"
+              strokeWidth={0.6}
+            />
+          ))}
+          {Array.from({ length: 8 }, (_, i) => (
+            <line
+              key={`v${i}`}
+              x1={((i + 1) * W) / 9}
+              y1={0}
+              x2={((i + 1) * W) / 9}
+              y2={H}
+              stroke="#e2e8f0"
+              strokeWidth={0.6}
+            />
+          ))}
+          {geoPoints.map((p) => (
+            <circle
+              key={p.id}
+              cx={toX(p.lng!)}
+              cy={toY(p.lat!)}
+              r={5}
+              fill={getColor(p.bankName)}
+              fillOpacity={p.isActive ? 0.88 : 0.28}
+              stroke="white"
+              strokeWidth={1}
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setHovered(p)}
+              onMouseLeave={() => setHovered(null)}
+            />
+          ))}
+          {hovered &&
+            (() => {
+              const cx = toX(hovered.lng!);
+              const cy = toY(hovered.lat!);
+              const tw = 210;
+              const th = 56;
+              const tx = cx + tw + 14 > W ? cx - tw - 8 : cx + 8;
+              const ty = Math.max(4, Math.min(cy - th / 2, H - th - 4));
+              const bankLine = (hovered.bankName ?? hovered.label).slice(0, 30);
+              const labelLine = hovered.label.slice(0, 32);
+              return (
+                <g pointerEvents="none">
+                  <rect
+                    x={tx}
+                    y={ty}
+                    width={tw}
+                    height={th}
+                    rx={4}
+                    fill="white"
+                    stroke="#cbd5e1"
+                    strokeWidth={1}
+                  />
+                  <text x={tx + 8} y={ty + 18} fontSize={11} fill="#0f172a" fontWeight="600">
+                    {bankLine}
+                  </text>
+                  <text x={tx + 8} y={ty + 32} fontSize={10} fill="#475569">
+                    {labelLine}
+                  </text>
+                  {hovered.city && (
+                    <text x={tx + 8} y={ty + 46} fontSize={9} fill="#94a3b8">
+                      {hovered.city}
+                    </text>
+                  )}
+                </g>
+              );
+            })()}
+        </svg>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+        {banks.map((bank) => {
+          const count = geoPoints.filter((p) => p.bankName === bank).length;
+          return (
+            <div key={bank} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span
+                className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                style={{ background: getColor(bank) }}
+              />
+              {bank} <span className="font-medium text-foreground">({count})</span>
+            </div>
+          );
+        })}
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-[#6b7280]" />
+          Прочие ({geoPoints.filter((p) => !p.bankName || !BANK_COLORS[p.bankName]).length})
+        </div>
+      </div>
+    </div>
   );
 }
 
