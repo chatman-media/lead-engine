@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.27.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.26.0...@chatman-media/conversation-engine-v3.27.0) (2026-06-20)
+
+
+### Features
+
+* **i18n:** переводящий слой оператору — ответ оператора на язык клиента ([#731](https://github.com/chatman-media/lead-engine/issues/731), часть 1) ([1e966f6](https://github.com/chatman-media/lead-engine/commit/1e966f68567b08acdde3dd9137652777937296a1)), closes [#735](https://github.com/chatman-media/lead-engine/issues/735) [#736](https://github.com/chatman-media/lead-engine/issues/736) [#736](https://github.com/chatman-media/lead-engine/issues/736)
+
 # [@chatman-media/conversation-engine-v3.26.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.25.0...@chatman-media/conversation-engine-v3.26.0) (2026-06-20)
 
 
