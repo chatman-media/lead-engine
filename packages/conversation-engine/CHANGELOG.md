@@ -1,3 +1,11 @@
+# [@chatman-media/conversation-engine-v3.26.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.25.0...@chatman-media/conversation-engine-v3.26.0) (2026-06-20)
+
+
+### Features
+
+* **i18n:** роутинг языка ответа — бот отвечает на языке клиента ([#730](https://github.com/chatman-media/lead-engine/issues/730)) ([eba2f6e](https://github.com/chatman-media/lead-engine/commit/eba2f6ec026ed9109dfda5046b10ecb10541bd3d)), closes [#735](https://github.com/chatman-media/lead-engine/issues/735) [#735](https://github.com/chatman-media/lead-engine/issues/735)
+* **i18n:** схема — оригинал, язык и перевод сообщения в messages ([#736](https://github.com/chatman-media/lead-engine/issues/736)) ([ba7dc22](https://github.com/chatman-media/lead-engine/commit/ba7dc2229bc84cea96fccd6136a9cbb75a32e2aa)), closes [#731](https://github.com/chatman-media/lead-engine/issues/731) [#731](https://github.com/chatman-media/lead-engine/issues/731)
+
 # [@chatman-media/conversation-engine-v3.25.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.24.0...@chatman-media/conversation-engine-v3.25.0) (2026-06-19)
 
 
