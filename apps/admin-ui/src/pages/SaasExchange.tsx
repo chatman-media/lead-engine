@@ -2,6 +2,7 @@ import {
   AlertTriangleIcon,
   CheckCircleIcon,
   CheckIcon,
+  CopyIcon,
   Loader2Icon,
   MapIcon,
   PlusIcon,
@@ -543,6 +544,10 @@ export function SaasExchange() {
   const [rateForm, setRateForm] = useState<ExchangeRateInput>(() => emptyRate(quoteCode));
   const [savingRate, setSavingRate] = useState(false);
 
+  // Шаблон поста с курсами (ссылки, контакты, украшения)
+  const [postTemplate, setPostTemplate] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+
   // Реквизиты
   const [savedRequisites, setSavedRequisites] = useState<
     Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }>
@@ -576,6 +581,8 @@ export function SaasExchange() {
         setSavedRequisites(req.items);
         setSettings(st);
         setPendingProposals(prop.proposals);
+        const tmpl = req.items.find((i) => i.key === "exchange_rate_post_template");
+        if (tmpl?.value) setPostTemplate(tmpl.value);
       })
       .catch((err) => {
         if (!handle401(err)) toast.error("Не удалось загрузить данные обменника");
@@ -719,6 +726,24 @@ export function SaasExchange() {
     } finally {
       setCardSaving(false);
     }
+  }
+
+  async function saveTemplate() {
+    setSavingTemplate(true);
+    try {
+      await saas.saveExchangeRequisite("exchange_rate_post_template", postTemplate);
+      toast.success("Шаблон сохранён");
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось сохранить шаблон");
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
+
+  async function copyPost() {
+    const full = postTemplate ? `${rateCardMessage}\n\n${postTemplate}` : rateCardMessage;
+    await navigator.clipboard.writeText(full);
+    toast.success("Пост скопирован в буфер");
   }
 
   async function handleSaveRequisite(key: string) {
@@ -1086,9 +1111,42 @@ export function SaasExchange() {
                         {cardLoading ? "Обновляем…" : "Сбросить к рынку"}
                       </Button>
                     </div>
+                    <div className="space-y-1.5 pt-2">
+                      <Label className="text-xs">Шаблон поста (ссылки, контакты, украшения)</Label>
+                      <Textarea
+                        rows={6}
+                        value={postTemplate}
+                        onChange={(e) => setPostTemplate(e.target.value)}
+                        placeholder={
+                          "💲💲💲💲💲💲без карты(Инструкция)\n\n📞 LINE: @example\n📞 WhatsApp: +63...\n\n💬Отзывы о Нашей Работе 📨"
+                        }
+                        className="resize-y font-mono text-xs"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={saveTemplate}
+                          disabled={savingTemplate}
+                        >
+                          <SaveIcon className="size-3.5" />
+                          {savingTemplate ? "Сохраняем…" : "Сохранить шаблон"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={copyPost}
+                          disabled={!rateCardMessage}
+                        >
+                          <CopyIcon className="size-3.5" />
+                          Скопировать пост
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <pre className="max-h-[460px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs">
-                    {rateCardMessage}
+                  <pre className="max-h-[560px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs">
+                    {postTemplate ? `${rateCardMessage}\n\n${postTemplate}` : rateCardMessage}
                   </pre>
                 </div>
               )}
