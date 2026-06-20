@@ -46,10 +46,7 @@ class CapturingRagChat implements ChatClient {
   }
 }
 
-function chatThenFactCheck(
-	reply: string,
-	verdict: Record<string, unknown>,
-): ChatClient {
+function chatThenFactCheck(reply: string, verdict: Record<string, unknown>): ChatClient {
   let calls = 0;
   return {
     complete: async () => {
@@ -114,17 +111,17 @@ const STYLE: ResolvedStyleAssignment = {
   hooks: [],
   stages: {},
   fewShot: [],
-	guardrails: {
-		noMinors: true,
-		botDisclosureOnDirectQuestion: true,
-		forbiddenTopics: [],
-	},
+  guardrails: {
+    noMinors: true,
+    botDisclosureOnDirectQuestion: true,
+    forbiddenTopics: [],
+  },
   model: { id: "x", temperature: 0.5, maxTokens: 100 },
 };
 
 /** Минимальный messagesRepo с recent/countByConversation/insert. */
 function fakeMessages(
-	opts: { recent?: unknown[]; count?: number } = {},
+  opts: { recent?: unknown[]; count?: number } = {},
 ): RagTurnContext["messages"] {
   const rows = () =>
     (opts.recent ?? []).map((item, index) => {
@@ -157,8 +154,7 @@ function fakeMessages(
         .filter(
           (item) =>
             item.id < summaryOpts.beforeMessageId &&
-            (summaryOpts.afterMessageId == null ||
-              item.id > summaryOpts.afterMessageId) &&
+            (summaryOpts.afterMessageId == null || item.id > summaryOpts.afterMessageId) &&
             item.deletedAt == null &&
             item.role !== "system",
         )
@@ -188,10 +184,7 @@ function ctxWith(partial: Partial<RagTurnContext>): RagTurnContext {
   };
 }
 
-function mk(
-	ctx: RagTurnContext,
-	opts: Partial<RagReplyStrategyOpts> = {},
-): RagReplyStrategy {
+function mk(ctx: RagTurnContext, opts: Partial<RagReplyStrategyOpts> = {}): RagReplyStrategy {
   return new RagReplyStrategy({ loadTurnContext: () => ctx, ...opts });
 }
 
@@ -348,11 +341,28 @@ describe("RagReplyStrategy.generate", () => {
     });
   });
 
+  it("suggestions.log ошибка → catch-путь, ответ не роняется", async () => {
+    const s = mk(
+      ctxWith({
+        chat: chatReturning("Уточню!"),
+        suggestions: {
+          log: async () => {
+            throw new Error("log failed");
+          },
+        } as never,
+      }),
+      { softFallback: true },
+    );
+
+    await s.generate(baseInput());
+    // fire-and-forget reject: даём микротаску добежать
+    await new Promise((res) => setTimeout(res, 0));
+  });
+
   it("tool-loop telemetry пробрасывается в recordToolCalls", async () => {
     let toolLoopCalls = 0;
     const chat = {
-			complete: async () =>
-				"Вот ссылка для записи: https://calendly.example/demo",
+      complete: async () => "Вот ссылка для записи: https://calendly.example/demo",
       completeWithTools: async () => {
         toolLoopCalls += 1;
         if (toolLoopCalls === 1) {
@@ -367,21 +377,19 @@ describe("RagReplyStrategy.generate", () => {
             ],
           };
         }
-				return {
-					content: "Вот ссылка для записи: https://calendly.example/demo",
-					toolCalls: [],
-				};
+        return {
+          content: "Вот ссылка для записи: https://calendly.example/demo",
+          toolCalls: [],
+        };
       },
     } as unknown as ChatClient;
     const tool = makeBookingLinkTool("https://calendly.example/demo");
-		const recorded: Array<
-			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
-		> = [];
-		const s = mk(ctxWith({ chat, kb: kbWith([HIT]), tools: [tool] }), {
-        recordToolCalls: async (input) => {
-          recorded.push(input);
-        },
-		});
+    const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const s = mk(ctxWith({ chat, kb: kbWith([HIT]), tools: [tool] }), {
+      recordToolCalls: async (input) => {
+        recorded.push(input);
+      },
+    });
 
     const r = await s.generate(baseInput());
 
@@ -403,11 +411,11 @@ describe("RagReplyStrategy.generate", () => {
   });
 
   it("style assignment metadata сохраняется в conversation", async () => {
-		const saved: Array<{
-			conversationId: number;
-			styleId?: number | null;
-			experimentId?: number | null;
-		}> = [];
+    const saved: Array<{
+      conversationId: number;
+      styleId?: number | null;
+      experimentId?: number | null;
+    }> = [];
     const s = mk(
       ctxWith({
         chat: chatReturning("Курс 36.5 бат за USDT, без комиссии"),
@@ -422,10 +430,10 @@ describe("RagReplyStrategy.generate", () => {
         conversations: {
           setAssignment: async (
             conversationId: number,
-						assignment: {
-							styleId?: number | null;
-							experimentId?: number | null;
-						},
+            assignment: {
+              styleId?: number | null;
+              experimentId?: number | null;
+            },
           ) => {
             saved.push({ conversationId, ...assignment });
           },
@@ -436,11 +444,11 @@ describe("RagReplyStrategy.generate", () => {
     const r = await s.generate(baseInput());
 
     expect(r).not.toBeNull();
-		expect(saved[0]).toEqual({
-			conversationId: 100,
-			styleId: 7,
-			experimentId: 3,
-		});
+    expect(saved[0]).toEqual({
+      conversationId: 100,
+      styleId: 7,
+      experimentId: 3,
+    });
   });
 
   it("exchange: неподкреплённый курс заменяется safe fallback", async () => {
@@ -456,60 +464,56 @@ describe("RagReplyStrategy.generate", () => {
     expect(firstReplyText(r)).toBe(EXCHANGE_SAFE_FALLBACK);
   });
 
-	it("exchange: guard finding is recorded even without tool calls", async () => {
-		const recorded: Array<
-			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
-		> = [];
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: chatReturning("Курс 31.5, получите 10553 THB."),
-				kb: kbWith([HIT]),
-			}),
-			{
-				recordToolCalls: async (input) => {
-					recorded.push(input);
-				},
-			},
-		);
+  it("exchange: guard finding is recorded even without tool calls", async () => {
+    const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: chatReturning("Курс 31.5, получите 10553 THB."),
+        kb: kbWith([HIT]),
+      }),
+      {
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+    );
 
-		const r = await s.generate(baseInput());
+    const r = await s.generate(baseInput());
 
-		expect(r).not.toBeNull();
-		expect(recorded).toHaveLength(1);
-		expect(recorded[0]?.guardFindings?.[0]).toMatchObject({
-			action: "rewrite",
-			reasons: ["unbacked_quote"],
-			originalText: "Курс 31.5, получите 10553 THB.",
-			finalText: EXCHANGE_SAFE_FALLBACK,
-		});
-	});
+    expect(r).not.toBeNull();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.guardFindings?.[0]).toMatchObject({
+      action: "rewrite",
+      reasons: ["unbacked_quote"],
+      originalText: "Курс 31.5, получите 10553 THB.",
+      finalText: EXCHANGE_SAFE_FALLBACK,
+    });
+  });
 
-	it("exchange: response guard can be disabled by tenant flag", async () => {
-		const recorded: Array<
-			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
-		> = [];
-		const unsafeText = "Курс 31.5, получите 10553 THB.";
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: chatReturning(unsafeText),
-				kb: kbWith([HIT]),
-				exchangeResponseGuardEnabled: false,
-			}),
-			{
-				recordToolCalls: async (input) => {
-					recorded.push(input);
-				},
-			},
-		);
+  it("exchange: response guard can be disabled by tenant flag", async () => {
+    const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const unsafeText = "Курс 31.5, получите 10553 THB.";
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: chatReturning(unsafeText),
+        kb: kbWith([HIT]),
+        exchangeResponseGuardEnabled: false,
+      }),
+      {
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+    );
 
-		const r = await s.generate(baseInput());
+    const r = await s.generate(baseInput());
 
-		expect(r).not.toBeNull();
-		expect(firstReplyText(r)).toBe(unsafeText);
-		expect(recorded).toHaveLength(0);
-	});
+    expect(r).not.toBeNull();
+    expect(firstReplyText(r)).toBe(unsafeText);
+    expect(recorded).toHaveLength(0);
+  });
 
   it("exchange: policy guard blocks payment confirmation without verified payment state", async () => {
     const s = mk(
@@ -540,9 +544,9 @@ describe("RagReplyStrategy.generate", () => {
     expect(firstReplyText(r)).toBe(EXCHANGE_PAYMENT_FALLBACK);
   });
 
-	it("exchange: payment proof answer attaches payment-review operator handoff", async () => {
-	    const s = mk(
-	      ctxWith({
+  it("exchange: payment proof answer attaches payment-review operator handoff", async () => {
+    const s = mk(
+      ctxWith({
         template: EXCHANGE_TEMPLATE,
         chat: chatReturning("Чек получили, передаю оператору на проверку."),
         kb: kbWith([HIT]),
@@ -588,1102 +592,1105 @@ describe("RagReplyStrategy.generate", () => {
       stageSlug: "payment_review",
       pending: "operator_payment_review",
     });
-	    expect(normalized?.autoTakeover).toBe(true);
-	  });
+    expect(normalized?.autoTakeover).toBe(true);
+  });
 
-	it("exchange: amount request computes quote without exposing rate", async () => {
-		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
-		let seenArgs: unknown = null;
-		const recorded: Array<
-			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
-		> = [];
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 10000,
-					amountSetThisTurn: true,
-				},
-				tools: [
-					{
-						name: "compute_exchange_quote",
-						description: "compute quote",
-						parameters: {},
-						execute: async (args: unknown) => {
-							seenArgs = args;
-							return {
-								direction: "RUB->PHP",
-								asset: "RUB",
-								quoteAsset: "PHP",
-								amountMode: "source_amount",
-								amountFrom: 10000,
-								rate: 1.230575,
-								amountToThb: 8126,
-							};
-						},
-					},
-				] as never,
-			}),
-			{
-				reflect: false,
-				recordToolCalls: async (input) => {
-					recorded.push(input);
-				},
-			},
-		);
+  it("exchange: amount request computes quote without exposing rate", async () => {
+    const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
+    let seenArgs: unknown = null;
+    const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 10000,
+          amountSetThisTurn: true,
+        },
+        tools: [
+          {
+            name: "compute_exchange_quote",
+            description: "compute quote",
+            parameters: {},
+            execute: async (args: unknown) => {
+              seenArgs = args;
+              return {
+                direction: "RUB->PHP",
+                asset: "RUB",
+                quoteAsset: "PHP",
+                amountMode: "source_amount",
+                amountFrom: 10000,
+                rate: 1.230575,
+                amountToThb: 8126,
+              };
+            },
+          },
+        ] as never,
+      }),
+      {
+        reflect: false,
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+    );
 
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText: "10к рублей",
-		});
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText: "10к рублей",
+    });
 
-		expect(firstReplyText(r)).toContain("получите 8126 PHP");
-		expect(firstReplyText(r).toLowerCase()).not.toContain("курс");
-		expect(chat.lastCall).toBeNull();
-		expect(seenArgs).toMatchObject({
-			asset: "RUB",
-			amount: 10000,
-			amountMode: "source_amount",
-		});
-		expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe(
-			"compute_exchange_quote",
-		);
-	});
+    expect(firstReplyText(r)).toContain("получите 8126 PHP");
+    expect(firstReplyText(r).toLowerCase()).not.toContain("курс");
+    expect(chat.lastCall).toBeNull();
+    expect(seenArgs).toMatchObject({
+      asset: "RUB",
+      amount: 10000,
+      amountMode: "source_amount",
+    });
+    expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe("compute_exchange_quote");
+  });
 
-	it("exchange: явный вопрос про курс → показываем курс", async () => {
-		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				exchangeCollected: { asset: "RUB", amount: 10000 },
-				tools: [
-					{
-						name: "compute_exchange_quote",
-						description: "compute quote",
-						parameters: {},
-						execute: async () => ({
-							direction: "RUB->PHP",
-							asset: "RUB",
-							quoteAsset: "PHP",
-							amountMode: "source_amount",
-							amountFrom: 10000,
-							rate: 1.230575,
-							amountToThb: 8126,
-						}),
-					},
-				] as never,
-			}),
-			{ reflect: false },
-		);
+  it("exchange: явный вопрос про курс → показываем курс", async () => {
+    const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        exchangeCollected: { asset: "RUB", amount: 10000 },
+        tools: [
+          {
+            name: "compute_exchange_quote",
+            description: "compute quote",
+            parameters: {},
+            execute: async () => ({
+              direction: "RUB->PHP",
+              asset: "RUB",
+              quoteAsset: "PHP",
+              amountMode: "source_amount",
+              amountFrom: 10000,
+              rate: 1.230575,
+              amountToThb: 8126,
+            }),
+          },
+        ] as never,
+      }),
+      { reflect: false },
+    );
 
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText: "А какой курс вы используете для расчёта?",
-		});
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText: "А какой курс вы используете для расчёта?",
+    });
 
-		const text = firstReplyText(r);
-		expect(text).toContain("получите 8126 PHP");
-		expect(text.toLowerCase()).toContain("курс");
-		expect(text).toContain("1.23");
-		expect(chat.lastCall).toBeNull();
-	});
+    const text = firstReplyText(r);
+    expect(text).toContain("получите 8126 PHP");
+    expect(text.toLowerCase()).toContain("курс");
+    expect(text).toContain("1.23");
+    expect(chat.lastCall).toBeNull();
+  });
 
-	it("exchange: «20.000 руб» (точка-разделитель тысяч) парсит как 20000", async () => {
-		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
-		let seenArgs: unknown = null;
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 20000,
-					amountSetThisTurn: true,
-				},
-				tools: [
-					{
-						name: "compute_exchange_quote",
-						description: "compute quote",
-						parameters: {},
-						execute: async (args: unknown) => {
-							seenArgs = args;
-							return {
-								direction: "RUB->PHP",
-								asset: "RUB",
-								quoteAsset: "PHP",
-								amountMode: "source_amount",
-								amountFrom: 20000,
-								rate: 1.23,
-								amountToThb: 16220,
-							};
-						},
-					},
-				] as never,
-			}),
-			{ reflect: false },
-		);
+  it("exchange: «20.000 руб» (точка-разделитель тысяч) парсит как 20000", async () => {
+    const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
+    let seenArgs: unknown = null;
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 20000,
+          amountSetThisTurn: true,
+        },
+        tools: [
+          {
+            name: "compute_exchange_quote",
+            description: "compute quote",
+            parameters: {},
+            execute: async (args: unknown) => {
+              seenArgs = args;
+              return {
+                direction: "RUB->PHP",
+                asset: "RUB",
+                quoteAsset: "PHP",
+                amountMode: "source_amount",
+                amountFrom: 20000,
+                rate: 1.23,
+                amountToThb: 16220,
+              };
+            },
+          },
+        ] as never,
+      }),
+      { reflect: false },
+    );
 
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText: "хочу поменять 20.000 руб на песо",
-		});
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText: "хочу поменять 20.000 руб на песо",
+    });
 
-		expect(seenArgs).toMatchObject({ asset: "RUB", amount: 20000 });
-		expect(firstReplyText(r)).toContain("получите 16220 PHP");
-	});
+    expect(seenArgs).toMatchObject({ asset: "RUB", amount: 20000 });
+    expect(firstReplyText(r)).toContain("получите 16220 PHP");
+  });
 
-	it("exchange: после котировки спрашивает способ выдачи, если не назван", async () => {
-		const quoteTool = {
-			name: "compute_exchange_quote",
-			description: "compute quote",
-			parameters: {},
-			execute: async () => ({
-				direction: "RUB->PHP",
-				asset: "RUB",
-				quoteAsset: "PHP",
-				amountMode: "source_amount",
-				amountFrom: 20000,
-				rate: 1.23,
-				amountToThb: 16220,
-			}),
-		};
-		// Способ выдачи НЕ назван → к котировке добавляется вопрос.
-		const s1 = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: new CapturingRagChat("x"),
-				kb: kbWith([HIT]),
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 20000,
-					amountSetThisTurn: true,
-				},
-				tools: [quoteTool] as never,
-			}),
-			{ reflect: false },
-		);
-		const r1 = await s1.generate({
-			...baseInput(),
-			userMessageText: "хочу обменять 20к рублей на песо",
-		});
-		expect(firstReplyText(r1)).toContain("получите 16220 PHP");
-		expect(firstReplyText(r1)).toContain("как удобнее получить деньги");
+  it("exchange: после котировки спрашивает способ выдачи, если не назван", async () => {
+    const quoteTool = {
+      name: "compute_exchange_quote",
+      description: "compute quote",
+      parameters: {},
+      execute: async () => ({
+        direction: "RUB->PHP",
+        asset: "RUB",
+        quoteAsset: "PHP",
+        amountMode: "source_amount",
+        amountFrom: 20000,
+        rate: 1.23,
+        amountToThb: 16220,
+      }),
+    };
+    // Способ выдачи НЕ назван → к котировке добавляется вопрос.
+    const s1 = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: new CapturingRagChat("x"),
+        kb: kbWith([HIT]),
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 20000,
+          amountSetThisTurn: true,
+        },
+        tools: [quoteTool] as never,
+      }),
+      { reflect: false },
+    );
+    const r1 = await s1.generate({
+      ...baseInput(),
+      userMessageText: "хочу обменять 20к рублей на песо",
+    });
+    expect(firstReplyText(r1)).toContain("получите 16220 PHP");
+    expect(firstReplyText(r1)).toContain("как удобнее получить деньги");
 
-		// Способ выдачи назван («в банкомате») → доп.вопрос не задаётся.
-		const s2 = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: new CapturingRagChat("x"),
-				kb: kbWith([HIT]),
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 20000,
-					payoutMethod: "atm",
-					amountSetThisTurn: true,
-				},
-				tools: [quoteTool] as never,
-			}),
-			{ reflect: false },
-		);
-		const r2 = await s2.generate({
-			...baseInput(),
-			userMessageText: "хочу обменять 20к рублей на песо, получу в банкомате",
-		});
-		expect(firstReplyText(r2)).toContain("получите 16220 PHP");
-		expect(firstReplyText(r2)).not.toContain("как удобнее получить деньги");
-	});
+    // Способ выдачи назван («в банкомате») → доп.вопрос не задаётся.
+    const s2 = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: new CapturingRagChat("x"),
+        kb: kbWith([HIT]),
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 20000,
+          payoutMethod: "atm",
+          amountSetThisTurn: true,
+        },
+        tools: [quoteTool] as never,
+      }),
+      { reflect: false },
+    );
+    const r2 = await s2.generate({
+      ...baseInput(),
+      userMessageText: "хочу обменять 20к рублей на песо, получу в банкомате",
+    });
+    expect(firstReplyText(r2)).toContain("получите 16220 PHP");
+    expect(firstReplyText(r2)).not.toContain("как удобнее получить деньги");
+  });
 
-	it("exchange: USDT без сети → спрашивает протокол (TRC20/ERC20/BEP20)", async () => {
-		const quoteTool = {
-			name: "compute_exchange_quote",
-			description: "compute quote",
-			parameters: {},
-			execute: async (args: unknown) => ({
-				direction: "USDT->PHP",
-				asset: "USDT",
-				quoteAsset: "PHP",
-				network: (args as { network?: string }).network ?? "TRC20",
-				amountMode: "source_amount",
-				amountFrom: 200,
-				rate: 56,
-				amountToThb: 11200,
-			}),
-		};
-		// Сеть НЕ указана → спрашиваем протокол.
-		const s1 = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: new CapturingRagChat("x"),
-				kb: kbWith([HIT]),
-				exchangeCollected: {
-					asset: "usdt",
-					amount: 200,
-					amountSetThisTurn: true,
-				},
-				tools: [quoteTool] as never,
-			}),
-			{ reflect: false },
-		);
-		const r1 = await s1.generate({ ...baseInput(), userMessageText: "200 usdt" });
-		expect(firstReplyText(r1)).toContain("получите 11200 PHP");
-		expect(firstReplyText(r1)).toContain("в какой сети");
+  it("exchange: USDT без сети → спрашивает протокол (TRC20/ERC20/BEP20)", async () => {
+    const quoteTool = {
+      name: "compute_exchange_quote",
+      description: "compute quote",
+      parameters: {},
+      execute: async (args: unknown) => ({
+        direction: "USDT->PHP",
+        asset: "USDT",
+        quoteAsset: "PHP",
+        network: (args as { network?: string }).network ?? "TRC20",
+        amountMode: "source_amount",
+        amountFrom: 200,
+        rate: 56,
+        amountToThb: 11200,
+      }),
+    };
+    // Сеть НЕ указана → спрашиваем протокол.
+    const s1 = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: new CapturingRagChat("x"),
+        kb: kbWith([HIT]),
+        exchangeCollected: {
+          asset: "usdt",
+          amount: 200,
+          amountSetThisTurn: true,
+        },
+        tools: [quoteTool] as never,
+      }),
+      { reflect: false },
+    );
+    const r1 = await s1.generate({ ...baseInput(), userMessageText: "200 usdt" });
+    expect(firstReplyText(r1)).toContain("получите 11200 PHP");
+    expect(firstReplyText(r1)).toContain("в какой сети");
 
-		// Сеть указана (TRC20) → протокол не переспрашиваем.
-		const s2 = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: new CapturingRagChat("x"),
-				kb: kbWith([HIT]),
-				exchangeCollected: {
-					asset: "usdt",
-					amount: 200,
-					network: "trc20",
-					amountSetThisTurn: true,
-				},
-				tools: [quoteTool] as never,
-			}),
-			{ reflect: false },
-		);
-		const r2 = await s2.generate({
-			...baseInput(),
-			userMessageText: "200 usdt trc20",
-		});
-		expect(firstReplyText(r2)).toContain("получите 11200 PHP");
-		expect(firstReplyText(r2)).not.toContain("в какой сети");
-	});
+    // Сеть указана (TRC20) → протокол не переспрашиваем.
+    const s2 = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: new CapturingRagChat("x"),
+        kb: kbWith([HIT]),
+        exchangeCollected: {
+          asset: "usdt",
+          amount: 200,
+          network: "trc20",
+          amountSetThisTurn: true,
+        },
+        tools: [quoteTool] as never,
+      }),
+      { reflect: false },
+    );
+    const r2 = await s2.generate({
+      ...baseInput(),
+      userMessageText: "200 usdt trc20",
+    });
+    expect(firstReplyText(r2)).toContain("получите 11200 PHP");
+    expect(firstReplyText(r2)).not.toContain("в какой сети");
+  });
 
-	it("exchange: неподдерживаемая сеть (TON) → явный отказ с TRC20/ERC20/BEP20", async () => {
-		const quoteTool = {
-			name: "compute_exchange_quote",
-			description: "compute quote",
-			parameters: {},
-			execute: async () => ({
-				direction: "USDT->PHP",
-				asset: "USDT",
-				quoteAsset: "PHP",
-				amountMode: "source_amount",
-				amountFrom: 200,
-				rate: 56,
-				amountToThb: 11200,
-			}),
-		};
-		const mkExchange = () =>
-			mk(
-				ctxWith({
-					template: EXCHANGE_TEMPLATE,
-					chat: new CapturingRagChat("x"),
-					kb: kbWith([HIT]),
-					exchangePolicyState: { stageSlug: "quote_calculated" },
-					// Для r3 («200 usdt trc20») форс-котировке нужна свежая сумма; r1/r2
-					// («TON»/«тон») отбиваются unsupported-network ответом раньше неё.
-					exchangeCollected: {
-						asset: "usdt",
-						amount: 200,
-						network: "trc20",
-						amountSetThisTurn: true,
-					},
-					tools: [quoteTool] as never,
-				}),
-				{ reflect: false },
-			);
-		// Латиница: «сеть TON» → отказ, без молчаливого переспроса.
-		const r1 = await mkExchange().generate({
-			...baseInput(),
-			userMessageText: "сеть TON",
-		});
-		const t1 = firstReplyText(r1);
-		expect(t1).toContain("TON");
-		expect(t1).toContain("не поддерживаем");
-		expect(t1).toContain("TRC20");
-		// Кириллица: ответ одним словом «тон».
-		const r2 = await mkExchange().generate({
-			...baseInput(),
-			userMessageText: "тон",
-		});
-		expect(firstReplyText(r2)).toContain("не поддерживаем");
-		// Поддерживаемая сеть рядом с амаунтом — НЕ отказываем, считаем котировку.
-		const r3 = await mkExchange().generate({
-			...baseInput(),
-			userMessageText: "200 usdt trc20",
-		});
-		expect(firstReplyText(r3)).not.toContain("не поддерживаем");
-		expect(firstReplyText(r3)).toContain("получите 11200 PHP");
-	});
+  it("exchange: неподдерживаемая сеть (TON) → явный отказ с TRC20/ERC20/BEP20", async () => {
+    const quoteTool = {
+      name: "compute_exchange_quote",
+      description: "compute quote",
+      parameters: {},
+      execute: async () => ({
+        direction: "USDT->PHP",
+        asset: "USDT",
+        quoteAsset: "PHP",
+        amountMode: "source_amount",
+        amountFrom: 200,
+        rate: 56,
+        amountToThb: 11200,
+      }),
+    };
+    const mkExchange = () =>
+      mk(
+        ctxWith({
+          template: EXCHANGE_TEMPLATE,
+          chat: new CapturingRagChat("x"),
+          kb: kbWith([HIT]),
+          exchangePolicyState: { stageSlug: "quote_calculated" },
+          // Для r3 («200 usdt trc20») форс-котировке нужна свежая сумма; r1/r2
+          // («TON»/«тон») отбиваются unsupported-network ответом раньше неё.
+          exchangeCollected: {
+            asset: "usdt",
+            amount: 200,
+            network: "trc20",
+            amountSetThisTurn: true,
+          },
+          tools: [quoteTool] as never,
+        }),
+        { reflect: false },
+      );
+    // Латиница: «сеть TON» → отказ, без молчаливого переспроса.
+    const r1 = await mkExchange().generate({
+      ...baseInput(),
+      userMessageText: "сеть TON",
+    });
+    const t1 = firstReplyText(r1);
+    expect(t1).toContain("TON");
+    expect(t1).toContain("не поддерживаем");
+    expect(t1).toContain("TRC20");
+    // Кириллица: ответ одним словом «тон».
+    const r2 = await mkExchange().generate({
+      ...baseInput(),
+      userMessageText: "тон",
+    });
+    expect(firstReplyText(r2)).toContain("не поддерживаем");
+    // Поддерживаемая сеть рядом с амаунтом — НЕ отказываем, считаем котировку.
+    const r3 = await mkExchange().generate({
+      ...baseInput(),
+      userMessageText: "200 usdt trc20",
+    });
+    expect(firstReplyText(r3)).not.toContain("не поддерживаем");
+    expect(firstReplyText(r3)).toContain("получите 11200 PHP");
+  });
 
-	it("exchange: после ответа о выдаче (банкомат) спрашивает метод оплаты", async () => {
-		const quoteTool = {
-			name: "compute_exchange_quote",
-			description: "compute quote",
-			parameters: {},
-			execute: async () => ({
-				direction: "RUB->PHP",
-				asset: "RUB",
-				quoteAsset: "PHP",
-				amountMode: "source_amount",
-				amountFrom: 20000,
-				rate: 0.81,
-				amountToThb: 16220,
-			}),
-		};
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: new CapturingRagChat("x"),
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "хочу 20к рублей на песо" },
-						{ role: "assistant", text: "Получите 16220 PHP.\n\nПодскажите, как удобнее получить деньги?" },
-					],
-				}),
-				exchangePolicyState: { stageSlug: "quote_calculated" },
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 20000,
-					payoutMethod: "atm",
-				},
-				tools: [quoteTool] as never,
-			}),
-			{ reflect: false },
-		);
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText: "в банкомате",
-		});
-		const text = firstReplyText(r);
-		expect(text).toContain("QR-коду в банк-приложении");
-		expect(text).toContain("банковским переводом");
-	});
+  it("exchange: после ответа о выдаче (банкомат) спрашивает метод оплаты", async () => {
+    const quoteTool = {
+      name: "compute_exchange_quote",
+      description: "compute quote",
+      parameters: {},
+      execute: async () => ({
+        direction: "RUB->PHP",
+        asset: "RUB",
+        quoteAsset: "PHP",
+        amountMode: "source_amount",
+        amountFrom: 20000,
+        rate: 0.81,
+        amountToThb: 16220,
+      }),
+    };
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: new CapturingRagChat("x"),
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "хочу 20к рублей на песо" },
+            {
+              role: "assistant",
+              text: "Получите 16220 PHP.\n\nПодскажите, как удобнее получить деньги?",
+            },
+          ],
+        }),
+        exchangePolicyState: { stageSlug: "quote_calculated" },
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 20000,
+          payoutMethod: "atm",
+        },
+        tools: [quoteTool] as never,
+      }),
+      { reflect: false },
+    );
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText: "в банкомате",
+    });
+    const text = firstReplyText(r);
+    expect(text).toContain("QR-коду в банк-приложении");
+    expect(text).toContain("банковским переводом");
+  });
 
-	it("exchange: если QR уже упомянут — вопрос о методе оплаты не задаётся", async () => {
-		const chat = new CapturingRagChat("Принял!");
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "хочу 20к рублей на песо" },
-						{ role: "assistant", text: "Получите 16220 PHP.\n\nПодскажите, как удобнее получить деньги?" },
-						{ role: "user", text: "в банкомате" },
-						{ role: "assistant", text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?" },
-					],
-				}),
-				exchangePolicyState: { stageSlug: "quote_calculated" },
-				tools: [] as never,
-			}),
-			{ reflect: false },
-		);
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText: "через QR",
-		});
-		// Метод оплаты назван — вопрос не повторяется, LLM отвечает
-		expect(firstReplyText(r)).toBe("Принял!");
-		expect(chat.lastCall).not.toBeNull();
-	});
+  it("exchange: если QR уже упомянут — вопрос о методе оплаты не задаётся", async () => {
+    const chat = new CapturingRagChat("Принял!");
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "хочу 20к рублей на песо" },
+            {
+              role: "assistant",
+              text: "Получите 16220 PHP.\n\nПодскажите, как удобнее получить деньги?",
+            },
+            { role: "user", text: "в банкомате" },
+            {
+              role: "assistant",
+              text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
+            },
+          ],
+        }),
+        exchangePolicyState: { stageSlug: "quote_calculated" },
+        tools: [] as never,
+      }),
+      { reflect: false },
+    );
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText: "через QR",
+    });
+    // Метод оплаты назван — вопрос не повторяется, LLM отвечает
+    expect(firstReplyText(r)).toBe("Принял!");
+    expect(chat.lastCall).not.toBeNull();
+  });
 
-	it("exchange: метод оплаты sbp_qr передаётся в create_exchange_order", async () => {
-		let seenOrderArgs: unknown = null;
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: new CapturingRagChat("x"),
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "хочу 20к рублей на песо" },
-						{ role: "assistant", text: "Получите 16220 PHP." },
-						{ role: "user", text: "в банкомате" },
-						{ role: "assistant", text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?" },
-						{ role: "user", text: "через QR" },
-						{ role: "assistant", text: "Понял!" },
-					],
-				}),
-				exchangePolicyState: { stageSlug: "quote_calculated" },
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 20000,
-					payoutMethod: "atm",
-					paymentMethod: "sbp_qr",
-				},
-				tools: [
-					{
-						name: "create_exchange_order",
-						description: "create order",
-						parameters: {},
-						execute: async (args: unknown) => {
-							seenOrderArgs = args;
-							return { orderId: 77 };
-						},
-					},
-				] as never,
-			}),
-			{ reflect: false },
-		);
-		await s.generate({ ...baseInput(), userMessageText: "ок" });
-		expect(seenOrderArgs).toMatchObject({ paymentMethod: "sbp_qr" });
-	});
+  it("exchange: метод оплаты sbp_qr передаётся в create_exchange_order", async () => {
+    let seenOrderArgs: unknown = null;
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: new CapturingRagChat("x"),
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "хочу 20к рублей на песо" },
+            { role: "assistant", text: "Получите 16220 PHP." },
+            { role: "user", text: "в банкомате" },
+            {
+              role: "assistant",
+              text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
+            },
+            { role: "user", text: "через QR" },
+            { role: "assistant", text: "Понял!" },
+          ],
+        }),
+        exchangePolicyState: { stageSlug: "quote_calculated" },
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 20000,
+          payoutMethod: "atm",
+          paymentMethod: "sbp_qr",
+        },
+        tools: [
+          {
+            name: "create_exchange_order",
+            description: "create order",
+            parameters: {},
+            execute: async (args: unknown) => {
+              seenOrderArgs = args;
+              return { orderId: 77 };
+            },
+          },
+        ] as never,
+      }),
+      { reflect: false },
+    );
+    await s.generate({ ...baseInput(), userMessageText: "ок" });
+    expect(seenOrderArgs).toMatchObject({ paymentMethod: "sbp_qr" });
+  });
 
-	it("exchange: USDT — вопрос о методе оплаты не задаётся (crypto_transfer)", async () => {
-		const chat = new CapturingRagChat("Понял!");
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "хочу 200 usdt trc20" },
-						{ role: "assistant", text: "Получите 11200 PHP.\n\nПодскажите, как удобнее получить деньги?" },
-					],
-				}),
-				exchangePolicyState: { stageSlug: "quote_calculated" },
-				exchangeCollected: {
-					asset: "USDT",
-					amount: 200,
-					network: "TRC20",
-					payoutMethod: "atm",
-				},
-				tools: [] as never,
-			}),
-			{ reflect: false },
-		);
-		const r = await s.generate({ ...baseInput(), userMessageText: "в банкомате" });
-		// USDT → метод оплаты не релевантен, вопрос не задаётся
-		expect(firstReplyText(r)).not.toContain("банк-приложении");
-		expect(chat.lastCall).not.toBeNull();
-	});
+  it("exchange: USDT — вопрос о методе оплаты не задаётся (crypto_transfer)", async () => {
+    const chat = new CapturingRagChat("Понял!");
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "хочу 200 usdt trc20" },
+            {
+              role: "assistant",
+              text: "Получите 11200 PHP.\n\nПодскажите, как удобнее получить деньги?",
+            },
+          ],
+        }),
+        exchangePolicyState: { stageSlug: "quote_calculated" },
+        exchangeCollected: {
+          asset: "USDT",
+          amount: 200,
+          network: "TRC20",
+          payoutMethod: "atm",
+        },
+        tools: [] as never,
+      }),
+      { reflect: false },
+    );
+    const r = await s.generate({ ...baseInput(), userMessageText: "в банкомате" });
+    // USDT → метод оплаты не релевантен, вопрос не задаётся
+    expect(firstReplyText(r)).not.toContain("банк-приложении");
+    expect(chat.lastCall).not.toBeNull();
+  });
 
-	it("exchange: USDT — когда все поля собраны, выдаёт сводку + подтверждение", async () => {
-		const chat = new CapturingRagChat("LLM-fallback");
-		const quoteTool = {
-			name: "compute_exchange_quote",
-			description: "compute quote",
-			parameters: {},
-			execute: async () => ({
-				direction: "USDT->PHP",
-				asset: "USDT",
-				quoteAsset: "PHP",
-				amountMode: "source_amount",
-				amountFrom: 2000,
-				rate: 58.36,
-				amountToThb: 116710,
-			}),
-		};
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{
-							role: "user",
-							text: "хочу обменять usdt 2000 на песо, какой курс?",
-						},
-						{
-							role: "assistant",
-							text: "Меняем 2000 USDT. Получите 116710 PHP.\n\nПодскажите, в какой сети будете отправлять USDT, и как удобнее получить деньги?",
-						},
-					],
-				}),
-				exchangePolicyState: { stageSlug: "quote_calculated" },
-				// Все поля собраны, но СВЕЖЕЙ суммы этого хода нет (amountSetThisTurn
-				// false) → не котировка, а сводка/подтверждение.
-				exchangeCollected: {
-					asset: "USDT",
-					amount: 2000,
-					network: "TRC20",
-					payoutMethod: "atm",
-				},
-				tools: [quoteTool] as never,
-			}),
-			{ reflect: false },
-		);
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText: "TRC20 в банкомате",
-		});
-		const text = firstReplyText(r);
-		// Сводка с суммой/сетью/выдачей + подтверждение, НЕ «уточните сумму».
-		expect(text).toContain("Оформляю заявку?");
-		expect(text).toContain("2000 USDT");
-		expect(text).toContain("TRC20");
-		expect(text).toContain("снятие в банкомате");
-		expect(text).not.toContain("банк-приложении"); // крипта → без вопроса оплаты
-		expect(chat.lastCall).toBeNull(); // forced — LLM не вызывали
-	});
+  it("exchange: USDT — когда все поля собраны, выдаёт сводку + подтверждение", async () => {
+    const chat = new CapturingRagChat("LLM-fallback");
+    const quoteTool = {
+      name: "compute_exchange_quote",
+      description: "compute quote",
+      parameters: {},
+      execute: async () => ({
+        direction: "USDT->PHP",
+        asset: "USDT",
+        quoteAsset: "PHP",
+        amountMode: "source_amount",
+        amountFrom: 2000,
+        rate: 58.36,
+        amountToThb: 116710,
+      }),
+    };
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            {
+              role: "user",
+              text: "хочу обменять usdt 2000 на песо, какой курс?",
+            },
+            {
+              role: "assistant",
+              text: "Меняем 2000 USDT. Получите 116710 PHP.\n\nПодскажите, в какой сети будете отправлять USDT, и как удобнее получить деньги?",
+            },
+          ],
+        }),
+        exchangePolicyState: { stageSlug: "quote_calculated" },
+        // Все поля собраны, но СВЕЖЕЙ суммы этого хода нет (amountSetThisTurn
+        // false) → не котировка, а сводка/подтверждение.
+        exchangeCollected: {
+          asset: "USDT",
+          amount: 2000,
+          network: "TRC20",
+          payoutMethod: "atm",
+        },
+        tools: [quoteTool] as never,
+      }),
+      { reflect: false },
+    );
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText: "TRC20 в банкомате",
+    });
+    const text = firstReplyText(r);
+    // Сводка с суммой/сетью/выдачей + подтверждение, НЕ «уточните сумму».
+    expect(text).toContain("Оформляю заявку?");
+    expect(text).toContain("2000 USDT");
+    expect(text).toContain("TRC20");
+    expect(text).toContain("снятие в банкомате");
+    expect(text).not.toContain("банк-приложении"); // крипта → без вопроса оплаты
+    expect(chat.lastCall).toBeNull(); // forced — LLM не вызывали
+  });
 
-	it("exchange: сводку НЕ повторяем, если уже была в эпизоде (Q&A вытолкнул её за окно -4) (#653)", async () => {
-		const chat = new CapturingRagChat("Уточняю по комиссии.");
-		const quoteTool = {
-			name: "compute_exchange_quote",
-			description: "compute quote",
-			parameters: {},
-			execute: async () => ({
-				direction: "USDT->PHP",
-				asset: "USDT",
-				quoteAsset: "PHP",
-				amountMode: "source_amount",
-				amountFrom: 2000,
-				rate: 58.36,
-				amountToThb: 116710,
-			}),
-		};
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "2000 usdt trc20 в банкомате" },
-						// Сводка S1 — теперь ДАЛЬШЕ 4 сообщений от конца.
-						{
-							role: "assistant",
-							text: "Меняем 2000 USDT (TRC20), снятие в банкомате.\n\nОформляю заявку?",
-						},
-						{ role: "user", text: "а комиссия есть?" },
-						{ role: "assistant", text: "Комиссия 0%." },
-						{ role: "user", text: "а сколько по времени?" },
-						{ role: "assistant", text: "Обычно 15 минут." },
-					],
-				}),
-				exchangePolicyState: { stageSlug: "quote_calculated" },
-				// Все поля собраны (универсальный движок).
-				exchangeCollected: {
-					asset: "USDT",
-					amount: 2000,
-					network: "TRC20",
-					payoutMethod: "atm",
-				},
-				tools: [quoteTool] as never,
-			}),
-			{ reflect: false },
-		);
-		const r = await s.generate({ ...baseInput(), userMessageText: "ну ок" });
-		const text = firstReplyText(r);
-		// Старое окно slice(-4) не видело S1 → дубль. Теперь сводку не повторяем.
-		expect(text).not.toContain("Оформляю заявку?");
-		expect(chat.lastCall).not.toBeNull(); // ушли в LLM, не форс-сводку
-	});
+  it("exchange: сводку НЕ повторяем, если уже была в эпизоде (Q&A вытолкнул её за окно -4) (#653)", async () => {
+    const chat = new CapturingRagChat("Уточняю по комиссии.");
+    const quoteTool = {
+      name: "compute_exchange_quote",
+      description: "compute quote",
+      parameters: {},
+      execute: async () => ({
+        direction: "USDT->PHP",
+        asset: "USDT",
+        quoteAsset: "PHP",
+        amountMode: "source_amount",
+        amountFrom: 2000,
+        rate: 58.36,
+        amountToThb: 116710,
+      }),
+    };
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "2000 usdt trc20 в банкомате" },
+            // Сводка S1 — теперь ДАЛЬШЕ 4 сообщений от конца.
+            {
+              role: "assistant",
+              text: "Меняем 2000 USDT (TRC20), снятие в банкомате.\n\nОформляю заявку?",
+            },
+            { role: "user", text: "а комиссия есть?" },
+            { role: "assistant", text: "Комиссия 0%." },
+            { role: "user", text: "а сколько по времени?" },
+            { role: "assistant", text: "Обычно 15 минут." },
+          ],
+        }),
+        exchangePolicyState: { stageSlug: "quote_calculated" },
+        // Все поля собраны (универсальный движок).
+        exchangeCollected: {
+          asset: "USDT",
+          amount: 2000,
+          network: "TRC20",
+          payoutMethod: "atm",
+        },
+        tools: [quoteTool] as never,
+      }),
+      { reflect: false },
+    );
+    const r = await s.generate({ ...baseInput(), userMessageText: "ну ок" });
+    const text = firstReplyText(r);
+    // Старое окно slice(-4) не видело S1 → дубль. Теперь сводку не повторяем.
+    expect(text).not.toContain("Оформляю заявку?");
+    expect(chat.lastCall).not.toBeNull(); // ушли в LLM, не форс-сводку
+  });
 
-	it("exchange: лид на operator-гейте → AI не оформляет заявку, committing-тулзы сняты (#652)", async () => {
-		const makeOrderTool = () => {
-			let called = false;
-			return {
-				tool: {
-					name: "create_exchange_order",
-					description: "create order",
-					parameters: {},
-					execute: async () => {
-						called = true;
-						return { orderId: 123, instructions: "Реквизиты для оплаты: ..." };
-					},
-				},
-				wasCalled: () => called,
-			};
-		};
-		const quoteTool = {
-			name: "compute_exchange_quote",
-			description: "compute quote",
-			parameters: {},
-			execute: async () => ({
-				direction: "USDT->PHP",
-				asset: "USDT",
-				quoteAsset: "PHP",
-				amountMode: "source_amount",
-				amountFrom: 2000,
-				rate: 58.36,
-				amountToThb: 116710,
-			}),
-		};
-		const history = [
-			{ role: "user" as const, text: "2000 usdt trc20 в банкомате" },
-			{
-				role: "assistant" as const,
-				text: "Меняем 2000 USDT (TRC20). Получите 116710 PHP.\n\nОформляю заявку?",
-			},
-		];
-		const mkS = (awaitingOperator: boolean, order: { tool: unknown }) =>
-			mk(
-				ctxWith({
-					template: EXCHANGE_TEMPLATE,
-					chat: new CapturingRagChat("Передаю заявку оператору."),
-					kb: kbWith([HIT]),
-					messages: fakeMessages({ recent: history }),
-					exchangePolicyState: { stageSlug: "quote_calculated" },
-					exchangeCollected: {
-						asset: "USDT",
-						amount: 2000,
-						network: "TRC20",
-						payoutMethod: "atm",
-					},
-					awaitingOperator,
-					tools: [order.tool, quoteTool] as never,
-				}),
-				{ reflect: false },
-			);
-		// На operator-гейте: committing-тул снят → forced order не срабатывает.
-		const onGate = makeOrderTool();
-		const rGate = await mkS(true, onGate).generate({
-			...baseInput(),
-			userMessageText: "да, оформляй",
-		});
-		expect(onGate.wasCalled()).toBe(false);
-		expect(firstReplyText(rGate)).not.toContain("заявку оформил");
-		// Контраст: без гейта тот же ввод оформляет заявку (тул доступен).
-		const offGate = makeOrderTool();
-		await mkS(false, offGate).generate({
-			...baseInput(),
-			userMessageText: "да, оформляй",
-		});
-		expect(offGate.wasCalled()).toBe(true);
-	});
+  it("exchange: лид на operator-гейте → AI не оформляет заявку, committing-тулзы сняты (#652)", async () => {
+    const makeOrderTool = () => {
+      let called = false;
+      return {
+        tool: {
+          name: "create_exchange_order",
+          description: "create order",
+          parameters: {},
+          execute: async () => {
+            called = true;
+            return { orderId: 123, instructions: "Реквизиты для оплаты: ..." };
+          },
+        },
+        wasCalled: () => called,
+      };
+    };
+    const quoteTool = {
+      name: "compute_exchange_quote",
+      description: "compute quote",
+      parameters: {},
+      execute: async () => ({
+        direction: "USDT->PHP",
+        asset: "USDT",
+        quoteAsset: "PHP",
+        amountMode: "source_amount",
+        amountFrom: 2000,
+        rate: 58.36,
+        amountToThb: 116710,
+      }),
+    };
+    const history = [
+      { role: "user" as const, text: "2000 usdt trc20 в банкомате" },
+      {
+        role: "assistant" as const,
+        text: "Меняем 2000 USDT (TRC20). Получите 116710 PHP.\n\nОформляю заявку?",
+      },
+    ];
+    const mkS = (awaitingOperator: boolean, order: { tool: unknown }) =>
+      mk(
+        ctxWith({
+          template: EXCHANGE_TEMPLATE,
+          chat: new CapturingRagChat("Передаю заявку оператору."),
+          kb: kbWith([HIT]),
+          messages: fakeMessages({ recent: history }),
+          exchangePolicyState: { stageSlug: "quote_calculated" },
+          exchangeCollected: {
+            asset: "USDT",
+            amount: 2000,
+            network: "TRC20",
+            payoutMethod: "atm",
+          },
+          awaitingOperator,
+          tools: [order.tool, quoteTool] as never,
+        }),
+        { reflect: false },
+      );
+    // На operator-гейте: committing-тул снят → forced order не срабатывает.
+    const onGate = makeOrderTool();
+    const rGate = await mkS(true, onGate).generate({
+      ...baseInput(),
+      userMessageText: "да, оформляй",
+    });
+    expect(onGate.wasCalled()).toBe(false);
+    expect(firstReplyText(rGate)).not.toContain("заявку оформил");
+    // Контраст: без гейта тот же ввод оформляет заявку (тул доступен).
+    const offGate = makeOrderTool();
+    await mkS(false, offGate).generate({
+      ...baseInput(),
+      userMessageText: "да, оформляй",
+    });
+    expect(offGate.wasCalled()).toBe(true);
+  });
 
-	it("exchange: RUB — «на счёт, сбер» после выдачи даёт сводку (не «уточните сумму»)", async () => {
-		const chat = new CapturingRagChat("уточните сумму");
-		const quoteTool = {
-			name: "compute_exchange_quote",
-			description: "compute quote",
-			parameters: {},
-			execute: async () => ({
-				direction: "RUB->PHP",
-				asset: "RUB",
-				quoteAsset: "PHP",
-				amountMode: "source_amount",
-				amountFrom: 20000,
-				rate: 0.81,
-				amountToThb: 16220,
-			}),
-		};
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "хочу обменять 20к рублей на песо" },
-						{
-							role: "assistant",
-							text: "Меняем 20000 RUB. Получите 16220 PHP.\n\nКак удобнее получить деньги?",
-						},
-						{ role: "user", text: "в банкомате" },
-						{
-							role: "assistant",
-							text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
-						},
-					],
-				}),
-				exchangePolicyState: { stageSlug: "quote_calculated" },
-				// «на счёт, сбер» → universal field-extractor собрал способ оплаты
-				// (card_transfer); свежей суммы этого хода нет → сводка, не котировка.
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 20000,
-					payoutMethod: "atm",
-					paymentMethod: "card_transfer",
-				},
-				tools: [quoteTool] as never,
-			}),
-			{ reflect: false },
-		);
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText: "на счёт, сбер",
-		});
-		const text = firstReplyText(r);
-		expect(text).toContain("Оформляю заявку?");
-		expect(text).toContain("банковским зачислением"); // card_transfer (сбер/счёт)
-		expect(chat.lastCall).toBeNull(); // не ушли в LLM «уточните сумму»
-	});
+  it("exchange: RUB — «на счёт, сбер» после выдачи даёт сводку (не «уточните сумму»)", async () => {
+    const chat = new CapturingRagChat("уточните сумму");
+    const quoteTool = {
+      name: "compute_exchange_quote",
+      description: "compute quote",
+      parameters: {},
+      execute: async () => ({
+        direction: "RUB->PHP",
+        asset: "RUB",
+        quoteAsset: "PHP",
+        amountMode: "source_amount",
+        amountFrom: 20000,
+        rate: 0.81,
+        amountToThb: 16220,
+      }),
+    };
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "хочу обменять 20к рублей на песо" },
+            {
+              role: "assistant",
+              text: "Меняем 20000 RUB. Получите 16220 PHP.\n\nКак удобнее получить деньги?",
+            },
+            { role: "user", text: "в банкомате" },
+            {
+              role: "assistant",
+              text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
+            },
+          ],
+        }),
+        exchangePolicyState: { stageSlug: "quote_calculated" },
+        // «на счёт, сбер» → universal field-extractor собрал способ оплаты
+        // (card_transfer); свежей суммы этого хода нет → сводка, не котировка.
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 20000,
+          payoutMethod: "atm",
+          paymentMethod: "card_transfer",
+        },
+        tools: [quoteTool] as never,
+      }),
+      { reflect: false },
+    );
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText: "на счёт, сбер",
+    });
+    const text = firstReplyText(r);
+    expect(text).toContain("Оформляю заявку?");
+    expect(text).toContain("банковским зачислением"); // card_transfer (сбер/счёт)
+    expect(chat.lastCall).toBeNull(); // не ушли в LLM «уточните сумму»
+  });
 
-	it("exchange: «да» после сводки создаёт заявку с собранным paymentMethod", async () => {
-		let seenOrderArgs: unknown = null;
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: new CapturingRagChat("x"),
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "хочу обменять 20к рублей на песо" },
-						{ role: "assistant", text: "Меняем 20000 RUB. Получите 16220 PHP." },
-						{ role: "user", text: "в банкомате" },
-						{
-							role: "assistant",
-							text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
-						},
-						{ role: "user", text: "переводом со счёта, сбер" },
-						{
-							role: "assistant",
-							text: "Итак: меняем 20000 RUB → получите 16220 PHP, выдача — снятие в банкомате, внесение — банковским зачислением.\n\nОформляю заявку?",
-						},
-					],
-				}),
-				exchangePolicyState: { stageSlug: "quote_calculated" },
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 20000,
-					payoutMethod: "atm",
-					paymentMethod: "card_transfer",
-				},
-				tools: [
-					{
-						name: "create_exchange_order",
-						description: "create order",
-						parameters: {},
-						execute: async (args: unknown) => {
-							seenOrderArgs = args;
-							return { orderId: 88 };
-						},
-					},
-				] as never,
-			}),
-			{ reflect: false },
-		);
-		await s.generate({ ...baseInput(), userMessageText: "да" });
-		expect(seenOrderArgs).toMatchObject({
-			asset: "RUB",
-			amount: 20000,
-			paymentMethod: "card_transfer",
-			payoutMethod: "atm",
-		});
-	});
+  it("exchange: «да» после сводки создаёт заявку с собранным paymentMethod", async () => {
+    let seenOrderArgs: unknown = null;
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: new CapturingRagChat("x"),
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "хочу обменять 20к рублей на песо" },
+            { role: "assistant", text: "Меняем 20000 RUB. Получите 16220 PHP." },
+            { role: "user", text: "в банкомате" },
+            {
+              role: "assistant",
+              text: "Как удобнее внести рубли — по QR-коду в банк-приложении или банковским переводом со счёта?",
+            },
+            { role: "user", text: "переводом со счёта, сбер" },
+            {
+              role: "assistant",
+              text: "Итак: меняем 20000 RUB → получите 16220 PHP, выдача — снятие в банкомате, внесение — банковским зачислением.\n\nОформляю заявку?",
+            },
+          ],
+        }),
+        exchangePolicyState: { stageSlug: "quote_calculated" },
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 20000,
+          payoutMethod: "atm",
+          paymentMethod: "card_transfer",
+        },
+        tools: [
+          {
+            name: "create_exchange_order",
+            description: "create order",
+            parameters: {},
+            execute: async (args: unknown) => {
+              seenOrderArgs = args;
+              return { orderId: 88 };
+            },
+          },
+        ] as never,
+      }),
+      { reflect: false },
+    );
+    await s.generate({ ...baseInput(), userMessageText: "да" });
+    expect(seenOrderArgs).toMatchObject({
+      asset: "RUB",
+      amount: 20000,
+      paymentMethod: "card_transfer",
+      payoutMethod: "atm",
+    });
+  });
 
-	it("exchange: «2к баксов» парсится как USD 2000", async () => {
-		let seenArgs: unknown = null;
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat: new CapturingRagChat("x"),
-				kb: kbWith([HIT]),
-				exchangeCollected: {
-					asset: "USD",
-					amount: 2000,
-					amountSetThisTurn: true,
-				},
-				tools: [
-					{
-						name: "compute_exchange_quote",
-						description: "compute quote",
-						parameters: {},
-						execute: async (args: unknown) => {
-							seenArgs = args;
-							return {
-								direction: "USD->PHP",
-								asset: "USD",
-								quoteAsset: "PHP",
-								amountMode: "source_amount",
-								amountFrom: 2000,
-								rate: 56,
-								amountToThb: 112000,
-							};
-						},
-					},
-				] as never,
-			}),
-			{ reflect: false },
-		);
-		await s.generate({
-			...baseInput(),
-			userMessageText: "хочу обменять 2к баксов на песо",
-		});
-		expect(seenArgs).toMatchObject({ asset: "USD", amount: 2000 });
-	});
+  it("exchange: «2к баксов» парсится как USD 2000", async () => {
+    let seenArgs: unknown = null;
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat: new CapturingRagChat("x"),
+        kb: kbWith([HIT]),
+        exchangeCollected: {
+          asset: "USD",
+          amount: 2000,
+          amountSetThisTurn: true,
+        },
+        tools: [
+          {
+            name: "compute_exchange_quote",
+            description: "compute quote",
+            parameters: {},
+            execute: async (args: unknown) => {
+              seenArgs = args;
+              return {
+                direction: "USD->PHP",
+                asset: "USD",
+                quoteAsset: "PHP",
+                amountMode: "source_amount",
+                amountFrom: 2000,
+                rate: 56,
+                amountToThb: 112000,
+              };
+            },
+          },
+        ] as never,
+      }),
+      { reflect: false },
+    );
+    await s.generate({
+      ...baseInput(),
+      userMessageText: "хочу обменять 2к баксов на песо",
+    });
+    expect(seenArgs).toMatchObject({ asset: "USD", amount: 2000 });
+  });
 
-	it("exchange: «500 USDT … Какой курс» парсит сумму как 500, не 500000", async () => {
-		const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
-		let seenArgs: unknown = null;
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				// Сумму/сеть собрал универсальный экстрактор (не regex реплики, #654).
-				exchangeCollected: {
-					asset: "USDT",
-					amount: 500,
-					network: "TRC20",
-					amountSetThisTurn: true,
-				},
-				tools: [
-					{
-						name: "compute_exchange_quote",
-						description: "compute quote",
-						parameters: {},
-						execute: async (args: unknown) => {
-							seenArgs = args;
-							return {
-								direction: "USDT->PHP",
-								asset: "USDT",
-								quoteAsset: "PHP",
-								amountMode: "source_amount",
-								amountFrom: 500,
-								rate: 58,
-								amountToThb: 29000,
-							};
-						},
-					},
-				] as never,
-			}),
-			{ reflect: false },
-		);
+  it("exchange: «500 USDT … Какой курс» парсит сумму как 500, не 500000", async () => {
+    const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
+    let seenArgs: unknown = null;
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        // Сумму/сеть собрал универсальный экстрактор (не regex реплики, #654).
+        exchangeCollected: {
+          asset: "USDT",
+          amount: 500,
+          network: "TRC20",
+          amountSetThisTurn: true,
+        },
+        tools: [
+          {
+            name: "compute_exchange_quote",
+            description: "compute quote",
+            parameters: {},
+            execute: async (args: unknown) => {
+              seenArgs = args;
+              return {
+                direction: "USDT->PHP",
+                asset: "USDT",
+                quoteAsset: "PHP",
+                amountMode: "source_amount",
+                amountFrom: 500,
+                rate: 58,
+                amountToThb: 29000,
+              };
+            },
+          },
+        ] as never,
+      }),
+      { reflect: false },
+    );
 
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText:
-				"Хочу обменять 500 USDT (TRC20) на песо. Какой курс и сколько песо я получу на руки?",
-		});
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText:
+        "Хочу обменять 500 USDT (TRC20) на песо. Какой курс и сколько песо я получу на руки?",
+    });
 
-		// Сумма берётся из собранного (500), а не из парсинга текста — где слово
-		// «Какой» когда-то давало ложный ×1000 (500→500000). Регрессия теперь
-		// невозможна структурно: regex-парсинг суммы из реплики удалён.
-		expect(seenArgs).toMatchObject({
-			asset: "USDT",
-			amount: 500,
-			network: "TRC20",
-		});
-		expect(firstReplyText(r)).toContain("получите 29000 PHP");
-		expect(chat.lastCall).toBeNull();
-	});
+    // Сумма берётся из собранного (500), а не из парсинга текста — где слово
+    // «Какой» когда-то давало ложный ×1000 (500→500000). Регрессия теперь
+    // невозможна структурно: regex-парсинг суммы из реплики удалён.
+    expect(seenArgs).toMatchObject({
+      asset: "USDT",
+      amount: 500,
+      network: "TRC20",
+    });
+    expect(firstReplyText(r)).toContain("получите 29000 PHP");
+    expect(chat.lastCall).toBeNull();
+  });
 
-	it("exchange: confirmation after quote creates order preflight and asks for KYC", async () => {
-		const chat = new CapturingRagChat("Сейчас снова посчитаю.");
-		const instructions =
-			"Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.";
-		let seenArgs: unknown = null;
-		const recorded: Array<
-			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
-		> = [];
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{
-							role: "user",
-							text: "отдаю 10к рублей нужны песо в банкомате",
-						},
-						{ role: "assistant", text: "Получите 8126 PHP." },
-						{ role: "user", text: "супер давай" },
-					],
-				}),
-				exchangePolicyState: {
-					stageSlug: "quote_calculated",
-					verification: {
-						verified: false,
-						status: "missing",
-						needsVerification: true,
-					},
-				},
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 10000,
-					payoutMethod: "atm",
-				},
-				tools: [
-					{
-						name: "create_exchange_order",
-						description: "create order",
-						parameters: {},
-						execute: async (args: unknown) => {
-							seenArgs = args;
-							return {
-								ok: false,
-								needsVerification: true,
-								status: "missing",
-								instructions,
-							};
-						},
-					},
-				] as never,
-			}),
-			{
-				reflect: false,
-				recordToolCalls: async (input) => {
-					recorded.push(input);
-				},
-			},
-		);
+  it("exchange: confirmation after quote creates order preflight and asks for KYC", async () => {
+    const chat = new CapturingRagChat("Сейчас снова посчитаю.");
+    const instructions =
+      "Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.";
+    let seenArgs: unknown = null;
+    const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            {
+              role: "user",
+              text: "отдаю 10к рублей нужны песо в банкомате",
+            },
+            { role: "assistant", text: "Получите 8126 PHP." },
+            { role: "user", text: "супер давай" },
+          ],
+        }),
+        exchangePolicyState: {
+          stageSlug: "quote_calculated",
+          verification: {
+            verified: false,
+            status: "missing",
+            needsVerification: true,
+          },
+        },
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 10000,
+          payoutMethod: "atm",
+        },
+        tools: [
+          {
+            name: "create_exchange_order",
+            description: "create order",
+            parameters: {},
+            execute: async (args: unknown) => {
+              seenArgs = args;
+              return {
+                ok: false,
+                needsVerification: true,
+                status: "missing",
+                instructions,
+              };
+            },
+          },
+        ] as never,
+      }),
+      {
+        reflect: false,
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+    );
 
-		const r = await s.generate({
-			...baseInput(),
-			userMessageText: "супер давай",
-		});
+    const r = await s.generate({
+      ...baseInput(),
+      userMessageText: "супер давай",
+    });
 
-		expect(firstReplyText(r)).toBe(instructions);
-		expect(chat.lastCall).toBeNull();
-		expect(seenArgs).toMatchObject({
-			asset: "RUB",
-			amount: 10000,
-			amountMode: "source_amount",
-			paymentMethod: "bank_transfer",
-			payoutMethod: "atm",
-		});
-		expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe(
-			"create_exchange_order",
-		);
-	});
+    expect(firstReplyText(r)).toBe(instructions);
+    expect(chat.lastCall).toBeNull();
+    expect(seenArgs).toMatchObject({
+      asset: "RUB",
+      amount: 10000,
+      amountMode: "source_amount",
+      paymentMethod: "bank_transfer",
+      payoutMethod: "atm",
+    });
+    expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe("create_exchange_order");
+  });
 
-	it("exchange: краткое «отл» после котировки тоже форсит create_exchange_order", async () => {
-		const chat = new CapturingRagChat("Сейчас снова посчитаю.");
-		const instructions =
-			"Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.";
-		let seenArgs: unknown = null;
-		const recorded: Array<
-			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
-		> = [];
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "отдаю 10к рублей нужны песо в банкомате" },
-						{ role: "assistant", text: "Получите 8126 PHP." },
-						{ role: "user", text: "отл" },
-					],
-				}),
-				exchangePolicyState: {
-					stageSlug: "quote_calculated",
-					verification: {
-						verified: false,
-						status: "missing",
-						needsVerification: true,
-					},
-				},
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 10000,
-					payoutMethod: "atm",
-				},
-				tools: [
-					{
-						name: "create_exchange_order",
-						description: "create order",
-						parameters: {},
-						execute: async (args: unknown) => {
-							seenArgs = args;
-							return {
-								ok: false,
-								needsVerification: true,
-								status: "missing",
-								instructions,
-							};
-						},
-					},
-				] as never,
-			}),
-			{
-				reflect: false,
-				recordToolCalls: async (input) => {
-					recorded.push(input);
-				},
-			},
-		);
+  it("exchange: краткое «отл» после котировки тоже форсит create_exchange_order", async () => {
+    const chat = new CapturingRagChat("Сейчас снова посчитаю.");
+    const instructions =
+      "Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.";
+    let seenArgs: unknown = null;
+    const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "отдаю 10к рублей нужны песо в банкомате" },
+            { role: "assistant", text: "Получите 8126 PHP." },
+            { role: "user", text: "отл" },
+          ],
+        }),
+        exchangePolicyState: {
+          stageSlug: "quote_calculated",
+          verification: {
+            verified: false,
+            status: "missing",
+            needsVerification: true,
+          },
+        },
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 10000,
+          payoutMethod: "atm",
+        },
+        tools: [
+          {
+            name: "create_exchange_order",
+            description: "create order",
+            parameters: {},
+            execute: async (args: unknown) => {
+              seenArgs = args;
+              return {
+                ok: false,
+                needsVerification: true,
+                status: "missing",
+                instructions,
+              };
+            },
+          },
+        ] as never,
+      }),
+      {
+        reflect: false,
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+    );
 
-		const r = await s.generate({ ...baseInput(), userMessageText: "отл" });
+    const r = await s.generate({ ...baseInput(), userMessageText: "отл" });
 
-		expect(firstReplyText(r)).toBe(instructions);
-		expect(chat.lastCall).toBeNull();
-		expect(seenArgs).toMatchObject({ asset: "RUB", amount: 10000 });
-		expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe(
-			"create_exchange_order",
-		);
-	});
+    expect(firstReplyText(r)).toBe(instructions);
+    expect(chat.lastCall).toBeNull();
+    expect(seenArgs).toMatchObject({ asset: "RUB", amount: 10000 });
+    expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe("create_exchange_order");
+  });
 
-	it("exchange: подтверждение выдаёт заявку И реквизиты в одном ходе", async () => {
-		const chat = new CapturingRagChat("Сейчас снова посчитаю.");
-		const ADDRESS = "TMockExchangeWallet111111111111111111";
-		let orderCalls = 0;
-		let reqCalls = 0;
-		const s = mk(
-			ctxWith({
-				template: EXCHANGE_TEMPLATE,
-				chat,
-				kb: kbWith([HIT]),
-				messages: fakeMessages({
-					recent: [
-						{ role: "user", text: "отдаю 10к рублей нужны песо в банкомате" },
-						{ role: "assistant", text: "Получите 8126 PHP." },
-						{ role: "user", text: "отл" },
-					],
-				}),
-				exchangePolicyState: {
-					stageSlug: "quote_calculated",
-					verification: {
-						verified: true,
-						status: "verified",
-						needsVerification: false,
-					},
-				},
-				exchangeCollected: {
-					asset: "RUB",
-					amount: 10000,
-					payoutMethod: "atm",
-				},
-				tools: [
-					{
-						name: "create_exchange_order",
-						description: "create order",
-						parameters: {},
-						execute: async () => {
-							orderCalls += 1;
-							return {
-								orderId: 77,
-								status: "awaiting_payment",
-								direction: "RUB->PHP",
-								amountToThb: 8126,
-								rate: 1.23,
-							};
-						},
-					},
-					{
-						name: "fetch_exchange_requisites",
-						description: "fetch requisites",
-						parameters: {},
-						execute: async () => {
-							reqCalls += 1;
-							return {
-								orderId: 77,
-								kind: "crypto",
-								address: ADDRESS,
-								network: "trc20",
-								ttlMin: 15,
-								instructions: `Адрес для USDT (trc20): ${ADDRESS}\nАдрес актуален 15 минут.`,
-							};
-						},
-					},
-				] as never,
-			}),
-			{ reflect: false },
-		);
+  it("exchange: подтверждение выдаёт заявку И реквизиты в одном ходе", async () => {
+    const chat = new CapturingRagChat("Сейчас снова посчитаю.");
+    const ADDRESS = "TMockExchangeWallet111111111111111111";
+    let orderCalls = 0;
+    let reqCalls = 0;
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({
+          recent: [
+            { role: "user", text: "отдаю 10к рублей нужны песо в банкомате" },
+            { role: "assistant", text: "Получите 8126 PHP." },
+            { role: "user", text: "отл" },
+          ],
+        }),
+        exchangePolicyState: {
+          stageSlug: "quote_calculated",
+          verification: {
+            verified: true,
+            status: "verified",
+            needsVerification: false,
+          },
+        },
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 10000,
+          payoutMethod: "atm",
+        },
+        tools: [
+          {
+            name: "create_exchange_order",
+            description: "create order",
+            parameters: {},
+            execute: async () => {
+              orderCalls += 1;
+              return {
+                orderId: 77,
+                status: "awaiting_payment",
+                direction: "RUB->PHP",
+                amountToThb: 8126,
+                rate: 1.23,
+              };
+            },
+          },
+          {
+            name: "fetch_exchange_requisites",
+            description: "fetch requisites",
+            parameters: {},
+            execute: async () => {
+              reqCalls += 1;
+              return {
+                orderId: 77,
+                kind: "crypto",
+                address: ADDRESS,
+                network: "trc20",
+                ttlMin: 15,
+                instructions: `Адрес для USDT (trc20): ${ADDRESS}\nАдрес актуален 15 минут.`,
+              };
+            },
+          },
+        ] as never,
+      }),
+      { reflect: false },
+    );
 
-		const r = await s.generate({ ...baseInput(), userMessageText: "отл" });
+    const r = await s.generate({ ...baseInput(), userMessageText: "отл" });
 
-		expect(orderCalls).toBe(1);
-		expect(reqCalls).toBe(1);
-		const text = firstReplyText(r);
-		expect(text).toContain("заявку оформил");
-		expect(text).toContain(ADDRESS);
-		expect(chat.lastCall).toBeNull();
-	});
+    expect(orderCalls).toBe(1);
+    expect(reqCalls).toBe(1);
+    const text = firstReplyText(r);
+    expect(text).toContain("заявку оформил");
+    expect(text).toContain(ADDRESS);
+    expect(chat.lastCall).toBeNull();
+  });
 
-	  it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
-	    const s = mk(
+  it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
+    const s = mk(
       ctxWith({
         template: EXCHANGE_TEMPLATE,
         chat: chatReturning("ответ"),
@@ -1719,10 +1726,9 @@ describe("RagReplyStrategy.generate", () => {
       EXCHANGE_SAFE_FALLBACK,
       "Подскажите, какую сумму хотите обменять?",
     ]);
-    const s = mk(
-      ctxWith({ template: EXCHANGE_TEMPLATE, chat, kb: kbWith([HIT]) }),
-      { reflect: false },
-    );
+    const s = mk(ctxWith({ template: EXCHANGE_TEMPLATE, chat, kb: kbWith([HIT]) }), {
+      reflect: false,
+    });
     const r = await s.generate(baseInput());
     const normalized = normalizeReplyStrategyResult(r);
     expect(firstReplyText(r)).toContain("какую сумму");
@@ -1736,10 +1742,9 @@ describe("RagReplyStrategy.generate", () => {
       EXCHANGE_SAFE_FALLBACK,
       EXCHANGE_SAFE_FALLBACK,
     ]);
-    const s = mk(
-      ctxWith({ template: EXCHANGE_TEMPLATE, chat, kb: kbWith([HIT]) }),
-      { reflect: false },
-    );
+    const s = mk(ctxWith({ template: EXCHANGE_TEMPLATE, chat, kb: kbWith([HIT]) }), {
+      reflect: false,
+    });
     const r = await s.generate(baseInput());
     const normalized = normalizeReplyStrategyResult(r);
     expect(normalized?.autoTakeover).toBe(true); // исчерпали 3 попытки → оператор
@@ -1784,9 +1789,9 @@ describe("RagReplyStrategy.generate", () => {
   });
 
   it("no-context без softFallback → null", async () => {
-		const s = mk(ctxWith({ chat: chatReturning("ответ") }), {
-			softFallback: false,
-		});
+    const s = mk(ctxWith({ chat: chatReturning("ответ") }), {
+      softFallback: false,
+    });
     expect(await s.generate(baseInput())).toBeNull();
   });
 

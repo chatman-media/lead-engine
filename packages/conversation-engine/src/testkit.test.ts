@@ -91,3 +91,42 @@ describe("FakeOutboundQueueRepo", () => {
 		expect(repo.all()).toHaveLength(1);
 	});
 });
+
+describe("FakeMessagesRepo.insert / setTranslation / getTranslation", () => {
+	it("insert возвращает строку сообщения", async () => {
+		const repo = new FakeMessagesRepo(1);
+		const msg = await repo.insert({
+			conversationId: 10,
+			role: "user",
+			text: "hello",
+			nowEpoch: 100,
+		});
+		expect(msg.id).toBe(1);
+		expect(msg.text).toBe("hello");
+	});
+
+	it("setTranslation: несуществующий id → no-op", async () => {
+		const repo = new FakeMessagesRepo(1);
+		await expect(repo.setTranslation(999, { text: "x", lang: "en" })).resolves.toBeUndefined();
+	});
+
+	it("setTranslation+getTranslation: round-trip", async () => {
+		const repo = new FakeMessagesRepo(1);
+		const msg = await repo.insert({ conversationId: 10, role: "user", text: "привет", nowEpoch: 1 });
+		await repo.setTranslation(msg.id, { text: "hello", lang: "en" });
+		const tr = await repo.getTranslation(msg.id);
+		expect(tr).toEqual({ text: "hello", lang: "en" });
+	});
+
+	it("getTranslation: несуществующий id → null", async () => {
+		const repo = new FakeMessagesRepo(1);
+		expect(await repo.getTranslation(999)).toBeNull();
+	});
+
+	it("getTranslation: сообщение без перевода → null", async () => {
+		const repo = new FakeMessagesRepo(1);
+		const msg = await repo.insert({ conversationId: 10, role: "user", text: "hi", nowEpoch: 1 });
+		expect(await repo.getTranslation(msg.id)).toBeNull();
+	});
+});
+
