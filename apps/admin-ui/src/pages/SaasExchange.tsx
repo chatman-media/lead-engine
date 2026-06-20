@@ -15,7 +15,13 @@ import {
 import "leaflet/dist/leaflet.css";
 import type { LatLngBoundsExpression } from "leaflet";
 import { useEffect, useState } from "react";
-import { CircleMarker, MapContainer, Tooltip as MapTooltip, TileLayer } from "react-leaflet";
+import {
+  CircleMarker,
+  LayersControl,
+  MapContainer,
+  Tooltip as MapTooltip,
+  TileLayer,
+} from "react-leaflet";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -2456,12 +2462,31 @@ function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
           scrollWheelZoom
           style={{ height: 440, width: "100%", background: "#0b1220" }}
         >
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            subdomains="abcd"
-            maxZoom={20}
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          />
+          <LayersControl position="topright">
+            <LayersControl.BaseLayer checked name="Тёмная">
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                subdomains="abcd"
+                maxZoom={20}
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              />
+            </LayersControl.BaseLayer>
+            <LayersControl.BaseLayer name="Дороги">
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                subdomains="abcd"
+                maxZoom={20}
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              />
+            </LayersControl.BaseLayer>
+            <LayersControl.BaseLayer name="Спутник">
+              <TileLayer
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                maxZoom={19}
+                attribution="Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+              />
+            </LayersControl.BaseLayer>
+          </LayersControl>
           {geoPoints.map((p) => (
             <CircleMarker
               key={p.id}
