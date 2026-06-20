@@ -1487,7 +1487,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
   // POST /api/admin/exchange/payout-points/sync-osm
   app.post("/api/admin/exchange/payout-points/sync-osm", async (c) => {
     const tenantId = c.var.tenantId;
-    const body = await c.req.json<{ bbox?: string; quoteAsset?: string }>().catch(() => ({}));
+    const body = await c.req
+      .json<{ bbox?: string; quoteAsset?: string }>()
+      .catch((): { bbox?: string; quoteAsset?: string } => ({}));
     const result = await syncOsmAtms(opts.db, tenantId, {
       bbox: body.bbox ?? DEFAULT_PH_BBOX,
       quoteAsset: body.quoteAsset ?? "PHP",
@@ -1496,7 +1498,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
       tenantId,
       adminId: c.var.adminId as number | undefined,
       action: "exchange.osm_sync",
-      details: result,
+      details: result as unknown as Record<string, unknown>,
     });
     return c.json({ ok: true, ...result });
   });
