@@ -1,3 +1,10 @@
+# [@chatman-media/channel-telegram-v1.12.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.11.0...@chatman-media/channel-telegram-v1.12.0) (2026-06-20)
+
+
+### Features
+
+* **exchange:** отправить геолокацию точки выдачи клиенту в Telegram ([d60176c](https://github.com/chatman-media/lead-engine/commit/d60176c6187a808096a6e0f866351b0e16268524))
+
 # [@chatman-media/channel-telegram-v1.11.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-telegram-v1.10.0...@chatman-media/channel-telegram-v1.11.0) (2026-06-20)
 
 
