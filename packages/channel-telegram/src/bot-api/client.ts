@@ -183,10 +183,7 @@ export class TelegramClient {
       name: input.name,
     };
     if (input.iconColor !== undefined) params.icon_color = input.iconColor;
-    return this.call<{ message_thread_id: number; name: string }>(
-      "createForumTopic",
-      params,
-    );
+    return this.call<{ message_thread_id: number; name: string }>("createForumTopic", params);
   }
 
   /**
@@ -210,6 +207,18 @@ export class TelegramClient {
     if (input.caption) params.caption = input.caption;
     if (input.messageThreadId !== undefined) params.message_thread_id = input.messageThreadId;
     return this.call<TgSendMessageResult>("sendPhoto", params);
+  }
+
+  sendLocation(input: {
+    chatId: number | string;
+    latitude: number;
+    longitude: number;
+  }): Promise<TgSendMessageResult> {
+    return this.call<TgSendMessageResult>("sendLocation", {
+      chat_id: input.chatId,
+      latitude: input.latitude,
+      longitude: input.longitude,
+    });
   }
 
   sendVideo(input: {

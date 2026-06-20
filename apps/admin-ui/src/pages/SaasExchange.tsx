@@ -5,6 +5,7 @@ import {
   CopyIcon,
   Loader2Icon,
   MapIcon,
+  MapPinIcon,
   PlusIcon,
   RefreshCwIcon,
   SaveIcon,
@@ -1734,6 +1735,10 @@ function PayoutPointsTab() {
   const [coverageLoading, setCoverageLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "map">("list");
+  const [pointKind, setPointKind] = useState<"atm" | "office">("atm");
+  const [sendLocPoint, setSendLocPoint] = useState<PayoutPoint | null>(null);
+  const [sendLocConvId, setSendLocConvId] = useState("");
+  const [sendingLoc, setSendingLoc] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -1830,6 +1835,23 @@ function PayoutPointsTab() {
     }
   };
 
+  const sendLocation = async () => {
+    if (!sendLocPoint) return;
+    const convId = Number(sendLocConvId.trim());
+    if (!convId) return toast.error("Введите ID диалога");
+    setSendingLoc(true);
+    try {
+      await saas.sendPayoutPointLocation(sendLocPoint.id, convId);
+      toast.success(`Локация «${sendLocPoint.label}» отправлена клиенту`);
+      setSendLocPoint(null);
+      setSendLocConvId("");
+    } catch {
+      toast.error("Не удалось отправить локацию");
+    } finally {
+      setSendingLoc(false);
+    }
+  };
+
   const syncOsm = async () => {
     setSyncing(true);
     try {
@@ -1849,7 +1871,27 @@ function PayoutPointsTab() {
     <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">Каталог точек выдачи</CardTitle>
+          <div className="flex items-center gap-3">
+            <CardTitle className="text-base">Каталог точек выдачи</CardTitle>
+            <div className="flex rounded-md border">
+              <Button
+                size="sm"
+                variant={pointKind === "atm" ? "secondary" : "ghost"}
+                className="rounded-r-none border-0"
+                onClick={() => setPointKind("atm")}
+              >
+                Банкоматы ({points.filter((p) => p.kind === "atm").length})
+              </Button>
+              <Button
+                size="sm"
+                variant={pointKind === "office" ? "secondary" : "ghost"}
+                className="rounded-l-none border-0"
+                onClick={() => setPointKind("office")}
+              >
+                Офисы ({points.filter((p) => p.kind !== "atm").length})
+              </Button>
+            </div>
+          </div>
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -1869,81 +1911,103 @@ function PayoutPointsTab() {
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <Skeleton className="h-24 w-full" />
-          ) : viewMode === "map" ? (
-            <PayoutPointsMap points={points} />
-          ) : points.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Точки выдачи не настроены.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Тип</TableHead>
-                  <TableHead>Банк / Зона</TableHead>
-                  <TableHead>Название</TableHead>
-                  <TableHead>Валюта</TableHead>
-                  <TableHead>Номинал</TableHead>
-                  <TableHead>Лим./сн.</TableHead>
-                  <TableHead>Комиссия</TableHead>
-                  <TableHead>Город</TableHead>
-                  <TableHead>Активна</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {points.map((p) => (
-                  <TableRow key={p.id} className={!p.isActive ? "opacity-50" : undefined}>
-                    <TableCell>
-                      <Badge variant="outline">{KIND_LABEL[p.kind] ?? p.kind}</Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">{p.bankName ?? "—"}</TableCell>
-                    <TableCell className="font-medium">{p.label}</TableCell>
-                    <TableCell>{p.quoteAsset}</TableCell>
-                    <TableCell>{p.denomination ?? "—"}</TableCell>
-                    <TableCell>{p.perWithdrawalMax?.toLocaleString() ?? "—"}</TableCell>
-                    <TableCell>
-                      {p.feeFixed > 0 ? `+${p.feeFixed}` : ""}
-                      {p.feePct > 0 ? ` ${p.feePct}%` : ""}
-                      {p.feeFixed === 0 && p.feePct === 0 ? "0" : ""}
-                    </TableCell>
-                    <TableCell>{p.city ?? "—"}</TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={p.isActive}
-                        onCheckedChange={(v) =>
-                          saas
-                            .updatePayoutPoint(p.id, { isActive: v })
-                            .then(load)
-                            .catch(() => toast.error("Ошибка"))
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>
-                          Изм.
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => openCoverage(p)}>
-                          Операторы
-                        </Button>
-                        {p.isActive && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive"
-                            onClick={() => deactivate(p)}
-                          >
-                            <Trash2Icon className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
+          {(() => {
+            const visible = points.filter((p) =>
+              pointKind === "atm" ? p.kind === "atm" : p.kind !== "atm",
+            );
+            if (loading) return <Skeleton className="h-24 w-full" />;
+            if (viewMode === "map") return <PayoutPointsMap points={visible} />;
+            if (visible.length === 0)
+              return (
+                <p className="text-sm text-muted-foreground">
+                  {pointKind === "atm"
+                    ? "Банкоматы не загружены. Запустите «Синк OSM»."
+                    : "Офисы не добавлены."}
+                </p>
+              );
+            return (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Тип</TableHead>
+                    <TableHead>Банк / Зона</TableHead>
+                    <TableHead>Название</TableHead>
+                    <TableHead>Валюта</TableHead>
+                    <TableHead>Номинал</TableHead>
+                    <TableHead>Лим./сн.</TableHead>
+                    <TableHead>Комиссия</TableHead>
+                    <TableHead>Город</TableHead>
+                    <TableHead>Активна</TableHead>
+                    <TableHead />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+                </TableHeader>
+                <TableBody>
+                  {visible.map((p) => (
+                    <TableRow key={p.id} className={!p.isActive ? "opacity-50" : undefined}>
+                      <TableCell>
+                        <Badge variant="outline">{KIND_LABEL[p.kind] ?? p.kind}</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">{p.bankName ?? "—"}</TableCell>
+                      <TableCell className="font-medium">{p.label}</TableCell>
+                      <TableCell>{p.quoteAsset}</TableCell>
+                      <TableCell>{p.denomination ?? "—"}</TableCell>
+                      <TableCell>{p.perWithdrawalMax?.toLocaleString() ?? "—"}</TableCell>
+                      <TableCell>
+                        {p.feeFixed > 0 ? `+${p.feeFixed}` : ""}
+                        {p.feePct > 0 ? ` ${p.feePct}%` : ""}
+                        {p.feeFixed === 0 && p.feePct === 0 ? "0" : ""}
+                      </TableCell>
+                      <TableCell>{p.city ?? "—"}</TableCell>
+                      <TableCell>
+                        <Switch
+                          checked={p.isActive}
+                          onCheckedChange={(v) =>
+                            saas
+                              .updatePayoutPoint(p.id, { isActive: v })
+                              .then(load)
+                              .catch(() => toast.error("Ошибка"))
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>
+                            Изм.
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => openCoverage(p)}>
+                            Операторы
+                          </Button>
+                          {p.lat != null && p.lng != null && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Отправить локацию клиенту в Telegram"
+                              onClick={() => {
+                                setSendLocPoint(p);
+                                setSendLocConvId("");
+                              }}
+                            >
+                              <MapPinIcon className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          {p.isActive && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive"
+                              onClick={() => deactivate(p)}
+                            >
+                              <Trash2Icon className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            );
+          })()}
         </CardContent>
       </Card>
 
@@ -2152,6 +2216,38 @@ function PayoutPointsTab() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Диалог отправки локации клиенту */}
+      <Dialog open={sendLocPoint != null} onOpenChange={(o) => !o && setSendLocPoint(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Отправить локацию клиенту</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{sendLocPoint?.label}</span> будет
+            отправлена как геопозиция в Telegram-диалог.
+          </p>
+          <div className="space-y-1">
+            <Label>ID диалога (conversations.id)</Label>
+            <Input
+              type="number"
+              placeholder="например, 42"
+              value={sendLocConvId}
+              onChange={(e) => setSendLocConvId(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendLocation()}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setSendLocPoint(null)}>
+              Отмена
+            </Button>
+            <Button onClick={sendLocation} disabled={sendingLoc || !sendLocConvId.trim()}>
+              <MapPinIcon className="mr-1 h-4 w-4" />
+              {sendingLoc ? "Отправка…" : "Отправить"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -2181,10 +2277,23 @@ const BANK_COLORS: Record<string, string> = {
 
 function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
   const [hovered, setHovered] = useState<PayoutPoint | null>(null);
+  const [hiddenBanks, setHiddenBanks] = useState<Set<string>>(new Set());
 
-  const geoPoints = points.filter((p) => p.lat != null && p.lng != null);
+  const toggleBank = (key: string) =>
+    setHiddenBanks((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
-  if (geoPoints.length === 0) {
+  const allGeo = points.filter((p) => p.lat != null && p.lng != null);
+  const geoPoints = allGeo.filter((p) => {
+    const key = p.bankName && BANK_COLORS[p.bankName] ? p.bankName : "__other__";
+    return !hiddenBanks.has(key);
+  });
+
+  if (allGeo.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
         Нет точек с координатами — запустите «Синк OSM».
@@ -2192,8 +2301,8 @@ function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
     );
   }
 
-  const lats = geoPoints.map((p) => p.lat!);
-  const lngs = geoPoints.map((p) => p.lng!);
+  const lats = allGeo.map((p) => p.lat!);
+  const lngs = allGeo.map((p) => p.lng!);
   const pad = 0.008;
   const minLat = Math.min(...lats) - pad;
   const maxLat = Math.max(...lats) + pad;
@@ -2291,21 +2400,41 @@ function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
         {banks.map((bank) => {
-          const count = geoPoints.filter((p) => p.bankName === bank).length;
+          const hidden = hiddenBanks.has(bank);
+          const count = allGeo.filter((p) => p.bankName === bank).length;
           return (
-            <div key={bank} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <button
+              type="button"
+              key={bank}
+              onClick={() => toggleBank(bank)}
+              className={`flex items-center gap-1.5 text-xs transition-opacity ${hidden ? "opacity-35" : "text-muted-foreground"}`}
+            >
               <span
                 className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
                 style={{ background: getColor(bank) }}
               />
-              {bank} <span className="font-medium text-foreground">({count})</span>
-            </div>
+              <span className={hidden ? "line-through" : ""}>{bank}</span>
+              <span className="font-medium text-foreground">({count})</span>
+            </button>
           );
         })}
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-[#6b7280]" />
-          Прочие ({geoPoints.filter((p) => !p.bankName || !BANK_COLORS[p.bankName]).length})
-        </div>
+        {(() => {
+          const otherKey = "__other__";
+          const hidden = hiddenBanks.has(otherKey);
+          const count = allGeo.filter((p) => !p.bankName || !BANK_COLORS[p.bankName]).length;
+          if (count === 0) return null;
+          return (
+            <button
+              type="button"
+              onClick={() => toggleBank(otherKey)}
+              className={`flex items-center gap-1.5 text-xs transition-opacity ${hidden ? "opacity-35" : "text-muted-foreground"}`}
+            >
+              <span className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-[#6b7280]" />
+              <span className={hidden ? "line-through" : ""}>Прочие</span>
+              <span className="font-medium text-foreground">({count})</span>
+            </button>
+          );
+        })()}
       </div>
     </div>
   );

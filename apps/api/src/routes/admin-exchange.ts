@@ -6,6 +6,7 @@
  * onReload(tenantId) сбрасывает кеш resolveTools (вкл/выкл exchange-tools).
  */
 
+import { TelegramClient } from "@chatman-media/channel-telegram";
 import {
   type Db,
   getDecryptedSecret,
@@ -1560,6 +1561,113 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
       adminId: actorId,
       action: "exchange.coverage_removed",
       details: { payoutPointId: pointId, operatorAdminId: targetAdminId },
+    });
+    return c.json({ ok: true });
+  });
+
+  // POST /api/admin/exchange/payout-points/:id/send-location
+  // Отправить геолокацию точки выдачи клиенту в Telegram.
+  // Body: { conversationId: number }
+  app.post("/api/admin/exchange/payout-points/:id/send-location", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const pointId = Number(c.req.param("id"));
+    const body = await c.req.json().catch(() => ({}));
+    const conversationId = typeof body.conversationId === "number" ? body.conversationId : NaN;
+    if (!conversationId || Number.isNaN(conversationId)) {
+      return c.json({ error: "conversationId required" }, 400);
+    }
+
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      // 1. Получить точку выдачи (проверить tenant + наличие координат)
+      const [point] = await tx
+        .select({
+          id: exchangePayoutPoints.id,
+          lat: exchangePayoutPoints.lat,
+          lng: exchangePayoutPoints.lng,
+          name: exchangePayoutPoints.name,
+        })
+        .from(exchangePayoutPoints)
+        .where(
+          and(eq(exchangePayoutPoints.tenantId, tenantId), eq(exchangePayoutPoints.id, pointId)),
+        )
+        .limit(1);
+      if (!point) return { kind: "point_not_found" } as const;
+      if (point.lat === null || point.lng === null) {
+        return { kind: "no_coordinates" } as const;
+      }
+
+      // 2. Найти диалог → contactId
+      const [conv] = await tx
+        .select({ contactId: conversations.userId, channelId: conversations.channelId })
+        .from(conversations)
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
+        .limit(1);
+      if (!conv) return { kind: "conversation_not_found" } as const;
+
+      // 3. Найти channel_identity для контакта — Telegram Bot канал
+      const [identity] = await tx
+        .select({
+          externalUserId: channelIdentities.externalUserId,
+          channelDbId: channels.id,
+          credentialsRef: channels.credentialsRef,
+          kind: channels.kind,
+        })
+        .from(channelIdentities)
+        .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
+        .where(
+          and(
+            eq(channelIdentities.contactId, conv.contactId),
+            eq(channels.tenantId, tenantId),
+            eq(channels.kind, "telegram_bot"),
+            eq(channels.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!identity) return { kind: "no_telegram_channel" } as const;
+      if (!identity.credentialsRef) return { kind: "no_credentials" } as const;
+
+      // 4. Расшифровать bot_token из tenant_secrets
+      const botToken = await getDecryptedSecret({
+        db: tx,
+        tenantId,
+        key: identity.credentialsRef,
+        masterKeyHex: opts.masterKeyHex,
+      });
+      if (!botToken) return { kind: "no_credentials" } as const;
+
+      // 5. Отправить геолокацию
+      const tgClient = new TelegramClient({ token: botToken });
+      await tgClient.sendLocation({
+        chatId: Number(identity.externalUserId),
+        latitude: Number(point.lat),
+        longitude: Number(point.lng),
+      });
+
+      return { kind: "ok", pointName: point.name } as const;
+    });
+
+    if (result.kind === "point_not_found") {
+      return c.json({ error: "Payout point not found" }, 404);
+    }
+    if (result.kind === "no_coordinates") {
+      return c.json({ error: "Payout point has no coordinates" }, 404);
+    }
+    if (result.kind === "conversation_not_found") {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
+    if (result.kind === "no_telegram_channel") {
+      return c.json({ error: "No active Telegram channel for this contact" }, 404);
+    }
+    if (result.kind === "no_credentials") {
+      return c.json({ error: "Bot token not found; reconnect the channel" }, 404);
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "exchange.location_sent",
+      details: { payoutPointId: pointId, conversationId },
     });
     return c.json({ ok: true });
   });
