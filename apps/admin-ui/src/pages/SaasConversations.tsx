@@ -15,15 +15,12 @@ import React, { type FormEvent, useCallback, useEffect, useRef, useState } from 
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { LeadKbGuidanceCard } from "@/components/LeadKbGuidanceCard";
+import { PageHeader } from "@/components/page-header";
 import { QuickReplies } from "@/components/QuickReplies";
 import { SimPersonasManager } from "@/components/SimPersonasManager";
-import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -32,6 +29,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
   ApiError,
   type ConversationDetail,
@@ -42,8 +42,8 @@ import {
   type LeadListItem,
   type MessageRow,
   type OperatorHandoffNotification,
-  saas,
   type ServiceCatalogItem,
+  saas,
 } from "../api/saas.ts";
 
 const POLL_INTERVAL_MS = 5000;
@@ -161,7 +161,9 @@ function parseJsonRecord(value: string | null): Record<string, unknown> {
 }
 
 function mediaParts(meta: MessageMeta | null): MessageMediaPart[] {
-  return (meta?.parts ?? []).filter((part) => part.kind !== "text" && part.kind !== "callback_query");
+  return (meta?.parts ?? []).filter(
+    (part) => part.kind !== "text" && part.kind !== "callback_query",
+  );
 }
 
 function mediaKindLabel(kind: string): string {
@@ -192,7 +194,8 @@ function mediaRefLabel(part: MessageMediaPart): string | null {
 
 function MediaPartIcon({ kind }: { kind: string }) {
   if (kind === "photo") return <ImageIcon className="size-4 text-primary" />;
-  if (kind === "video" || kind === "video_note") return <VideoIcon className="size-4 text-primary" />;
+  if (kind === "video" || kind === "video_note")
+    return <VideoIcon className="size-4 text-primary" />;
   if (kind === "voice") return <MicIcon className="size-4 text-primary" />;
   return <FileTextIcon className="size-4 text-primary" />;
 }
@@ -293,7 +296,9 @@ function MessageMediaList({
           part.durationSec ? `${part.durationSec}с` : null,
           part.mimeType,
           mediaRefLabel(part),
-        ].filter(Boolean).join(" · ");
+        ]
+          .filter(Boolean)
+          .join(" · ");
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: media parts have no stable ids in stored meta
           <div key={index} className="space-y-2 rounded-lg border bg-background/70 px-2.5 py-2">
@@ -334,9 +339,10 @@ function ConversationVerificationPanel({
   approving?: boolean;
 }) {
   const attrs = parseJsonRecord(attributesJson);
-  const kyc = attrs.exchangeKyc && typeof attrs.exchangeKyc === "object" && !Array.isArray(attrs.exchangeKyc)
-    ? (attrs.exchangeKyc as Record<string, unknown>)
-    : {};
+  const kyc =
+    attrs.exchangeKyc && typeof attrs.exchangeKyc === "object" && !Array.isArray(attrs.exchangeKyc)
+      ? (attrs.exchangeKyc as Record<string, unknown>)
+      : {};
   const passportName = [attrs.passport_family_name, attrs.passport_given_name]
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     .join(" ");
@@ -351,7 +357,8 @@ function ConversationVerificationPanel({
         : passportName || passportNumber
           ? "documents_received"
           : null;
-  if (!status && !passportName && !passportNumber && !passportExpiry && !lastPhotoClass) return null;
+  if (!status && !passportName && !passportNumber && !passportExpiry && !lastPhotoClass)
+    return null;
   const statusLabel: Record<string, string> = {
     verified: "KYC OK",
     documents_received: "Документы получены",
@@ -364,7 +371,15 @@ function ConversationVerificationPanel({
       <div className="flex items-center gap-2">
         <ShieldCheckIcon className="size-4 text-primary" />
         <span className="text-xs font-semibold">KYC / OCR</span>
-        {status && <Badge variant={status === "verified" ? "success" : status === "rejected" ? "destructive" : "warning"}>{statusLabel[status] ?? status}</Badge>}
+        {status && (
+          <Badge
+            variant={
+              status === "verified" ? "success" : status === "rejected" ? "destructive" : "warning"
+            }
+          >
+            {statusLabel[status] ?? status}
+          </Badge>
+        )}
       </div>
       <div className="space-y-1 text-xs">
         {lastPhotoClass && (
@@ -419,7 +434,9 @@ function operatorActionLabel(action: string | undefined): string | null {
 }
 
 function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">): string {
-  return item.verticalTemplateId ? (FUNNEL_VERTICAL_RU[item.verticalTemplateId] ?? item.slug) : item.slug;
+  return item.verticalTemplateId
+    ? (FUNNEL_VERTICAL_RU[item.verticalTemplateId] ?? item.slug)
+    : item.slug;
 }
 
 function serviceTargetLabel(item: ServiceCatalogItem): string {
@@ -427,7 +444,10 @@ function serviceTargetLabel(item: ServiceCatalogItem): string {
     item.routeType === "partner_service"
       ? item.partnerServiceName || "партнёрская услуга"
       : item.funnelSlug
-        ? funnelLabel({ slug: item.funnelSlug, verticalTemplateId: item.funnelVerticalTemplateId ?? null })
+        ? funnelLabel({
+            slug: item.funnelSlug,
+            verticalTemplateId: item.funnelVerticalTemplateId ?? null,
+          })
         : "авто";
   return `${item.name} → ${target}`;
 }
@@ -494,6 +514,7 @@ export function SaasConversations() {
   const [simTurns, setSimTurns] = useState("6");
   const [simStarting, setSimStarting] = useState(false);
   const [simPersonasOpen, setSimPersonasOpen] = useState(false);
+  const [simLanguage, setSimLanguage] = useState("");
   // Поток («боевой режим»): N клиентов по интервалу
   const [simStream, setSimStream] = useState(false);
   const [simCount, setSimCount] = useState("10");
@@ -521,11 +542,17 @@ export function SaasConversations() {
   }
 
   useEffect(() => {
-    saas.listAdmins().then((r) => setAdmins(r.items)).catch(() => {});
+    saas
+      .listAdmins()
+      .then((r) => setAdmins(r.items))
+      .catch(() => {});
   }, []);
 
   const refreshSimStreams = useCallback(() => {
-    saas.listSimStreams().then((r) => setSimStreams(r.streams)).catch(() => {});
+    saas
+      .listSimStreams()
+      .then((r) => setSimStreams(r.streams))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -540,10 +567,16 @@ export function SaasConversations() {
         .catch(() => {});
     }
     if (simFunnels.length === 0) {
-      saas.listFunnels().then((r) => setSimFunnels(r.items)).catch(() => {});
+      saas
+        .listFunnels()
+        .then((r) => setSimFunnels(r.items))
+        .catch(() => {});
     }
     if (simServices.length === 0) {
-      saas.listServiceCatalog().then((r) => setSimServices(r.items)).catch(() => {});
+      saas
+        .listServiceCatalog()
+        .then((r) => setSimServices(r.items))
+        .catch(() => {});
     }
     refreshSimStreams();
     const t = setInterval(refreshSimStreams, POLL_INTERVAL_MS);
@@ -580,7 +613,12 @@ export function SaasConversations() {
         refreshSimStreams();
       } else {
         if (!simPersonaId) return;
-        const res = await saas.startSim({ personaId: simPersonaId, maxTurns, ...target });
+        const res = await saas.startSim({
+          personaId: simPersonaId,
+          maxTurns,
+          ...target,
+          ...(simLanguage ? { languageCode: simLanguage } : {}),
+        });
         setSimOpen(false);
         await refreshList();
         navigate(`/conversations/${res.conversationId}`);
@@ -612,14 +650,17 @@ export function SaasConversations() {
     }
   }
 
-  const buildFilters = useCallback(() => ({
-    status: filterStatus,
-    ...(filterSource ? { source: filterSource } : {}),
-    ...(filterMode ? { mode: filterMode } : {}),
-    ...(filterEscalated ? { escalated: true } : {}),
-    ...(filterBanned ? { includeBanned: true } : {}),
-    ...(filterQDebounced ? { q: filterQDebounced } : {}),
-  }), [filterStatus, filterSource, filterMode, filterEscalated, filterBanned, filterQDebounced]);
+  const buildFilters = useCallback(
+    () => ({
+      status: filterStatus,
+      ...(filterSource ? { source: filterSource } : {}),
+      ...(filterMode ? { mode: filterMode } : {}),
+      ...(filterEscalated ? { escalated: true } : {}),
+      ...(filterBanned ? { includeBanned: true } : {}),
+      ...(filterQDebounced ? { q: filterQDebounced } : {}),
+    }),
+    [filterStatus, filterSource, filterMode, filterEscalated, filterBanned, filterQDebounced],
+  );
 
   async function refreshList(limit = 30, filters = buildFilters()) {
     try {
@@ -637,7 +678,11 @@ export function SaasConversations() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await saas.listConversations({ limit: 30, cursor: nextCursor, ...buildFilters() });
+      const res = await saas.listConversations({
+        limit: 30,
+        cursor: nextCursor,
+        ...buildFilters(),
+      });
       setList((prev) => {
         const merged = [...prev, ...res.items];
         loadedCountRef.current = merged.length;
@@ -745,7 +790,9 @@ export function SaasConversations() {
   useEffect(() => {
     if (filterQTimerRef.current) clearTimeout(filterQTimerRef.current);
     filterQTimerRef.current = setTimeout(() => setFilterQDebounced(filterQ), 350);
-    return () => { if (filterQTimerRef.current) clearTimeout(filterQTimerRef.current); };
+    return () => {
+      if (filterQTimerRef.current) clearTimeout(filterQTimerRef.current);
+    };
   }, [filterQ]);
 
   // Re-fetch when filters change
@@ -881,7 +928,10 @@ export function SaasConversations() {
     }
   }
 
-  async function handleUpdateConversation(patch: { status?: string; assignedAdminId?: number | null }) {
+  async function handleUpdateConversation(patch: {
+    status?: string;
+    assignedAdminId?: number | null;
+  }) {
     if (!selectedId) return;
     try {
       await saas.updateConversation(selectedId, patch);
@@ -1001,6 +1051,21 @@ export function SaasConversations() {
               </Select>
             </div>
             <div className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">Язык клиента</span>
+              <Select value={simLanguage} onValueChange={setSimLanguage}>
+                <SelectTrigger className="w-28">
+                  <SelectValue placeholder="Авто" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Авто</SelectItem>
+                  <SelectItem value="ru">RU — Русский</SelectItem>
+                  <SelectItem value="en">EN — English</SelectItem>
+                  <SelectItem value="ko">KO — 한국어</SelectItem>
+                  <SelectItem value="zh">ZH — 中文</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
               <span className="text-xs font-medium text-muted-foreground">Ходов</span>
               <Input
                 type="number"
@@ -1036,7 +1101,10 @@ export function SaasConversations() {
                 </div>
               </>
             )}
-            <Button onClick={handleStartSim} disabled={simStarting || (!simStream && !simPersonaId)}>
+            <Button
+              onClick={handleStartSim}
+              disabled={simStarting || (!simStream && !simPersonaId)}
+            >
               {simStarting ? "Запуск…" : simStream ? "Запустить поток" : "Запустить"}
             </Button>
             <Button variant="destructive" onClick={handleStopAllStreams}>
@@ -1049,8 +1117,8 @@ export function SaasConversations() {
               checked={simStream}
               onChange={(e) => setSimStream(e.target.checked)}
             />
-            Поток («боевой режим»): новый клиент каждые N секунд. «Остановить все» глушит и
-            уже идущие диалоги.
+            Поток («боевой режим»): новый клиент каждые N секунд. «Остановить все» глушит и уже
+            идущие диалоги.
           </label>
           {simStreams.length > 0 && (
             <div className="space-y-1 border-t pt-2">
@@ -1115,7 +1183,10 @@ export function SaasConversations() {
               />
             </div>
             <div className="flex gap-1.5">
-              <Select value={filterSource || "all"} onValueChange={(v) => setFilterSource(v === "all" ? "" : v)}>
+              <Select
+                value={filterSource || "all"}
+                onValueChange={(v) => setFilterSource(v === "all" ? "" : v)}
+              >
                 <SelectTrigger className="h-7 text-xs flex-1">
                   <SelectValue placeholder="Канал" />
                 </SelectTrigger>
@@ -1127,7 +1198,10 @@ export function SaasConversations() {
                   <SelectItem value="web">Web</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={filterMode || "all"} onValueChange={(v) => setFilterMode(v === "all" ? "" : v)}>
+              <Select
+                value={filterMode || "all"}
+                onValueChange={(v) => setFilterMode(v === "all" ? "" : v)}
+              >
                 <SelectTrigger className="h-7 text-xs flex-1">
                   <SelectValue placeholder="Режим" />
                 </SelectTrigger>
@@ -1157,7 +1231,8 @@ export function SaasConversations() {
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground px-0.5">
-              {list.length}{nextCursor ? "+" : ""} диалог{list.length === 1 ? "" : list.length < 5 ? "а" : "ов"}
+              {list.length}
+              {nextCursor ? "+" : ""} диалог{list.length === 1 ? "" : list.length < 5 ? "а" : "ов"}
             </p>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
@@ -1275,7 +1350,9 @@ export function SaasConversations() {
                     {detail.conversation.contactName ?? `Контакт #${detail.conversation.contactId}`}
                   </p>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                    <Badge variant="secondary">{SOURCE_RU[detail.conversation.source] ?? detail.conversation.source}</Badge>
+                    <Badge variant="secondary">
+                      {SOURCE_RU[detail.conversation.source] ?? detail.conversation.source}
+                    </Badge>
                     <Badge variant={detail.conversation.mode === "human" ? "warning" : "outline"}>
                       {detail.conversation.mode === "human" ? "оператор" : "AI"}
                     </Badge>
@@ -1378,10 +1455,19 @@ export function SaasConversations() {
                   {confirmingTakeover ? (
                     <div className="flex items-center gap-1.5 text-sm">
                       <span className="text-muted-foreground">AI замолчит?</span>
-                      <Button size="sm" variant="destructive" onClick={handleToggleMode} disabled={togglingMode}>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleToggleMode}
+                        disabled={togglingMode}
+                      >
                         Да
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setConfirmingTakeover(false)}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConfirmingTakeover(false)}
+                      >
                         Нет
                       </Button>
                     </div>
@@ -1446,9 +1532,11 @@ export function SaasConversations() {
                     const operatorBot = meta ? operatorBotLabel(meta) : null;
                     const operatorAction = meta ? operatorActionLabel(meta.exchangeAction) : null;
                     const labelColor =
-                      m.role === "assistant" ? "text-primary" :
-                      m.role === "human" ? "text-[var(--success)]" :
-                      "text-muted-foreground";
+                      m.role === "assistant"
+                        ? "text-primary"
+                        : m.role === "human"
+                          ? "text-[var(--success)]"
+                          : "text-muted-foreground";
                     // #731: входящее клиента с переводом → показываем русский,
                     // оригинал прячем под details. Гейт только на role==="user".
                     const clientLang =
@@ -1471,12 +1559,19 @@ export function SaasConversations() {
                         )}
                       >
                         <div className="mb-1 flex items-center justify-between gap-3">
-                          <span className={cn("text-[11px] font-semibold", showLabel ? labelColor : "text-muted-foreground/50")}>
+                          <span
+                            className={cn(
+                              "text-[11px] font-semibold",
+                              showLabel ? labelColor : "text-muted-foreground/50",
+                            )}
+                          >
                             {showLabel ? (ROLE_RU[m.role] ?? m.role) : ""}
                           </span>
                           <div className="flex items-center gap-1.5">
                             {meta?.editedAt && (
-                              <span className="text-[10px] italic text-muted-foreground/70">изменено</span>
+                              <span className="text-[10px] italic text-muted-foreground/70">
+                                изменено
+                              </span>
                             )}
                             {m.role === "human" && !m.deletedAt && (
                               <button
@@ -1487,7 +1582,9 @@ export function SaasConversations() {
                                 <Trash2Icon className="size-3" />
                               </button>
                             )}
-                            <span className="font-mono text-[10px] text-muted-foreground">{fmtShortTime(m.createdAt)}</span>
+                            <span className="font-mono text-[10px] text-muted-foreground">
+                              {fmtShortTime(m.createdAt)}
+                            </span>
                           </div>
                         </div>
                         <div
@@ -1510,29 +1607,35 @@ export function SaasConversations() {
                                 </div>
                               );
                             }
-                            return bodyText
-                              ? <span>{bodyText}</span>
-                              : <span className="italic text-muted-foreground">—</span>;
+                            return bodyText ? (
+                              <span>{bodyText}</span>
+                            ) : (
+                              <span className="italic text-muted-foreground">—</span>
+                            );
                           })()}
                         </div>
                         {showTranslation && (
                           <details className="mt-1 text-[11px] text-muted-foreground">
                             <summary className="cursor-pointer select-none">
-                              🌐 {LANG_LABEL[clientLang ?? ""] ?? (clientLang ?? "").toUpperCase()} · оригинал
+                              🌐 {LANG_LABEL[clientLang ?? ""] ?? (clientLang ?? "").toUpperCase()}{" "}
+                              · оригинал
                             </summary>
-                            <div className="mt-1 whitespace-pre-wrap break-words italic">{m.text}</div>
+                            <div className="mt-1 whitespace-pre-wrap break-words italic">
+                              {m.text}
+                            </div>
                           </details>
                         )}
                         {(operatorBot || operatorAction || meta?.orderId || meta?.payoutCode) && (
                           <div className="mt-2 flex flex-wrap gap-1">
                             {operatorBot && (
-                              <Badge variant="outline" className="border-[var(--success)]/30 text-[var(--success)]">
+                              <Badge
+                                variant="outline"
+                                className="border-[var(--success)]/30 text-[var(--success)]"
+                              >
                                 {operatorBot}
                               </Badge>
                             )}
-                            {operatorAction && (
-                              <Badge variant="secondary">{operatorAction}</Badge>
-                            )}
+                            {operatorAction && <Badge variant="secondary">{operatorAction}</Badge>}
                             {meta?.orderId && (
                               <Badge variant="outline">Заявка #{meta.orderId}</Badge>
                             )}
@@ -1580,15 +1683,15 @@ export function SaasConversations() {
         {/* Инфо-панель (Right Sidebar) */}
         <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
           {!detail ? (
-            <div className="p-4 text-center text-sm text-muted-foreground">
-              Выберите диалог
-            </div>
+            <div className="p-4 text-center text-sm text-muted-foreground">Выберите диалог</div>
           ) : (
             <div className="flex flex-col h-full overflow-y-auto p-4 space-y-6">
               {/* Статус и Назначение */}
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Статус</label>
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">
+                    Статус
+                  </label>
                   <div className="flex h-9 items-center">
                     <Badge
                       variant={
@@ -1605,10 +1708,16 @@ export function SaasConversations() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Назначен на</label>
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">
+                    Назначен на
+                  </label>
                   <Select
                     value={String(detail.conversation.assignedAdminId ?? "none")}
-                    onValueChange={(v) => handleUpdateConversation({ assignedAdminId: v === "none" ? null : Number.parseInt(v, 10) })}
+                    onValueChange={(v) =>
+                      handleUpdateConversation({
+                        assignedAdminId: v === "none" ? null : Number.parseInt(v, 10),
+                      })
+                    }
                   >
                     <SelectTrigger className="h-9">
                       <SelectValue />
@@ -1632,9 +1741,15 @@ export function SaasConversations() {
               {/* Контакт и Лид */}
               <div className="space-y-3 border-t pt-4">
                 <div className="space-y-1">
-                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Контакт</label>
-                  <p className="text-sm font-medium">{detail.conversation.contactName || "Без имени"}</p>
-                  <p className="text-[11px] text-muted-foreground">ID: {detail.conversation.contactId}</p>
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">
+                    Контакт
+                  </label>
+                  <p className="text-sm font-medium">
+                    {detail.conversation.contactName || "Без имени"}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    ID: {detail.conversation.contactId}
+                  </p>
                 </div>
 
                 <ConversationVerificationPanel
@@ -1669,12 +1784,16 @@ export function SaasConversations() {
                             const r = await saas.advanceConversation(detail.conversation.id);
                             await refreshDetail(detail.conversation.id);
                             await refreshList();
-                            const nextLead = await refreshContactLead(detail.conversation.contactId);
+                            const nextLead = await refreshContactLead(
+                              detail.conversation.contactId,
+                            );
                             await refreshKbGuidance(nextLead?.id ?? null);
                             if (r.terminal) setError("");
                           } catch (err) {
                             if (!handleAuthError(err))
-                              setError(err instanceof ApiError ? err.message : "Не удалось продвинуть");
+                              setError(
+                                err instanceof ApiError ? err.message : "Не удалось продвинуть",
+                              );
                           } finally {
                             setAdvancing(false);
                           }
@@ -1709,7 +1828,8 @@ export function SaasConversations() {
                           const nextLead = await refreshContactLead(detail.conversation.contactId);
                           await refreshKbGuidance(nextLead?.id ?? null);
                         } catch (err) {
-                          if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+                          if (!handleAuthError(err))
+                            setError(err instanceof Error ? err.message : String(err));
                         }
                       }}
                     >

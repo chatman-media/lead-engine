@@ -318,6 +318,8 @@ export async function computeQuote(
      * прежнее поведение). Резолвится из активной rate-row, не угадывается LLM.
      */
     payoutAsset?: string | null;
+    /** Способ выдачи (cardless_atm / office_cash / thai_bank_transfer …) для выбора шага округления. */
+    payoutMethod?: string | null;
   },
   guardrails?: ExchangeGuardrails,
 ): Promise<QuoteResult | QuoteError> {
@@ -424,15 +426,26 @@ export async function computeQuote(
 
   const gross = mode === "divide" ? amountFrom / eff : amountFrom * eff;
   const quoteCurrency = resolveQuoteCurrency(quoteCode);
-  // Шаг округления: сначала из exchange_settings (per-tenant), иначе из словаря валют.
+  // Шаг округления: per-tenant из exchange_settings, fallback — словарь валют.
   const [settingsRow] = await withTenant(db, tenantId, async (tx) =>
     tx
-      .select({ quoteRoundStep: exchangeSettings.quoteRoundStep })
+      .select({
+        roundStepAtm: exchangeSettings.roundStepAtm,
+        roundStepCash: exchangeSettings.roundStepCash,
+        roundStepBank: exchangeSettings.roundStepBank,
+      })
       .from(exchangeSettings)
       .where(eq(exchangeSettings.tenantId, tenantId))
       .limit(1),
   );
-  const step = settingsRow?.quoteRoundStep ?? quoteCurrency.denomStep;
+  const pm = input.payoutMethod ?? "";
+  const isBank = pm === "thai_bank_transfer";
+  const isCash = pm === "office_cash" || pm === "courier_cash";
+  const step = isBank
+    ? (settingsRow?.roundStepBank ?? quoteCurrency.denomStepBank)
+    : isCash
+      ? (settingsRow?.roundStepCash ?? quoteCurrency.denomStepCash)
+      : (settingsRow?.roundStepAtm ?? quoteCurrency.denomStepAtm);
   const rawAmount =
     amountMode === "target_thb"
       ? Math.round(amount)
