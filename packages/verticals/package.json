@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/verticals",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Реестр vertical templates: контракт VerticalTemplate + lookup по slug. Сами templates живут в apps/vertical-*.",
   "type": "module",
   "main": "./dist/index.js",

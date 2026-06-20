@@ -1,3 +1,10 @@
+# [@chatman-media/verticals-v1.4.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.4.0...@chatman-media/verticals-v1.4.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **exchange:** округление котировки вниз до шага номинала ([d07188c](https://github.com/chatman-media/lead-engine/commit/d07188c56873e8809db94d189c2293bae206eda2))
+
 # [@chatman-media/verticals-v1.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.3.0...@chatman-media/verticals-v1.4.0) (2026-06-11)
 
 
