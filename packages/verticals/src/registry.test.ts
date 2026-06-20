@@ -42,6 +42,14 @@ describe("VerticalRegistry", () => {
     expect(r.load("foo").version).toBe(2);
   });
 
+  it("clear() сбрасывает реестр", () => {
+    const r = new VerticalRegistry();
+    r.register(tpl("foo", 1));
+    r.clear();
+    expect(r.list()).toEqual([]);
+    expect(r.tryLoad("foo")).toBeUndefined();
+  });
+
   it("list() сортирован", () => {
     const r = new VerticalRegistry();
     r.register(tpl("zeta", 1));
