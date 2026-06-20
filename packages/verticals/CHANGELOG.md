@@ -1,3 +1,10 @@
+# [@chatman-media/verticals-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.4.1...@chatman-media/verticals-v1.5.0) (2026-06-20)
+
+
+### Features
+
+* **exchange:** проактивные направления + 3 шага округления + язык симулятора ([334ae6f](https://github.com/chatman-media/lead-engine/commit/334ae6fc815d1bcb6ab95eebf5f9f4e4bc359ca6))
+
 # [@chatman-media/verticals-v1.4.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.4.0...@chatman-media/verticals-v1.4.1) (2026-06-20)
 
 
