@@ -562,6 +562,16 @@ export function SaasExchange() {
   // Котируемая валюта тенанта — для подписи оборота, табло и дефолтов направлений.
   const quoteCode = settings.quoteAsset ?? "PHP";
 
+  // Список валют в таблице округления: активные направления + сохранённые + основная.
+  const [roundCurrencies, setRoundCurrencies] = useState<string[]>([quoteCode]);
+  useEffect(() => {
+    const fromRates = rates.filter((r) => r.isActive).map((r) => r.quoteAsset);
+    const fromSteps = Object.keys(settings.roundSteps ?? {});
+    const primary = settings.quoteAsset ?? "PHP";
+    const merged = [...new Set([primary, ...fromRates, ...fromSteps])];
+    setRoundCurrencies(merged);
+  }, [rates, settings.quoteAsset, settings.roundSteps]);
+
   // Произвольное направление обмена (помимо табло RUB/USDT→THB)
   const [addingRate, setAddingRate] = useState(false);
   const [rateForm, setRateForm] = useState<ExchangeRateInput>(() => emptyRate(quoteCode));
@@ -927,137 +937,150 @@ export function SaasExchange() {
         {/* ── Курсы ─────────────────────────────────────────────── */}
         <TabsContent value="rates" className="space-y-4">
           {/* ── Карточка 1: Валюта и округление ──────────────────── */}
-          {(() => {
-            const primaryCurrency = settings.quoteAsset ?? "PHP";
-            const activeCurrencies = [
-              ...new Set(rates.filter((r) => r.isActive).map((r) => r.quoteAsset)),
-            ];
-            if (!activeCurrencies.includes(primaryCurrency))
-              activeCurrencies.unshift(primaryCurrency);
-            const roundSteps = settings.roundSteps ?? {};
-            const setStep = (code: string, method: "atm" | "cash" | "bank", val: string) => {
-              setSettings((s) => {
-                const prev = s.roundSteps ?? {};
-                const entry = { ...(prev[code] ?? {}) };
-                if (val === "") {
-                  delete entry[method];
-                } else {
-                  const n = Math.max(1, Math.floor(Number(val)));
-                  if (Number.isFinite(n)) entry[method] = n;
-                }
-                const next = { ...prev };
-                if (Object.keys(entry).length === 0) delete next[code];
-                else next[code] = entry;
-                return { ...s, roundSteps: Object.keys(next).length ? next : null };
-              });
-            };
-            return (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Валюта и округление</CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    Основная валюта — в ней бот считает котировки и выдаёт суммы. После смены
-                    пересоздайте курсы через «Курсы обмена по диапазонам». Шаги округления — вниз до
-                    кратного по способу выдачи; пусто = авто из словаря валют.
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="space-y-1.5">
-                    <Label>Основная валюта</Label>
-                    <div className="flex items-center gap-3">
-                      <Select
-                        value={primaryCurrency}
-                        onValueChange={(v) => setSettings((s) => ({ ...s, quoteAsset: v }))}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Валюта и округление</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Основная валюта — в ней бот считает котировки и выдаёт суммы. После смены
+                пересоздайте курсы через «Курсы обмена по диапазонам».
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Основная валюта */}
+              <div className="flex items-center gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Основная валюта</Label>
+                  <Select
+                    value={settings.quoteAsset ?? "PHP"}
+                    onValueChange={(v) => setSettings((s) => ({ ...s, quoteAsset: v }))}
+                  >
+                    <SelectTrigger className="h-8 w-52 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS).map((code) => (
+                        <SelectItem key={code} value={code}>
+                          {QUOTE_ASSET_LABELS[code] ?? code}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Шаги округления */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-muted-foreground">
+                    Шаги округления при выдаче
+                  </Label>
+                  <span className="text-xs text-muted-foreground">— пусто = авто из словаря</span>
+                </div>
+                <div className="space-y-1">
+                  {roundCurrencies.map((code) => {
+                    const auto = ROUND_STEP_AUTO[code];
+                    const row = settings.roundSteps?.[code] ?? {};
+                    const isFromActiveRate = rates.some((r) => r.isActive && r.quoteAsset === code);
+                    const isPrimary = code === (settings.quoteAsset ?? "PHP");
+                    const canRemove = !isPrimary && !isFromActiveRate;
+                    const setStep = (method: "atm" | "cash" | "bank", val: string) => {
+                      setSettings((s) => {
+                        const prev = s.roundSteps ?? {};
+                        const entry = { ...(prev[code] ?? {}) };
+                        if (val === "") delete entry[method];
+                        else {
+                          const n = Math.max(1, Math.floor(Number(val)));
+                          if (Number.isFinite(n)) entry[method] = n;
+                        }
+                        const next = { ...prev };
+                        if (Object.keys(entry).length === 0) delete next[code];
+                        else next[code] = entry;
+                        return { ...s, roundSteps: Object.keys(next).length ? next : null };
+                      });
+                    };
+                    return (
+                      <div
+                        key={code}
+                        className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2"
                       >
-                        <SelectTrigger className="w-64">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS).map(
-                            (code) => (
-                              <SelectItem key={code} value={code}>
-                                {QUOTE_ASSET_LABELS[code] ?? code}
-                              </SelectItem>
-                            ),
-                          )}
-                        </SelectContent>
-                      </Select>
-                      {activeCurrencies.length > 1 && (
-                        <p className="text-xs text-muted-foreground">
-                          Активные направления: {activeCurrencies.join(", ")}
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                        <span className="w-16 shrink-0 text-sm font-medium">
+                          {QUOTE_ASSET_LABELS[code]?.match(/^\S+/)?.[0] ?? ""}{" "}
+                          <span className="font-mono">{code}</span>
+                        </span>
+                        {(
+                          [
+                            { method: "atm", label: "ATM" },
+                            { method: "cash", label: "Нал" },
+                            { method: "bank", label: "Банк" },
+                          ] as const
+                        ).map(({ method, label }) => (
+                          <div key={method} className="flex flex-col items-center gap-0.5">
+                            <span className="text-[10px] text-muted-foreground">{label}</span>
+                            <Input
+                              type="text"
+                              inputMode="numeric"
+                              className="h-7 w-20 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none px-2 text-center text-sm"
+                              placeholder={auto ? String(auto[method]) : "авто"}
+                              value={row[method] ?? ""}
+                              onChange={(e) => setStep(method, e.target.value.replace(/\D/g, ""))}
+                            />
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          title={
+                            canRemove
+                              ? "Убрать валюту"
+                              : isPrimary
+                                ? "Основная валюта — нельзя убрать"
+                                : "Есть активные направления"
+                          }
+                          disabled={!canRemove}
+                          onClick={() =>
+                            setRoundCurrencies((prev) => prev.filter((c) => c !== code))
+                          }
+                          className="ml-auto shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
 
-                  <div className="space-y-2">
-                    <Label>Шаги округления при выдаче</Label>
-                    <div className="overflow-x-auto rounded-md border">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b bg-muted/40">
-                            <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                              Валюта
-                            </th>
-                            <th className="px-3 py-2 text-center font-medium text-muted-foreground">
-                              Банкомат (ATM)
-                            </th>
-                            <th className="px-3 py-2 text-center font-medium text-muted-foreground">
-                              Наличные
-                            </th>
-                            <th className="px-3 py-2 text-center font-medium text-muted-foreground">
-                              Банк / перевод
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {activeCurrencies.map((code) => {
-                            const auto = ROUND_STEP_AUTO[code];
-                            const row = roundSteps[code] ?? {};
-                            return (
-                              <tr key={code} className="border-b last:border-0">
-                                <td className="px-3 py-2 font-medium">
-                                  {QUOTE_ASSET_LABELS[code]?.split("—")[0].trim() ?? code}
-                                </td>
-                                {(["atm", "cash", "bank"] as const).map((method) => (
-                                  <td key={method} className="px-2 py-1.5">
-                                    <Input
-                                      type="number"
-                                      min={1}
-                                      step={1}
-                                      className="h-8 w-28 text-center"
-                                      placeholder={auto ? `авто (${auto[method]})` : "авто"}
-                                      value={row[method] ?? ""}
-                                      onChange={(e) => setStep(code, method, e.target.value)}
-                                    />
-                                  </td>
-                                ))}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Пусто = авто. Авто-значения: PHP ATM→100, THB ATM→500, VND/IDR ATM→50 000.
-                    </p>
-                  </div>
+                {/* Добавить валюту */}
+                {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS).some(
+                  (c) => !roundCurrencies.includes(c),
+                ) && (
+                  <Select
+                    value=""
+                    onValueChange={(v) => setRoundCurrencies((prev) => [...prev, v])}
+                  >
+                    <SelectTrigger className="h-7 w-44 border-dashed text-xs text-muted-foreground">
+                      <PlusIcon className="mr-1 size-3" />
+                      Добавить валюту
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS)
+                        .filter((c) => !roundCurrencies.includes(c))
+                        .map((code) => (
+                          <SelectItem key={code} value={code}>
+                            {QUOTE_ASSET_LABELS[code] ?? code}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
 
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      onClick={saveSettings}
-                      disabled={savingSettings}
-                      size="sm"
-                    >
-                      <SaveIcon className="size-4" />
-                      {savingSettings ? "Сохранение…" : "Сохранить"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })()}
+              <div className="flex justify-end">
+                <Button type="button" onClick={saveSettings} disabled={savingSettings} size="sm">
+                  <SaveIcon className="size-4" />
+                  {savingSettings ? "Сохранение…" : "Сохранить"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* ── Карточка 2: Автоматизация курсов ─────────────────── */}
           <Card>
