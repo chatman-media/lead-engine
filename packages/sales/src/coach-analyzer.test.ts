@@ -15,6 +15,9 @@ function msg(opts: Partial<MessageRow> & { id: number; role: MessageRow["role"];
     createdAt: 0,
     stage: null,
     deletedAt: null,
+    origLang: null,
+    translatedText: null,
+    translatedLang: null,
   };
 }
 
