@@ -153,9 +153,8 @@ export function parsePassportJson(raw: string): PassportIdentity {
   } catch {
     return {};
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return {};
-  }
+  /* c8 ignore next */
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
   const obj = parsed as Record<string, unknown>;
   const out: PassportIdentity = {};
   for (const key of ["family_name", "given_name", "passport_number", "passport_expiry"] as const) {

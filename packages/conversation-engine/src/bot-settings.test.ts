@@ -5,6 +5,7 @@ import {
   matchStopWord,
   mergeBotSettings,
   parseBotSettings,
+  serializeBotSettings,
 } from "./bot-settings.ts";
 
 describe("parseBotSettings", () => {
@@ -104,6 +105,13 @@ describe("isWithinBotHours", () => {
       }),
     );
     expect(isWithinBotHours(s, at("2021-06-15T03:00:00Z"))).toBe(true);
+  });
+});
+
+describe("serializeBotSettings", () => {
+  it("сериализует в JSON, обратимо с parseBotSettings", () => {
+    const json = serializeBotSettings(DEFAULT_BOT_SETTINGS);
+    expect(JSON.parse(json)).toMatchObject(DEFAULT_BOT_SETTINGS);
   });
 });
 

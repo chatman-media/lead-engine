@@ -272,6 +272,16 @@ describe("answerWithRag — persona shortcuts", () => {
     expect(r.telemetry.path).toBe("persona_fact");
     expect(r.text).toContain("Москва");
   });
+
+  it("personal-fact question, но факт не задан в персоне → fallback to RAG", async () => {
+    const r = await answerWithRag(
+      baseInput({
+        question: "где ты живёшь?",
+        persona: { name: "Аня", role: "human", facts: {} },
+      }),
+    );
+    expect(r.telemetry.path).not.toBe("persona_fact");
+  });
 });
 
 describe("answerWithRag — main paths", () => {

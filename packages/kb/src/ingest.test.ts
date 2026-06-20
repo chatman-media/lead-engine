@@ -107,6 +107,15 @@ describe("ingestText", () => {
     expect(state.inserted).toBe(r.chunks);
   });
 
+  it("scope funnel → source включает funnel-<id>:", async () => {
+    const state = newState();
+    const r = await ingestText(
+      { title: "Doc", body: "funnel scoped content" },
+      { kb: fakeStore(state), embedder, scope: { scopeType: "funnel", funnelId: 7 } },
+    );
+    expect(r.source).toContain("funnel-7:");
+  });
+
   it("пустой title → 'untitled'; пустое тело → 0 чанков", async () => {
     const state = newState();
     const r = await ingestText({ title: "  ", body: "" }, { kb: fakeStore(state), embedder });

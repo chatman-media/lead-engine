@@ -193,6 +193,17 @@ describe("composeSystemPrompt — support mode / grounding / few-shot", () => {
     expect(p).toContain("Никогда не выдумывай");
   });
 
+  it("groundingRequired + assistant persona → напоминание с «скажи prospect»", () => {
+    const s: Style = {
+      ...baseStyle,
+      persona: { name: "Бот", role: "assistant" },
+      stages: { qualify: { goal: "G", groundingRequired: true } },
+    };
+    const p = composeSystemPrompt(s, "qualify");
+    expect(p).toContain("Никогда не выдумывай");
+    expect(p).toContain("скажи prospect");
+  });
+
   it("groundingRequired + есть KB контекст → KB CONTEXT присутствует", () => {
     const s: Style = {
       ...baseStyle,

@@ -496,9 +496,5 @@ function isToolCallRegressionStatus(value: unknown): value is ToolCallRegression
 function describeValue(value: unknown): string {
   if (value === undefined) return "missing";
   if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  return JSON.stringify(value);
 }

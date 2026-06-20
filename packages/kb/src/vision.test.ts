@@ -159,6 +159,9 @@ describe("parsePassportJson", () => {
   it("битый JSON → {}", () => {
     expect(parsePassportJson("{ broken")).toEqual({});
   });
+  it("есть скобки но невалидный JSON → {}", () => {
+    expect(parsePassportJson("{not: valid json}")).toEqual({});
+  });
   it("массив / не-объект → {}", () => {
     expect(parsePassportJson("[1,2,3]")).toEqual({});
   });
