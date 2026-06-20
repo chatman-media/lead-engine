@@ -35,6 +35,7 @@ import {
 import { and, asc, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { DEFAULT_PH_BBOX, syncOsmAtms } from "../lib/exchange/osm-sync.ts";
 import {
   applyBaseRateToTiers,
   buildDefaultRateCardProposal,
@@ -1481,6 +1482,23 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
       details: { payoutPointId: pointId, operatorAdminId: body.adminId },
     });
     return c.json({ ok: true });
+  });
+
+  // POST /api/admin/exchange/payout-points/sync-osm
+  app.post("/api/admin/exchange/payout-points/sync-osm", async (c) => {
+    const tenantId = c.var.tenantId;
+    const body = await c.req.json<{ bbox?: string; quoteAsset?: string }>().catch(() => ({}));
+    const result = await syncOsmAtms(opts.db, tenantId, {
+      bbox: body.bbox ?? DEFAULT_PH_BBOX,
+      quoteAsset: body.quoteAsset ?? "PHP",
+    });
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId: c.var.adminId as number | undefined,
+      action: "exchange.osm_sync",
+      details: result,
+    });
+    return c.json({ ok: true, ...result });
   });
 
   // DELETE /api/admin/exchange/payout-points/:id/coverage/:adminId

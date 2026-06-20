@@ -1634,6 +1634,7 @@ function PayoutPointsTab() {
   const [coveragePoint, setCoveragePoint] = useState<PayoutPoint | null>(null);
   const [coverage, setCoverage] = useState<PayoutCoverageOperator[]>([]);
   const [coverageLoading, setCoverageLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -1730,15 +1731,35 @@ function PayoutPointsTab() {
     }
   };
 
+  const syncOsm = async () => {
+    setSyncing(true);
+    try {
+      const r = await saas.syncOsmAtms();
+      toast.success(
+        `OSM синк: добавлено/обновлено ${r.upserted} из ${r.fetched} (пропущено ${r.skipped})`,
+      );
+      load();
+    } catch {
+      toast.error("Ошибка синхронизации OSM");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Каталог точек выдачи</CardTitle>
-          <Button size="sm" onClick={openNew}>
-            <PlusIcon className="mr-1 h-4 w-4" />
-            Добавить
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={syncOsm} disabled={syncing}>
+              {syncing ? "Синхронизация…" : "Синк OSM"}
+            </Button>
+            <Button size="sm" onClick={openNew}>
+              <PlusIcon className="mr-1 h-4 w-4" />
+              Добавить
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (

@@ -62,6 +62,11 @@ function partsFromMessage(channelId: string, msg: TgMessage): InboundPart[] {
       ...(msg.document.mime_type ? { mimeType: msg.document.mime_type } : {}),
       ...(msg.document.file_name ? { fileName: msg.document.file_name } : {}),
     });
+  } else if (msg.location) {
+    parts.push({
+      kind: "text",
+      text: `📍 Геолокация: ${msg.location.latitude}, ${msg.location.longitude}`,
+    });
   } else if (!msg.text && msg.caption) {
     // Caption без media — теоретически невозможно по Bot API, но обработаем как text.
     parts.push({ kind: "text", text: msg.caption });
