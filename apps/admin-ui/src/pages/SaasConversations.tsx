@@ -67,6 +67,13 @@ const ROLE_RU: Record<string, string> = {
   human: "оператор",
   system: "система",
 };
+// #731: метки языка оригинала для бейджа перевода в инбоксе.
+const LANG_LABEL: Record<string, string> = {
+  ru: "RU",
+  en: "EN",
+  ko: "KO 한국어",
+  zh: "ZH 中文",
+};
 const STATE_RU: Record<string, string> = {
   active: "активен",
   won: "выигран",
@@ -1442,6 +1449,13 @@ export function SaasConversations() {
                       m.role === "assistant" ? "text-primary" :
                       m.role === "human" ? "text-[var(--success)]" :
                       "text-muted-foreground";
+                    // #731: входящее клиента с переводом → показываем русский,
+                    // оригинал прячем под details. Гейт только на role==="user".
+                    const clientLang =
+                      m.origLang ?? (m.role === "user" ? detail.conversation.detectedLang : null);
+                    const showTranslation =
+                      m.role === "user" && !!m.translatedText && m.translatedText !== m.text;
+                    const bodyText = showTranslation ? (m.translatedText as string) : m.text;
                     return (
                       <div
                         key={m.id}
@@ -1492,15 +1506,23 @@ export function SaasConversations() {
                                     conversationId={selectedId}
                                     messageId={m.id}
                                   />
-                                  {m.text && <div>{m.text}</div>}
+                                  {bodyText && <div>{bodyText}</div>}
                                 </div>
                               );
                             }
-                            return m.text
-                              ? <span>{m.text}</span>
+                            return bodyText
+                              ? <span>{bodyText}</span>
                               : <span className="italic text-muted-foreground">—</span>;
                           })()}
                         </div>
+                        {showTranslation && (
+                          <details className="mt-1 text-[11px] text-muted-foreground">
+                            <summary className="cursor-pointer select-none">
+                              🌐 {LANG_LABEL[clientLang ?? ""] ?? (clientLang ?? "").toUpperCase()} · оригинал
+                            </summary>
+                            <div className="mt-1 whitespace-pre-wrap break-words italic">{m.text}</div>
+                          </details>
+                        )}
                         {(operatorBot || operatorAction || meta?.orderId || meta?.payoutCode) && (
                           <div className="mt-2 flex flex-wrap gap-1">
                             {operatorBot && (

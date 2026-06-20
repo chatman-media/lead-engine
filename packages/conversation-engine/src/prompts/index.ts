@@ -2,3 +2,4 @@
 
 export * from "./compact-conversation.ts";
 export * from "./llm-reply.ts";
+export * from "./translation.ts";
