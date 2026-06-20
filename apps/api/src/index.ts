@@ -434,6 +434,8 @@ async function main() {
 		{
 			db: db as never,
 			appUrl: cfg.mailer.appUrl,
+			// #731: перевод ответа оператора (RU) на язык клиента перед отправкой.
+			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
 		},
 	);
 	if (cfg.operatorBotToken) {
