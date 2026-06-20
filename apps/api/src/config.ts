@@ -237,8 +237,17 @@ export interface ApiConfig {
   operatorBotToken: string;
   operatorBotUsername: string;
   superadminToken: string;
+  /**
+   * Опциональная модель для LLM-персоны симулятора диалогов (admin-sim).
+   * Если задана — персона использует эту модель вместо tenant chat LLM,
+   * что позволяет держать бота на дорогой модели, а персону — на дешёвой.
+   * env PERSONA_OPENROUTER_MODEL + PERSONA_OPENROUTER_API_KEY (fallback LLM_API_KEY).
+   */
+  sim: {
+    personaModel: string;
+    personaApiKey: string;
+  };
   telegramUserbot: {
-
     apiId: number;
     apiHash: string;
     dispatcherPollMs: number;
@@ -262,7 +271,10 @@ export function loadApiConfig(): ApiConfig {
     databaseUrl: required("DATABASE_URL"),
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
     authSecret: process.env.PLATFORM_AUTH_SECRET ?? required("PLATFORM_MASTER_KEY"),
-    partnerCallbackSecret: process.env.PARTNER_CALLBACK_SECRET ?? process.env.PLATFORM_AUTH_SECRET ?? required("PLATFORM_MASTER_KEY"),
+    partnerCallbackSecret:
+      process.env.PARTNER_CALLBACK_SECRET ??
+      process.env.PLATFORM_AUTH_SECRET ??
+      required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
     whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
     whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",
@@ -313,7 +325,11 @@ export function loadApiConfig(): ApiConfig {
     mailer: {
       apiKey: process.env.RESEND_API_KEY ?? "",
       fromAddress: process.env.PLATFORM_FROM_EMAIL ?? "lead-engine <noreply@leadengine.app>",
-      appUrl: (process.env.PLATFORM_APP_URL ?? process.env.PLATFORM_PUBLIC_URL ?? "https://app.leadengine.app").replace(/\/$/, ""),
+      appUrl: (
+        process.env.PLATFORM_APP_URL ??
+        process.env.PLATFORM_PUBLIC_URL ??
+        "https://app.leadengine.app"
+      ).replace(/\/$/, ""),
     },
     stripe: {
       secretKey: process.env.STRIPE_SECRET_KEY ?? "",
@@ -325,5 +341,9 @@ export function loadApiConfig(): ApiConfig {
     operatorBotToken: process.env.PLATFORM_OPERATOR_BOT_TOKEN ?? "",
     operatorBotUsername: process.env.PLATFORM_OPERATOR_BOT_USERNAME ?? "",
     superadminToken: process.env.PLATFORM_SUPERADMIN_TOKEN ?? "",
+    sim: {
+      personaModel: process.env.PERSONA_OPENROUTER_MODEL ?? "",
+      personaApiKey: process.env.PERSONA_OPENROUTER_API_KEY ?? process.env.LLM_API_KEY ?? "",
+    },
   };
 }
