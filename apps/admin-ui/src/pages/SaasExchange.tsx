@@ -1880,6 +1880,9 @@ function PayoutPointsTab() {
   const [sendLocPoint, setSendLocPoint] = useState<PayoutPoint | null>(null);
   const [sendLocConvId, setSendLocConvId] = useState("");
   const [sendingLoc, setSendingLoc] = useState(false);
+  // Поддерживаемые банки выдачи (exchange_payout_banks). Пусто = все банки.
+  const [supportedBanks, setSupportedBanks] = useState<string[]>([]);
+  const [savingBanks, setSavingBanks] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -1891,6 +1894,39 @@ function PayoutPointsTab() {
   };
 
   useEffect(load, []);
+
+  useEffect(() => {
+    saas
+      .exchangeRequisites()
+      .then((r) => {
+        const raw = r.items.find((i) => i.key === "exchange_payout_banks")?.value;
+        if (!raw) return;
+        try {
+          const arr: unknown = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            setSupportedBanks(arr.filter((x): x is string => typeof x === "string"));
+          }
+        } catch {
+          /* кривой JSON — игнор */
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const toggleSupportedBank = async (bank: string) => {
+    const next = supportedBanks.includes(bank)
+      ? supportedBanks.filter((b) => b !== bank)
+      : [...supportedBanks, bank].sort();
+    setSupportedBanks(next);
+    setSavingBanks(true);
+    try {
+      await saas.saveExchangeRequisite("exchange_payout_banks", JSON.stringify(next));
+    } catch {
+      toast.error("Не удалось сохранить список банков");
+    } finally {
+      setSavingBanks(false);
+    }
+  };
 
   const openNew = () => {
     setIsNew(true);
@@ -2052,12 +2088,62 @@ function PayoutPointsTab() {
           </div>
         </CardHeader>
         <CardContent>
+          {pointKind === "atm" &&
+            (() => {
+              const availableBanks = [
+                ...new Set(
+                  points
+                    .filter((p) => p.kind === "atm" && p.bankName)
+                    .map((p) => p.bankName as string),
+                ),
+              ].sort();
+              if (availableBanks.length === 0) return null;
+              return (
+                <div className="mb-4 space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="font-medium">Поддерживаемые банки выдачи</span>
+                    <span className="text-muted-foreground">
+                      {supportedBanks.length === 0
+                        ? "— все банки"
+                        : `выбрано: ${supportedBanks.length}`}
+                      {savingBanks ? " · сохраняю…" : ""}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {availableBanks.map((bank) => {
+                      const on = supportedBanks.includes(bank);
+                      return (
+                        <button
+                          type="button"
+                          key={bank}
+                          onClick={() => toggleSupportedBank(bank)}
+                          className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                            on
+                              ? "border-primary bg-primary/15 text-foreground"
+                              : "border-border text-muted-foreground hover:bg-muted"
+                          }`}
+                        >
+                          {bank}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Бот предлагает клиенту банкоматы только этих банков, и карта показывает только
+                    их. Пусто = все банки каталога.
+                  </p>
+                </div>
+              );
+            })()}
           {(() => {
             const visible = points.filter((p) =>
               pointKind === "atm" ? p.kind === "atm" : p.kind !== "atm",
             );
             if (loading) return <Skeleton className="h-24 w-full" />;
-            if (viewMode === "map") return <PayoutPointsMap points={visible} />;
+            // Карта фильтруется по поддерживаемым банкам (если заданы); список —
+            // полный, чтобы оператор управлял всем каталогом.
+            if (viewMode === "map")
+              return <PayoutPointsMap points={visible} supportedBanks={supportedBanks} />;
             if (visible.length === 0)
               return (
                 <p className="text-sm text-muted-foreground">
@@ -2416,7 +2502,13 @@ const BANK_COLORS: Record<string, string> = {
   UCPB: "#be185d",
 };
 
-function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
+function PayoutPointsMap({
+  points,
+  supportedBanks = [],
+}: {
+  points: PayoutPoint[];
+  supportedBanks?: string[];
+}) {
   const [hiddenBanks, setHiddenBanks] = useState<Set<string>>(new Set());
 
   const toggleBank = (key: string) =>
@@ -2429,13 +2521,22 @@ function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
 
   const bankKey = (p: PayoutPoint) =>
     p.bankName && BANK_COLORS[p.bankName] ? p.bankName : "__other__";
-  const allGeo = points.filter((p) => p.lat != null && p.lng != null);
+  // Если заданы поддерживаемые банки — на карте только их точки (как в боте).
+  const supportedSet = supportedBanks.length > 0 ? new Set(supportedBanks) : null;
+  const allGeo = points.filter(
+    (p) =>
+      p.lat != null &&
+      p.lng != null &&
+      (!supportedSet || (p.bankName != null && supportedSet.has(p.bankName))),
+  );
   const geoPoints = allGeo.filter((p) => !hiddenBanks.has(bankKey(p)));
 
   if (allGeo.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
-        Нет точек с координатами — запустите «Синк OSM».
+        {supportedSet
+          ? "Нет точек выбранных банков с координатами."
+          : "Нет точек с координатами — запустите «Синк OSM»."}
       </p>
     );
   }

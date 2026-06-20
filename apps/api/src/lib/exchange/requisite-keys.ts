@@ -47,7 +47,13 @@ export const EXCHANGE_SENSITIVE_SECRET_KEYS = [
  * через get_exchange_business_info и не гейтят онбординг. Для админских хелперов
  * (напр. шаблон поста с курсами — текст для ручной публикации в каналах).
  */
-export const EXCHANGE_ADMIN_SETTING_KEYS = ["exchange_rate_post_template"] as const;
+export const EXCHANGE_ADMIN_SETTING_KEYS = [
+  "exchange_rate_post_template",
+  // JSON-массив имён банков, через которые тенант реально выдаёт наличные
+  // (cardless ATM). Пусто/не задан = все банки каталога. Бот фильтрует по нему
+  // точки выдачи (list_exchange_payout_points), карта в админке — выделяет их.
+  "exchange_payout_banks",
+] as const;
 
 /** Бизнес-настройки, доступные runtime через get_exchange_business_info. */
 export const EXCHANGE_BUSINESS_SETTING_KEYS = [
