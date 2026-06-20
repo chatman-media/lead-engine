@@ -1864,6 +1864,12 @@ const EMPTY_POINT: PayoutPointInput = {
   isActive: true,
 };
 
+// Кэш точек выдачи на модуль (холдер-объект — чтобы biome не правил let→const):
+// при первой загрузке тянем с сервера, при повторных заходах на вкладку отдаём из
+// кэша. Мутации/синк форсят перезагрузку.
+const payoutPointsCache: { value: PayoutPoint[] | null } = { value: null };
+const POINTS_PAGE_SIZE = 25;
+
 function PayoutPointsTab() {
   const [points, setPoints] = useState<PayoutPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1883,17 +1889,28 @@ function PayoutPointsTab() {
   // Поддерживаемые банки выдачи (exchange_payout_banks). Пусто = все банки.
   const [supportedBanks, setSupportedBanks] = useState<string[]>([]);
   const [savingBanks, setSavingBanks] = useState(false);
+  const [pointsPage, setPointsPage] = useState(0);
 
-  const load = () => {
+  const load = (force = false) => {
+    if (!force && payoutPointsCache.value) {
+      setPoints(payoutPointsCache.value);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     saas
       .listPayoutPoints()
-      .then((r) => setPoints(r.points))
+      .then((r) => {
+        payoutPointsCache.value = r.points;
+        setPoints(r.points);
+      })
       .catch(() => toast.error("Не удалось загрузить точки выдачи"))
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   useEffect(() => {
     saas
@@ -1965,7 +1982,7 @@ function PayoutPointsTab() {
         toast.success("Точка обновлена");
       }
       setEditPoint(null);
-      load();
+      load(true);
     } catch {
       toast.error("Ошибка сохранения");
     } finally {
@@ -1978,7 +1995,7 @@ function PayoutPointsTab() {
     try {
       await saas.deletePayoutPoint(p.id);
       toast.success("Деактивировано");
-      load();
+      load(true);
     } catch {
       toast.error("Ошибка");
     }
@@ -2036,7 +2053,7 @@ function PayoutPointsTab() {
       toast.success(
         `OSM синк: добавлено/обновлено ${r.upserted} из ${r.fetched} (пропущено ${r.skipped})`,
       );
-      load();
+      load(true);
     } catch {
       toast.error("Ошибка синхронизации OSM");
     } finally {
@@ -2055,7 +2072,10 @@ function PayoutPointsTab() {
                 size="sm"
                 variant={pointKind === "atm" ? "secondary" : "ghost"}
                 className="rounded-r-none border-0"
-                onClick={() => setPointKind("atm")}
+                onClick={() => {
+                  setPointKind("atm");
+                  setPointsPage(0);
+                }}
               >
                 Банкоматы ({points.filter((p) => p.kind === "atm").length})
               </Button>
@@ -2063,7 +2083,10 @@ function PayoutPointsTab() {
                 size="sm"
                 variant={pointKind === "office" ? "secondary" : "ghost"}
                 className="rounded-l-none border-0"
-                onClick={() => setPointKind("office")}
+                onClick={() => {
+                  setPointKind("office");
+                  setPointsPage(0);
+                }}
               >
                 Офисы ({points.filter((p) => p.kind !== "atm").length})
               </Button>
@@ -2152,87 +2175,119 @@ function PayoutPointsTab() {
                     : "Офисы не добавлены."}
                 </p>
               );
+            const total = visible.length;
+            const pageCount = Math.max(1, Math.ceil(total / POINTS_PAGE_SIZE));
+            const page = Math.min(pointsPage, pageCount - 1);
+            const pageItems = visible.slice(page * POINTS_PAGE_SIZE, (page + 1) * POINTS_PAGE_SIZE);
             return (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Тип</TableHead>
-                    <TableHead>Банк / Зона</TableHead>
-                    <TableHead>Название</TableHead>
-                    <TableHead>Валюта</TableHead>
-                    <TableHead>Номинал</TableHead>
-                    <TableHead>Лим./сн.</TableHead>
-                    <TableHead>Комиссия</TableHead>
-                    <TableHead>Город</TableHead>
-                    <TableHead>Активна</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visible.map((p) => (
-                    <TableRow key={p.id} className={!p.isActive ? "opacity-50" : undefined}>
-                      <TableCell>
-                        <Badge variant="outline">{KIND_LABEL[p.kind] ?? p.kind}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{p.bankName ?? "—"}</TableCell>
-                      <TableCell className="font-medium">{p.label}</TableCell>
-                      <TableCell>{p.quoteAsset}</TableCell>
-                      <TableCell>{p.denomination ?? "—"}</TableCell>
-                      <TableCell>{p.perWithdrawalMax?.toLocaleString() ?? "—"}</TableCell>
-                      <TableCell>
-                        {p.feeFixed > 0 ? `+${p.feeFixed}` : ""}
-                        {p.feePct > 0 ? ` ${p.feePct}%` : ""}
-                        {p.feeFixed === 0 && p.feePct === 0 ? "0" : ""}
-                      </TableCell>
-                      <TableCell>{p.city ?? "—"}</TableCell>
-                      <TableCell>
-                        <Switch
-                          checked={p.isActive}
-                          onCheckedChange={(v) =>
-                            saas
-                              .updatePayoutPoint(p.id, { isActive: v })
-                              .then(load)
-                              .catch(() => toast.error("Ошибка"))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>
-                            Изм.
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => openCoverage(p)}>
-                            Операторы
-                          </Button>
-                          {p.lat != null && p.lng != null && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              title="Отправить локацию клиенту в Telegram"
-                              onClick={() => {
-                                setSendLocPoint(p);
-                                setSendLocConvId("");
-                              }}
-                            >
-                              <MapPinIcon className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                          {p.isActive && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-destructive"
-                              onClick={() => deactivate(p)}
-                            >
-                              <Trash2Icon className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Тип</TableHead>
+                      <TableHead>Банк / Зона</TableHead>
+                      <TableHead>Название</TableHead>
+                      <TableHead>Валюта</TableHead>
+                      <TableHead>Номинал</TableHead>
+                      <TableHead>Лим./сн.</TableHead>
+                      <TableHead>Комиссия</TableHead>
+                      <TableHead>Город</TableHead>
+                      <TableHead>Активна</TableHead>
+                      <TableHead />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {pageItems.map((p) => (
+                      <TableRow key={p.id} className={!p.isActive ? "opacity-50" : undefined}>
+                        <TableCell>
+                          <Badge variant="outline">{KIND_LABEL[p.kind] ?? p.kind}</Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">{p.bankName ?? "—"}</TableCell>
+                        <TableCell className="font-medium">{p.label}</TableCell>
+                        <TableCell>{p.quoteAsset}</TableCell>
+                        <TableCell>{p.denomination ?? "—"}</TableCell>
+                        <TableCell>{p.perWithdrawalMax?.toLocaleString() ?? "—"}</TableCell>
+                        <TableCell>
+                          {p.feeFixed > 0 ? `+${p.feeFixed}` : ""}
+                          {p.feePct > 0 ? ` ${p.feePct}%` : ""}
+                          {p.feeFixed === 0 && p.feePct === 0 ? "0" : ""}
+                        </TableCell>
+                        <TableCell>{p.city ?? "—"}</TableCell>
+                        <TableCell>
+                          <Switch
+                            checked={p.isActive}
+                            onCheckedChange={(v) =>
+                              saas
+                                .updatePayoutPoint(p.id, { isActive: v })
+                                .then(() => load(true))
+                                .catch(() => toast.error("Ошибка"))
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>
+                              Изм.
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => openCoverage(p)}>
+                              Операторы
+                            </Button>
+                            {p.lat != null && p.lng != null && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                title="Отправить локацию клиенту в Telegram"
+                                onClick={() => {
+                                  setSendLocPoint(p);
+                                  setSendLocConvId("");
+                                }}
+                              >
+                                <MapPinIcon className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                            {p.isActive && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-destructive"
+                                onClick={() => deactivate(p)}
+                              >
+                                <Trash2Icon className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {total > POINTS_PAGE_SIZE && (
+                  <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>
+                      {page * POINTS_PAGE_SIZE + 1}–{Math.min((page + 1) * POINTS_PAGE_SIZE, total)}{" "}
+                      из {total}
+                    </span>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={page === 0}
+                        onClick={() => setPointsPage(page - 1)}
+                      >
+                        Назад
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={page >= pageCount - 1}
+                        onClick={() => setPointsPage(page + 1)}
+                      >
+                        Вперёд
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
             );
           })()}
         </CardContent>
@@ -2564,7 +2619,7 @@ function PayoutPointsMap({
           style={{ height: 440, width: "100%", background: "#0b1220" }}
         >
           <LayersControl position="topright">
-            <LayersControl.BaseLayer checked name="Тёмная">
+            <LayersControl.BaseLayer name="Тёмная">
               <TileLayer
                 url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                 subdomains="abcd"
@@ -2572,7 +2627,7 @@ function PayoutPointsMap({
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
               />
             </LayersControl.BaseLayer>
-            <LayersControl.BaseLayer name="Дороги">
+            <LayersControl.BaseLayer checked name="Дороги">
               <TileLayer
                 url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
                 subdomains="abcd"
