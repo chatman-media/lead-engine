@@ -12,7 +12,10 @@ import {
   Trash2Icon,
   XCircleIcon,
 } from "lucide-react";
+import "leaflet/dist/leaflet.css";
+import type { LatLngBoundsExpression } from "leaflet";
 import { useEffect, useState } from "react";
+import { CircleMarker, MapContainer, Tooltip as MapTooltip, TileLayer } from "react-leaflet";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -2408,7 +2411,6 @@ const BANK_COLORS: Record<string, string> = {
 };
 
 function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
-  const [hovered, setHovered] = useState<PayoutPoint | null>(null);
   const [hiddenBanks, setHiddenBanks] = useState<Set<string>>(new Set());
 
   const toggleBank = (key: string) =>
@@ -2419,11 +2421,10 @@ function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
       return next;
     });
 
+  const bankKey = (p: PayoutPoint) =>
+    p.bankName && BANK_COLORS[p.bankName] ? p.bankName : "__other__";
   const allGeo = points.filter((p) => p.lat != null && p.lng != null);
-  const geoPoints = allGeo.filter((p) => {
-    const key = p.bankName && BANK_COLORS[p.bankName] ? p.bankName : "__other__";
-    return !hiddenBanks.has(key);
-  });
+  const geoPoints = allGeo.filter((p) => !hiddenBanks.has(bankKey(p)));
 
   if (allGeo.length === 0) {
     return (
@@ -2433,102 +2434,56 @@ function PayoutPointsMap({ points }: { points: PayoutPoint[] }) {
     );
   }
 
+  const getColor = (bank: string | null) => BANK_COLORS[bank ?? ""] ?? "#6b7280";
   const lats = allGeo.map((p) => p.lat!);
   const lngs = allGeo.map((p) => p.lng!);
-  const pad = 0.008;
-  const minLat = Math.min(...lats) - pad;
-  const maxLat = Math.max(...lats) + pad;
-  const minLng = Math.min(...lngs) - pad;
-  const maxLng = Math.max(...lngs) + pad;
-
-  const W = 700;
-  const H = 480;
-  const toX = (lng: number) => ((lng - minLng) / (maxLng - minLng)) * W;
-  const toY = (lat: number) => H - ((lat - minLat) / (maxLat - minLat)) * H;
-  const getColor = (bank: string | null) => BANK_COLORS[bank ?? ""] ?? "#6b7280";
+  // Реальная карта (Leaflet + тёмные Carto-тайлы): подгоняем вид под bbox точек.
+  const bounds: LatLngBoundsExpression = [
+    [Math.min(...lats), Math.min(...lngs)],
+    [Math.max(...lats), Math.max(...lngs)],
+  ];
 
   const banks = [
-    ...new Set(geoPoints.map((p) => p.bankName).filter((b): b is string => b != null)),
-  ];
+    ...new Set(allGeo.map((p) => p.bankName).filter((b): b is string => b != null)),
+  ].sort();
 
   return (
     <div className="space-y-3">
-      <div className="overflow-hidden rounded-md border bg-muted/30">
-        <svg viewBox={`0 0 ${W} ${H}`} className="h-[440px] w-full">
-          {Array.from({ length: 6 }, (_, i) => (
-            <line
-              key={`h${i}`}
-              x1={0}
-              y1={((i + 1) * H) / 7}
-              x2={W}
-              y2={((i + 1) * H) / 7}
-              stroke="#e2e8f0"
-              strokeWidth={0.6}
-            />
-          ))}
-          {Array.from({ length: 8 }, (_, i) => (
-            <line
-              key={`v${i}`}
-              x1={((i + 1) * W) / 9}
-              y1={0}
-              x2={((i + 1) * W) / 9}
-              y2={H}
-              stroke="#e2e8f0"
-              strokeWidth={0.6}
-            />
-          ))}
+      <div className="relative isolate overflow-hidden rounded-md border">
+        <MapContainer
+          bounds={bounds}
+          boundsOptions={{ padding: [24, 24] }}
+          scrollWheelZoom
+          style={{ height: 440, width: "100%", background: "#0b1220" }}
+        >
+          <TileLayer
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            subdomains="abcd"
+            maxZoom={20}
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          />
           {geoPoints.map((p) => (
-            <circle
+            <CircleMarker
               key={p.id}
-              cx={toX(p.lng!)}
-              cy={toY(p.lat!)}
-              r={5}
-              fill={getColor(p.bankName)}
-              fillOpacity={p.isActive ? 0.88 : 0.28}
-              stroke="white"
-              strokeWidth={1}
-              style={{ cursor: "pointer" }}
-              onMouseEnter={() => setHovered(p)}
-              onMouseLeave={() => setHovered(null)}
-            />
+              center={[p.lat!, p.lng!]}
+              radius={5}
+              pathOptions={{
+                color: "#ffffff",
+                weight: 1,
+                fillColor: getColor(p.bankName),
+                fillOpacity: p.isActive ? 0.9 : 0.3,
+              }}
+            >
+              <MapTooltip direction="top" offset={[0, -4]}>
+                <div className="text-xs leading-tight">
+                  <div className="font-semibold">{p.bankName ?? p.label}</div>
+                  <div className="opacity-80">{p.label}</div>
+                  {p.city && <div className="opacity-60">{p.city}</div>}
+                </div>
+              </MapTooltip>
+            </CircleMarker>
           ))}
-          {hovered &&
-            (() => {
-              const cx = toX(hovered.lng!);
-              const cy = toY(hovered.lat!);
-              const tw = 210;
-              const th = 56;
-              const tx = cx + tw + 14 > W ? cx - tw - 8 : cx + 8;
-              const ty = Math.max(4, Math.min(cy - th / 2, H - th - 4));
-              const bankLine = (hovered.bankName ?? hovered.label).slice(0, 30);
-              const labelLine = hovered.label.slice(0, 32);
-              return (
-                <g pointerEvents="none">
-                  <rect
-                    x={tx}
-                    y={ty}
-                    width={tw}
-                    height={th}
-                    rx={4}
-                    fill="white"
-                    stroke="#cbd5e1"
-                    strokeWidth={1}
-                  />
-                  <text x={tx + 8} y={ty + 18} fontSize={11} fill="#0f172a" fontWeight="600">
-                    {bankLine}
-                  </text>
-                  <text x={tx + 8} y={ty + 32} fontSize={10} fill="#475569">
-                    {labelLine}
-                  </text>
-                  {hovered.city && (
-                    <text x={tx + 8} y={ty + 46} fontSize={9} fill="#94a3b8">
-                      {hovered.city}
-                    </text>
-                  )}
-                </g>
-              );
-            })()}
-        </svg>
+        </MapContainer>
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
         {banks.map((bank) => {
