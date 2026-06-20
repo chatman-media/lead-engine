@@ -151,7 +151,37 @@ const OVERPASS_HEADERS = {
   "User-Agent": "lead-engine/1.0 (exchange atm sync)",
 };
 
+/** Таймаут одного запроса к Overpass (серверный [timeout:90] + запас на сеть). */
+const OVERPASS_FETCH_TIMEOUT_MS = 100_000;
+
+/**
+ * Валидирует bbox "lat_min,lng_min,lat_max,lng_max" перед подстановкой в
+ * Overpass-запрос: ровно 4 конечных числа в диапазонах широты/долготы и
+ * не инвертированные. bbox приходит от админа — не доверяем сырой строке
+ * в теле запроса (плюс понятная ошибка вместо мусорного ответа Overpass).
+ */
+export function validateBbox(bbox: string): void {
+  const parts = bbox.split(",").map((s) => Number(s.trim()));
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) {
+    throw new Error(
+      `Некорректный bbox: ожидается "lat_min,lng_min,lat_max,lng_max" из 4 чисел, получено "${bbox}"`,
+    );
+  }
+  const [latMin, lngMin, latMax, lngMax] = parts as [number, number, number, number];
+  if (
+    latMin < -90 ||
+    latMax > 90 ||
+    lngMin < -180 ||
+    lngMax > 180 ||
+    latMin >= latMax ||
+    lngMin >= lngMax
+  ) {
+    throw new Error(`bbox вне диапазона или инвертирован: "${bbox}"`);
+  }
+}
+
 export async function fetchOsmAtms(bbox: string): Promise<OsmNode[]> {
+  validateBbox(bbox);
   const query = `[out:json][timeout:90][bbox:${bbox}];\nnode["amenity"="atm"];\nout body;`;
   const body = `data=${encodeURIComponent(query)}`;
 
@@ -163,7 +193,21 @@ export async function fetchOsmAtms(bbox: string): Promise<OsmNode[]> {
     if (BACKOFF_MS[attempt]) {
       await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
     }
-    const res = await fetch(OVERPASS_URL, { method: "POST", headers: OVERPASS_HEADERS, body });
+    // Свой таймаут на каждый запрос: серверный [timeout:90] не спасает от
+    // зависшего TCP-соединения, а 3 ретрая повесили бы admin-эндпоинт.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OVERPASS_FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(OVERPASS_URL, {
+        method: "POST",
+        headers: OVERPASS_HEADERS,
+        body,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     if (res.status === 429 || res.status === 503) {
       lastStatus = res.status;
       continue;

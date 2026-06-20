@@ -42,6 +42,13 @@ export const EXCHANGE_SENSITIVE_SECRET_KEYS = [
   "exchange_westwallet_secret_key",
 ] as const;
 
+/**
+ * Admin-only ключи: разрешены к записи/чтению в админке, но НЕ отдаются боту
+ * через get_exchange_business_info и не гейтят онбординг. Для админских хелперов
+ * (напр. шаблон поста с курсами — текст для ручной публикации в каналах).
+ */
+export const EXCHANGE_ADMIN_SETTING_KEYS = ["exchange_rate_post_template"] as const;
+
 /** Бизнес-настройки, доступные runtime через get_exchange_business_info. */
 export const EXCHANGE_BUSINESS_SETTING_KEYS = [
   "exchange_operator_contact",
@@ -70,7 +77,8 @@ export function isAllowedExchangeSecretKey(key: string): boolean {
   return (
     isExchangeRequisiteKey(key) ||
     (EXCHANGE_BUSINESS_SETTING_KEYS as readonly string[]).includes(key) ||
-    (EXCHANGE_PROVIDER_SETTING_KEYS as readonly string[]).includes(key)
+    (EXCHANGE_PROVIDER_SETTING_KEYS as readonly string[]).includes(key) ||
+    (EXCHANGE_ADMIN_SETTING_KEYS as readonly string[]).includes(key)
   );
 }
 
