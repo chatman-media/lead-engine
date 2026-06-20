@@ -1279,6 +1279,14 @@ export function SaasConversations() {
                     <Badge variant={detail.conversation.mode === "human" ? "warning" : "outline"}>
                       {detail.conversation.mode === "human" ? "оператор" : "AI"}
                     </Badge>
+                    {detail.conversation.detectedLang &&
+                      detail.conversation.detectedLang !== "ru" && (
+                        <Badge variant="outline" className="gap-1 border-primary/40 text-primary">
+                          🌐{" "}
+                          {LANG_LABEL[detail.conversation.detectedLang] ??
+                            detail.conversation.detectedLang.toUpperCase()}
+                        </Badge>
+                      )}
                     {detail.conversation.currentStage && (
                       <Badge variant="outline">{detail.conversation.currentStage}</Badge>
                     )}
