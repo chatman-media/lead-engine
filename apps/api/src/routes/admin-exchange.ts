@@ -362,9 +362,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: exchangeSettings.quoteAsset,
           handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
           requireRateConfirmation: exchangeSettings.requireRateConfirmation,
-          roundStepAtm: exchangeSettings.roundStepAtm,
-          roundStepCash: exchangeSettings.roundStepCash,
-          roundStepBank: exchangeSettings.roundStepBank,
+          roundSteps: exchangeSettings.roundSteps,
         })
         .from(exchangeSettings)
         .where(eq(exchangeSettings.tenantId, tenantId))
@@ -377,9 +375,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
       quoteAssetOptions: QUOTE_CURRENCY_CODES,
       handoffCustomerNotice: row?.handoffCustomerNotice ?? true,
       requireRateConfirmation: row?.requireRateConfirmation ?? false,
-      roundStepAtm: row?.roundStepAtm ?? null,
-      roundStepCash: row?.roundStepCash ?? null,
-      roundStepBank: row?.roundStepBank ?? null,
+      roundSteps: row?.roundSteps ?? null,
     });
   });
 
@@ -417,22 +413,29 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
     // Тумблер «требовать подтверждение оператором при обновлении базового курса»
     // (даже мелких тиков). Дефолт false — back-compat.
     const requireRateConfirmation = body?.requireRateConfirmation === true;
-    // Шаги округления котировки (floor) по способу выдачи. null = авто из словаря валют.
-    function parseStep(val: unknown, field: string) {
-      if (val == null || val === "") return null;
-      const n = Math.floor(Number(val));
-      if (!Number.isFinite(n) || n < 1) throw new Error(`${field} должен быть ≥ 1`);
-      return n;
-    }
-    let roundStepAtm: number | null;
-    let roundStepCash: number | null;
-    let roundStepBank: number | null;
-    try {
-      roundStepAtm = parseStep(body?.roundStepAtm, "roundStepAtm");
-      roundStepCash = parseStep(body?.roundStepCash, "roundStepCash");
-      roundStepBank = parseStep(body?.roundStepBank, "roundStepBank");
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    // Шаги округления per-currency: { PHP: { atm, cash, bank }, THB: { atm } … }
+    // null = авто из словаря валют для каждой валюты.
+    let roundSteps: Record<string, { atm?: number; cash?: number; bank?: number }> | null = null;
+    if (body?.roundSteps != null && typeof body.roundSteps === "object") {
+      roundSteps = {};
+      for (const [code, methods] of Object.entries(body.roundSteps as Record<string, unknown>)) {
+        if (!/^[A-Z]{3}$/.test(code)) {
+          return c.json({ error: `roundSteps: недопустимый код валюты "${code}"` }, 400);
+        }
+        if (typeof methods !== "object" || methods === null) continue;
+        const entry: { atm?: number; cash?: number; bank?: number } = {};
+        for (const method of ["atm", "cash", "bank"] as const) {
+          const v = (methods as Record<string, unknown>)[method];
+          if (v == null || v === "") continue;
+          const n = Math.floor(Number(v));
+          if (!Number.isFinite(n) || n < 1) {
+            return c.json({ error: `roundSteps.${code}.${method} должен быть ≥ 1` }, 400);
+          }
+          entry[method] = n;
+        }
+        if (Object.keys(entry).length > 0) roundSteps[code] = entry;
+      }
+      if (Object.keys(roundSteps).length === 0) roundSteps = null;
     }
     const now = Math.floor(Date.now() / 1000);
     const [row] = await withTenant(opts.db, tenantId, async (tx) =>
@@ -445,9 +448,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: quoteAssetRaw,
           handoffCustomerNotice,
           requireRateConfirmation,
-          roundStepAtm,
-          roundStepCash,
-          roundStepBank,
+          roundSteps,
           createdAt: now,
           updatedAt: now,
         })
@@ -459,9 +460,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
             quoteAsset: quoteAssetRaw,
             handoffCustomerNotice,
             requireRateConfirmation,
-            roundStepAtm,
-            roundStepCash,
-            roundStepBank,
+            roundSteps,
             updatedAt: now,
           },
         })
@@ -471,9 +470,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: exchangeSettings.quoteAsset,
           handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
           requireRateConfirmation: exchangeSettings.requireRateConfirmation,
-          roundStepAtm: exchangeSettings.roundStepAtm,
-          roundStepCash: exchangeSettings.roundStepCash,
-          roundStepBank: exchangeSettings.roundStepBank,
+          roundSteps: exchangeSettings.roundSteps,
         }),
     );
     return c.json({ ok: true, settings: row });

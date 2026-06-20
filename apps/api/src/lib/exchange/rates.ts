@@ -429,11 +429,7 @@ export async function computeQuote(
   // Шаг округления: per-tenant из exchange_settings, fallback — словарь валют.
   const [settingsRow] = await withTenant(db, tenantId, async (tx) =>
     tx
-      .select({
-        roundStepAtm: exchangeSettings.roundStepAtm,
-        roundStepCash: exchangeSettings.roundStepCash,
-        roundStepBank: exchangeSettings.roundStepBank,
-      })
+      .select({ roundSteps: exchangeSettings.roundSteps })
       .from(exchangeSettings)
       .where(eq(exchangeSettings.tenantId, tenantId))
       .limit(1),
@@ -441,11 +437,12 @@ export async function computeQuote(
   const pm = input.payoutMethod ?? "";
   const isBank = pm === "thai_bank_transfer";
   const isCash = pm === "office_cash" || pm === "courier_cash";
+  const perCurrency = settingsRow?.roundSteps?.[quoteCode];
   const step = isBank
-    ? (settingsRow?.roundStepBank ?? quoteCurrency.denomStepBank)
+    ? (perCurrency?.bank ?? quoteCurrency.denomStepBank)
     : isCash
-      ? (settingsRow?.roundStepCash ?? quoteCurrency.denomStepCash)
-      : (settingsRow?.roundStepAtm ?? quoteCurrency.denomStepAtm);
+      ? (perCurrency?.cash ?? quoteCurrency.denomStepCash)
+      : (perCurrency?.atm ?? quoteCurrency.denomStepAtm);
   const rawAmount =
     amountMode === "target_thb"
       ? Math.round(amount)

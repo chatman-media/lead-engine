@@ -23,6 +23,7 @@ import {
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   serial,
@@ -2262,11 +2263,11 @@ export const exchangeSettings = pgTable(
     // (даже мелких тиков). По дефолту выкл — фид авто-применяет в пределах soft.
     // См. exchange_rate_proposals + apps/api/src/lib/exchange/rate-feed.ts.
     requireRateConfirmation: boolean("require_rate_confirmation").notNull().default(false),
-    // Шаг округления вниз суммы к получению (floor) по способу выдачи.
-    // NULL → берётся из словаря валют: PHP/THB→100, VND/IDR→50000 (ATM), 1 (bank).
-    roundStepAtm: integer("round_step_atm"),
-    roundStepCash: integer("round_step_cash"),
-    roundStepBank: integer("round_step_bank"),
+    // Шаги округления вниз суммы к получению (floor) по способу выдачи, per-currency.
+    // Ключ — ISO-код валюты (PHP, THB…), значение — { atm?, cash?, bank? }.
+    // NULL или отсутствие ключа → дефолт из словаря валют (quote-currency.ts).
+    roundSteps:
+      jsonb("round_steps").$type<Record<string, { atm?: number; cash?: number; bank?: number }>>(),
     createdAt: integer("created_at").notNull().default(epochNow()),
     updatedAt: integer("updated_at").notNull().default(epochNow()),
   },
@@ -2280,18 +2281,6 @@ export const exchangeSettings = pgTable(
       sql`${t.feedStaleSec} IS NULL OR ${t.feedStaleSec} >= 60`,
     ),
     check("exchange_settings_quote_asset_check", sql`${t.quoteAsset} ~ '^[A-Z]{3}$'`),
-    check(
-      "exchange_settings_atm_step_check",
-      sql`${t.roundStepAtm} IS NULL OR ${t.roundStepAtm} >= 1`,
-    ),
-    check(
-      "exchange_settings_cash_step_check",
-      sql`${t.roundStepCash} IS NULL OR ${t.roundStepCash} >= 1`,
-    ),
-    check(
-      "exchange_settings_bank_step_check",
-      sql`${t.roundStepBank} IS NULL OR ${t.roundStepBank} >= 1`,
-    ),
   ],
 );
 
