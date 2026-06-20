@@ -637,6 +637,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amountMode: args.amountMode,
         network,
         ...(payoutAsset ? { payoutAsset } : {}),
+        payoutMethod: collected.payoutMethod ?? null,
       });
       if (!q.ok) {
         if (q.guard?.tripped) onGuardTrip(asset, network, q.guard);
@@ -764,6 +765,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amountMode: args.amountMode,
         network: networkArg,
         ...(payoutAssetArg ? { payoutAsset: payoutAssetArg } : {}),
+        payoutMethod: payoutMethodArg ?? collected.payoutMethod ?? null,
       });
       if (!q.ok) {
         if (q.guard?.tripped) onGuardTrip(assetArg, networkArg, q.guard);

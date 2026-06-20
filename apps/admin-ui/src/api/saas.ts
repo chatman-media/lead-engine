@@ -2259,6 +2259,10 @@ export interface ExchangeSettings {
    * и не применяется до клика «Подтвердить». Дефолт false (back-compat).
    */
   requireRateConfirmation?: boolean;
+  /** Шаги floor-округления по способу выдачи. null = авто из словаря валют. */
+  roundStepAtm?: number | null;
+  roundStepCash?: number | null;
+  roundStepBank?: number | null;
 }
 
 /**
@@ -2818,6 +2822,7 @@ export const saas = {
     maxTurns?: number;
     targetFunnelId?: number;
     targetCatalogItemId?: number;
+    languageCode?: string;
   }) {
     return request<{
       ok: boolean;
@@ -2831,6 +2836,24 @@ export const saas = {
   },
   deleteSim(conversationId: number) {
     return request<{ ok: boolean }>(`/api/admin/sim/${conversationId}`, { method: "DELETE" });
+  },
+  // Записанные диалоги (реальные реплики клиентов) для скриптового прогона.
+  listSimScripts(currency?: "THB" | "PHP") {
+    const qs = currency ? `?currency=${currency}` : "";
+    return request<{
+      currency: "THB" | "PHP";
+      scripts: Array<{ id: string; title: string; turnCount: number; mediaCount: number }>;
+    }>(`/api/admin/sim/scripts${qs}`);
+  },
+  replaySim(opts: { scriptId: string; currency?: "THB" | "PHP"; languageCode?: string }) {
+    return request<{
+      ok: boolean;
+      conversationId: number;
+      scriptId: string;
+      currency: "THB" | "PHP";
+      turnCount: number;
+      displayName: string;
+    }>("/api/admin/sim/replay", { method: "POST", body: JSON.stringify(opts) });
   },
   startSimStream(opts: {
     count: number;

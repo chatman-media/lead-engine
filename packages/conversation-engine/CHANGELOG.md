@@ -1,3 +1,17 @@
+# [@chatman-media/conversation-engine-v3.28.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.27.1...@chatman-media/conversation-engine-v3.28.0) (2026-06-20)
+
+
+### Features
+
+* **exchange:** проактивные направления + 3 шага округления + язык симулятора ([334ae6f](https://github.com/chatman-media/lead-engine/commit/334ae6fc815d1bcb6ab95eebf5f9f4e4bc359ca6))
+
+# [@chatman-media/conversation-engine-v3.27.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.27.0...@chatman-media/conversation-engine-v3.27.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **exchange:** «тайский счёт» → bankLabel тенанта в ответах бота ([c7e49f7](https://github.com/chatman-media/lead-engine/commit/c7e49f70c6badf88b33d8d5af271bb74898927cc))
+
 # [@chatman-media/conversation-engine-v3.27.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.26.0...@chatman-media/conversation-engine-v3.27.0) (2026-06-20)
 
 

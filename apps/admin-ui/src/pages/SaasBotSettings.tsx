@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ApiError, type BotSettings, clearToken, saas } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, type BotSettings, clearToken, saas } from "@/api/saas";
 
 function minToTime(min: number | null): string {
   if (min == null) return "";
@@ -90,7 +90,12 @@ export function SaasBotSettings() {
     savedKey === k ? <span className="text-xs text-[var(--success)]">✓ Сохранено</span> : null;
 
   if (loading) return <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>;
-  if (!s) return <div className="p-6 text-sm text-destructive">{error || "Не удалось загрузить настройки"}</div>;
+  if (!s)
+    return (
+      <div className="p-6 text-sm text-destructive">
+        {error || "Не удалось загрузить настройки"}
+      </div>
+    );
 
   return (
     <div className="space-y-5">
@@ -104,16 +109,30 @@ export function SaasBotSettings() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p className="text-xs text-muted-foreground">
-            Сколько последних сообщений диалога бот учитывает как контекст. Пусто = по умолчанию (20).
-            Диапазон 2–100.
+            Сколько последних сообщений диалога бот учитывает как контекст. Пусто = по умолчанию
+            (20). Диапазон 2–100.
           </p>
           <div className="flex items-center gap-2">
-            <Input type="number" min={2} max={100} value={historyLimit}
-              onChange={(e) => setHistoryLimit(e.target.value)} placeholder="20" className="h-8 w-28 text-sm" />
-            <Button size="sm" disabled={savingKey === "history"}
-              onClick={() => flash("history", async () => {
-                await saas.setReplyHistoryLimit(numOrNull(historyLimit));
-              })}>Сохранить</Button>
+            <Input
+              type="number"
+              min={2}
+              max={100}
+              value={historyLimit}
+              onChange={(e) => setHistoryLimit(e.target.value)}
+              placeholder="20"
+              className="h-8 w-28 text-sm"
+            />
+            <Button
+              size="sm"
+              disabled={savingKey === "history"}
+              onClick={() =>
+                flash("history", async () => {
+                  await saas.setReplyHistoryLimit(numOrNull(historyLimit));
+                })
+              }
+            >
+              Сохранить
+            </Button>
             <SavedMark k="history" />
           </div>
         </CardContent>
@@ -126,16 +145,24 @@ export function SaasBotSettings() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p className="text-xs text-muted-foreground">
-            Сколько секунд бот ждёт перед ответом. Новое сообщение или правка в окне сбрасывают таймер —
-            бот ответит один раз по всей переписке. 0/пусто = сразу. Диапазон 0–120.
+            Сколько секунд бот ждёт перед ответом. Новое сообщение или правка в окне сбрасывают
+            таймер — бот ответит один раз по всей переписке. 0/пусто = сразу. Диапазон 0–120.
           </p>
           <div className="flex items-center gap-2">
-            <Input type="number" min={0} max={120}
+            <Input
+              type="number"
+              min={0}
+              max={120}
               value={s.replyDelaySeconds == null ? "" : String(s.replyDelaySeconds)}
               onChange={(e) => patch({ replyDelaySeconds: numOrNull(e.target.value) })}
-              placeholder="0" className="h-8 w-28 text-sm" />
-            <Button size="sm" disabled={savingKey === "delay"}
-              onClick={() => saveBot("delay", { replyDelaySeconds: s.replyDelaySeconds })}>
+              placeholder="0"
+              className="h-8 w-28 text-sm"
+            />
+            <Button
+              size="sm"
+              disabled={savingKey === "delay"}
+              onClick={() => saveBot("delay", { replyDelaySeconds: s.replyDelaySeconds })}
+            >
               Сохранить
             </Button>
             <SavedMark k="delay" />
@@ -150,8 +177,8 @@ export function SaasBotSettings() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <p className="text-xs text-muted-foreground">
-            Вне окна бот не отвечает (диалог ждёт оператора). Можно задать авто-сообщение «вне часов»
-            (шлётся не чаще раза в 3 часа).
+            Вне окна бот не отвечает (диалог ждёт оператора). Можно задать авто-сообщение «вне
+            часов» (шлётся не чаще раза в 3 часа).
           </p>
           <div className="flex items-center gap-2">
             <Switch checked={s.hoursEnabled} onCheckedChange={(v) => patch({ hoursEnabled: v })} />
@@ -159,23 +186,53 @@ export function SaasBotSettings() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground">с</span>
-            <Input type="time" value={minToTime(s.hoursStartMin)} disabled={!s.hoursEnabled}
-              onChange={(e) => patch({ hoursStartMin: timeToMin(e.target.value) })} className="h-8 w-28 text-sm" />
+            <Input
+              type="time"
+              value={minToTime(s.hoursStartMin)}
+              disabled={!s.hoursEnabled}
+              onChange={(e) => patch({ hoursStartMin: timeToMin(e.target.value) })}
+              className="h-8 w-28 text-sm"
+            />
             <span className="text-xs text-muted-foreground">до</span>
-            <Input type="time" value={minToTime(s.hoursEndMin)} disabled={!s.hoursEnabled}
-              onChange={(e) => patch({ hoursEndMin: timeToMin(e.target.value) })} className="h-8 w-28 text-sm" />
-            <Input placeholder="Asia/Manila" value={s.hoursTz ?? ""} disabled={!s.hoursEnabled}
-              onChange={(e) => patch({ hoursTz: e.target.value || null })} className="h-8 w-40 text-sm" />
+            <Input
+              type="time"
+              value={minToTime(s.hoursEndMin)}
+              disabled={!s.hoursEnabled}
+              onChange={(e) => patch({ hoursEndMin: timeToMin(e.target.value) })}
+              className="h-8 w-28 text-sm"
+            />
+            <Input
+              placeholder="Asia/Manila"
+              value={s.hoursTz ?? ""}
+              disabled={!s.hoursEnabled}
+              onChange={(e) => patch({ hoursTz: e.target.value || null })}
+              className="h-8 w-40 text-sm"
+            />
           </div>
-          <Textarea placeholder="Авто-сообщение вне рабочих часов (необязательно)" rows={2}
-            value={s.offhoursMessage ?? ""} disabled={!s.hoursEnabled}
-            onChange={(e) => patch({ offhoursMessage: e.target.value || null })} className="text-sm" />
+          <Textarea
+            placeholder="Авто-сообщение вне рабочих часов (необязательно)"
+            rows={2}
+            value={s.offhoursMessage ?? ""}
+            disabled={!s.hoursEnabled}
+            onChange={(e) => patch({ offhoursMessage: e.target.value || null })}
+            className="text-sm"
+          />
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled={savingKey === "hours"}
-              onClick={() => saveBot("hours", {
-                hoursEnabled: s.hoursEnabled, hoursStartMin: s.hoursStartMin, hoursEndMin: s.hoursEndMin,
-                hoursTz: s.hoursTz, offhoursMessage: s.offhoursMessage,
-              })}>Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "hours"}
+              onClick={() =>
+                saveBot("hours", {
+                  hoursEnabled: s.hoursEnabled,
+                  hoursStartMin: s.hoursStartMin,
+                  hoursEndMin: s.hoursEndMin,
+                  hoursTz: s.hoursTz,
+                  offhoursMessage: s.offhoursMessage,
+                })
+              }
+            >
+              Сохранить
+            </Button>
             <SavedMark k="hours" />
           </div>
         </CardContent>
@@ -188,16 +245,30 @@ export function SaasBotSettings() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p className="text-xs text-muted-foreground">
-            Если сообщение клиента содержит любое из слов — диалог сразу уходит оператору, бот не отвечает.
-            По одному на строку или через запятую.
+            Если сообщение клиента содержит любое из слов — диалог сразу уходит оператору, бот не
+            отвечает. Вводите через запятую.
           </p>
-          <Textarea placeholder={"оператор\nчеловек\nжалоба"} rows={3}
-            value={s.stopWords.join("\n")}
-            onChange={(e) => patch({ stopWords: e.target.value.split(/[\n,]/).map((w) => w.trim()).filter(Boolean) })}
-            className="text-sm" />
+          <Input
+            placeholder="оператор, человек, жалоба"
+            value={s.stopWords.join(", ")}
+            onChange={(e) =>
+              patch({
+                stopWords: e.target.value
+                  .split(",")
+                  .map((w) => w.trim())
+                  .filter(Boolean),
+              })
+            }
+            className="text-sm"
+          />
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled={savingKey === "stop"}
-              onClick={() => saveBot("stop", { stopWords: s.stopWords })}>Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "stop"}
+              onClick={() => saveBot("stop", { stopWords: s.stopWords })}
+            >
+              Сохранить
+            </Button>
             <SavedMark k="stop" />
           </div>
         </CardContent>
@@ -210,15 +281,27 @@ export function SaasBotSettings() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p className="text-xs text-muted-foreground">
-            Если бот N раз подряд отвечает «уточню у оператора» — диалог уходит оператору. Пусто = не
-            передавать автоматически. Диапазон 1–20.
+            Если бот N раз подряд отвечает «уточню у оператора» — диалог уходит оператору. Пусто =
+            не передавать автоматически. Диапазон 1–20.
           </p>
           <div className="flex items-center gap-2">
-            <Input type="number" min={1} max={20} placeholder="—" value={s.handoffAfterFallbacks ?? ""}
-              onChange={(e) => patch({ handoffAfterFallbacks: numOrNull(e.target.value) })} className="h-8 w-28 text-sm" />
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              placeholder="—"
+              value={s.handoffAfterFallbacks ?? ""}
+              onChange={(e) => patch({ handoffAfterFallbacks: numOrNull(e.target.value) })}
+              className="h-8 w-28 text-sm"
+            />
             <span className="text-xs text-muted-foreground">фолбэков подряд</span>
-            <Button size="sm" disabled={savingKey === "handoff"}
-              onClick={() => saveBot("handoff", { handoffAfterFallbacks: s.handoffAfterFallbacks })}>Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "handoff"}
+              onClick={() => saveBot("handoff", { handoffAfterFallbacks: s.handoffAfterFallbacks })}
+            >
+              Сохранить
+            </Button>
             <SavedMark k="handoff" />
           </div>
         </CardContent>
@@ -231,15 +314,24 @@ export function SaasBotSettings() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p className="text-xs text-muted-foreground">
-            Что бот пишет, когда не может ответить сам и обещает уточнить у оператора. Пусто = текст по
-            умолчанию.
+            Что бот пишет, когда не может ответить сам и обещает уточнить у оператора. Пусто = текст
+            по умолчанию.
           </p>
-          <Textarea placeholder="Сейчас уточню у оператора и вернусь с ответом." rows={2}
-            value={s.fallbackText ?? ""} onChange={(e) => patch({ fallbackText: e.target.value || null })}
-            className="text-sm" />
+          <Textarea
+            placeholder="Сейчас уточню у оператора и вернусь с ответом."
+            rows={2}
+            value={s.fallbackText ?? ""}
+            onChange={(e) => patch({ fallbackText: e.target.value || null })}
+            className="text-sm"
+          />
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled={savingKey === "fallback"}
-              onClick={() => saveBot("fallback", { fallbackText: s.fallbackText })}>Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "fallback"}
+              onClick={() => saveBot("fallback", { fallbackText: s.fallbackText })}
+            >
+              Сохранить
+            </Button>
             <SavedMark k="fallback" />
           </div>
         </CardContent>
@@ -254,12 +346,21 @@ export function SaasBotSettings() {
           <p className="text-xs text-muted-foreground">
             Автоматическое сообщение при первом обращении клиента. Пусто = без приветствия.
           </p>
-          <Textarea placeholder="Здравствуйте! Чем можем помочь?" rows={2}
-            value={s.greetingText ?? ""} onChange={(e) => patch({ greetingText: e.target.value || null })}
-            className="text-sm" />
+          <Textarea
+            placeholder="Здравствуйте! Чем можем помочь?"
+            rows={2}
+            value={s.greetingText ?? ""}
+            onChange={(e) => patch({ greetingText: e.target.value || null })}
+            className="text-sm"
+          />
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled={savingKey === "greet"}
-              onClick={() => saveBot("greet", { greetingText: s.greetingText })}>Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "greet"}
+              onClick={() => saveBot("greet", { greetingText: s.greetingText })}
+            >
+              Сохранить
+            </Button>
             <SavedMark k="greet" />
           </div>
         </CardContent>
@@ -276,13 +377,25 @@ export function SaasBotSettings() {
             <span>Дробить длинный ответ на несколько сообщений (по абзацам)</span>
           </div>
           <div className="flex items-center gap-2">
-            <Switch checked={s.typingIndicator} onCheckedChange={(v) => patch({ typingIndicator: v })} />
+            <Switch
+              checked={s.typingIndicator}
+              onCheckedChange={(v) => patch({ typingIndicator: v })}
+            />
             <span>Показывать «печатает…» во время ответа</span>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled={savingKey === "cadence"}
-              onClick={() => saveBot("cadence", { splitReplies: s.splitReplies, typingIndicator: s.typingIndicator })}>
-              Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "cadence"}
+              onClick={() =>
+                saveBot("cadence", {
+                  splitReplies: s.splitReplies,
+                  typingIndicator: s.typingIndicator,
+                })
+              }
+            >
+              Сохранить
+            </Button>
             <SavedMark k="cadence" />
           </div>
         </CardContent>
@@ -300,28 +413,56 @@ export function SaasBotSettings() {
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="space-y-1">
               <span className="block text-xs text-muted-foreground">Температура (0–1.5)</span>
-              <Input type="number" min={0} max={1.5} step={0.1} placeholder="0.7"
-                value={s.temperature ?? ""} onChange={(e) => patch({ temperature: numOrNull(e.target.value) })}
-                className="h-8 text-sm" />
+              <Input
+                type="number"
+                min={0}
+                max={1.5}
+                step={0.1}
+                placeholder="0.7"
+                value={s.temperature ?? ""}
+                onChange={(e) => patch({ temperature: numOrNull(e.target.value) })}
+                className="h-8 text-sm"
+              />
             </div>
             <div className="space-y-1">
               <span className="block text-xs text-muted-foreground">Макс. токенов</span>
-              <Input type="number" min={100} max={4000} placeholder="600"
-                value={s.maxOutputTokens ?? ""} onChange={(e) => patch({ maxOutputTokens: numOrNull(e.target.value) })}
-                className="h-8 text-sm" />
+              <Input
+                type="number"
+                min={100}
+                max={4000}
+                placeholder="600"
+                value={s.maxOutputTokens ?? ""}
+                onChange={(e) => patch({ maxOutputTokens: numOrNull(e.target.value) })}
+                className="h-8 text-sm"
+              />
             </div>
             <div className="space-y-1">
               <span className="block text-xs text-muted-foreground">Сжимать после N сообщений</span>
-              <Input type="number" min={5} max={100} placeholder="20"
-                value={s.compactAfterMessages ?? ""} onChange={(e) => patch({ compactAfterMessages: numOrNull(e.target.value) })}
-                className="h-8 text-sm" />
+              <Input
+                type="number"
+                min={5}
+                max={100}
+                placeholder="20"
+                value={s.compactAfterMessages ?? ""}
+                onChange={(e) => patch({ compactAfterMessages: numOrNull(e.target.value) })}
+                className="h-8 text-sm"
+              />
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled={savingKey === "gen"}
-              onClick={() => saveBot("gen", {
-                temperature: s.temperature, maxOutputTokens: s.maxOutputTokens, compactAfterMessages: s.compactAfterMessages,
-              })}>Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "gen"}
+              onClick={() =>
+                saveBot("gen", {
+                  temperature: s.temperature,
+                  maxOutputTokens: s.maxOutputTokens,
+                  compactAfterMessages: s.compactAfterMessages,
+                })
+              }
+            >
+              Сохранить
+            </Button>
             <SavedMark k="gen" />
           </div>
         </CardContent>
@@ -334,15 +475,27 @@ export function SaasBotSettings() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p className="text-xs text-muted-foreground">
-            Закрывать диалог после N часов без сообщений (оператор может переоткрыть). Пусто = не закрывать.
-            Диапазон 1–720.
+            Закрывать диалог после N часов без сообщений (оператор может переоткрыть). Пусто = не
+            закрывать. Диапазон 1–720.
           </p>
           <div className="flex items-center gap-2">
-            <Input type="number" min={1} max={720} placeholder="—" value={s.autocloseHours ?? ""}
-              onChange={(e) => patch({ autocloseHours: numOrNull(e.target.value) })} className="h-8 w-28 text-sm" />
+            <Input
+              type="number"
+              min={1}
+              max={720}
+              placeholder="—"
+              value={s.autocloseHours ?? ""}
+              onChange={(e) => patch({ autocloseHours: numOrNull(e.target.value) })}
+              className="h-8 w-28 text-sm"
+            />
             <span className="text-xs text-muted-foreground">часов</span>
-            <Button size="sm" disabled={savingKey === "autoclose"}
-              onClick={() => saveBot("autoclose", { autocloseHours: s.autocloseHours })}>Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "autoclose"}
+              onClick={() => saveBot("autoclose", { autocloseHours: s.autocloseHours })}
+            >
+              Сохранить
+            </Button>
             <SavedMark k="autoclose" />
           </div>
         </CardContent>
@@ -362,12 +515,23 @@ export function SaasBotSettings() {
             <span className="block text-xs text-muted-foreground">
               Ответ на медиа без подписи (фото/файл без текста). Пусто = молчать.
             </span>
-            <Input placeholder="Получили, проверяем." value={s.mediaAckText ?? ""}
-              onChange={(e) => patch({ mediaAckText: e.target.value || null })} className="h-8 text-sm" />
+            <Input
+              placeholder="Получили, проверяем."
+              value={s.mediaAckText ?? ""}
+              onChange={(e) => patch({ mediaAckText: e.target.value || null })}
+              className="h-8 text-sm"
+            />
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled={savingKey === "media"}
-              onClick={() => saveBot("media", { voiceStt: s.voiceStt, mediaAckText: s.mediaAckText })}>Сохранить</Button>
+            <Button
+              size="sm"
+              disabled={savingKey === "media"}
+              onClick={() =>
+                saveBot("media", { voiceStt: s.voiceStt, mediaAckText: s.mediaAckText })
+              }
+            >
+              Сохранить
+            </Button>
             <SavedMark k="media" />
           </div>
         </CardContent>

@@ -318,6 +318,8 @@ export async function computeQuote(
      * прежнее поведение). Резолвится из активной rate-row, не угадывается LLM.
      */
     payoutAsset?: string | null;
+    /** Способ выдачи (cardless_atm / office_cash / thai_bank_transfer …) для выбора шага округления. */
+    payoutMethod?: string | null;
   },
   guardrails?: ExchangeGuardrails,
 ): Promise<QuoteResult | QuoteError> {
@@ -423,10 +425,35 @@ export async function computeQuote(
   }
 
   const gross = mode === "divide" ? amountFrom / eff : amountFrom * eff;
-  const amountToThb =
+  const quoteCurrency = resolveQuoteCurrency(quoteCode);
+  // Шаг округления: per-tenant из exchange_settings, fallback — словарь валют.
+  const [settingsRow] = await withTenant(db, tenantId, async (tx) =>
+    tx
+      .select({
+        roundStepAtm: exchangeSettings.roundStepAtm,
+        roundStepCash: exchangeSettings.roundStepCash,
+        roundStepBank: exchangeSettings.roundStepBank,
+      })
+      .from(exchangeSettings)
+      .where(eq(exchangeSettings.tenantId, tenantId))
+      .limit(1),
+  );
+  const pm = input.payoutMethod ?? "";
+  const isBank = pm === "thai_bank_transfer";
+  const isCash = pm === "office_cash" || pm === "courier_cash";
+  const step = isBank
+    ? (settingsRow?.roundStepBank ?? quoteCurrency.denomStepBank)
+    : isCash
+      ? (settingsRow?.roundStepCash ?? quoteCurrency.denomStepCash)
+      : (settingsRow?.roundStepAtm ?? quoteCurrency.denomStepAtm);
+  const rawAmount =
     amountMode === "target_thb"
       ? Math.round(amount)
       : Math.max(0, Math.round(gross - row.feeFixedThb));
+  // Floor-округление только для source_amount: клиент назвал сколько ОТДАЁТ,
+  // мы округляем то, что он ПОЛУЧИТ. При target_thb клиент сам задал сумму — не трогаем.
+  const amountToThb =
+    amountMode !== "target_thb" && step > 1 ? Math.floor(rawAmount / step) * step : rawAmount;
 
   return {
     ok: true,

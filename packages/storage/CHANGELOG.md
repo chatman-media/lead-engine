@@ -1,3 +1,24 @@
+# [@chatman-media/storage-v1.48.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.48.0...@chatman-media/storage-v1.48.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **storage:** миграция 0081 чинит коллизию round_step (0080 переписана после применения) ([c810c8c](https://github.com/chatman-media/lead-engine/commit/c810c8c6142de623a972ff5a380e86bba18611ff))
+
+# [@chatman-media/storage-v1.48.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.47.0...@chatman-media/storage-v1.48.0) (2026-06-20)
+
+
+### Features
+
+* **exchange:** проактивные направления + 3 шага округления + язык симулятора ([334ae6f](https://github.com/chatman-media/lead-engine/commit/334ae6fc815d1bcb6ab95eebf5f9f4e4bc359ca6))
+
+# [@chatman-media/storage-v1.47.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.46.0...@chatman-media/storage-v1.47.0) (2026-06-20)
+
+
+### Features
+
+* **exchange:** quote_round_step в exchange_settings + UI ([f549faa](https://github.com/chatman-media/lead-engine/commit/f549faa5e5d2ff16352a432e9531d4c50e023cf6))
+
 # [@chatman-media/storage-v1.46.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.45.0...@chatman-media/storage-v1.46.0) (2026-06-20)
 
 

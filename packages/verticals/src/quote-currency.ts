@@ -22,6 +22,14 @@ export interface QuoteCurrency {
 	mentionRe: RegExp;
 	/** Локальный банковский рельс в текстах: «тайский банк», «местный банк». */
 	bankLabel: string;
+	/** Шаг округления вниз (floor) при расчёте котировки: 100 для PHP/THB, 10000 для VND. */
+	denomStep: number;
+	/** Шаг floor-округления по способу выдачи: банкомат. */
+	denomStepAtm: number;
+	/** Шаг floor-округления по способу выдачи: наличные/курьер. */
+	denomStepCash: number;
+	/** Шаг floor-округления по способу выдачи: банковский перевод. */
+	denomStepBank: number;
 }
 
 export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
@@ -33,6 +41,10 @@ export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
 		flag: "🇵🇭",
 		mentionRe: /php|песо|peso|₱/i,
 		bankLabel: "местный банк (BDO/BPI/GCash)",
+		denomStep: 100,
+		denomStepAtm: 100,
+		denomStepCash: 100,
+		denomStepBank: 1,
 	},
 	THB: {
 		code: "THB",
@@ -42,6 +54,10 @@ export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
 		flag: "🇹🇭",
 		mentionRe: /thb|бат|bhat|฿/i,
 		bankLabel: "тайский банк",
+		denomStep: 100,
+		denomStepAtm: 500,
+		denomStepCash: 100,
+		denomStepBank: 1,
 	},
 	VND: {
 		code: "VND",
@@ -51,6 +67,10 @@ export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
 		flag: "🇻🇳",
 		mentionRe: /vnd|донг|dong|₫/i,
 		bankLabel: "вьетнамский банк",
+		denomStep: 10000,
+		denomStepAtm: 50000,
+		denomStepCash: 10000,
+		denomStepBank: 1,
 	},
 	IDR: {
 		code: "IDR",
@@ -60,6 +80,10 @@ export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
 		flag: "🇮🇩",
 		mentionRe: /idr|рупи|rupiah|rp\b/i,
 		bankLabel: "индонезийский банк",
+		denomStep: 1000,
+		denomStepAtm: 50000,
+		denomStepCash: 10000,
+		denomStepBank: 1,
 	},
 };
 
@@ -86,6 +110,10 @@ export function resolveQuoteCurrency(code?: string | null): QuoteCurrency {
 		flag: "",
 		mentionRe: new RegExp(normalized.replace(/[^A-Z]/g, ""), "i"),
 		bankLabel: "местный банк",
+		denomStep: 1,
+		denomStepAtm: 1,
+		denomStepCash: 1,
+		denomStepBank: 1,
 	};
 }
 

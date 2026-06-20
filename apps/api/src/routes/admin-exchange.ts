@@ -361,6 +361,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: exchangeSettings.quoteAsset,
           handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
           requireRateConfirmation: exchangeSettings.requireRateConfirmation,
+          roundStepAtm: exchangeSettings.roundStepAtm,
+          roundStepCash: exchangeSettings.roundStepCash,
+          roundStepBank: exchangeSettings.roundStepBank,
         })
         .from(exchangeSettings)
         .where(eq(exchangeSettings.tenantId, tenantId))
@@ -373,6 +376,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
       quoteAssetOptions: QUOTE_CURRENCY_CODES,
       handoffCustomerNotice: row?.handoffCustomerNotice ?? true,
       requireRateConfirmation: row?.requireRateConfirmation ?? false,
+      roundStepAtm: row?.roundStepAtm ?? null,
+      roundStepCash: row?.roundStepCash ?? null,
+      roundStepBank: row?.roundStepBank ?? null,
     });
   });
 
@@ -410,6 +416,23 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
     // Тумблер «требовать подтверждение оператором при обновлении базового курса»
     // (даже мелких тиков). Дефолт false — back-compat.
     const requireRateConfirmation = body?.requireRateConfirmation === true;
+    // Шаги округления котировки (floor) по способу выдачи. null = авто из словаря валют.
+    function parseStep(val: unknown, field: string) {
+      if (val == null || val === "") return null;
+      const n = Math.floor(Number(val));
+      if (!Number.isFinite(n) || n < 1) throw new Error(`${field} должен быть ≥ 1`);
+      return n;
+    }
+    let roundStepAtm: number | null;
+    let roundStepCash: number | null;
+    let roundStepBank: number | null;
+    try {
+      roundStepAtm = parseStep(body?.roundStepAtm, "roundStepAtm");
+      roundStepCash = parseStep(body?.roundStepCash, "roundStepCash");
+      roundStepBank = parseStep(body?.roundStepBank, "roundStepBank");
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
     const now = Math.floor(Date.now() / 1000);
     const [row] = await withTenant(opts.db, tenantId, async (tx) =>
       tx
@@ -421,6 +444,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: quoteAssetRaw,
           handoffCustomerNotice,
           requireRateConfirmation,
+          roundStepAtm,
+          roundStepCash,
+          roundStepBank,
           createdAt: now,
           updatedAt: now,
         })
@@ -432,6 +458,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
             quoteAsset: quoteAssetRaw,
             handoffCustomerNotice,
             requireRateConfirmation,
+            roundStepAtm,
+            roundStepCash,
+            roundStepBank,
             updatedAt: now,
           },
         })
@@ -441,6 +470,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           quoteAsset: exchangeSettings.quoteAsset,
           handoffCustomerNotice: exchangeSettings.handoffCustomerNotice,
           requireRateConfirmation: exchangeSettings.requireRateConfirmation,
+          roundStepAtm: exchangeSettings.roundStepAtm,
+          roundStepCash: exchangeSettings.roundStepCash,
+          roundStepBank: exchangeSettings.roundStepBank,
         }),
     );
     return c.json({ ok: true, settings: row });
@@ -1487,9 +1519,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
   // POST /api/admin/exchange/payout-points/sync-osm
   app.post("/api/admin/exchange/payout-points/sync-osm", async (c) => {
     const tenantId = c.var.tenantId;
+    // Типизируем fallback: иначе union `… | {}` теряет поля bbox/quoteAsset (TS2339).
     const body = await c.req
       .json<{ bbox?: string; quoteAsset?: string }>()
-      .catch((): { bbox?: string; quoteAsset?: string } => ({}));
+      .catch(() => ({}) as { bbox?: string; quoteAsset?: string });
     const result = await syncOsmAtms(opts.db, tenantId, {
       bbox: body.bbox ?? DEFAULT_PH_BBOX,
       quoteAsset: body.quoteAsset ?? "PHP",
@@ -1498,7 +1531,9 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
       tenantId,
       adminId: c.var.adminId as number | undefined,
       action: "exchange.osm_sync",
-      details: result as unknown as Record<string, unknown>,
+      // Спред в объект-литерал → совместимо с Record<string, unknown>
+      // (интерфейс OsmSyncResult без индекс-сигнатуры напрямую не присваивается).
+      details: { ...result },
     });
     return c.json({ ok: true, ...result });
   });
