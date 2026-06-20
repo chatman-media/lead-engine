@@ -1,4 +1,14 @@
-import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
+import {
+  asSupportedLang,
+  type Db,
+  MessagesRepo,
+  type NotificationService,
+  needsTranslation,
+  OPERATOR_LANG,
+  translateText,
+  withTenant,
+} from "@chatman-media/conversation-engine";
+import type { ChatClient } from "@chatman-media/llm-router";
 import {
   adminNotifications,
   admins,
@@ -13,9 +23,9 @@ import {
 } from "@chatman-media/storage";
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { recordAudit } from "../lib/audit.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import { advanceLead } from "../lib/advance-lead.ts";
+import { recordAudit } from "../lib/audit.ts";
 import {
   buildBannedAttributes,
   buildUnbannedAttributes,
@@ -44,6 +54,12 @@ export interface AdminConversationsRoutesOpts {
    * file_id. null — канал не найден/медиа недоступно.
    */
   downloadMedia?: (ref: { channelId: string; externalRef: string }) => Promise<Response | null>;
+  /**
+   * #731: переводчик. Инбокс лениво переводит входящие клиента на русский для
+   * оператора; ответ оператора (RU) — на язык клиента перед отправкой. Не задан →
+   * перевод выключен (back-compat).
+   */
+  resolveChat?: (tenantId: number) => ChatClient;
 }
 
 const kycHandoffKinds = new Set(["verification_requested", "document_uploaded"]);
@@ -99,9 +115,7 @@ function isResolvedKycHandoff(
   );
 }
 
-export function makeAdminConversationsRoutes(
-  opts: AdminConversationsRoutesOpts,
-): Hono {
+export function makeAdminConversationsRoutes(opts: AdminConversationsRoutesOpts): Hono {
   const app = new Hono();
   const operatorHandoffKinds = [
     "operator_handoff_required",
@@ -132,7 +146,9 @@ export function makeAdminConversationsRoutes(
     const sourceFilter = c.req.query("source") || null;
     const modeFilter = c.req.query("mode") || null;
     const statusFilter = c.req.query("status") || null;
-    const assigneeFilter = c.req.query("assigneeId") ? Number.parseInt(c.req.query("assigneeId")!, 10) : null;
+    const assigneeFilter = c.req.query("assigneeId")
+      ? Number.parseInt(c.req.query("assigneeId")!, 10)
+      : null;
     const escalatedOnly = c.req.query("escalated") === "1";
     const qFilter = c.req.query("q")?.trim() || null;
     const includeBanned = c.req.query("includeBanned") === "1" || contactIdFilter !== null;
@@ -141,7 +157,9 @@ export function makeAdminConversationsRoutes(
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       const conditions = [
         eq(conversations.tenantId, tenantId),
-        ...(cursor !== null && Number.isFinite(cursor) ? [lt(conversations.lastMessageAt, cursor)] : []),
+        ...(cursor !== null && Number.isFinite(cursor)
+          ? [lt(conversations.lastMessageAt, cursor)]
+          : []),
         ...(contactIdFilter !== null ? [eq(conversations.userId, contactIdFilter)] : []),
         ...(sourceFilter ? [eq(conversations.source, sourceFilter)] : []),
         ...(modeFilter ? [eq(conversations.mode, modeFilter)] : []),
@@ -205,7 +223,7 @@ export function makeAdminConversationsRoutes(
           : includeBanned && rows.length > limit
             ? items[items.length - 1]
             : null;
-    const nextCursor = hasMore ? cursorSource?.lastMessageAt ?? null : null;
+    const nextCursor = hasMore ? (cursorSource?.lastMessageAt ?? null) : null;
 
     return c.json({
       items,
@@ -236,9 +254,7 @@ export function makeAdminConversationsRoutes(
       await tx
         .update(conversations)
         .set({ unreadCount: 0 })
-        .where(
-          and(eq(conversations.tenantId, tenantId), eq(conversations.id, id)),
-        );
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, id)));
 
       const [conv] = await tx
         .select({
@@ -255,12 +271,11 @@ export function makeAdminConversationsRoutes(
           lastMessageAt: conversations.lastMessageAt,
           createdAt: conversations.createdAt,
           escalatedAt: conversations.escalatedAt,
+          detectedLang: conversations.detectedLang,
         })
         .from(conversations)
         .leftJoin(contacts, eq(contacts.id, conversations.userId))
-        .where(
-          and(eq(conversations.tenantId, tenantId), eq(conversations.id, id)),
-        );
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, id)));
       if (!conv) return null;
 
       // Note: deletedAt НЕ фильтруется — admin видит soft-deleted сообщения
@@ -274,14 +289,12 @@ export function makeAdminConversationsRoutes(
           createdAt: messages.createdAt,
           stage: messages.stage,
           deletedAt: messages.deletedAt,
+          origLang: messages.origLang,
+          translatedText: messages.translatedText,
+          translatedLang: messages.translatedLang,
         })
         .from(messages)
-        .where(
-          and(
-            eq(messages.tenantId, tenantId),
-            eq(messages.conversationId, id),
-          ),
-        )
+        .where(and(eq(messages.tenantId, tenantId), eq(messages.conversationId, id)))
         .orderBy(desc(messages.createdAt), desc(messages.id))
         .limit(200);
 
@@ -289,6 +302,30 @@ export function makeAdminConversationsRoutes(
     });
 
     if (!result) return c.json({ error: "conversation not found" }, 404);
+
+    // #731: лениво переводим входящие клиента на русский для оператора и кэшируем
+    // в messages (#736), чтобы не переводить повторно. LLM ВНЕ tx (split-tx).
+    // Только если язык диалога определён и не русский. Кап на свежие N — чтобы
+    // первое открытие длинного диалога не упёрлось в десятки LLM-вызовов.
+    const clientLang = asSupportedLang(result.conversation.detectedLang);
+    if (opts.resolveChat && clientLang && needsTranslation(clientLang, OPERATOR_LANG)) {
+      const chat = opts.resolveChat(tenantId);
+      const repo = new MessagesRepo({ db: opts.db, tenantId });
+      let budget = 40;
+      for (const m of result.messages) {
+        if (budget <= 0) break;
+        if (m.role !== "user" || m.translatedText || !m.text?.trim()) continue;
+        budget--;
+        const translated = await translateText({ chat, text: m.text, targetLang: OPERATOR_LANG });
+        if (translated !== m.text) {
+          m.translatedText = translated;
+          m.translatedLang = OPERATOR_LANG;
+          if (!m.origLang) m.origLang = clientLang;
+          await repo.setTranslation(m.id, { text: translated, lang: OPERATOR_LANG });
+        }
+      }
+    }
+
     // Reverse так чтобы client получил chronological order (oldest first).
     return c.json({
       conversation: {
@@ -344,8 +381,7 @@ export function makeAdminConversationsRoutes(
       const part = objectValue(p);
       const mr = objectValue(part.mediaRef);
       if (typeof mr.externalRef === "string" && mr.externalRef === ref) {
-        channelId =
-          typeof mr.channelId === "string" ? mr.channelId : String(mr.channelId ?? "");
+        channelId = typeof mr.channelId === "string" ? mr.channelId : String(mr.channelId ?? "");
         kind = typeof part.kind === "string" ? part.kind : "";
         partMime = typeof part.mimeType === "string" ? part.mimeType : "";
         break;
@@ -486,6 +522,33 @@ export function makeAdminConversationsRoutes(
 
     const nowEpoch = Math.floor(Date.now() / 1000);
 
+    // #731: перевод ответа оператора (RU) на язык клиента ДО открытия tx (LLM
+    // нельзя внутри withTenant). detectedLang определён и не ru → переводим;
+    // клиенту уходит перевод, оператор в инбоксе видит свой RU-оригинал.
+    let outboundText = text;
+    let replyTranslation: { text: string; lang: string } | null = null;
+    if (opts.resolveChat) {
+      const [convLang] = await withTenant(opts.db, tenantId, (tx) =>
+        tx
+          .select({ detectedLang: conversations.detectedLang })
+          .from(conversations)
+          .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
+          .limit(1),
+      );
+      const clientLang = asSupportedLang(convLang?.detectedLang);
+      if (clientLang && needsTranslation(OPERATOR_LANG, clientLang)) {
+        const translated = await translateText({
+          chat: opts.resolveChat(tenantId),
+          text,
+          targetLang: clientLang,
+        });
+        if (translated !== text) {
+          outboundText = translated;
+          replyTranslation = { text: translated, lang: clientLang };
+        }
+      }
+    }
+
     const outcome = await withTenant(opts.db, tenantId, async (tx) => {
       // 1. Find conversation + contactId.
       const [conv] = await tx
@@ -494,9 +557,7 @@ export function makeAdminConversationsRoutes(
           contactId: conversations.userId,
         })
         .from(conversations)
-        .where(
-          and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)),
-        );
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)));
       if (!conv) return { kind: "not_found" } as const;
 
       // 2. Find first active telegram_bot channel_identity для этого contact'а.
@@ -508,12 +569,7 @@ export function makeAdminConversationsRoutes(
         })
         .from(channelIdentities)
         .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-        .where(
-          and(
-            eq(channelIdentities.contactId, conv.contactId),
-            eq(channels.status, "active"),
-          ),
-        )
+        .where(and(eq(channelIdentities.contactId, conv.contactId), eq(channels.status, "active")))
         .limit(1);
       if (!identity) return { kind: "no_channel" } as const;
 
@@ -527,14 +583,21 @@ export function makeAdminConversationsRoutes(
           text,
           metaJson: JSON.stringify({ adminId, sentVia: "admin-reply" }),
           createdAt: nowEpoch,
+          ...(replyTranslation
+            ? {
+                origLang: OPERATOR_LANG,
+                translatedText: replyTranslation.text,
+                translatedLang: replyTranslation.lang,
+              }
+            : {}),
         })
         .returning({ id: messages.id });
 
-      // 4. Build OutboundEnvelope JSON и enqueue.
+      // 4. Build OutboundEnvelope JSON и enqueue. Клиенту уходит перевод (#731).
       const envelope = {
         channelId: String(identity.channelDbId),
         externalUserId: identity.externalUserId,
-        parts: [{ kind: "text", text }],
+        parts: [{ kind: "text", text: outboundText }],
       };
       // idempotencyKey производный от message.id (auto-increment serial),
       // поэтому коллизий не будет — onConflict не нужен (partial unique
@@ -572,10 +635,7 @@ export function makeAdminConversationsRoutes(
       return c.json({ error: "conversation not found" }, 404);
     }
     if (outcome.kind === "no_channel") {
-      return c.json(
-        { error: "no active channel for this contact — cannot deliver" },
-        409,
-      );
+      return c.json({ error: "no active channel for this contact — cannot deliver" }, 409);
     }
 
     await recordAudit(opts.db, {
@@ -956,9 +1016,7 @@ export function makeAdminConversationsRoutes(
       const [existing] = await tx
         .select({ mode: conversations.mode, escalatedAt: conversations.escalatedAt })
         .from(conversations)
-        .where(
-          and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)),
-        );
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)));
       if (!existing) return { kind: "not_found" } as const;
       // Снять эскалацию нужно даже когда диалог УЖЕ в ai: метка escalatedAt
       // живёт отдельно от mode, и «Вернуть боту» на уже-AI диалоге обязан её
@@ -986,7 +1044,8 @@ export function makeAdminConversationsRoutes(
       await recordAudit(opts.db, {
         tenantId,
         adminId,
-        action: newMode === "human" ? "conversation.mode.takeover" : "conversation.mode.return_to_ai",
+        action:
+          newMode === "human" ? "conversation.mode.takeover" : "conversation.mode.return_to_ai",
         targetKind: "conversation",
         targetId: conversationId,
         details: { from: outcome.from, to: outcome.to },
@@ -1117,8 +1176,8 @@ export function makeAdminConversationsRoutes(
     }
     if (body.assignedAdminId !== undefined) {
       if (
-        body.assignedAdminId !== null
-        && (!Number.isInteger(body.assignedAdminId) || body.assignedAdminId <= 0)
+        body.assignedAdminId !== null &&
+        (!Number.isInteger(body.assignedAdminId) || body.assignedAdminId <= 0)
       ) {
         return c.json({ error: "invalid assignedAdminId" }, 400);
       }

@@ -442,6 +442,8 @@ export interface ConversationDetail {
   lastMessageAt: number | null;
   createdAt: number;
   escalatedAt: number | null;
+  /** Определённый язык диалога (#735). null — не определён / русский. */
+  detectedLang?: string | null;
 }
 
 export interface MessageRow {
@@ -452,6 +454,10 @@ export interface MessageRow {
   createdAt: number;
   stage: string | null;
   deletedAt: number | null;
+  /** #731 переводящий слой: язык оригинала + перевод (для оператора). */
+  origLang?: string | null;
+  translatedText?: string | null;
+  translatedLang?: string | null;
 }
 
 export interface OperatorHandoffNotification {
