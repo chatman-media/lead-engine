@@ -1,0 +1,24 @@
+/* Tailwind v4 compile input for /design-sync. Imports the app's real theme
+ * (src/index.css) and widens content scanning to the component sources and the
+ * authored preview cards so every utility class they use is baked into the
+ * shipped, compiler-free stylesheet.
+ *
+ * The two leading @import url() lines load the brand fonts (Satoshi, IBM Plex
+ * Mono) at runtime from the same public hosts the app's index.html uses, so
+ * designs render in the real typography instead of a system fallback. */
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
+@import "./src/index.css";
+
+@source "./src/components/ui";
+@source "./.ds-entry.tsx";
+@source "../../.design-sync/previews";
+
+/* Safelist the semantic token vocabulary so the design agent can use the full
+ * family even where the shipped components only reach a token via arbitrary
+ * color-mix(). Keeps conventions.md truthful: every named utility resolves. */
+@source inline("font-sans font-mono");
+@source inline("{bg,text,border,ring}-{background,foreground,card,popover,primary,secondary,muted,accent,destructive,success,warning,border,input,ring}");
+@source inline("{bg,text}-{card,popover,primary,secondary,muted,accent,destructive}-foreground");
+@source inline("{bg,text,border}-{primary,secondary,destructive,success,warning,accent,muted}/{10,15,20,30,40,90}");
