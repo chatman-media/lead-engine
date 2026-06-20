@@ -150,9 +150,15 @@ export async function fetchOsmAtms(bbox: string): Promise<OsmNode[]> {
   const query = `[out:json][timeout:90][bbox:${bbox}];\nnode["amenity"="atm"];\nout body;`;
   const res = await fetch(OVERPASS_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "lead-engine/1.0 (exchange atm sync)",
+    },
     body: `data=${encodeURIComponent(query)}`,
   });
+  if (res.status === 429 || res.status === 503) {
+    throw new Error("Overpass API перегружен — подождите 1–2 минуты и попробуйте снова");
+  }
   if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
   const data = (await res.json()) as { elements: OsmNode[] };
   return data.elements.filter((e): e is OsmNode => e.type === "node");
