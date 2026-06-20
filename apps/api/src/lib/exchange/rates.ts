@@ -450,7 +450,10 @@ export async function computeQuote(
     amountMode === "target_thb"
       ? Math.round(amount)
       : Math.max(0, Math.round(gross - row.feeFixedThb));
-  const amountToThb = step > 1 ? Math.floor(rawAmount / step) * step : rawAmount;
+  // Floor-округление только для source_amount: клиент назвал сколько ОТДАЁТ,
+  // мы округляем то, что он ПОЛУЧИТ. При target_thb клиент сам задал сумму — не трогаем.
+  const amountToThb =
+    amountMode !== "target_thb" && step > 1 ? Math.floor(rawAmount / step) * step : rawAmount;
 
   return {
     ok: true,
