@@ -869,6 +869,7 @@ export function makeAdminSimRoutes(opts: {
       conversationId: number;
       contactId: number;
       botReply: string;
+      handedOff: boolean;
     } | null> => {
       const now = Math.floor(Date.now() / 1000);
       // Если бот на прошлом ходе попросил KYC-документы — sim-клиент «присылает»
@@ -945,6 +946,12 @@ export function makeAdminSimRoutes(opts: {
       }
 
       let botReply = "";
+      // Бот передал диалог оператору (autoTakeover/operatorHandoff)? В бою это
+      // переключает разговор в режим оператора и бот замолкает; в симуляции
+      // оператора нет, поэтому диалог надо завершить — иначе sim-клиент шлёт
+      // новые реплики, бот снова отвечает тем же safe-fallback и получается
+      // дословный «уточню у оператора» loop (артефакт симуляции, не прод-бага).
+      let handedOff = false;
       try {
         const result = await ctx.replyStrategy.generate({
           tenant,
@@ -954,9 +961,10 @@ export function makeAdminSimRoutes(opts: {
           inbound,
           userMessageText: userText,
         });
-        botReply = firstPartText(
-          normalizeReplyStrategyResult(result)?.envelopes.flatMap((e) => e.parts) ?? [],
-        );
+        const normalized = normalizeReplyStrategyResult(result);
+        botReply = firstPartText(normalized?.envelopes.flatMap((e) => e.parts) ?? []);
+        handedOff =
+          normalized?.autoTakeover === true || (normalized?.operatorHandoffs?.length ?? 0) > 0;
       } catch (err) {
         botReply = `(reply error: ${err instanceof Error ? err.message : String(err)})`;
       }
@@ -981,6 +989,7 @@ export function makeAdminSimRoutes(opts: {
         conversationId: pi.conversationId,
         contactId: pi.contactId,
         botReply,
+        handedOff,
       };
     };
 
@@ -1014,17 +1023,21 @@ export function makeAdminSimRoutes(opts: {
         const res = await runExchange(userText);
         if (!res) break;
         exchanges.push({ user: userText, bot: res.botReply });
+        if (res.handedOff) break; // оператор подхватил диалог — бот замолкает
       }
     };
 
-    if (params.background === false) {
-      // Eval-режим: ждём весь диалог, чтобы потом оценить его целиком.
-      await runRest();
-    } else {
-      // Боевой режим: остальные ходы в фоне (инбокс наполняется по поллингу).
-      void runRest().catch(() => {
-        /* фоновая симуляция — ошибки не должны валить процесс */
-      });
+    // Бот уже на первом ходе ушёл к оператору — остальные ходы не нужны.
+    if (!first.handedOff) {
+      if (params.background === false) {
+        // Eval-режим: ждём весь диалог, чтобы потом оценить его целиком.
+        await runRest();
+      } else {
+        // Боевой режим: остальные ходы в фоне (инбокс наполняется по поллингу).
+        void runRest().catch(() => {
+          /* фоновая симуляция — ошибки не должны валить процесс */
+        });
+      }
     }
 
     return first.conversationId;
