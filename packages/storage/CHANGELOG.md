@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.48.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.48.0...@chatman-media/storage-v1.48.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **storage:** миграция 0081 чинит коллизию round_step (0080 переписана после применения) ([c810c8c](https://github.com/chatman-media/lead-engine/commit/c810c8c6142de623a972ff5a380e86bba18611ff))
+
 # [@chatman-media/storage-v1.48.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.47.0...@chatman-media/storage-v1.48.0) (2026-06-20)
 
 
