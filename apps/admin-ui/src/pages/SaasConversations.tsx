@@ -25,7 +25,9 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -439,6 +441,28 @@ function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">):
     : item.slug;
 }
 
+// Группировка персон симулятора по категории (по префиксу id) — чтобы пикер не
+// был «кучей» из 25+ плоских пунктов. Категория «Прочее» собирает остальные.
+const SIM_PERSONA_GROUPS: ReadonlyArray<{ label: string; match: (id: string) => boolean }> = [
+  { label: "Обмен", match: (id) => id.startsWith("exchange") },
+  { label: "Трансфер", match: (id) => id.startsWith("transfer") },
+  { label: "Зелёный коридор", match: (id) => id.startsWith("green_corridor") },
+  { label: "Свои сценарии", match: (id) => id.startsWith("custom_") },
+];
+
+function groupSimPersonas<T extends { id: string }>(
+  personas: T[],
+): Array<{ label: string; items: T[] }> {
+  const groups = SIM_PERSONA_GROUPS.map((g) => ({
+    label: g.label,
+    items: personas.filter((p) => g.match(p.id)),
+  }));
+  const claimed = new Set(groups.flatMap((g) => g.items.map((p) => p.id)));
+  const rest = personas.filter((p) => !claimed.has(p.id));
+  if (rest.length > 0) groups.push({ label: "Прочее", items: rest });
+  return groups.filter((g) => g.items.length > 0);
+}
+
 function serviceTargetLabel(item: ServiceCatalogItem): string {
   const target =
     item.routeType === "partner_service"
@@ -515,8 +539,16 @@ export function SaasConversations() {
   const [simStarting, setSimStarting] = useState(false);
   const [simPersonasOpen, setSimPersonasOpen] = useState(false);
   const [simLanguage, setSimLanguage] = useState("");
-  // Поток («боевой режим»): N клиентов по интервалу
-  const [simStream, setSimStream] = useState(false);
+  // Режим симулятора: persona = LLM играет клиента; script = прогон записанного
+  // диалога (реальные реплики); stream = «боевой режим», N клиентов по интервалу.
+  const [simMode, setSimMode] = useState<"persona" | "script" | "stream">("persona");
+  const simStream = simMode === "stream";
+  // Записанные диалоги (скриптовый прогон).
+  const [simCurrency, setSimCurrency] = useState<"THB" | "PHP">("THB");
+  const [simScripts, setSimScripts] = useState<
+    Array<{ id: string; title: string; turnCount: number; mediaCount: number }>
+  >([]);
+  const [simScriptId, setSimScriptId] = useState("");
   const [simCount, setSimCount] = useState("10");
   const [simIntervalSec, setSimIntervalSec] = useState("60");
   const [simStreams, setSimStreams] = useState<
@@ -583,6 +615,20 @@ export function SaasConversations() {
     return () => clearInterval(t);
   }, [simOpen, simPersonas.length, simFunnels.length, simServices.length, refreshSimStreams]);
 
+  // Записанные диалоги: грузим под выбранную валюту при входе в режим «скрипт».
+  useEffect(() => {
+    if (!simOpen || simMode !== "script") return;
+    saas
+      .listSimScripts(simCurrency)
+      .then((r) => {
+        setSimScripts(r.scripts);
+        setSimScriptId((prev) =>
+          prev && r.scripts.some((s) => s.id === prev) ? prev : (r.scripts[0]?.id ?? ""),
+        );
+      })
+      .catch(() => setSimScripts([]));
+  }, [simOpen, simMode, simCurrency]);
+
   function simTargetPayload(): { targetFunnelId?: number; targetCatalogItemId?: number } {
     if (simTarget.startsWith("funnel:")) {
       const id = Number(simTarget.slice("funnel:".length));
@@ -601,7 +647,17 @@ export function SaasConversations() {
     try {
       const maxTurns = Number.parseInt(simTurns, 10) || 6;
       const target = simTargetPayload();
-      if (simStream) {
+      if (simMode === "script") {
+        if (!simScriptId) return;
+        const res = await saas.replaySim({
+          scriptId: simScriptId,
+          currency: simCurrency,
+          ...(simLanguage ? { languageCode: simLanguage } : {}),
+        });
+        setSimOpen(false);
+        await refreshList();
+        navigate(`/conversations/${res.conversationId}`);
+      } else if (simStream) {
         await saas.startSimStream({
           count: Number.parseInt(simCount, 10) || 10,
           intervalSec: Number.parseInt(simIntervalSec, 10) || 60,
@@ -1004,52 +1060,120 @@ export function SaasConversations() {
 
       {simOpen && (
         <Card className="space-y-3 p-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-[220px] flex-1 space-y-1">
-              <span className="text-xs font-medium text-muted-foreground">
-                {simStream ? "Сценарий (пусто = все по очереди)" : "Сценарий / персона"}
-              </span>
-              <Select value={simPersonaId} onValueChange={setSimPersonaId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Выберите персону…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {simPersonas.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name} — {p.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <div className="flex flex-wrap items-center gap-1">
+            {(
+              [
+                ["persona", "Персона (LLM)"],
+                ["script", "Записанный диалог"],
+                ["stream", "Поток"],
+              ] as const
+            ).map(([m, label]) => (
               <button
+                key={m}
                 type="button"
-                className="text-[11px] text-primary hover:underline"
-                onClick={() => setSimPersonasOpen(true)}
+                onClick={() => setSimMode(m)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  simMode === m
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70",
+                )}
               >
-                Управление сценариями…
+                {label}
               </button>
-            </div>
-            <div className="min-w-[220px] flex-1 space-y-1">
-              <span className="text-xs font-medium text-muted-foreground">Куда писать</span>
-              <Select value={simTarget} onValueChange={setSimTarget}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Авто по сообщению" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Авто по сообщению</SelectItem>
-                  {simFunnels.map((f) => (
-                    <SelectItem key={`funnel:${f.id}`} value={`funnel:${f.id}`}>
-                      Воронка: {funnelLabel(f)}
-                    </SelectItem>
-                  ))}
-                  {activeServiceTargets.map((item) => (
-                    <SelectItem key={`service:${item.id}`} value={`service:${item.id}`}>
-                      Услуга: {serviceTargetLabel(item)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            {simMode === "script" ? (
+              <>
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">Валюта</span>
+                  <Select
+                    value={simCurrency}
+                    onValueChange={(v) => setSimCurrency(v as "THB" | "PHP")}
+                  >
+                    <SelectTrigger className="w-36">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="THB">THB — Таиланд</SelectItem>
+                      <SelectItem value="PHP">PHP — Филиппины</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="min-w-[260px] flex-1 space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Записанный диалог (реальные реплики клиента)
+                  </span>
+                  <Select value={simScriptId} onValueChange={setSimScriptId}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Выберите диалог…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {simScripts.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.title} · {s.turnCount} ходов
+                          {s.mediaCount ? ` · ${s.mediaCount} медиа` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            ) : (
+              <div className="min-w-[220px] flex-1 space-y-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {simStream ? "Сценарий (пусто = все по очереди)" : "Сценарий / персона"}
+                </span>
+                <Select value={simPersonaId} onValueChange={setSimPersonaId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Выберите персону…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groupSimPersonas(simPersonas).map((g) => (
+                      <SelectGroup key={g.label}>
+                        <SelectLabel>{g.label}</SelectLabel>
+                        {g.items.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name} — {p.displayName}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  className="text-[11px] text-primary hover:underline"
+                  onClick={() => setSimPersonasOpen(true)}
+                >
+                  Управление сценариями…
+                </button>
+              </div>
+            )}
+            {simMode !== "script" && (
+              <div className="min-w-[220px] flex-1 space-y-1">
+                <span className="text-xs font-medium text-muted-foreground">Куда писать</span>
+                <Select value={simTarget} onValueChange={setSimTarget}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Авто по сообщению" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Авто по сообщению</SelectItem>
+                    {simFunnels.map((f) => (
+                      <SelectItem key={`funnel:${f.id}`} value={`funnel:${f.id}`}>
+                        Воронка: {funnelLabel(f)}
+                      </SelectItem>
+                    ))}
+                    {activeServiceTargets.map((item) => (
+                      <SelectItem key={`service:${item.id}`} value={`service:${item.id}`}>
+                        Услуга: {serviceTargetLabel(item)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1">
               <span className="text-xs font-medium text-muted-foreground">Язык клиента</span>
               <Select value={simLanguage} onValueChange={setSimLanguage}>
@@ -1065,17 +1189,19 @@ export function SaasConversations() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground">Ходов</span>
-              <Input
-                type="number"
-                min={1}
-                max={20}
-                value={simTurns}
-                onChange={(e) => setSimTurns(e.target.value)}
-                className="w-20"
-              />
-            </div>
+            {simMode !== "script" && (
+              <div className="space-y-1">
+                <span className="text-xs font-medium text-muted-foreground">Ходов</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={simTurns}
+                  onChange={(e) => setSimTurns(e.target.value)}
+                  className="w-20"
+                />
+              </div>
+            )}
             {simStream && (
               <>
                 <div className="space-y-1">
@@ -1103,23 +1229,31 @@ export function SaasConversations() {
             )}
             <Button
               onClick={handleStartSim}
-              disabled={simStarting || (!simStream && !simPersonaId)}
+              disabled={
+                simStarting ||
+                (simMode === "persona" && !simPersonaId) ||
+                (simMode === "script" && !simScriptId)
+              }
             >
-              {simStarting ? "Запуск…" : simStream ? "Запустить поток" : "Запустить"}
+              {simStarting
+                ? "Запуск…"
+                : simMode === "script"
+                  ? "Прогнать диалог"
+                  : simStream
+                    ? "Запустить поток"
+                    : "Запустить"}
             </Button>
             <Button variant="destructive" onClick={handleStopAllStreams}>
               ⏹ Остановить все
             </Button>
           </div>
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={simStream}
-              onChange={(e) => setSimStream(e.target.checked)}
-            />
-            Поток («боевой режим»): новый клиент каждые N секунд. «Остановить все» глушит и уже
-            идущие диалоги.
-          </label>
+          <p className="text-xs text-muted-foreground">
+            {simMode === "script"
+              ? "Записанный диалог: реальные реплики клиента шлются боту по очереди (детерминированно, без LLM-клиента). Виден в инбоксе как обычный диалог."
+              : simStream
+                ? "Поток («боевой режим»): новый клиент каждые N секунд. «Остановить все» глушит и уже идущие диалоги."
+                : "Персона: LLM играет клиента по брифу, диалог разворачивается вживую."}
+          </p>
           {simStreams.length > 0 && (
             <div className="space-y-1 border-t pt-2">
               <span className="text-xs font-medium text-muted-foreground">Активные потоки</span>

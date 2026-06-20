@@ -57,6 +57,13 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { scoreExchangeDialog } from "../lib/exchange/eval.ts";
 import { getTenantQuoteCurrency } from "../lib/exchange/rates.ts";
+import {
+  getScriptedDialog,
+  loadScriptedDialogs,
+  type ScriptedDialogCurrency,
+  type ScriptedMediaKind,
+  type ScriptedTurn,
+} from "../lib/exchange/scripted-dialogs.ts";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import { buildSimPersonaSystemPrompt } from "../prompts/admin-sim.ts";
 
@@ -810,16 +817,24 @@ export function makeAdminSimRoutes(opts: {
     channelDbId: number;
     externalId: string;
     tenantSlug: string;
-    personaClient: ChatClient;
+    // null допустим только в скриптовом прогоне (записанные реплики) — там
+    // LLM-«клиент» не нужен, бот отвечает на фиксированные сообщения.
+    personaClient: ChatClient | null;
     replyStrategy: ReplyStrategy;
     template?: VerticalTemplate;
   }
 
   // Резолвит активный канал + slug + persona-клиент. Возвращает строку-ошибку
-  // (для 400) либо готовый контекст.
-  async function buildCtx(tenantId: number, adminId: number): Promise<SimCtx | string> {
+  // (для 400) либо готовый контекст. requirePersona=false — для скриптового
+  // прогона, где persona-LLM не нужен (нужен только бот = replyStrategy).
+  async function buildCtx(
+    tenantId: number,
+    adminId: number,
+    ctxOpts?: { requirePersona?: boolean },
+  ): Promise<SimCtx | string> {
+    const requirePersona = ctxOpts?.requirePersona ?? true;
     const personaClient = opts.resolveSimChat(tenantId);
-    if (!personaClient) return "chat LLM not configured for this tenant";
+    if (requirePersona && !personaClient) return "chat LLM not configured for this tenant";
     if (!opts.replyStrategy) return "reply strategy not configured (add a chat LLM config)";
 
     const rows = await withTenant(opts.db, tenantId, async (tx) =>
@@ -875,6 +890,12 @@ export function makeAdminSimRoutes(opts: {
       kycVerified?: boolean;
       /** BCP-47 код языка клиента (ru/en/ko/zh), пробрасывается как channelLangHint. */
       languageCode?: string;
+      /**
+       * Скриптовый прогон: фиксированные реплики клиента (записанный диалог).
+       * Если задан — persona-LLM не используется, реплики шлются по очереди,
+       * медиа берутся из разметки хода (а не из авто-KYC по запросу бота).
+       */
+      script?: readonly ScriptedTurn[];
     },
   ): Promise<number> {
     const { tenantId, adminId } = ctx;
@@ -900,6 +921,7 @@ export function makeAdminSimRoutes(opts: {
 
     const runExchange = async (
       userText: string,
+      explicitMedia?: InboundPart[],
     ): Promise<{
       conversationId: number;
       contactId: number;
@@ -907,20 +929,30 @@ export function makeAdminSimRoutes(opts: {
       handedOff: boolean;
     } | null> => {
       const now = Math.floor(Date.now() / 1000);
-      // Если бот на прошлом ходе попросил KYC-документы — sim-клиент «присылает»
-      // mock-паспорт + видео-кружок (см. buildSimKycMediaParts), иначе бот всегда
-      // отвечал бы «верификация не прошла».
+      // Медиа хода. В скриптовом режиме (explicitMedia задан) берём вложения из
+      // разметки записанного диалога. Иначе — авто-KYC: если бот на прошлом ходе
+      // попросил документы, sim-клиент «присылает» mock-паспорт + видео-кружок
+      // (см. buildSimKycMediaParts), иначе бот всегда отвечал бы «верификация не прошла».
       const prevBotReply = exchanges[exchanges.length - 1]?.bot ?? "";
-      const kycMedia: InboundPart[] =
-        ctx.template?.slug === "exchange_v1" && botRequestedKyc(prevBotReply)
+      const media: InboundPart[] =
+        explicitMedia ??
+        (ctx.template?.slug === "exchange_v1" && botRequestedKyc(prevBotReply)
           ? buildSimKycMediaParts(channelIdStr)
-          : [];
+          : []);
+      // Ход может быть media-only (текст пустой) — шлём только вложения. Если и
+      // текста, и медиа нет (не должно случаться — парсер дропает пустые) —
+      // подстраховка пустым текстом, чтобы inbound был валиден.
+      const textParts: InboundPart[] = userText ? [{ kind: "text", text: userText }] : [];
+      const parts: InboundPart[] =
+        textParts.length + media.length > 0
+          ? [...textParts, ...media]
+          : [{ kind: "text", text: "" }];
       const inbound: Inbound = {
         channelId: channelIdStr,
         externalMessageId: `sim-${Date.now()}-${simToken()}`,
         externalUserId,
         externalUsername: params.displayName,
-        parts: [{ kind: "text", text: userText }, ...kycMedia],
+        parts,
         receivedAt: now,
         ...(params.languageCode ? { channelLangHint: params.languageCode } : {}),
         raw: {
@@ -1062,7 +1094,38 @@ export function makeAdminSimRoutes(opts: {
     };
 
     const exchanges: Array<{ user: string; bot: string }> = [];
-    const nextUserMessage = async (): Promise<string | null> => {
+
+    // Вложения записанного хода → InboundPart. Refs совпадают с mock-KYC
+    // (__sim_kyc_*), чтобы downloadMedia в инбоксе отрисовал плейсхолдер-картинку
+    // (см. index.ts), а бот увидел фото/документ/голос как реальное медиа.
+    const scriptedMediaToParts = (kinds: readonly ScriptedMediaKind[]): InboundPart[] =>
+      kinds.map((k): InboundPart => {
+        if (k === "document") {
+          return {
+            kind: "document",
+            mediaRef: { channelId: channelIdStr, externalRef: SIM_KYC_PASSPORT_REF },
+            fileName: "document.pdf",
+          };
+        }
+        if (k === "voice") {
+          return {
+            kind: "voice",
+            mediaRef: { channelId: channelIdStr, externalRef: SIM_KYC_VIDEO_REF },
+            durationSec: 5,
+          };
+        }
+        return {
+          kind: "photo",
+          mediaRef: { channelId: channelIdStr, externalRef: SIM_KYC_PASSPORT_REF },
+          caption: "SIMULATION MEDIA",
+        };
+      });
+
+    // Генерация следующей реплики LLM-«клиентом» (персона). Не используется в
+    // скриптовом режиме. Требует persona-клиента (в скриптовом он может быть null).
+    const nextPersonaMessage = async (): Promise<string | null> => {
+      const personaClient = ctx.personaClient;
+      if (!personaClient) return null;
       const msgs: ChatMessage[] = [{ role: "system", content: personaSystemPrompt(params.brief) }];
       for (const ex of exchanges) {
         msgs.push({ role: "assistant", content: ex.user }); // реплика клиента
@@ -1075,7 +1138,7 @@ export function makeAdminSimRoutes(opts: {
         content: "Напиши следующую реплику КЛИЕНТА (не обменника) — только то, что говорит клиент.",
       });
       const complete = async (extra?: ChatMessage, temperature = 0.8): Promise<string> => {
-        const out = await ctx.personaClient.complete(extra ? [...msgs, extra] : msgs, {
+        const out = await personaClient.complete(extra ? [...msgs, extra] : msgs, {
           temperature,
           numPredict: 200,
         });
@@ -1099,26 +1162,48 @@ export function makeAdminSimRoutes(opts: {
       return text;
     };
 
-    const firstUser = await nextUserMessage();
-    if (!firstUser) throw new Error("persona produced no message");
-    const first = await runExchange(firstUser);
+    // Унифицированный провайдер хода: записанный (script) или LLM-персона.
+    // Возвращает текст + явные медиа (для script) либо undefined-медиа (LLM —
+    // тогда runExchange сам решает про авто-KYC).
+    let scriptIdx = 0;
+    const nextTurn = async (): Promise<{
+      text: string;
+      media: InboundPart[] | undefined;
+    } | null> => {
+      if (params.script) {
+        const t = params.script[scriptIdx++];
+        if (!t) return null;
+        return { text: t.text, media: scriptedMediaToParts(t.media) };
+      }
+      const text = await nextPersonaMessage();
+      if (text == null) return null;
+      return { text, media: undefined };
+    };
+
+    const firstTurn = await nextTurn();
+    if (!firstTurn) throw new Error("no first message (persona or script produced nothing)");
+    const first = await runExchange(firstTurn.text, firstTurn.media);
     if (!first) throw new Error("pipeline produced no conversation");
-    exchanges.push({ user: firstUser, bot: first.botReply });
+    exchanges.push({ user: firstTurn.text, bot: first.botReply });
 
     const runRest = async () => {
       for (let turn = 1; turn < params.maxTurns; turn++) {
         if (aborted()) break; // kill-switch: «Остановить все» / стоп потока
-        const userText = await nextUserMessage();
-        if (!userText || aborted()) break;
-        const res = await runExchange(userText);
+        const t = await nextTurn();
+        if (!t || aborted()) break;
+        const res = await runExchange(t.text, t.media);
         if (!res) break;
-        exchanges.push({ user: userText, bot: res.botReply });
-        if (res.handedOff) break; // оператор подхватил диалог — бот замолкает
+        exchanges.push({ user: t.text, bot: res.botReply });
+        // Оператор подхватил диалог — бот замолкает. В скриптовом режиме мы
+        // всё равно дошлём оставшиеся записанные реплики (как было в реальном
+        // диалоге, где клиент продолжал писать оператору).
+        if (res.handedOff && !params.script) break;
       }
     };
 
-    // Бот уже на первом ходе ушёл к оператору — остальные ходы не нужны.
-    if (!first.handedOff) {
+    // Бот уже на первом ходе ушёл к оператору — для LLM-персоны остальные ходы
+    // не нужны; для скрипта (записанного диалога) дошлём все реплики.
+    if (params.script || !first.handedOff) {
       if (params.background === false) {
         // Eval-режим: ждём весь диалог, чтобы потом оценить его целиком.
         await runRest();
@@ -1132,6 +1217,88 @@ export function makeAdminSimRoutes(opts: {
 
     return first.conversationId;
   }
+
+  // Валюта для выбора записанных диалогов: явный override (THB/PHP) либо
+  // котируемая валюта тенанта (PHP → филиппинские кейсы, иначе тайские).
+  async function resolveScriptCurrency(
+    tenantId: number,
+    override?: string,
+  ): Promise<ScriptedDialogCurrency> {
+    if (override === "PHP" || override === "THB") return override;
+    const qc = await getTenantQuoteCurrency(opts.db, tenantId);
+    return qc.code === "PHP" ? "PHP" : "THB";
+  }
+
+  // ── GET /api/admin/sim/scripts ─────────────────────────────────────────
+  // Список записанных диалогов (реальные реплики клиентов) под валюту тенанта
+  // или ?currency=THB|PHP. Используются скриптовым прогоном (POST /sim/replay).
+  app.get("/api/admin/sim/scripts", async (c) => {
+    const tenantId = c.var.tenantId;
+    const currency = await resolveScriptCurrency(tenantId, c.req.query("currency"));
+    const scripts = loadScriptedDialogs(currency).map((d) => ({
+      id: d.id,
+      title: d.title,
+      turnCount: d.turns.length,
+      mediaCount: d.mediaCount,
+    }));
+    return c.json({ currency, scripts });
+  });
+
+  // ── POST /api/admin/sim/replay ─────────────────────────────────────────
+  // Скриптовый прогон: шлёт фиксированные реплики записанного диалога живому
+  // боту по очереди (детерминированно, без LLM-клиента). Виден в инбоксе как
+  // обычный self_play-диалог. Первый ход синхронно (вернуть conversationId),
+  // остальные — в фоне (инбокс наполняется по поллингу).
+  app.post("/api/admin/sim/replay", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? 0;
+    let body: {
+      scriptId?: string;
+      currency?: string;
+      displayName?: string;
+      languageCode?: string;
+    };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const scriptId = typeof body.scriptId === "string" ? body.scriptId.trim() : "";
+    if (!scriptId) return c.json({ error: "scriptId required" }, 400);
+    const currency = await resolveScriptCurrency(tenantId, body.currency);
+    const dialog = getScriptedDialog(currency, scriptId);
+    if (!dialog) return c.json({ error: "script not found" }, 404);
+
+    const ctx = await buildCtx(tenantId, adminId, { requirePersona: false });
+    if (typeof ctx === "string") return c.json({ error: ctx }, 400);
+
+    const displayName = (
+      (typeof body.displayName === "string" && body.displayName.trim()) ||
+      `▶ ${dialog.title}`
+    ).slice(0, 60);
+    const languageCode =
+      typeof body.languageCode === "string" && body.languageCode ? body.languageCode : undefined;
+
+    try {
+      const conversationId = await simulateClient(ctx, {
+        brief: "",
+        displayName,
+        maxTurns: dialog.turns.length,
+        script: dialog.turns,
+        ...(languageCode ? { languageCode } : {}),
+      });
+      return c.json({
+        ok: true,
+        conversationId,
+        scriptId,
+        currency,
+        turnCount: dialog.turns.length,
+        displayName,
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
 
   // ── GET /api/admin/sim/personas ────────────────────────────────────────
   app.get("/api/admin/sim/personas", async (c) => {
