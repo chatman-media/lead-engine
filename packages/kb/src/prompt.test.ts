@@ -57,13 +57,47 @@ describe("composeSystemPrompt — persona / voice / framework blocks", () => {
     expect(p).not.toContain("empty");
   });
 
-  it("voice.forbid → блок ЗАПРЕЩЕНО; язык en", () => {
+  it("voice.forbid → блок ЗАПРЕЩЕНО; язык из voice.language (back-compat en)", () => {
     const p = composeSystemPrompt(
       { ...baseStyle, voice: { tone: "bold", language: "en", forbid: ["мат", "сленг"] } },
       "qualify",
     );
-    expect(p).toContain("Язык: английский");
+    // Без options.lang язык ответа берётся из voice.language (back-compat).
+    expect(p).toContain("Язык ответа: English");
     expect(p).toContain("ЗАПРЕЩЕНО: мат; сленг");
+  });
+});
+
+describe("composeSystemPrompt — язык ответа (#730)", () => {
+  it("options.lang рендерит директиву на каждом из 4 языков", () => {
+    const cases: Array<["ru" | "en" | "ko" | "zh", string]> = [
+      ["ru", "русском"],
+      ["en", "English"],
+      ["ko", "한국어"],
+      ["zh", "中文"],
+    ];
+    for (const [lang, name] of cases) {
+      const p = composeSystemPrompt(baseStyle, "qualify", null, { lang });
+      expect(p).toContain(`Язык ответа: ${name}`);
+      expect(p).toContain("ТОЛЬКО на этом языке");
+    }
+  });
+
+  it("options.lang перебивает voice.language (язык — свойство диалога, не Style)", () => {
+    // Style по-русски, но диалог корейский → отвечаем по-корейски.
+    const p = composeSystemPrompt(
+      { ...baseStyle, voice: { tone: "friendly", language: "ru", forbid: [] } },
+      "qualify",
+      null,
+      { lang: "ko" },
+    );
+    expect(p).toContain("Язык ответа: 한국어");
+    expect(p).not.toContain("Язык ответа: русском");
+  });
+
+  it("без options.lang → fallback на voice.language (back-compat ru)", () => {
+    const p = composeSystemPrompt(baseStyle, "qualify");
+    expect(p).toContain("Язык ответа: русском");
   });
 });
 
@@ -111,8 +145,18 @@ describe("composeSystemPrompt — hooks / director hooks / skills", () => {
   it("skills фильтруются по стадии", () => {
     const p = composeSystemPrompt(baseStyle, "qualify", null, {
       skills: [
-        { slug: "mirror", displayName: "Зеркало", promptFragment: "отражай", applicableStages: ["qualify"] },
-        { slug: "close", displayName: "Закрытие", promptFragment: "закрывай", applicableStages: ["close"] },
+        {
+          slug: "mirror",
+          displayName: "Зеркало",
+          promptFragment: "отражай",
+          applicableStages: ["qualify"],
+        },
+        {
+          slug: "close",
+          displayName: "Закрытие",
+          promptFragment: "закрывай",
+          applicableStages: ["close"],
+        },
         { slug: "always", displayName: "Всегда", promptFragment: "везде", applicableStages: [] },
       ],
     });

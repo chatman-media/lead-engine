@@ -16,6 +16,30 @@
  * See README.md for full usage and `IKbStore` implementation guide.
  */
 
+// ── LLM clients (re-exports из @chatman-media/llm-router для backwards-compat) ─
+// Новый код должен импортировать chat/embed/providers напрямую из llm-router;
+// эти re-exports будут удалены в будущем PR после полной миграции consumers.
+// ── Provider implementations (re-exports из llm-router) ──────────────────────
+export type {
+  ChatClient,
+  ChatCompletionOpts,
+  ChatMessage,
+  ChatRole,
+  EmbeddingClient,
+  OllamaChatOptions,
+  OllamaEmbeddingOptions,
+  OpenRouterChatOptions,
+} from "@chatman-media/llm-router";
+export {
+  ChatApiError,
+  EmbeddingApiError,
+  NullEmbeddingClient,
+  OllamaChatClient,
+  OllamaEmbeddingClient,
+  OpenAIChatClient,
+  OpenAIEmbeddingClient,
+  OpenRouterChatClient,
+} from "@chatman-media/llm-router";
 // ── A/B style router ──────────────────────────────────────────────────────────
 export type { ABRouterOptions, ABVariant } from "./ab-router.ts";
 export { ABRouter } from "./ab-router.ts";
@@ -24,36 +48,28 @@ export {
   answerWithRag,
   answerWithRagStream,
   generateSoftFallback,
-  retrieveHits,
   type RetrievalResult,
+  retrieveHits,
 } from "./answer.ts";
 export type { AnswerInput, AnswerResult, AnswerTelemetry, Persona } from "./answer-types.ts";
 export { NO_CONTEXT_MARKER } from "./answer-types.ts";
-// ── LLM clients (re-exports из @chatman-media/llm-router для backwards-compat) ─
-// Новый код должен импортировать chat/embed/providers напрямую из llm-router;
-// эти re-exports будут удалены в будущем PR после полной миграции consumers.
-export type {
-  ChatClient,
-  ChatCompletionOpts,
-  ChatMessage,
-  ChatRole,
-} from "@chatman-media/llm-router";
-export { ChatApiError, OpenAIChatClient } from "@chatman-media/llm-router";
+// ── Built-in tools (ready-made RagTool factories) ────────────────────────────
+export { makeBookingLinkTool } from "./built-in-tools/calendly.ts";
 export type { Chunk, ChunkOptions, SectionChunk } from "./chunk.ts";
 // ── Chunking ──────────────────────────────────────────────────────────────────
 export { chunkBySections, chunkText, estimateTokens } from "./chunk.ts";
 // ── Conversation store ────────────────────────────────────────────────────────
 export type { IConversationStore } from "./conversation-store.ts";
 export { InMemoryConversationStore } from "./conversation-store.ts";
-export type { EmbeddingClient } from "@chatman-media/llm-router";
-export {
-  EmbeddingApiError,
-  NullEmbeddingClient,
-  OpenAIEmbeddingClient,
-} from "@chatman-media/llm-router";
 // ── Retrieval evaluation ──────────────────────────────────────────────────────
 export type { EvalQuery, EvalResult, QueryMetrics } from "./eval.ts";
 export { evalRetrieval } from "./eval.ts";
+export type { ExtractFactsInput } from "./extract-user-facts.ts";
+// ── Memory & conversation management ─────────────────────────────────────────
+export { extractUserFacts, parseFactsFromLlmOutput } from "./extract-user-facts.ts";
+export type { FactCheckInput, FactCheckResult } from "./fact-checker.ts";
+// ── Hallucination guard ───────────────────────────────────────────────────────
+export { checkFacts, parseFactCheckResult } from "./fact-checker.ts";
 export type {
   RagGoldenAblation,
   RagGoldenCase,
@@ -76,34 +92,9 @@ export {
   evaluateRagGoldenCases,
   formatRagGoldenFailures,
   makeRagGoldenLlmJudge,
-  parseRagGoldenJudgeResult,
   parseRagGoldenJsonl,
+  parseRagGoldenJudgeResult,
 } from "./golden-eval.ts";
-export type {
-  ParsedToolCallRegressionJsonlLine,
-  ToolCallRegressionCaseLabel,
-  ToolCallRegressionCaseRecord,
-  ToolCallRegressionCaseResult,
-  ToolCallRegressionCaseResultStatus,
-  ToolCallRegressionCaseStatus,
-  ToolCallRegressionFailure,
-  ToolCallRegressionReport,
-  ToolCallRegressionRunInput,
-  ToolCallRegressionSummary,
-} from "./tool-regression-eval.ts";
-export {
-  formatToolCallRegressionFailures,
-  parseToolCallRegressionJsonl,
-  runToolCallRegressionCases,
-  TOOL_CALL_REGRESSION_RECORD_TYPE,
-  toolCallRegressionExitCode,
-} from "./tool-regression-eval.ts";
-export type { ExtractFactsInput } from "./extract-user-facts.ts";
-// ── Memory & conversation management ─────────────────────────────────────────
-export { extractUserFacts, parseFactsFromLlmOutput } from "./extract-user-facts.ts";
-export type { FactCheckInput, FactCheckResult } from "./fact-checker.ts";
-// ── Hallucination guard ───────────────────────────────────────────────────────
-export { checkFacts, parseFactCheckResult } from "./fact-checker.ts";
 export type { GradeSkillsInput } from "./grade-skills.ts";
 // ── Skill grading (post-hoc analytics) ───────────────────────────────────────
 export { gradeSkills } from "./grade-skills.ts";
@@ -129,17 +120,6 @@ export {
 } from "./persona-shortcuts.ts";
 // ── Sales-style prompt engine ────────────────────────────────────────────────
 export { composeSystemPrompt } from "./prompt.ts";
-// ── Provider implementations (re-exports из llm-router) ──────────────────────
-export type {
-  OllamaChatOptions,
-  OllamaEmbeddingOptions,
-  OpenRouterChatOptions,
-} from "@chatman-media/llm-router";
-export {
-  OllamaChatClient,
-  OllamaEmbeddingClient,
-  OpenRouterChatClient,
-} from "@chatman-media/llm-router";
 export type { ReflectInput, ReflectResult } from "./reflect.ts";
 export { parseReflection, verifyAnswer } from "./reflect.ts";
 // ── Reranker ──────────────────────────────────────────────────────────────────
@@ -168,6 +148,7 @@ export type {
   FunnelStage,
   Hook,
   HookKind,
+  ReplyLang,
   SalesFramework,
   SkillForPrompt,
   StageConfig,
@@ -201,10 +182,6 @@ export {
   stripAILeadIns,
   stripMarkdownBold,
 } from "./text-style-rules.ts";
-// ── Tool calling ──────────────────────────────────────────────────────────────
-export type { AnyRagTool, CompleteWithToolsResult, RagTool } from "./tools.ts";
-// ── Built-in tools (ready-made RagTool factories) ────────────────────────────
-export { makeBookingLinkTool } from "./built-in-tools/calendly.ts";
 // ── Agentic tool-calling loop (multi-cycle, used internally by answerWithRag) ─
 export {
   buildToolTelemetry,
@@ -213,6 +190,27 @@ export {
   type ToolCallRecord,
   type ToolLoopResult,
 } from "./tool-loop.ts";
+export type {
+  ParsedToolCallRegressionJsonlLine,
+  ToolCallRegressionCaseLabel,
+  ToolCallRegressionCaseRecord,
+  ToolCallRegressionCaseResult,
+  ToolCallRegressionCaseResultStatus,
+  ToolCallRegressionCaseStatus,
+  ToolCallRegressionFailure,
+  ToolCallRegressionReport,
+  ToolCallRegressionRunInput,
+  ToolCallRegressionSummary,
+} from "./tool-regression-eval.ts";
+export {
+  formatToolCallRegressionFailures,
+  parseToolCallRegressionJsonl,
+  runToolCallRegressionCases,
+  TOOL_CALL_REGRESSION_RECORD_TYPE,
+  toolCallRegressionExitCode,
+} from "./tool-regression-eval.ts";
+// ── Tool calling ──────────────────────────────────────────────────────────────
+export type { AnyRagTool, CompleteWithToolsResult, RagTool } from "./tools.ts";
 // ── Topic routing ─────────────────────────────────────────────────────────────
 export { classifyTopic, classifyTopicAll, KNOWN_TOPICS } from "./topic-classifier.ts";
 // ── Storage interfaces & implementations ─────────────────────────────────────

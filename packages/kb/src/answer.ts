@@ -1,3 +1,4 @@
+import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { z } from "zod";
 import {
   type AnswerInput,
@@ -6,8 +7,8 @@ import {
   NO_CONTEXT_MARKER,
   type Persona,
 } from "./answer-types.ts";
-import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import { checkFacts } from "./fact-checker.ts";
+import { expandQueries } from "./multi-query.ts";
 import {
   botPresenceReply,
   isBotPresenceQuestion,
@@ -17,9 +18,8 @@ import {
   personaSmalltalkReply,
 } from "./persona-shortcuts.ts";
 import { composeSystemPrompt, renderKbContextBlock } from "./prompt.ts";
-import { rewriteQuery } from "./rewrite-query.ts";
 import { applyDynamicThreshold, mmrDiversify, rrfMerge } from "./retrieval-utils.ts";
-import { expandQueries } from "./multi-query.ts";
+import { rewriteQuery } from "./rewrite-query.ts";
 import { sanitizeLlmOutput } from "./sanitize.ts";
 import {
   injectJsonInstruction,
@@ -70,7 +70,8 @@ export {
 function toolCallsToGroundingContext(records: ToolCallRecord[] | undefined): string {
   if (!records || records.length === 0) return "";
   const lines = records.map((record, index) => {
-    const result = typeof record.result === "string" ? record.result : JSON.stringify(record.result);
+    const result =
+      typeof record.result === "string" ? record.result : JSON.stringify(record.result);
     return `[#tool-${index + 1}] ${record.name}: ${result ?? ""}`;
   });
   return `TOOL RESULTS:\n${lines.join("\n")}`;
@@ -256,6 +257,7 @@ async function answerFromHits(opts: {
       ...(input.stageOverride ? { stageOverride: input.stageOverride } : {}),
       ...(input.requestContext ? { requestContext: input.requestContext } : {}),
       ...(input.awaitingOperator ? { awaitingOperator: true } : {}),
+      ...(input.lang ? { lang: input.lang } : {}),
     });
     if (contextForPrompt) kbContextMessage = renderKbContextBlock(contextForPrompt);
     temperature = input.style.model.temperature;
@@ -265,6 +267,7 @@ async function answerFromHits(opts: {
       context,
       input.userFacts,
       input.conversationSummary,
+      input.lang,
     );
   }
 
@@ -392,7 +395,9 @@ async function answerFromHits(opts: {
 
   if (runFactCheck) {
     const toolContext = toolCallsToGroundingContext(multiCycleToolCalls);
-    const groundingContext = toolContext ? [context, toolContext].filter(Boolean).join("\n\n") : context;
+    const groundingContext = toolContext
+      ? [context, toolContext].filter(Boolean).join("\n\n")
+      : context;
     const verdict = await checkFacts({
       question: input.question,
       answer: text,
@@ -491,7 +496,7 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
   // ── Retrieval ────────────────────────────────────────────────────────────
   const topK = input.topK ?? 5;
   const { hits: retrievedHits, retrievalMs, searchQuery, queries } = await retrieveHits(input);
-  let hits = retrievedHits;
+  const hits = retrievedHits;
 
   if (hits.length === 0 && !(input.vacanciesBlock ?? "").trim() && !input.style) {
     input.onTelemetry?.({
@@ -539,6 +544,7 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
       ...(input.stageOverride ? { stageOverride: input.stageOverride } : {}),
       ...(input.requestContext ? { requestContext: input.requestContext } : {}),
       ...(input.awaitingOperator ? { awaitingOperator: true } : {}),
+      ...(input.lang ? { lang: input.lang } : {}),
     });
     if (contextForPrompt) kbContextMessage = renderKbContextBlock(contextForPrompt);
     temperature = input.style.model.temperature;
@@ -548,6 +554,7 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
       context,
       input.userFacts,
       input.conversationSummary,
+      input.lang,
     );
   }
 

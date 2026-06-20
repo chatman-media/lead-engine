@@ -1,8 +1,13 @@
+import type { ChatClient, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
 import type { z } from "zod";
-import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
-import type { EmbeddingClient } from "@chatman-media/llm-router";
-import type { DirectorHookForPrompt, FunnelStage, SkillForPrompt, Style } from "./styles.ts";
 import type { Reranker } from "./reranker.ts";
+import type {
+  DirectorHookForPrompt,
+  FunnelStage,
+  ReplyLang,
+  SkillForPrompt,
+  Style,
+} from "./styles.ts";
 import type { AnyRagTool } from "./tools.ts";
 import type { IKbStore, KbSearchHit } from "./types.ts";
 
@@ -31,6 +36,12 @@ export interface AnswerInput {
   persona?: Persona;
   style?: Style;
   stage?: FunnelStage;
+  /**
+   * Язык ответа клиенту (#730): из языка диалога (`conversations.detected_lang`
+   * через `effectiveLang`). Перебивает `style.voice.language`. Если не задан —
+   * fallback на язык Style (back-compat ru/en).
+   */
+  lang?: ReplyLang;
   includeFewShot?: boolean;
   numPredict?: number;
   userFacts?: Record<string, string>;
