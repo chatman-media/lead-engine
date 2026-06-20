@@ -2259,10 +2259,15 @@ export interface ExchangeSettings {
    * и не применяется до клика «Подтвердить». Дефолт false (back-compat).
    */
   requireRateConfirmation?: boolean;
-  /** Шаги floor-округления по способу выдачи. null = авто из словаря валют. */
-  roundStepAtm?: number | null;
-  roundStepCash?: number | null;
-  roundStepBank?: number | null;
+  /**
+   * Шаги floor-округления по способу выдачи, per-currency.
+   * Ключ — ISO-код (PHP, THB…), значение — { atm?, cash?, bank? }.
+   * null / отсутствие ключа → авто из словаря валют.
+   */
+  roundSteps?: Record<
+    string,
+    { atm?: number | null; cash?: number | null; bank?: number | null }
+  > | null;
 }
 
 /**
