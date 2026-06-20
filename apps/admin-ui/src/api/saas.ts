@@ -2837,6 +2837,24 @@ export const saas = {
   deleteSim(conversationId: number) {
     return request<{ ok: boolean }>(`/api/admin/sim/${conversationId}`, { method: "DELETE" });
   },
+  // Записанные диалоги (реальные реплики клиентов) для скриптового прогона.
+  listSimScripts(currency?: "THB" | "PHP") {
+    const qs = currency ? `?currency=${currency}` : "";
+    return request<{
+      currency: "THB" | "PHP";
+      scripts: Array<{ id: string; title: string; turnCount: number; mediaCount: number }>;
+    }>(`/api/admin/sim/scripts${qs}`);
+  },
+  replaySim(opts: { scriptId: string; currency?: "THB" | "PHP"; languageCode?: string }) {
+    return request<{
+      ok: boolean;
+      conversationId: number;
+      scriptId: string;
+      currency: "THB" | "PHP";
+      turnCount: number;
+      displayName: string;
+    }>("/api/admin/sim/replay", { method: "POST", body: JSON.stringify(opts) });
+  },
   startSimStream(opts: {
     count: number;
     intervalSec?: number;
