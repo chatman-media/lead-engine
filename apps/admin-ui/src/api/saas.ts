@@ -4423,6 +4423,12 @@ export const saas = {
       { method: "DELETE" },
     );
   },
+  syncOsmAtms(opts: { bbox?: string; quoteAsset?: string } = {}) {
+    return request<{ ok: boolean; fetched: number; upserted: number; skipped: number }>(
+      "/api/admin/exchange/payout-points/sync-osm",
+      { method: "POST", body: JSON.stringify(opts) },
+    );
+  },
   refreshExchangeRates() {
     return request<{ ok: boolean; updated: number; skipped: number; failed: number }>(
       "/api/admin/exchange/rates/refresh",

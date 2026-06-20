@@ -46,6 +46,7 @@ import {
   reviveExpiredOrder,
   updateOrder,
 } from "./orders.ts";
+import { listActivePayoutPoints } from "./payout-points.ts";
 import { getPaymentProvider, verifyWestWalletInvoicePayment } from "./providers.ts";
 import {
   computeQuote,
@@ -99,6 +100,16 @@ function parseOfficeAddresses(value: string | null | undefined): string[] {
           .map((line) => line.trim())
           .filter(Boolean);
   return candidates.map((candidate) => candidate.replace(/\s*\r?\n\s*/g, "; "));
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 async function moveExchangeLeadToStage(opts: {
@@ -458,6 +469,7 @@ const TOOL_STAGE_MATRIX: Record<string, Set<string> | "any"> = {
   verify_exchange_payment: new Set(["requisites_sent", "payment_proof_waiting"]),
   issue_exchange_payout: new Set(["payment_verified"]),
   get_exchange_business_info: "any",
+  list_exchange_payout_points: "any",
 };
 
 export function isKnownExchangeStage(stageSlug: string | null | undefined): stageSlug is string {
@@ -1471,6 +1483,55 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     },
   };
 
+  const listPayoutPointsTool: AnyRagTool = {
+    name: "list_exchange_payout_points",
+    description: [
+      "Найти ближайшие банкоматы/офисы для получения наличных.",
+      "Вызывай когда клиент прислал геолокацию (📍 Геолокация: lat, lng) или спрашивает про ближайший банкомат/офис.",
+      "Передай lat/lng из геолокации клиента. Результат отсортирован по расстоянию.",
+    ].join(" "),
+    parameters: z.object({
+      lat: z.number().describe("Широта (из геолокации клиента)"),
+      lng: z.number().describe("Долгота (из геолокации клиента)"),
+      radius_km: z
+        .number()
+        .positive()
+        .optional()
+        .default(5)
+        .describe("Радиус поиска в км. По умолчанию 5 км."),
+      kind: z
+        .enum(["atm", "office", "courier_zone"])
+        .optional()
+        .describe("Тип точки. Если не задан — вернёт все типы."),
+    }),
+    execute: async ({ lat, lng, radius_km = 5, kind }) => {
+      const points = await listActivePayoutPoints(db, tenantId, { kind });
+      const nearby = points
+        .filter((p) => p.lat != null && p.lng != null)
+        .map((p) => ({ ...p, distKm: haversineKm(lat, lng, p.lat!, p.lng!) }))
+        .filter((p) => p.distKm <= radius_km)
+        .sort((a, b) => a.distKm - b.distKm)
+        .slice(0, 5)
+        .map((p) => ({
+          id: p.id,
+          kind: p.kind,
+          label: p.label,
+          bankName: p.bankName,
+          address: p.address,
+          city: p.city,
+          distKm: Math.round(p.distKm * 10) / 10,
+          denomination: p.denomination,
+          perWithdrawalMax: p.perWithdrawalMax,
+          feeFixed: p.feeFixed,
+          feePct: p.feePct,
+        }));
+      if (nearby.length === 0) {
+        return { note: `Ближайших точек выдачи в радиусе ${radius_km} км не найдено.` };
+      }
+      return { points: nearby };
+    },
+  };
+
   const resolveCurrentStage = () => resolveLeadStageSlug(db, tenantId, conversationId);
   const guarded = [
     computeQuoteTool,
@@ -1492,6 +1553,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ),
     businessInfoTool,
     listDirectionsTool,
+    listPayoutPointsTool,
   ].map((tool) => withExchangeStageGuard(tool, stageSlug, resolveCurrentStage));
 
   // Policy-текст (текущая стадия + разрешённые инструменты) добавляем ОДИН раз —

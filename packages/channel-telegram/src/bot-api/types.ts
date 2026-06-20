@@ -82,6 +82,12 @@ export interface TgDocument {
   file_size?: number;
 }
 
+export interface TgLocation {
+  latitude: number;
+  longitude: number;
+  horizontal_accuracy?: number;
+}
+
 export interface TgMessage {
   message_id: number;
   from?: TgUser;
@@ -102,6 +108,7 @@ export interface TgMessage {
   /** «Кружок» — видео-сообщение (video note). Для видео-верификации. */
   video_note?: TgVideoNote;
   document?: TgDocument;
+  location?: TgLocation;
   /** When this message is a reply to another, Telegram inlines the
    *  parent message here. We use it to detect operator replies to lead
    *  cards (matched by the parent's `message_id` against

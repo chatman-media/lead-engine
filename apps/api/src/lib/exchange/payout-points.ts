@@ -33,6 +33,8 @@ export interface PayoutPoint {
   area: string | null;
   city: string | null;
   address: string | null;
+  lat: number | null;
+  lng: number | null;
 }
 
 export interface ListPayoutPointsOpts {
@@ -73,6 +75,8 @@ export async function listActivePayoutPoints(
         area: exchangePayoutPoints.area,
         city: exchangePayoutPoints.city,
         address: exchangePayoutPoints.address,
+        lat: exchangePayoutPoints.lat,
+        lng: exchangePayoutPoints.lng,
       })
       .from(exchangePayoutPoints)
       .where(and(...filters))
@@ -95,6 +99,8 @@ export async function listActivePayoutPoints(
       area: r.area,
       city: r.city,
       address: r.address,
+      lat: r.lat === null ? null : Number(r.lat),
+      lng: r.lng === null ? null : Number(r.lng),
     }));
   });
 }
