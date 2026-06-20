@@ -4447,6 +4447,12 @@ export const saas = {
       { method: "POST", body: JSON.stringify(opts) },
     );
   },
+  sendPayoutPointLocation(pointId: number, conversationId: number) {
+    return request<{ ok: boolean }>(`/api/admin/exchange/payout-points/${pointId}/send-location`, {
+      method: "POST",
+      body: JSON.stringify({ conversationId }),
+    });
+  },
   refreshExchangeRates() {
     return request<{ ok: boolean; updated: number; skipped: number; failed: number }>(
       "/api/admin/exchange/rates/refresh",
