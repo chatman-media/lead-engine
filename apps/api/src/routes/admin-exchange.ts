@@ -1585,7 +1585,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
           id: exchangePayoutPoints.id,
           lat: exchangePayoutPoints.lat,
           lng: exchangePayoutPoints.lng,
-          name: exchangePayoutPoints.name,
+          name: exchangePayoutPoints.label,
         })
         .from(exchangePayoutPoints)
         .where(
