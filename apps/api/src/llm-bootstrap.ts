@@ -45,11 +45,12 @@ import {
   type Style,
   type ToolCallRecord,
 } from "@chatman-media/kb";
-import type {
-  ChatClient,
-  InMemoryLlmRouter,
-  EmbeddingClient as RagEmbeddingClient,
-  LlmProviderConfig as RouterCfg,
+import {
+  type ChatClient,
+  type InMemoryLlmRouter,
+  OpenRouterChatClient,
+  type EmbeddingClient as RagEmbeddingClient,
+  type LlmProviderConfig as RouterCfg,
 } from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
@@ -194,15 +195,24 @@ export function makeMemoryExtractor(
  * который сам пишет реплики пользователя, имитируя живую переписку из Telegram.
  * Возвращает null если у тенанта не настроен chat LLM.
  */
-export function makeSimChatResolver(ref: LoadedRef): (tenantId: number) => ChatClient | null {
+export function makeSimChatResolver(
+  ref: LoadedRef,
+  personaModel?: string,
+  personaApiKey?: string,
+): (tenantId: number) => ChatClient | null {
+  const personaClient =
+    personaModel && personaApiKey
+      ? new OpenRouterChatClient({ model: personaModel, apiKey: personaApiKey })
+      : null;
+
   for (const [tenantId, perPurpose] of ref.current.byTenant) {
     const chat = perPurpose.get("chat");
     if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
   }
   return (tenantId: number): ChatClient | null => {
+    if (personaClient) return personaClient;
     const cfg = getConfig(ref.current, tenantId, "chat");
     if (!cfg) return null;
-    // setConfig идемпотентен — на случай tenant'а, добавленного после boot.
     ref.router.setConfig(toRouterConfig(tenantId, "chat", cfg));
     return ref.router.resolveChat(tenantId, "chat");
   };

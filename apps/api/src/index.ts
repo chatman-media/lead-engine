@@ -746,7 +746,11 @@ async function main() {
 				.catch(() => {});
 		},
 	);
-	const simChatResolver = makeSimChatResolver(loadedRef);
+	const simChatResolver = makeSimChatResolver(
+		loadedRef,
+		cfg.sim.personaModel || undefined,
+		cfg.sim.personaApiKey || undefined,
+	);
 	const shadowEvalRunner = new ShadowEvalJobRunner({
 		db,
 		resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),

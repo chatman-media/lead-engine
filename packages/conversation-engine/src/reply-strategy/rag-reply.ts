@@ -448,6 +448,7 @@ function exchangeMissingFieldsQuestion(
   asset: string,
   networkKnown: boolean,
   payoutKnown: boolean,
+  bankLabel = "местный банковский счёт",
 ): string | null {
   const parts: string[] = [];
   if (EXCHANGE_USDT_RE.test(asset) && !networkKnown) {
@@ -455,7 +456,7 @@ function exchangeMissingFieldsQuestion(
   }
   if (!payoutKnown) {
     parts.push(
-      "как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на тайский банковский счёт",
+      `как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на ${bankLabel}`,
     );
   }
   if (parts.length === 0) return null;
@@ -496,6 +497,11 @@ async function maybeForceExchangeQuoteReply(input: {
   const result = await quoteTool.execute(args);
   const text = forcedExchangeQuoteText(result, !args.network, rateAsked);
   if (!text) return null;
+  const resultRow = (result ?? {}) as Record<string, unknown>;
+  const dirQ = typeof resultRow.direction === "string" ? resultRow.direction.split("->")[1] : null;
+  const quoteBankLabel = resolveQuoteCurrency(
+    typeof resultRow.quoteAsset === "string" ? resultRow.quoteAsset : dirQ,
+  ).bankLabel;
   // После котировки дособираем способ выдачи/сети (если клиент ещё не назвал),
   // чтобы вести к заявке, а не замирать на «Получите X». networkKnown/payoutKnown
   // — из собранного, не regex.
@@ -503,6 +509,7 @@ async function maybeForceExchangeQuoteReply(input: {
     collected.asset,
     Boolean(collected.network),
     Boolean(collected.payoutMethod),
+    quoteBankLabel,
   );
   return {
     text: ask ? `${text}\n\n${ask}` : text,
@@ -556,7 +563,7 @@ function buildExchangeCollected(injected?: ExchangeCollectedInput | null): Excha
 // Метки для сводки/грунтинга. ВАЖНО: формулировки без слов
 // оплат*/перевод/карта/qr/сбп/реквизит — иначе текст с числом котировки
 // триггерит requisites-guard (см. exchange-reply-guard).
-function exchangePayoutLabel(method: string | null): string | null {
+function exchangePayoutLabel(method: string | null, bankLabel = "местный счёт"): string | null {
   switch (method) {
     case "atm":
       return "снятие в банкомате";
@@ -565,7 +572,7 @@ function exchangePayoutLabel(method: string | null): string | null {
     case "courier_cash":
       return "доставка курьером";
     case "thai_bank_transfer":
-      return "зачисление на тайский счёт";
+      return `зачисление на ${bankLabel}`;
     default:
       return null;
   }
@@ -613,7 +620,7 @@ function renderExchangeSummaryLine(c: ExchangeCollected, quoteResult: unknown): 
     typeof row.quoteAsset === "string" ? row.quoteAsset : directionQuote,
   );
   const net = c.network ? ` (${c.network})` : "";
-  const payout = exchangePayoutLabel(c.payoutMethod);
+  const payout = exchangePayoutLabel(c.payoutMethod, currency.bankLabel);
   const payment = c.asset === "RUB" ? exchangePaymentLabel(c.paymentMethod) : null;
   const tail = [payout ? `выдача — ${payout}` : null, payment ? `внесение — ${payment}` : null]
     .filter(Boolean)

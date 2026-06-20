@@ -366,6 +366,12 @@ const DEFAULT_MAX_TURNS = 6;
 const MAX_TURNS_CAP = 20;
 const DONE_TOKEN = "[DONE]";
 
+// Маркеры «role-flip»: persona-LLM ответила ОТ ЛИЦА обменника вместо клиента
+// («мы можем предложить…», выдумала курс/реквизиты). Слабые модели иногда
+// зеркалят сервисную формулировку бота — ловим и перегенерируем один раз.
+const PERSONA_ROLEFLIP_RE =
+  /\bмы (?:можем|предлага|готов|работа|обменя|дад|даё)|предлож(?:у|им|ить) вам|наш курс/iu;
+
 const DEFAULT_STREAM_INTERVAL_SEC = 60;
 const MIN_STREAM_INTERVAL_SEC = 5;
 const MAX_STREAM_CLIENTS = 50;
@@ -1018,11 +1024,33 @@ export function makeAdminSimRoutes(opts: {
         msgs.push({ role: "assistant", content: ex.user }); // реплика клиента
         msgs.push({ role: "user", content: ex.bot }); // ответ бота (собеседник)
       }
-      const out = await ctx.personaClient.complete(msgs, {
-        temperature: 0.8,
-        numPredict: 200,
+      // Якорь роли в КОНЦЕ контекста (модель сильнее весит последнее): напоминаем,
+      // что нужна реплика клиента — снижает role-flip ещё до проверки/перезапроса.
+      msgs.push({
+        role: "system",
+        content: "Напиши следующую реплику КЛИЕНТА (не обменника) — только то, что говорит клиент.",
       });
-      const text = out?.trim() ?? "";
+      const complete = async (extra?: ChatMessage, temperature = 0.8): Promise<string> => {
+        const out = await ctx.personaClient.complete(extra ? [...msgs, extra] : msgs, {
+          temperature,
+          numPredict: 200,
+        });
+        return out?.trim() ?? "";
+      };
+      let text = await complete();
+      // Анти-role-flip: если персона ответила от лица обменника — до 2 перезапросов
+      // с жёстким напоминанием и пониженной температурой (см. PERSONA_ROLEFLIP_RE).
+      for (let i = 0; text && i < 2 && PERSONA_ROLEFLIP_RE.test(text); i++) {
+        text = await complete(
+          {
+            role: "system",
+            content:
+              "СТОП. Ты — КЛИЕНТ, а не обменник. Не отвечай от его лица, не называй курсы/суммы/реквизиты " +
+              "и не предлагай условия. Напиши следующую реплику КЛИЕНТА — вопрос или реакцию.",
+          },
+          0.4,
+        );
+      }
       if (!text || text.includes(DONE_TOKEN)) return null;
       return text;
     };

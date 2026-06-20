@@ -468,7 +468,10 @@ function buildExchangeCollected(
 
 // Метки для сводки/грунтинга — без слов оплат*/перевод/карта/qr/сбп/реквизит,
 // иначе текст с числом котировки триггерит requisites-guard.
-function exchangePayoutLabel(method: string | null): string | null {
+function exchangePayoutLabel(
+	method: string | null,
+	bankLabel = "местный счёт",
+): string | null {
 	switch (method) {
 		case "atm":
 			return "снятие в банкомате";
@@ -477,7 +480,7 @@ function exchangePayoutLabel(method: string | null): string | null {
 		case "courier_cash":
 			return "доставка курьером";
 		case "thai_bank_transfer":
-			return "зачисление на тайский счёт";
+			return `зачисление на ${bankLabel}`;
 		default:
 			return null;
 	}
@@ -525,7 +528,7 @@ function renderExchangeSummaryLine(
 		typeof row.quoteAsset === "string" ? row.quoteAsset : directionQuote,
 	);
 	const net = c.network ? ` (${c.network})` : "";
-	const payout = exchangePayoutLabel(c.payoutMethod);
+	const payout = exchangePayoutLabel(c.payoutMethod, currency.bankLabel);
 	const payment =
 		c.asset === "RUB" ? exchangePaymentLabel(c.paymentMethod) : null;
 	const tail = [
@@ -649,6 +652,7 @@ function exchangeMissingFieldsQuestion(
 	asset: string,
 	networkKnown: boolean,
 	payoutKnown: boolean,
+	bankLabel = "местный банковский счёт",
 ): string | null {
 	const parts: string[] = [];
 	if (EXCHANGE_USDT_RE.test(asset) && !networkKnown) {
@@ -656,7 +660,7 @@ function exchangeMissingFieldsQuestion(
 	}
 	if (!payoutKnown) {
 		parts.push(
-			"как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на тайский банковский счёт",
+			`как удобнее получить деньги — наличными в офисе, снятием в банкомате или зачислением на ${bankLabel}`,
 		);
 	}
 	if (parts.length === 0) return null;
@@ -710,10 +714,16 @@ async function maybeForceExchangeQuoteReply(
 	const result = await quoteTool.execute(args);
 	const text = forcedExchangeQuoteText(result, !args.network, rateAsked);
 	if (!text) return null;
+	const resultRow4 = (result ?? {}) as Record<string, unknown>;
+	const dirQ4 = typeof resultRow4.direction === "string" ? resultRow4.direction.split("->")[1] : null;
+	const quoteBankLabel = resolveQuoteCurrency(
+		typeof resultRow4.quoteAsset === "string" ? resultRow4.quoteAsset : dirQ4,
+	).bankLabel;
 	const ask = exchangeMissingFieldsQuestion(
 		collected.asset,
 		Boolean(collected.network),
 		Boolean(collected.payoutMethod),
+		quoteBankLabel,
 	);
 	return {
 		text: ask ? `${text}\n\n${ask}` : text,
