@@ -146,16 +146,36 @@ interface OsmNode {
   tags?: Record<string, string>;
 }
 
+const OVERPASS_HEADERS = {
+  "Content-Type": "application/x-www-form-urlencoded",
+  "User-Agent": "lead-engine/1.0 (exchange atm sync)",
+};
+
 export async function fetchOsmAtms(bbox: string): Promise<OsmNode[]> {
   const query = `[out:json][timeout:90][bbox:${bbox}];\nnode["amenity"="atm"];\nout body;`;
-  const res = await fetch(OVERPASS_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `data=${encodeURIComponent(query)}`,
-  });
-  if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
-  const data = (await res.json()) as { elements: OsmNode[] };
-  return data.elements.filter((e): e is OsmNode => e.type === "node");
+  const body = `data=${encodeURIComponent(query)}`;
+
+  const MAX_ATTEMPTS = 3;
+  const BACKOFF_MS = [0, 8_000, 24_000];
+  let lastStatus = 0;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (BACKOFF_MS[attempt]) {
+      await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
+    }
+    const res = await fetch(OVERPASS_URL, { method: "POST", headers: OVERPASS_HEADERS, body });
+    if (res.status === 429 || res.status === 503) {
+      lastStatus = res.status;
+      continue;
+    }
+    if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+    const data = (await res.json()) as { elements: OsmNode[] };
+    return data.elements.filter((e): e is OsmNode => e.type === "node");
+  }
+
+  throw new Error(
+    `Overpass API перегружен (${lastStatus}) — сервер превысил квоту. Попробуйте через 5 минут.`,
+  );
 }
 
 function buildLabel(bankName: string, tags: Record<string, string>): string {
