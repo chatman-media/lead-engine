@@ -4508,12 +4508,13 @@ export const saas = {
       items: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }>;
     }>("/api/admin/exchange/requisites");
   },
-  exchangeOrders(status?: string, limit?: number) {
+  exchangeOrders(opts: { status?: string; limit?: number; offset?: number } = {}) {
     const p = new URLSearchParams();
-    if (status) p.set("status", status);
-    if (limit) p.set("limit", String(limit));
+    if (opts.status) p.set("status", opts.status);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.offset) p.set("offset", String(opts.offset));
     const q = p.toString() ? `?${p.toString()}` : "";
-    return request<{ orders: ExchangeOrder[] }>(`/api/admin/exchange/orders${q}`);
+    return request<{ orders: ExchangeOrder[]; total: number }>(`/api/admin/exchange/orders${q}`);
   },
   updateExchangeOrder(
     id: number,

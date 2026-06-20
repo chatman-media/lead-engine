@@ -922,19 +922,25 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
   app.get("/api/admin/exchange/orders", async (c) => {
     const tenantId = c.var.tenantId;
     const status = c.req.query("status");
-    const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 500);
-    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+    const limit = Math.min(Number(c.req.query("limit") ?? 20) || 20, 100);
+    const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
+    const [rows, totalRows] = await withTenant(opts.db, tenantId, async (tx) => {
       const where = status
         ? and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.status, status))
         : eq(exchangeOrders.tenantId, tenantId);
-      return tx
-        .select()
-        .from(exchangeOrders)
-        .where(where)
-        .orderBy(desc(exchangeOrders.id))
-        .limit(limit);
+      const [data, [cnt]] = await Promise.all([
+        tx
+          .select()
+          .from(exchangeOrders)
+          .where(where)
+          .orderBy(desc(exchangeOrders.id))
+          .limit(limit)
+          .offset(offset),
+        tx.select({ count: sql<number>`count(*)::int` }).from(exchangeOrders).where(where),
+      ]);
+      return [data, cnt?.count ?? 0] as const;
     });
-    return c.json({ orders: rows.map(serializeExchangeOrder) });
+    return c.json({ orders: rows.map(serializeExchangeOrder), total: totalRows });
   });
 
   app.get("/api/admin/exchange/orders/:id", async (c) => {

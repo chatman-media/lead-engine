@@ -526,6 +526,9 @@ export function SaasExchange() {
   const [loading, setLoading] = useState(true);
   const [rates, setRates] = useState<ExchangeRate[]>([]);
   const [orders, setOrders] = useState<ExchangeOrder[]>([]);
+  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [ordersPage, setOrdersPage] = useState(0);
+  const ORDERS_PAGE_SIZE = 20;
   const [turnover, setTurnover] = useState<ExchangeTurnover | null>(null);
   const [exchangeEval, setExchangeEval] = useState<ExchangeEvalResult | null>(null);
   const [exchangeEvalRunning, setExchangeEvalRunning] = useState(false);
@@ -568,11 +571,22 @@ export function SaasExchange() {
     return false;
   }
 
+  const loadOrders = (page: number) => {
+    saas
+      .exchangeOrders({ limit: ORDERS_PAGE_SIZE, offset: page * ORDERS_PAGE_SIZE })
+      .then((o) => {
+        setOrders(o.orders);
+        setOrdersTotal(o.total);
+        setOrdersPage(page);
+      })
+      .catch(() => toast.error("Не удалось загрузить заявки"));
+  };
+
   function load() {
     setLoading(true);
     Promise.all([
       saas.exchangeRates(),
-      saas.exchangeOrders(),
+      saas.exchangeOrders({ limit: ORDERS_PAGE_SIZE, offset: 0 }),
       saas.exchangeTurnover(),
       saas.exchangeRequisites().catch(() => ({ items: [] })),
       saas.exchangeSettings().catch(() => DEFAULT_SETTINGS),
@@ -581,6 +595,8 @@ export function SaasExchange() {
       .then(([r, o, t, req, st, prop]) => {
         setRates(r.rates);
         setOrders(o.orders);
+        setOrdersTotal(o.total);
+        setOrdersPage(0);
         setTurnover(t);
         setSavedRequisites(req.items);
         setSettings(st);
@@ -771,7 +787,7 @@ export function SaasExchange() {
     try {
       await saas.updateExchangeOrder(id, patch);
       toast.success("Заявка обновлена");
-      load();
+      loadOrders(ordersPage);
     } catch (err) {
       if (!handle401(err)) toast.error("Не удалось обновить заявку");
     }
@@ -801,7 +817,7 @@ export function SaasExchange() {
     try {
       const r = await saas.confirmExchangePayment(id);
       toast.success(r.delivered ? "Оплата подтверждена, клиент уведомлён" : "Оплата подтверждена");
-      load();
+      loadOrders(ordersPage);
     } catch (err) {
       if (!handle401(err)) toast.error("Не удалось подтвердить оплату");
     }
@@ -818,7 +834,7 @@ export function SaasExchange() {
           ? `Код ${r.payoutCode} отправлен клиенту`
           : `Код ${r.payoutCode} сохранён (клиенту не отправлен — нет активного канала)`,
       );
-      load();
+      loadOrders(ordersPage);
     } catch (err) {
       if (!handle401(err)) toast.error("Не удалось выдать код");
     }
@@ -1564,6 +1580,32 @@ export function SaasExchange() {
                   ))}
                 </TableBody>
               </Table>
+              {ordersTotal > ORDERS_PAGE_SIZE && (
+                <div className="flex items-center justify-between border-t px-4 py-3">
+                  <p className="text-xs text-muted-foreground">
+                    {ordersPage * ORDERS_PAGE_SIZE + 1}–
+                    {Math.min((ordersPage + 1) * ORDERS_PAGE_SIZE, ordersTotal)} из {ordersTotal}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={ordersPage === 0}
+                      onClick={() => loadOrders(ordersPage - 1)}
+                    >
+                      ← Назад
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={(ordersPage + 1) * ORDERS_PAGE_SIZE >= ordersTotal}
+                      onClick={() => loadOrders(ordersPage + 1)}
+                    >
+                      Вперёд →
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
