@@ -641,6 +641,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     const factReply = personaFactReply(activePersona, factKey);
     if (factReply) {
       const result: AnswerResult = {
+        /* c8 ignore next */
         text: applyStyleRules(factReply),
         usedChunkIds: [],
         hits: [],

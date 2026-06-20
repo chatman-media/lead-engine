@@ -1,10 +1,15 @@
-import type { ChatClient } from "@chatman-media/llm-router";
 import { afterEach, describe, expect, it } from "bun:test";
+import type { ChatClient } from "@chatman-media/llm-router";
 import { checkFacts, parseFactCheckResult } from "./fact-checker.ts";
 
-const chat = (text: string): ChatClient => ({ complete: async () => text }) as unknown as ChatClient;
+const chat = (text: string): ChatClient =>
+  ({ complete: async () => text }) as unknown as ChatClient;
 const chatThrows = (): ChatClient =>
-  ({ complete: async () => { throw new Error("down"); } }) as unknown as ChatClient;
+  ({
+    complete: async () => {
+      throw new Error("down");
+    },
+  }) as unknown as ChatClient;
 
 const savedEnv = process.env.RAG_FACT_CHECKER_FAIL_OPEN;
 afterEach(() => {
@@ -21,7 +26,9 @@ describe("parseFactCheckResult", () => {
     });
   });
   it("code-fence + think убираются", () => {
-    expect(parseFactCheckResult('<think>..</think>```json\n{"grounded":true,"vacancyOk":false}\n```')).toMatchObject({
+    expect(
+      parseFactCheckResult('<think>..</think>```json\n{"grounded":true,"vacancyOk":false}\n```'),
+    ).toMatchObject({
       grounded: true,
       vacancyOk: false,
     });
@@ -29,8 +36,11 @@ describe("parseFactCheckResult", () => {
   it("нет {} → OK (fail-open парсинга)", () => {
     expect(parseFactCheckResult("no json")).toEqual({ grounded: true, vacancyOk: true });
   });
-  it("битый JSON → OK", () => {
+  it("битый JSON (нет }) → OK", () => {
     expect(parseFactCheckResult("{broken")).toEqual({ grounded: true, vacancyOk: true });
+  });
+  it("есть {} но невалидный JSON → OK", () => {
+    expect(parseFactCheckResult("{broken json}")).toEqual({ grounded: true, vacancyOk: true });
   });
   it("non-bool поля → дефолт true", () => {
     expect(parseFactCheckResult('{"grounded":"yes"}')).toEqual({ grounded: true, vacancyOk: true });
@@ -40,17 +50,30 @@ describe("parseFactCheckResult", () => {
 describe("checkFacts", () => {
   const base = { question: "q", answer: "Зарплата 1500$", context: "контекст 1500$" };
   it("пустой ответ → OK без вызова LLM", async () => {
-    expect(await checkFacts({ ...base, answer: "  ", chat: chatThrows() })).toEqual({ grounded: true, vacancyOk: true });
+    expect(await checkFacts({ ...base, answer: "  ", chat: chatThrows() })).toEqual({
+      grounded: true,
+      vacancyOk: true,
+    });
   });
   it("нет контекста и вакансий → OK", async () => {
-    expect(await checkFacts({ ...base, context: "", chat: chatThrows() })).toEqual({ grounded: true, vacancyOk: true });
+    expect(await checkFacts({ ...base, context: "", chat: chatThrows() })).toEqual({
+      grounded: true,
+      vacancyOk: true,
+    });
   });
   it("есть контекст → парсит вердикт LLM", async () => {
-    const r = await checkFacts({ ...base, chat: chat('{"grounded":false,"vacancyOk":true,"reason":"выдумал"}') });
+    const r = await checkFacts({
+      ...base,
+      chat: chat('{"grounded":false,"vacancyOk":true,"reason":"выдумал"}'),
+    });
     expect(r.grounded).toBe(false);
   });
   it("vacancies-ветка промпта", async () => {
-    const r = await checkFacts({ ...base, vacanciesBlock: "Вакансия: 2000$", chat: chat('{"grounded":true,"vacancyOk":false,"reason":"не совпало"}') });
+    const r = await checkFacts({
+      ...base,
+      vacanciesBlock: "Вакансия: 2000$",
+      chat: chat('{"grounded":true,"vacancyOk":false,"reason":"не совпало"}'),
+    });
     expect(r.vacancyOk).toBe(false);
   });
   it("LLM упал → fail-closed по умолчанию", async () => {
@@ -61,6 +84,9 @@ describe("checkFacts", () => {
   });
   it("LLM упал + FAIL_OPEN=1 → пропускаем", async () => {
     process.env.RAG_FACT_CHECKER_FAIL_OPEN = "1";
-    expect(await checkFacts({ ...base, chat: chatThrows() })).toEqual({ grounded: true, vacancyOk: true });
+    expect(await checkFacts({ ...base, chat: chatThrows() })).toEqual({
+      grounded: true,
+      vacancyOk: true,
+    });
   });
 });

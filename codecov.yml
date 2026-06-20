@@ -74,3 +74,5 @@ ignore:
   - "**/*.spec.ts"
   - "**/dist/**"
   - "**/*.config.ts"
+  # PDF-парсер требует реальных PDF-файлов и библиотеки unpdf — недостижим из юнит-тестов.
+  - "packages/kb/src/parse-pdf.ts"

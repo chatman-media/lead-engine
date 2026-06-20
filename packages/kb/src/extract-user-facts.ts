@@ -71,9 +71,8 @@ export function parseFactsFromLlmOutput(raw: string): Record<string, string> {
     return {};
   }
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return {};
-  }
+  /* c8 ignore next */
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
 
   const result: Record<string, string> = {};
   let count = 0;

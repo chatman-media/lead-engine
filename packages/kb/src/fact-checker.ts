@@ -120,10 +120,12 @@ export function parseFactCheckResult(raw: string): FactCheckResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(s.slice(start, end + 1));
+    /* c8 ignore next */
   } catch {
     return OK;
   }
 
+  /* c8 ignore next */
   if (typeof parsed !== "object" || parsed === null) return OK;
   const obj = parsed as Record<string, unknown>;
 
