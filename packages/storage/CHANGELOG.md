@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.47.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.46.0...@chatman-media/storage-v1.47.0) (2026-06-20)
+
+
+### Features
+
+* **exchange:** quote_round_step в exchange_settings + UI ([f549faa](https://github.com/chatman-media/lead-engine/commit/f549faa5e5d2ff16352a432e9531d4c50e023cf6))
+
 # [@chatman-media/storage-v1.46.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.45.0...@chatman-media/storage-v1.46.0) (2026-06-20)
 
 
