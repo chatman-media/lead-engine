@@ -32,9 +32,7 @@ function masterKeyBytes(masterKeyHex: string): Buffer {
   }
   const buf = Buffer.from(masterKeyHex, "hex");
   if (buf.length !== 32) {
-    throw new SecretCryptoError(
-      `master key must be 32 bytes (64 hex chars), got ${buf.length}`,
-    );
+    throw new SecretCryptoError(`master key must be 32 bytes (64 hex chars), got ${buf.length}`);
   }
   return buf;
 }
@@ -45,14 +43,13 @@ export function encryptSecret(masterKeyHex: string, plaintext: string): string {
   const cipher = createCipheriv(ALGORITHM, key, iv);
   const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
-  if (authTag.length !== AUTH_TAG_LEN) {
+  // Defensive: GCM всегда отдаёт 16-байтный tag для aes-256-gcm → недостижимо.
+  /* c8 ignore next */
+  if (authTag.length !== AUTH_TAG_LEN)
     throw new SecretCryptoError(`unexpected auth tag length ${authTag.length}`);
-  }
-  return [
-    iv.toString("base64"),
-    authTag.toString("base64"),
-    encrypted.toString("base64"),
-  ].join(":");
+  return [iv.toString("base64"), authTag.toString("base64"), encrypted.toString("base64")].join(
+    ":",
+  );
 }
 
 export function decryptSecret(masterKeyHex: string, ciphertext: string): string {
