@@ -1256,4 +1256,100 @@ describe("processInbound", () => {
 			expect(snapshotLocked).toBe(true);
 		});
 	});
+
+	it("reply с photo-частью → outboundEnvelopeText пропускает нетекстовую часть (line 96)", async () => {
+		deps = makeDeps({
+			async generate() {
+				return [
+					{
+						channelId: "10",
+						externalUserId: "u1",
+						// photo без caption → outboundEnvelopeText вернёт null → не кладётся в messages
+						parts: [{ kind: "photo" as const, mediaRef: { channelId: "10", externalRef: "ext1" } }],
+					},
+				];
+			},
+		});
+		const result = await processInbound(
+			textInbound({ extUserId: "u1", extMessageId: "m-photo", text: "привет" }),
+			deps,
+		);
+		expect(result.persisted).toBe(true);
+		// photo без caption → aiText = null → assistant message не записывается
+		expect(deps._fakes.messages.all().filter((m) => m.role === "assistant")).toHaveLength(0);
+		// envelope всё равно попадает в outbound
+		expect(deps._fakes.outbound.all()).toHaveLength(1);
+	});
+
+	it("contact с невалидным attributesJson → parseJsonObject не падает (lines 110-114)", async () => {
+		// non-object JSON ("42") → ветка: JSON.parse OK но не объект → return {}
+		const contact1 = await deps._fakes.contacts.create({
+			attributesJson: "42",
+		});
+		await deps._fakes.identities.create({
+			contactId: contact1.id,
+			channelId: 10,
+			externalUserId: "u-bad1",
+		});
+
+		// broken JSON → catch-ветка
+		const contact2 = await deps._fakes.contacts.create({
+			attributesJson: "{broken-json",
+		});
+		await deps._fakes.identities.create({
+			contactId: contact2.id,
+			channelId: 10,
+			externalUserId: "u-bad2",
+		});
+
+		// Оба inbound должны пройти без падения (contact не забанен)
+		const r1 = await processInbound(
+			textInbound({ extUserId: "u-bad1", extMessageId: "m-bad1", text: "hello" }),
+			deps,
+		);
+		expect(r1.persisted).toBe(true);
+
+		const r2 = await processInbound(
+			textInbound({ extUserId: "u-bad2", extMessageId: "m-bad2", text: "world" }),
+			deps,
+		);
+		expect(r2.persisted).toBe(true);
+	});
+
+	it("autoTakeover с handoff → applyAutoHandoff вызывается (lines 812-823)", async () => {
+		deps = makeDeps({
+			async generate() {
+				return {
+					envelopes: [
+						{
+							channelId: "10",
+							externalUserId: "u1",
+							parts: [{ kind: "text" as const, text: "Передаю оператору." }],
+						},
+					],
+					operatorHandoffs: [
+						{
+							reason: "kyc_review" as const,
+							title: "KYC",
+							action: "Проверить",
+							orderId: 5,
+							stageSlug: "kyc_waiting",
+						},
+					],
+					autoTakeover: true,
+					customerNoticeSent: true,
+				};
+			},
+		});
+		const result = await processInbound(
+			textInbound({ extUserId: "u1", extMessageId: "m-takeover", text: "паспорт" }),
+			deps,
+		);
+		expect(result.escalatedReason).toBe("kyc_review");
+		// conversation переведена в human mode
+		const conv = deps._fakes.conversations.all().find((c) => c.mode === "human");
+		expect(conv).toBeDefined();
+	});
+
+
 });

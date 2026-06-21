@@ -7,14 +7,11 @@
 // Postgres не нужен — мокаем db.transaction через TestDb shim, который
 // просто исполняет callback. Тест покрывает orchestration, не DAL-уровень.
 
-import type {
-  Inbound,
-  OperatorHandoffMeta,
-  OutboundEnvelope,
-} from "@chatman-media/channel-core";
 import { describe, expect, it } from "bun:test";
-import { generateReplyAndEnqueue } from "./dispatch-reply.ts";
+import type { Inbound, OperatorHandoffMeta, OutboundEnvelope } from "@chatman-media/channel-core";
 import type { Db } from "./dal/types.ts";
+import { generateReplyAndEnqueue } from "./dispatch-reply.ts";
+import { EXCHANGE_SAFE_FALLBACK } from "./reply-strategy/exchange-reply-guard.ts";
 import type { ProcessInboundResult } from "./types.ts";
 
 interface TestDb {
@@ -70,7 +67,12 @@ function makeAutoHandoffDb() {
       set: (patch: Record<string, unknown>) => {
         // Применяем только примитивы: SQL-шаблоны (bumpFallbackStreak) пропускаем.
         for (const [k, v] of Object.entries(patch)) {
-          if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          if (
+            v === null ||
+            typeof v === "string" ||
+            typeof v === "number" ||
+            typeof v === "boolean"
+          ) {
             (conversation as Record<string, unknown>)[k] = v;
           }
         }
@@ -90,8 +92,7 @@ function makeAutoHandoffDb() {
   };
   return {
     db: {
-      transaction: async <T>(fn: (inner: Db) => Promise<T>) =>
-        fn(tx as unknown as Db),
+      transaction: async <T>(fn: (inner: Db) => Promise<T>) => fn(tx as unknown as Db),
       execute: async () => undefined,
     } as unknown as Db,
     conversation,
@@ -386,8 +387,7 @@ describe("generateReplyAndEnqueue", () => {
       }),
     };
     const db = {
-      transaction: async <T>(fn: (inner: Db) => Promise<T>) =>
-        fn(tx as unknown as Db),
+      transaction: async <T>(fn: (inner: Db) => Promise<T>) => fn(tx as unknown as Db),
       execute: async () => undefined,
     } as unknown as Db;
     const out = await generateReplyAndEnqueue({
@@ -421,4 +421,393 @@ describe("generateReplyAndEnqueue", () => {
     expect(out.outboundEnqueued).toBe(0); // дубль не отправлен
     expect(inserted).toHaveLength(0); // и не записан в историю
   });
+
+  it("escalatedReason path → ранний возврат с причиной, LLM не вызывается", async () => {
+    let called = false;
+    const db = makeTestDb();
+    const out = await generateReplyAndEnqueue({
+      db: db as unknown as Db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+        escalatedReason: "kyc_review",
+      },
+      replyStrategy: {
+        async generate() {
+          called = true;
+          return [];
+        },
+      },
+    });
+    expect(out.escalatedReason).toBe("kyc_review");
+    expect(out.outboundEnqueued).toBe(0);
+    expect(called).toBe(false);
+  });
+
+  it("пустые envelopes без auto-takeover → 0 enqueued", async () => {
+    const db = makeTestDb();
+    const out = await generateReplyAndEnqueue({
+      db: db as unknown as Db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return { envelopes: [], autoTakeover: false };
+        },
+      },
+    });
+    expect(out.outboundEnqueued).toBe(0);
+  });
+
+  it("fallbackText: заменяет EXCHANGE_SAFE_FALLBACK кастомным текстом", async () => {
+    const { db, outbound } = makeAutoHandoffDb();
+    const out = await generateReplyAndEnqueue({
+      db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      fallbackText: "Уточняю у команды, вернусь!",
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return [
+            {
+              channelId: "100",
+              externalUserId: "u1",
+              parts: [{ kind: "text" as const, text: EXCHANGE_SAFE_FALLBACK }],
+            },
+          ];
+        },
+      },
+    });
+    expect(out.outboundEnqueued).toBe(1);
+    const payloads = outbound.map((r) => JSON.parse(r.payloadJson as string));
+    expect(payloads[0].parts[0].text).toBe("Уточняю у команды, вернусь!");
+  });
+
+  it("splitReplies: текст с двойным переносом делится на два envelope'а", async () => {
+    const { db, outbound } = makeAutoHandoffDb();
+    const out = await generateReplyAndEnqueue({
+      db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      splitReplies: true,
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return [
+            {
+              channelId: "100",
+              externalUserId: "u1",
+              parts: [{ kind: "text" as const, text: "Первый абзац.\n\nВторой абзац." }],
+            },
+          ];
+        },
+      },
+    });
+    expect(out.outboundEnqueued).toBe(2);
+    expect(outbound).toHaveLength(2);
+  });
+
+  it("splitReplies: envelope с медиа не делится, caption попадает в envelopeText как ''", async () => {
+    const { db, outbound } = makeAutoHandoffDb();
+    const out = await generateReplyAndEnqueue({
+      db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      splitReplies: true,
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return [
+            {
+              channelId: "100",
+              externalUserId: "u1",
+              parts: [
+                {
+                  kind: "photo" as const,
+                  mediaRef: { channelId: "100", externalRef: "r1" },
+                  caption: "подпись",
+                },
+              ],
+            },
+          ];
+        },
+      },
+    });
+    // медиа не делится → 1 envelope
+    expect(out.outboundEnqueued).toBe(1);
+    expect(outbound).toHaveLength(1);
+  });
+
+  it("handoffAfterFallbacks: серия фолбэков >= threshold → applyAutoHandoff fallback_streak", async () => {
+    const conversation = {
+      mode: "ai",
+      status: "open",
+      escalatedAt: null as number | null,
+      fallbackStreak: 2,
+    };
+    const outboundRows: Record<string, unknown>[] = [];
+    const auditRows: Record<string, unknown>[] = [];
+    const tx = {
+      execute: async () => undefined,
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [conversation],
+            orderBy: () => ({ limit: async () => [] }),
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (patch: Record<string, unknown>) => {
+          for (const [k, v] of Object.entries(patch)) {
+            if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+              (conversation as Record<string, unknown>)[k] = v;
+            }
+          }
+          return { where: () => ({ returning: async () => [conversation] }) };
+        },
+      }),
+      insert: () => ({
+        values: (row: Record<string, unknown>) => {
+          if ("action" in row) auditRows.push(row);
+          else if ("payloadJson" in row) outboundRows.push(row);
+          return { returning: async () => [{ id: auditRows.length + outboundRows.length, ...row }] };
+        },
+      }),
+    };
+    const db = {
+      transaction: async <T>(fn: (inner: Db) => Promise<T>) => fn(tx as unknown as Db),
+      execute: async () => undefined,
+    } as unknown as Db;
+
+    const out = await generateReplyAndEnqueue({
+      db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      handoffAfterFallbacks: 2,
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return [
+            {
+              channelId: "100",
+              externalUserId: "u1",
+              parts: [{ kind: "text" as const, text: EXCHANGE_SAFE_FALLBACK }],
+            },
+          ];
+        },
+      },
+    });
+    expect(out.escalatedReason).toBe("fallback_streak");
+  });
+
+  it("fallback_streak + notifications → notify вызван, ошибка notify глотается", async () => {
+    const conversation = {
+      mode: "ai",
+      status: "open",
+      escalatedAt: null as number | null,
+      fallbackStreak: 3,
+    };
+    const tx = {
+      execute: async () => undefined,
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [conversation],
+            orderBy: () => ({ limit: async () => [] }),
+          }),
+        }),
+      }),
+      update: () => ({
+        set: () => ({ where: () => ({ returning: async () => [conversation] }) }),
+      }),
+      insert: () => ({
+        values: (row: Record<string, unknown>) => ({
+          returning: async () => [{ id: 1, ...row }],
+        }),
+      }),
+    };
+    const db = {
+      transaction: async <T>(fn: (inner: Db) => Promise<T>) => fn(tx as unknown as Db),
+      execute: async () => undefined,
+    } as unknown as Db;
+
+    const notifyCalls: unknown[] = [];
+    const notifications = {
+      notify: async (ev: unknown) => {
+        notifyCalls.push(ev);
+        throw new Error("smtp down");
+      },
+    };
+
+    const out = await generateReplyAndEnqueue({
+      db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      handoffAfterFallbacks: 1,
+      notifications: notifications as never,
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return [
+            {
+              channelId: "100",
+              externalUserId: "u1",
+              parts: [{ kind: "text" as const, text: EXCHANGE_SAFE_FALLBACK }],
+            },
+          ];
+        },
+      },
+    });
+    expect(out.escalatedReason).toBe("fallback_streak");
+    expect(notifyCalls).toHaveLength(1);
+  });
+
+
+  it("splitReplies: текст без двойного переноса → один envelope не разбивается (lines 105-106)", async () => {
+    const { db, outbound } = makeAutoHandoffDb();
+    const out = await generateReplyAndEnqueue({
+      db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      splitReplies: true,
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return [
+            {
+              channelId: "100",
+              externalUserId: "u1",
+              parts: [{ kind: "text" as const, text: "Один абзац без переноса." }],
+            },
+          ];
+        },
+      },
+    });
+    // текст без \n\n → не делится → 1 envelope
+    expect(out.outboundEnqueued).toBe(1);
+    expect(outbound).toHaveLength(1);
+  });
+
+  it("replaceFallbackText: envelope с нефолбэком-частью → ': p' ternary-ветка (line 132)", async () => {
+    const { db, outbound } = makeAutoHandoffDb();
+    await generateReplyAndEnqueue({
+      db,
+      tenant,
+      channel,
+      channelDbId: 100,
+      inbound: fakeInbound(),
+      fallbackText: "Кастом",
+      result: {
+        contactId: 1,
+        conversationId: 10,
+        persisted: true,
+        outboundEnqueued: 0,
+        userMessageText: "привет",
+        mediaOnly: false,
+        replyDeferred: true,
+      },
+      replyStrategy: {
+        async generate() {
+          return [
+            {
+              channelId: "100",
+              externalUserId: "u1",
+              // первая часть — фолбэк (заменится), вторая — обычный текст (останется как есть → line 132)
+              parts: [
+                { kind: "text" as const, text: EXCHANGE_SAFE_FALLBACK },
+                { kind: "text" as const, text: "Дополнительная инструкция." },
+              ],
+            },
+          ];
+        },
+      },
+    });
+    expect(outbound).toHaveLength(1);
+    const payload = JSON.parse((outbound[0] as Record<string, unknown>).payloadJson as string);
+    expect(payload.parts[0].text).toBe("Кастом");
+    expect(payload.parts[1].text).toBe("Дополнительная инструкция.");
+  });
+
 });
