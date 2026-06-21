@@ -4,6 +4,9 @@
 //
 // Без DATABASE_URL / живого PG тест self-skip'ается (как остальные integration).
 
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
+import { setEncryptedSecret } from "@chatman-media/conversation-engine";
 import {
   applyAllMigrations,
   createIsolatedDb,
@@ -11,10 +14,7 @@ import {
   tenants,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import { setEncryptedSecret } from "@chatman-media/conversation-engine";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
 import {
   resolveUserbotCreds,
@@ -153,5 +153,45 @@ describe("resolveUserbotCreds", () => {
     ).toEqual({ apiId: 999, apiHash: "env-hash" });
     // Защита от unused-import: ключ hash отсутствует в этом кейсе.
     expect(TELEGRAM_API_HASH_KEY).toBe("telegram_api_hash");
+  });
+});
+
+// Чистый unit (без PG): decrypt бросает → catch + onWarn (lines 63-66).
+describe("resolveUserbotCreds — decrypt error path", () => {
+  it("getDecryptedSecret кидает → onWarn + фолбэк/null", async () => {
+    const warns: Array<{ msg: string; ctx: Record<string, unknown> }> = [];
+    const throwingDb = {
+      select: () => {
+        throw new Error("db down");
+      },
+    } as never;
+
+    // без фолбэка → null
+    const res = await resolveUserbotCreds({
+      db: throwingDb,
+      tenantId: 42,
+      masterKeyHex: "a".repeat(64),
+      onWarn: (msg, ctx) => warns.push({ msg, ctx }),
+    });
+    expect(res).toBeNull();
+    expect(warns).toHaveLength(1);
+    expect(warns[0]?.msg).toContain("failed to decrypt");
+    expect(warns[0]?.ctx.tenantId).toBe(42);
+  });
+
+  it("decrypt кидает, но есть env-фолбэк → возвращает фолбэк", async () => {
+    const throwingDb = {
+      select: () => {
+        throw new Error("db down");
+      },
+    } as never;
+    const res = await resolveUserbotCreds({
+      db: throwingDb,
+      tenantId: 1,
+      masterKeyHex: "a".repeat(64),
+      fallbackApiId: 777,
+      fallbackApiHash: "env-h",
+    });
+    expect(res).toEqual({ apiId: 777, apiHash: "env-h" });
   });
 });
