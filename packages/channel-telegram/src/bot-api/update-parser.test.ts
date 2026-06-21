@@ -333,4 +333,22 @@ describe("parseUpdate", () => {
     };
     expect(parseUpdate(CH, update)?.channelLangHint).toBe("en-US");
   });
+
+  it("геолокация → text-часть с координатами (lines 66-69)", () => {
+    const update: TgUpdate = {
+      update_id: 13,
+      message: {
+        message_id: 60,
+        chat: { id: 5, type: "private" },
+        from: { id: 5 },
+        date: 1700000000,
+        location: { latitude: 13.7563, longitude: 100.5018 },
+      },
+    };
+    const inbound = parseUpdate(CH, update);
+    const textPart = inbound?.parts.find((p) => p.kind === "text");
+    expect(textPart).toBeDefined();
+    expect((textPart as { text: string }).text).toContain("13.7563");
+    expect((textPart as { text: string }).text).toContain("100.5018");
+  });
 });

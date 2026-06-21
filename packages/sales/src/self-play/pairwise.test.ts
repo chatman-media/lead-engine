@@ -1,8 +1,9 @@
-import type { ChatClient } from "@chatman-media/llm-router";
 import { describe, expect, it } from "bun:test";
+import type { ChatClient } from "@chatman-media/llm-router";
 import { judgePairwise, parsePairwiseVerdict } from "./pairwise.ts";
 
-const chat = (text: string): ChatClient => ({ complete: async () => text }) as unknown as ChatClient;
+const chat = (text: string): ChatClient =>
+  ({ complete: async () => text }) as unknown as ChatClient;
 const chatThrows = (): ChatClient =>
   ({
     complete: async () => {
@@ -21,7 +22,10 @@ const args = (c: ChatClient) => ({
 
 describe("parsePairwiseVerdict", () => {
   it("чистый JSON", () => {
-    expect(parsePairwiseVerdict('{"winner":"b","reason":"closed"}')).toMatchObject({ winner: "b", reason: "closed" });
+    expect(parsePairwiseVerdict('{"winner":"b","reason":"closed"}')).toMatchObject({
+      winner: "b",
+      reason: "closed",
+    });
   });
   it("code-fenced", () => {
     expect(parsePairwiseVerdict('```json\n{"winner":"a","reason":"x"}\n```').winner).toBe("a");
@@ -33,6 +37,14 @@ describe("parsePairwiseVerdict", () => {
     const v = parsePairwiseVerdict("nothing here");
     expect(v.winner).toBe("draw");
     expect(v.raw).toBe("nothing here");
+  });
+
+  it("JSON валидный, winner неизвестный → pickWinner null → fallback draw (line 129)", () => {
+    // JSON парсится корректно, но winner="BAD" не в {a,b,draw} → pickWinner→null
+    // regex /"winner".*"(a|b|draw)"/i тоже не совпадает → fallback
+    const v = parsePairwiseVerdict('{"winner":"BAD_VALUE","reason":"test"}');
+    expect(v.winner).toBe("draw");
+    expect(v.raw).toBe('{"winner":"BAD_VALUE","reason":"test"}');
   });
 });
 
