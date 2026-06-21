@@ -34,12 +34,10 @@ function b64url(s: string): string {
   return Buffer.from(s, "utf8").toString("base64url");
 }
 
-function parseB64url(s: string): string | null {
-  try {
-    return Buffer.from(s, "base64url").toString("utf8");
-  } catch {
-    return null;
-  }
+function parseB64url(s: string): string {
+  // Buffer.from(string, "base64url") не бросает (невалидные символы игнорятся);
+  // битый/пустой результат отсеивает вызывающий через `if (!raw)`.
+  return Buffer.from(s, "base64url").toString("utf8");
 }
 
 /**
@@ -128,9 +126,7 @@ export interface PartnerPingResult {
  *
  * @throws if transport fails (caller should catch and log; not block lead advance).
  */
-export async function firePartnerPing(
-  opts: PartnerPingOpts,
-): Promise<PartnerPingResult> {
+export async function firePartnerPing(opts: PartnerPingOpts): Promise<PartnerPingResult> {
   const ts = Math.floor(Date.now() / 1000);
   const token = await makeCallbackToken(
     { tenantId: opts.tenantId, leadId: opts.leadId, stageId: opts.stageId, ts },
@@ -242,7 +238,7 @@ async function sendTelegramPartnerMessage(opts: TgSendOpts): Promise<void> {
     signal: AbortSignal.timeout(8_000),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { description?: string };
+    const err = (await res.json().catch(() => ({}))) as { description?: string };
     throw new Error(`Telegram sendMessage failed ${res.status}: ${err.description ?? "unknown"}`);
   }
 }

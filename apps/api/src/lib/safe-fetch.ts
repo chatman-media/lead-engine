@@ -156,13 +156,13 @@ export async function safeFetch(
   const maxRedirects = opts?.maxRedirects ?? 3;
   let url = typeof input === "string" ? input : input.toString();
 
-  for (let hop = 0; ; hop++) {
+  for (let hop = 0; hop <= maxRedirects; hop++) {
     await assertPublicUrl(url);
     const res = await fetch(url, { ...init, redirect: "manual" });
     const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
     if (!isRedirect) return res;
-    if (hop >= maxRedirects) throw new SsrfError("too many redirects");
     const location = res.headers.get("location") ?? "";
     url = new URL(location, url).toString();
   }
+  throw new SsrfError("too many redirects");
 }

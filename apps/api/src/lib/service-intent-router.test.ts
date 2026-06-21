@@ -42,6 +42,45 @@ describe("service-intent-router", () => {
     expect(chooseFunnelForIntent(funnels, "что у вас есть?")?.slug).toBe("exchange");
   });
 
+  it("partner_service: прямого матча нет → fallback на 'partner'-воронку (lines 124-125)", () => {
+    // intent=partner_service, прямой funnelMatches(f,"partner_service") не находит,
+    // но funnelMatches(f,"partner") матчит slug "partners".
+    const rows = [
+      { id: 1, slug: "exchange", verticalTemplateId: "exchange_v1" },
+      { id: 4, slug: "partners", verticalTemplateId: null },
+    ];
+    expect(chooseFunnelForIntent(rows, "нужен подрядчик на проект")?.slug).toBe("partners");
+  });
+
+  it("каталог: матч по токену описания (не по slug/name) → catalog route (line 206)", () => {
+    const route = chooseServiceRoute({
+      funnels,
+      catalogItems: [
+        item({
+          id: 20,
+          slug: "svc1",
+          name: "Услуга Х",
+          description: "юридическая консультация для туристов",
+        }),
+      ],
+      // "консультация" есть только в description → срабатывает token-match, не direct
+      text: "нужна консультация",
+    });
+    expect(route.source).toBe("catalog");
+    expect(route.catalogItem?.id).toBe(20);
+  });
+
+  it("каталог не совпал → перебор завершается, route по intent (line 207)", () => {
+    const route = chooseServiceRoute({
+      funnels,
+      catalogItems: [item({ id: 30, slug: "visa", name: "Виза", description: "оформление визы" })],
+      text: "курс USDT на баты",
+    });
+    expect(route.source).toBe("intent");
+    expect(route.catalogItem).toBeNull();
+    expect(route.funnel?.slug).toBe("exchange");
+  });
+
   it("routes transfer/green corridor intents to their funnels (incl. hyphenated slug)", () => {
     const threeFunnels = [
       { id: 1, slug: "exchange", verticalTemplateId: "exchange_v1" },
@@ -89,7 +128,13 @@ describe("service-intent-router", () => {
 
   it("prefers matching service catalog item before deterministic intent fallback", () => {
     const catalog = [
-      item({ id: 10, slug: "vip_support", name: "VIP сопровождение", routeType: "funnel", funnelId: 2 }),
+      item({
+        id: 10,
+        slug: "vip_support",
+        name: "VIP сопровождение",
+        routeType: "funnel",
+        funnelId: 2,
+      }),
     ];
     const route = chooseServiceRoute({
       funnels,
@@ -140,7 +185,12 @@ describe("service-intent-router", () => {
     const manualRoute = chooseServiceRoute({
       funnels,
       catalogItems: [
-        item({ id: 12, slug: "custom_request", name: "Индивидуальный запрос", routeType: "manual" }),
+        item({
+          id: 12,
+          slug: "custom_request",
+          name: "Индивидуальный запрос",
+          routeType: "manual",
+        }),
       ],
       text: "индивидуальный запрос на завтра",
     });
@@ -149,7 +199,9 @@ describe("service-intent-router", () => {
   });
 });
 
-function item(input: Partial<RoutableCatalogItem> & { id: number; slug: string; name: string }): RoutableCatalogItem {
+function item(
+  input: Partial<RoutableCatalogItem> & { id: number; slug: string; name: string },
+): RoutableCatalogItem {
   return {
     category: null,
     description: null,
