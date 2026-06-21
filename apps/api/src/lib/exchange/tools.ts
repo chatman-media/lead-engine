@@ -1483,6 +1483,25 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     },
   };
 
+  // Поддерживаемые банки выдачи тенанта из настройки exchange_payout_banks
+  // (JSON-массив имён). Возвращает Set имён или null (не задано → без фильтра).
+  const getSupportedPayoutBanks = async (): Promise<Set<string> | null> => {
+    const raw = await withTenant(db, tenantId, (tx) =>
+      getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_payout_banks", masterKeyHex }),
+    );
+    if (!raw) return null;
+    try {
+      const arr: unknown = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        const names = arr.filter((x): x is string => typeof x === "string" && x.length > 0);
+        if (names.length > 0) return new Set(names);
+      }
+    } catch {
+      /* кривой JSON в настройке — трактуем как «фильтра нет» */
+    }
+    return null;
+  };
+
   const listPayoutPointsTool: AnyRagTool = {
     name: "list_exchange_payout_points",
     description: [
@@ -1506,7 +1525,14 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     }),
     execute: async ({ lat, lng, radius_km = 5, kind }) => {
       const points = await listActivePayoutPoints(db, tenantId, { kind });
-      const nearby = points
+      // Поддерживаемые банки тенанта (exchange_payout_banks, JSON-массив имён).
+      // Задан → бот предлагает ТОЛЬКО точки этих банков (через которые реально
+      // выдают наличные). Пусто → без фильтра (все банки каталога).
+      const supportedBanks = await getSupportedPayoutBanks();
+      const eligible = supportedBanks
+        ? points.filter((p) => p.bankName != null && supportedBanks.has(p.bankName))
+        : points;
+      const nearby = eligible
         .filter((p) => p.lat != null && p.lng != null)
         .map((p) => ({ ...p, distKm: haversineKm(lat, lng, p.lat!, p.lng!) }))
         .filter((p) => p.distKm <= radius_km)
