@@ -964,278 +964,262 @@ export function SaasExchange() {
 
         {/* ── Курсы ─────────────────────────────────────────────── */}
         <TabsContent value="rates" className="space-y-4">
-          {/* ── Карточка 1: Валюта и округление ──────────────────── */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Валюта и округление</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Основная валюта — в ней бот считает котировки и выдаёт суммы. После смены
-                пересоздайте курсы через «Курсы обмена по диапазонам».
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Основная валюта */}
-              <div className="flex items-center gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Основная валюта</Label>
-                  <Select
-                    value={settings.quoteAsset ?? "PHP"}
-                    onValueChange={(v) => setSettings((s) => ({ ...s, quoteAsset: v }))}
-                  >
-                    <SelectTrigger className="h-8 w-52 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS).map((code) => (
-                        <SelectItem key={code} value={code}>
-                          {QUOTE_ASSET_LABELS[code] ?? code}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Шаги округления */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs text-muted-foreground">
-                    Шаги округления при выдаче
-                  </Label>
-                  <span className="text-xs text-muted-foreground">— пусто = авто из словаря</span>
-                </div>
-                <div className="space-y-1">
-                  {roundCurrencies.map((code) => {
-                    const auto = ROUND_STEP_AUTO[code];
-                    const row = settings.roundSteps?.[code] ?? {};
-                    const isFromActiveRate = rates.some((r) => r.isActive && r.quoteAsset === code);
-                    const isPrimary = code === (settings.quoteAsset ?? "PHP");
-                    const canRemove = !isPrimary && !isFromActiveRate;
-                    const setStep = (method: "atm" | "cash" | "bank", val: string) => {
-                      setSettings((s) => {
-                        const prev = s.roundSteps ?? {};
-                        const entry = { ...(prev[code] ?? {}) };
-                        if (val === "") delete entry[method];
-                        else {
-                          const n = Math.max(1, Math.floor(Number(val)));
-                          if (Number.isFinite(n)) entry[method] = n;
-                        }
-                        const next = { ...prev };
-                        if (Object.keys(entry).length === 0) delete next[code];
-                        else next[code] = entry;
-                        return { ...s, roundSteps: Object.keys(next).length ? next : null };
-                      });
-                    };
-                    return (
-                      <div
-                        key={code}
-                        className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2"
-                      >
-                        <span className="w-16 shrink-0 text-sm font-medium">
-                          {QUOTE_ASSET_LABELS[code]?.match(/^\S+/)?.[0] ?? ""}{" "}
-                          <span className="font-mono">{code}</span>
-                        </span>
-                        {(
-                          [
-                            { method: "atm", label: "ATM" },
-                            { method: "cash", label: "Нал" },
-                            { method: "bank", label: "Банк" },
-                          ] as const
-                        ).map(({ method, label }) => (
-                          <div key={method} className="flex flex-col items-center gap-0.5">
-                            <span className="text-[10px] text-muted-foreground">{label}</span>
-                            <Input
-                              type="text"
-                              inputMode="numeric"
-                              className="h-7 w-20 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none px-2 text-center text-sm"
-                              placeholder={auto ? String(auto[method]) : "авто"}
-                              value={row[method] ?? ""}
-                              onChange={(e) => setStep(method, e.target.value.replace(/\D/g, ""))}
-                            />
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          title={
-                            canRemove
-                              ? "Убрать валюту"
-                              : isPrimary
-                                ? "Основная валюта — нельзя убрать"
-                                : "Есть активные направления"
-                          }
-                          disabled={!canRemove}
-                          onClick={() =>
-                            setRoundCurrencies((prev) => prev.filter((c) => c !== code))
-                          }
-                          className="ml-auto shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
-                        >
-                          <Trash2Icon className="size-3.5" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Добавить валюту */}
-                {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS).some(
-                  (c) => !roundCurrencies.includes(c),
-                ) && (
-                  <Select
-                    value=""
-                    onValueChange={(v) => setRoundCurrencies((prev) => [...prev, v])}
-                  >
-                    <SelectTrigger className="h-7 w-44 border-dashed text-xs text-muted-foreground">
-                      <PlusIcon className="mr-1 size-3" />
-                      Добавить валюту
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS)
-                        .filter((c) => !roundCurrencies.includes(c))
-                        .map((code) => (
+          {/* ── Настройки: валюта/округление + автоматизация рядом ── */}
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            {/* ── Карточка 1: Валюта и округление ──────────────────── */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Валюта и округление</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Основная валюта — в ней бот считает котировки и выдаёт суммы. После смены
+                  пересоздайте курсы через «Курсы обмена по диапазонам».
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Основная валюта */}
+                <div className="flex items-center gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Основная валюта</Label>
+                    <Select
+                      value={settings.quoteAsset ?? "PHP"}
+                      onValueChange={(v) => setSettings((s) => ({ ...s, quoteAsset: v }))}
+                    >
+                      <SelectTrigger className="h-9 w-72 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS).map((code) => (
                           <SelectItem key={code} value={code}>
                             {QUOTE_ASSET_LABELS[code] ?? code}
                           </SelectItem>
                         ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center justify-end gap-3">
-                {settingsDirty ? (
-                  <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
-                    <span className="size-2 animate-pulse rounded-full bg-amber-500" />
-                    Есть несохранённые изменения
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <CheckIcon className="size-3.5 text-emerald-600" />
-                    Все изменения сохранены
-                  </span>
-                )}
-                <Button
-                  type="button"
-                  onClick={saveSettings}
-                  disabled={savingSettings || !settingsDirty}
-                  size="sm"
-                >
-                  <SaveIcon className="size-4" />
-                  {savingSettings ? "Сохранение…" : "Сохранить"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* ── Карточка 2: Автоматизация курсов ─────────────────── */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Автоматизация курсов</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Как часто бот подтягивает рыночный курс. Реальная цена меняется раз в ~10–15 мин —
-                обновлять чаще обычно не нужно.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-end gap-4">
-                <div className="space-y-1.5">
-                  <Label>Частота обновления</Label>
-                  <Select
-                    value={String(settings.rateRefreshSec)}
-                    onValueChange={(v) => {
-                      const sec = Number(v);
-                      setSettings((s) => ({
-                        ...s,
-                        rateRefreshSec: sec,
-                        feedStaleSec:
-                          s.feedStaleSec != null && s.feedStaleSec < sec ? null : s.feedStaleSec,
-                      }));
-                    }}
-                  >
-                    <SelectTrigger className="w-44">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(REFRESH_PRESETS.some((p) => p.sec === settings.rateRefreshSec)
-                        ? REFRESH_PRESETS
-                        : [
-                            {
-                              sec: settings.rateRefreshSec,
-                              label: `Каждые ${Math.round(settings.rateRefreshSec / 60)} мин`,
-                            },
-                            ...REFRESH_PRESETS,
-                          ]
-                      ).map((p) => (
-                        <SelectItem key={p.sec} value={String(p.sec)}>
-                          {p.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
+
+                {/* Шаги округления */}
                 <div className="space-y-1.5">
-                  <Label>Порог «курсы устарели»</Label>
-                  <Select
-                    value={settings.feedStaleSec == null ? "auto" : String(settings.feedStaleSec)}
-                    onValueChange={(v) =>
-                      setSettings((s) => ({
-                        ...s,
-                        feedStaleSec: v === "auto" ? null : Number(v),
-                      }))
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground">
+                      Шаги округления при выдаче
+                    </Label>
+                    <span className="text-xs text-muted-foreground">— пусто = авто из словаря</span>
+                  </div>
+                  <div className="space-y-1">
+                    {roundCurrencies.map((code) => {
+                      const auto = ROUND_STEP_AUTO[code];
+                      const row = settings.roundSteps?.[code] ?? {};
+                      const isFromActiveRate = rates.some(
+                        (r) => r.isActive && r.quoteAsset === code,
+                      );
+                      const isPrimary = code === (settings.quoteAsset ?? "PHP");
+                      const canRemove = !isPrimary && !isFromActiveRate;
+                      const setStep = (method: "atm" | "cash" | "bank", val: string) => {
+                        setSettings((s) => {
+                          const prev = s.roundSteps ?? {};
+                          const entry = { ...(prev[code] ?? {}) };
+                          if (val === "") delete entry[method];
+                          else {
+                            const n = Math.max(1, Math.floor(Number(val)));
+                            if (Number.isFinite(n)) entry[method] = n;
+                          }
+                          const next = { ...prev };
+                          if (Object.keys(entry).length === 0) delete next[code];
+                          else next[code] = entry;
+                          return { ...s, roundSteps: Object.keys(next).length ? next : null };
+                        });
+                      };
+                      return (
+                        <div
+                          key={code}
+                          className="flex w-fit items-center gap-2 rounded-md border bg-muted/20 px-3 py-2"
+                        >
+                          <span className="w-16 shrink-0 text-sm font-medium">
+                            {QUOTE_ASSET_LABELS[code]?.match(/^\S+/)?.[0] ?? ""}{" "}
+                            <span className="font-mono">{code}</span>
+                          </span>
+                          {(
+                            [
+                              { method: "atm", label: "ATM" },
+                              { method: "cash", label: "Нал" },
+                              { method: "bank", label: "Банк" },
+                            ] as const
+                          ).map(({ method, label }) => (
+                            <div key={method} className="flex flex-col items-center gap-0.5">
+                              <span className="text-[10px] text-muted-foreground">{label}</span>
+                              <Input
+                                type="text"
+                                inputMode="numeric"
+                                className="h-7 w-20 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none px-2 text-center text-sm"
+                                placeholder={auto ? String(auto[method]) : "авто"}
+                                value={row[method] ?? ""}
+                                onChange={(e) => setStep(method, e.target.value.replace(/\D/g, ""))}
+                              />
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            title={
+                              canRemove
+                                ? "Убрать валюту"
+                                : isPrimary
+                                  ? "Основная валюта — нельзя убрать"
+                                  : "Есть активные направления"
+                            }
+                            disabled={!canRemove}
+                            onClick={() =>
+                              setRoundCurrencies((prev) => prev.filter((c) => c !== code))
+                            }
+                            className="ml-1 shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            <Trash2Icon className="size-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Добавить валюту */}
+                  {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS).some(
+                    (c) => !roundCurrencies.includes(c),
+                  ) && (
+                    <Select
+                      value=""
+                      onValueChange={(v) => setRoundCurrencies((prev) => [...prev, v])}
+                    >
+                      <SelectTrigger className="h-7 w-44 border-dashed text-xs text-muted-foreground">
+                        <PlusIcon className="mr-1 size-3" />
+                        Добавить валюту
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(settings.quoteAssetOptions ?? DEFAULT_QUOTE_ASSET_OPTIONS)
+                          .filter((c) => !roundCurrencies.includes(c))
+                          .map((code) => (
+                            <SelectItem key={code} value={code}>
+                              {QUOTE_ASSET_LABELS[code] ?? code}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* ── Карточка 2: Автоматизация курсов ─────────────────── */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Автоматизация курсов</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Как часто бот подтягивает рыночный курс. Реальная цена меняется раз в ~10–15 мин —
+                  обновлять чаще обычно не нужно.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Частота обновления</Label>
+                    <Select
+                      value={String(settings.rateRefreshSec)}
+                      onValueChange={(v) => {
+                        const sec = Number(v);
+                        setSettings((s) => ({
+                          ...s,
+                          rateRefreshSec: sec,
+                          feedStaleSec:
+                            s.feedStaleSec != null && s.feedStaleSec < sec ? null : s.feedStaleSec,
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="w-44">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(REFRESH_PRESETS.some((p) => p.sec === settings.rateRefreshSec)
+                          ? REFRESH_PRESETS
+                          : [
+                              {
+                                sec: settings.rateRefreshSec,
+                                label: `Каждые ${Math.round(settings.rateRefreshSec / 60)} мин`,
+                              },
+                              ...REFRESH_PRESETS,
+                            ]
+                        ).map((p) => (
+                          <SelectItem key={p.sec} value={String(p.sec)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Порог «курсы устарели»</Label>
+                    <Select
+                      value={settings.feedStaleSec == null ? "auto" : String(settings.feedStaleSec)}
+                      onValueChange={(v) =>
+                        setSettings((s) => ({
+                          ...s,
+                          feedStaleSec: v === "auto" ? null : Number(v),
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="w-44">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Авто (по частоте)</SelectItem>
+                        {STALE_PRESETS.filter((p) => p.sec >= settings.rateRefreshSec).map((p) => (
+                          <SelectItem key={p.sec} value={String(p.sec)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 rounded-md border px-3 py-2 sm:max-w-xl">
+                  <Switch
+                    checked={settings.requireRateConfirmation ?? false}
+                    onCheckedChange={(checked) =>
+                      setSettings((s) => ({ ...s, requireRateConfirmation: checked }))
                     }
-                  >
-                    <SelectTrigger className="w-44">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="auto">Авто (по частоте)</SelectItem>
-                      {STALE_PRESETS.filter((p) => p.sec >= settings.rateRefreshSec).map((p) => (
-                        <SelectItem key={p.sec} value={String(p.sec)}>
-                          {p.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  />
+                  <div className="space-y-0.5">
+                    <Label>Требовать подтверждение обновлений курса</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Если включено, каждое обновление курса от рынка попадёт в карточку
+                      «Обновлённые курсы» и применится только после вашего подтверждения.
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-md border px-3 py-2 sm:max-w-xl">
-                <Switch
-                  checked={settings.requireRateConfirmation ?? false}
-                  onCheckedChange={(checked) =>
-                    setSettings((s) => ({ ...s, requireRateConfirmation: checked }))
-                  }
-                />
-                <div className="space-y-0.5">
-                  <Label>Требовать подтверждение обновлений курса</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Если включено, каждое обновление курса от рынка попадёт в карточку «Обновлённые
-                    курсы» и применится только после вашего подтверждения.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-3">
-                {settingsDirty ? (
-                  <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
-                    <span className="size-2 animate-pulse rounded-full bg-amber-500" />
-                    Есть несохранённые изменения
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <CheckIcon className="size-3.5 text-emerald-600" />
-                    Все изменения сохранены
-                  </span>
-                )}
-                <Button
-                  type="button"
-                  onClick={saveSettings}
-                  disabled={savingSettings || !settingsDirty}
-                  size="sm"
-                >
-                  <SaveIcon className="size-4" />
-                  {savingSettings ? "Сохранение…" : "Сохранить"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* ── Общая панель сохранения настроек ──────────────────── */}
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {settingsDirty ? (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                <span className="size-2 animate-pulse rounded-full bg-amber-500" />
+                Есть несохранённые изменения
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <CheckIcon className="size-3.5 text-emerald-600" />
+                Все изменения сохранены
+              </span>
+            )}
+            <Button
+              type="button"
+              onClick={saveSettings}
+              disabled={savingSettings || !settingsDirty}
+              size="sm"
+            >
+              <SaveIcon className="size-4" />
+              {savingSettings ? "Сохранение…" : "Сохранить"}
+            </Button>
+          </div>
 
           {/* ── Карточка 3: Уведомления ───────────────────────────── */}
           <Card>
