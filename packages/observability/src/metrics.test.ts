@@ -26,7 +26,7 @@ describe("Counter", () => {
     expect(c.format()).toContain('hits_total{a="2",z="1"} 1');
   });
 
-  it("эскейпит \\ и \" в label values", () => {
+  it('эскейпит \\ и " в label values', () => {
     const c = new Counter("hits_total", "");
     c.inc(1, { path: 'a"b\\c' });
     expect(c.format()).toContain('path="a\\"b\\\\c"');
@@ -71,6 +71,16 @@ describe("Histogram", () => {
     expect(out).toContain('lat_seconds_bucket{le="1",route="/a"} 1');
     expect(out).toContain('lat_seconds_bucket{le="5",route="/a"} 2');
     expect(out).toContain('lat_seconds_bucket{le="1",route="/b"} 1');
+  });
+
+  it("reset() обнуляет bucketCounts/sums/counts (lines 81-83)", () => {
+    const h = new Histogram("req_seconds", "", [0.5, 1]);
+    h.observe(0.3);
+    h.observe(0.7);
+    expect(h.format()).toContain("req_seconds_count 2");
+    h.reset();
+    // после reset все счётчики чистые
+    expect(h.format()).not.toContain("req_seconds_count 2");
   });
 });
 

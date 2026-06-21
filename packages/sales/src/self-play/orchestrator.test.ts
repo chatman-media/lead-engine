@@ -5,21 +5,17 @@
 // Без БД и сети.
 
 import { describe, expect, it } from "bun:test";
-import type { ChatClient, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
 import type { IKbStore } from "@chatman-media/kb";
-import { runPairwiseMatch } from "./pairwise.ts";
-import { runShadowEval } from "../shadow-eval.ts";
-import {
-  _testCandidateConcluded,
-  runSelfPlayMatch,
-  type SelfPlayDeps,
-} from "./orchestrator.ts";
-import type { CandidatePersona } from "./personas.ts";
+import type { ChatClient, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
 import {
   SELF_PLAY_DEFAULT_STALL_REPLY,
   SELF_PLAY_STALL_CTA_FALLBACK,
 } from "../prompts/orchestrator.ts";
-import { StyleSchema, type Style } from "../types.ts";
+import { runShadowEval } from "../shadow-eval.ts";
+import { type Style, StyleSchema } from "../types.ts";
+import { _testCandidateConcluded, runSelfPlayMatch, type SelfPlayDeps } from "./orchestrator.ts";
+import { runPairwiseMatch } from "./pairwise.ts";
+import type { CandidatePersona } from "./personas.ts";
 
 const STYLE_A: Style = StyleSchema.parse({
   slug: "style-a",
@@ -82,7 +78,10 @@ interface FakeState {
   shadowUpdates: Array<Record<string, unknown>>;
 }
 
-function makeDeps(over: Partial<SelfPlayDeps> = {}, state?: FakeState): SelfPlayDeps & { _state: FakeState } {
+function makeDeps(
+  over: Partial<SelfPlayDeps> = {},
+  state?: FakeState,
+): SelfPlayDeps & { _state: FakeState } {
   const s: FakeState = state ?? {
     outcomes: [],
     ratings: new Map(),
@@ -211,9 +210,7 @@ describe("runSelfPlayMatch", () => {
       persona: PERSONA,
       maxTurns: 3,
     });
-    const sales = r.transcript
-      .filter((m) => m.role === "salesperson")
-      .map((m) => m.text);
+    const sales = r.transcript.filter((m) => m.role === "salesperson").map((m) => m.text);
     expect(sales).toEqual([
       SELF_PLAY_DEFAULT_STALL_REPLY,
       SELF_PLAY_DEFAULT_STALL_REPLY,
@@ -256,9 +253,7 @@ describe("runSelfPlayMatch", () => {
       persona: PERSONA,
       maxTurns: 3,
     });
-    const sales = r.transcript
-      .filter((m) => m.role === "salesperson")
-      .map((m) => m.text);
+    const sales = r.transcript.filter((m) => m.role === "salesperson").map((m) => m.text);
     expect(sales).toEqual([
       "Минутку, проверю по базе.",
       "Минутку, проверю по базе.",
@@ -310,9 +305,7 @@ describe("_testCandidateConcluded", () => {
     expect(_testCandidateConcluded("ок, давай оформим заявку")).toBe(true);
     expect(_testCandidateConcluded("мне это не интересно")).toBe(true);
     expect(_testCandidateConcluded("отстаньте от меня, это развод")).toBe(true);
-    expect(_testCandidateConcluded("сколько платят и какой график?")).toBe(
-      false,
-    );
+    expect(_testCandidateConcluded("сколько платят и какой график?")).toBe(false);
   });
 });
 
@@ -348,6 +341,35 @@ describe("runPairwiseMatch", () => {
     expect(r.matchA.styleSlug).toBe("style-a");
     expect(r.matchB.styleSlug).toBe("style-b");
   });
+
+  it("insert pairwise кидает → catch, persisted=false (line 184)", async () => {
+    const state: FakeState = {
+      outcomes: [],
+      ratings: new Map(),
+      matches: 0,
+      pairwise: 0,
+      shadowUpdates: [],
+    };
+    const base = makeDeps({}, state);
+    const deps = {
+      ...base,
+      pairwiseMatches: {
+        insert: async () => {
+          throw new Error("persist down");
+        },
+      },
+    } as never;
+    const r = await runPairwiseMatch(deps, {
+      styleA: STYLE_A,
+      styleAId: 1,
+      styleB: STYLE_B,
+      styleBId: 2,
+      persona: PERSONA,
+    });
+    // catch проглотил ошибку persist → результат вернулся, но не записан
+    expect(r.persisted).toBe(false);
+    expect(r.pairwiseId).toBeNull();
+  });
 });
 
 describe("runShadowEval", () => {
@@ -365,7 +387,13 @@ describe("runShadowEval", () => {
   }
 
   it("0 персон → complete/inconclusive, totalPairs 0", async () => {
-    const state: FakeState = { outcomes: [], ratings: new Map(), matches: 0, pairwise: 0, shadowUpdates: [] };
+    const state: FakeState = {
+      outcomes: [],
+      ratings: new Map(),
+      matches: 0,
+      pairwise: 0,
+      shadowUpdates: [],
+    };
     await runShadowEval(shadowDeps(state), {
       evalId: 1,
       parentStyle: STYLE_A,
@@ -383,7 +411,13 @@ describe("runShadowEval", () => {
   });
 
   it("happy: гоняет пары, итоговый decision записан", async () => {
-    const state: FakeState = { outcomes: [], ratings: new Map(), matches: 0, pairwise: 0, shadowUpdates: [] };
+    const state: FakeState = {
+      outcomes: [],
+      ratings: new Map(),
+      matches: 0,
+      pairwise: 0,
+      shadowUpdates: [],
+    };
     await runShadowEval(shadowDeps(state), {
       evalId: 2,
       parentStyle: STYLE_A,
@@ -402,11 +436,14 @@ describe("runShadowEval", () => {
   });
 
   it("ошибка в пайплайне → status failed", async () => {
-    const state: FakeState = { outcomes: [], ratings: new Map(), matches: 0, pairwise: 0, shadowUpdates: [] };
-    const base = makeDeps(
-      { judgeChat: judgeChat() },
-      state,
-    );
+    const state: FakeState = {
+      outcomes: [],
+      ratings: new Map(),
+      matches: 0,
+      pairwise: 0,
+      shadowUpdates: [],
+    };
+    const base = makeDeps({ judgeChat: judgeChat() }, state);
     // pairwiseMatches.insert кидает → runPairwiseMatch ловит сам (persisted=false),
     // поэтому валим через ratings.getRating (вызывается в runPairwiseMatch вне try).
     const deps = {

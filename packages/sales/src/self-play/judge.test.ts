@@ -1,5 +1,5 @@
-import type { ChatClient } from "@chatman-media/llm-router";
 import { describe, expect, it } from "bun:test";
+import type { ChatClient } from "@chatman-media/llm-router";
 import { judgeMatch, parseVerdict } from "./judge.ts";
 
 const chatReturning = (text: string): ChatClient =>
@@ -21,7 +21,10 @@ const input = (chat: ChatClient) => ({
 
 describe("parseVerdict", () => {
   it("чистый JSON", () => {
-    expect(parseVerdict('{"outcome":"won","reason":"committed"}')).toMatchObject({ outcome: "won", reason: "committed" });
+    expect(parseVerdict('{"outcome":"won","reason":"committed"}')).toMatchObject({
+      outcome: "won",
+      reason: "committed",
+    });
   });
   it("code-fenced JSON", () => {
     expect(parseVerdict('```json\n{"outcome":"lost","reason":"walked"}\n```').outcome).toBe("lost");
@@ -36,6 +39,14 @@ describe("parseVerdict", () => {
   });
   it("reason не строка → (no reason)", () => {
     expect(parseVerdict('{"outcome":"won","reason":42}').reason).toBe("(no reason)");
+  });
+
+  it("outcome неизвестный в JSON → pickOutcome возвращает null → fallback draw (line 106)", () => {
+    // JSON парсится, но outcome="invalid" не in {won,lost,draw} → pickOutcome returns null
+    // regex тоже не найдёт → итог: { outcome: "draw", raw: "..." }
+    const v = parseVerdict('{"outcome":"invalid_outcome","reason":"test"}');
+    expect(v.outcome).toBe("draw");
+    expect(v.raw).toBe('{"outcome":"invalid_outcome","reason":"test"}');
   });
 });
 

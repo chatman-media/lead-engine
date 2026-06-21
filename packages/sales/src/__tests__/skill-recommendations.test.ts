@@ -1,21 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import {
-  rankSkillRecommendations,
-  wilsonLowerBound,
-} from "../skill-recommendations.ts";
+import { rankSkillRecommendations, wilsonLowerBound } from "../skill-recommendations.ts";
 import type { SkillAggregate, SkillRow } from "../store.ts";
 
 describe("wilsonLowerBound", () => {
   test("0 total → 0", () => expect(wilsonLowerBound(0, 0)).toBe(0));
-  test("0 wins / 10 total → near 0", () =>
-    expect(wilsonLowerBound(0, 10)).toBeCloseTo(0, 1));
+  test("0 wins / 10 total → near 0", () => expect(wilsonLowerBound(0, 10)).toBeCloseTo(0, 1));
   test("10 wins / 10 total → < 1 but high", () => {
     const lb = wilsonLowerBound(10, 10);
     expect(lb).toBeGreaterThan(0.7);
     expect(lb).toBeLessThan(1);
   });
-  test("50 wins / 100 total → ~0.4", () =>
-    expect(wilsonLowerBound(50, 100)).toBeCloseTo(0.4, 1));
+  test("50 wins / 100 total → ~0.4", () => expect(wilsonLowerBound(50, 100)).toBeCloseTo(0.4, 1));
   test("more data at same rate → higher lower bound", () => {
     const few = wilsonLowerBound(5, 10);
     const many = wilsonLowerBound(50, 100);
@@ -39,12 +34,7 @@ function makeSkill(slug: string, overrides: Partial<SkillRow> = {}): SkillRow {
   };
 }
 
-function makeAgg(
-  slug: string,
-  wins: number,
-  losses: number,
-  draws: number,
-): SkillAggregate {
+function makeAgg(slug: string, wins: number, losses: number, draws: number): SkillAggregate {
   return {
     skill_slug: slug,
     wins,
@@ -62,10 +52,7 @@ describe("rankSkillRecommendations", () => {
   });
 
   test("noise family excluded", () => {
-    const catalogue = [
-      makeSkill("good"),
-      makeSkill("bad", { family: "noise" }),
-    ];
+    const catalogue = [makeSkill("good"), makeSkill("bad", { family: "noise" })];
     const result = rankSkillRecommendations(catalogue, []);
     expect(result.map((r) => r.slug)).not.toContain("bad");
   });
@@ -113,5 +100,17 @@ describe("rankSkillRecommendations", () => {
     const aggs = [makeAgg("x", 0, 0, 10)]; // all draws
     const [r] = rankSkillRecommendations(catalogue, aggs, { minSamples: 5 });
     expect(r?.observed_rate).toBeCloseTo(0.5);
+  });
+
+  test("одинаковый confidence_lower → вторичная сортировка по count DESC (lines 121-122)", () => {
+    // оба count < minSamples → оба confidence_lower=0 → сортируется по count
+    const catalogue = [makeSkill("low-count"), makeSkill("high-count")];
+    const aggs = [
+      makeAgg("low-count", 1, 0, 0), // count=1
+      makeAgg("high-count", 3, 0, 0), // count=3
+    ];
+    const ranked = rankSkillRecommendations(catalogue, aggs, { minSamples: 10 });
+    expect(ranked[0]?.slug).toBe("high-count");
+    expect(ranked[1]?.slug).toBe("low-count");
   });
 });

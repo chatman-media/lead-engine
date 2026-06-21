@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { JsonLogger } from "./logger.ts";
+import { JsonLogger, makeDefaultLogger } from "./logger.ts";
 
 class BufferStream {
   public lines: string[] = [];
@@ -69,5 +69,30 @@ describe("JsonLogger", () => {
     log.info("i");
     expect(buf.lines).toHaveLength(1);
     expect(parse(buf.lines[0]!).msg).toBe("i");
+  });
+});
+
+describe("makeDefaultLogger", () => {
+  it("создаёт JsonLogger со scope из LOG_LEVEL (lines 98-100)", () => {
+    const prev = process.env.LOG_LEVEL;
+    process.env.LOG_LEVEL = "debug";
+    try {
+      const log = makeDefaultLogger("my-scope");
+      expect(log).toBeInstanceOf(JsonLogger);
+    } finally {
+      if (prev === undefined) delete process.env.LOG_LEVEL;
+      else process.env.LOG_LEVEL = prev;
+    }
+  });
+
+  it("дефолт LOG_LEVEL='info' когда env не задан", () => {
+    const prev = process.env.LOG_LEVEL;
+    delete process.env.LOG_LEVEL;
+    try {
+      const log = makeDefaultLogger("scope2");
+      expect(log).toBeInstanceOf(JsonLogger);
+    } finally {
+      if (prev !== undefined) process.env.LOG_LEVEL = prev;
+    }
   });
 });
