@@ -1,3 +1,10 @@
+# [@chatman-media/verticals-v1.5.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.5.0...@chatman-media/verticals-v1.5.1) (2026-06-21)
+
+
+### Bug Fixes
+
+* **verticals:** typecheck quote-currency.test (KNOWN_QUOTE_CURRENCIES.* | undefined) ([95ce6d8](https://github.com/chatman-media/lead-engine/commit/95ce6d8cbddedee6b4bcdc64ff9fc00bdde59807)), closes [#782](https://github.com/chatman-media/lead-engine/issues/782)
+
 # [@chatman-media/verticals-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.4.1...@chatman-media/verticals-v1.5.0) (2026-06-20)
 
 
