@@ -9,9 +9,9 @@ describe("resolveQuoteCurrency", () => {
   });
 
   it("известный код (THB/PHP) → словарный объект", () => {
-    expect(resolveQuoteCurrency("THB")).toBe(KNOWN_QUOTE_CURRENCIES.THB);
-    expect(resolveQuoteCurrency("php")).toBe(KNOWN_QUOTE_CURRENCIES.PHP);
-    expect(resolveQuoteCurrency(" PHP ")).toBe(KNOWN_QUOTE_CURRENCIES.PHP);
+    expect(resolveQuoteCurrency("THB")).toBe(KNOWN_QUOTE_CURRENCIES.THB!);
+    expect(resolveQuoteCurrency("php")).toBe(KNOWN_QUOTE_CURRENCIES.PHP!);
+    expect(resolveQuoteCurrency(" PHP ")).toBe(KNOWN_QUOTE_CURRENCIES.PHP!);
   });
 
   it("неизвестный код → fallback-объект с самим кодом", () => {

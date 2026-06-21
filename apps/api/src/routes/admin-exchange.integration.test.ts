@@ -740,7 +740,7 @@ describe("admin-exchange routes", () => {
 });
 
 describe("admin-exchange settings (per-tenant частота/порог)", () => {
-  it("GET по умолчанию → 180с / null", async () => {
+  it("GET по умолчанию → 300с / null", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/exchange/settings");
     expect(res.status).toBe(200);
@@ -749,7 +749,7 @@ describe("admin-exchange settings (per-tenant частота/порог)", () =>
       feedStaleSec: number | null;
       handoffCustomerNotice: boolean;
     };
-    expect(body.rateRefreshSec).toBe(180);
+    expect(body.rateRefreshSec).toBe(300);
     expect(body.feedStaleSec).toBe(null);
     expect(body.handoffCustomerNotice).toBe(true);
   });
