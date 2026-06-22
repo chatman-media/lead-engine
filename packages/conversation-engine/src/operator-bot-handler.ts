@@ -1,4 +1,19 @@
 import {
+	escapeHtml,
+	objectValue,
+	parseJsonObject,
+	PAYOUT_CODE_TTL_SEC,
+	pickupWindowFromDestination,
+	stringValue,
+} from "./operator-bot-shared.ts";
+import {
+	applyOfficeDetailsSideEffect,
+	applyPaymentConfirmedSideEffect,
+	applyPayoutReadySideEffect,
+	createPayoutCode,
+	findExchangeOrderForDraft,
+} from "./exchange-side-effects.ts";
+import {
 	TelegramClient,
 	type TgCallbackQuery,
 	type TgMessage,
@@ -72,11 +87,10 @@ const SEV_EMOJI: Record<string, string> = {
 };
 
 const PREVIEW_TTL_SEC = 10 * 60;
-const PAYOUT_CODE_TTL_SEC = 60 * 60;
 const EXCHANGE_VERTICAL_TEMPLATE_ID = "exchange_v1";
 const EXCHANGE_REQUEST_TYPE = "exchange";
 
-interface PendingOperatorDraft {
+export interface PendingOperatorDraft {
 	draftId: string;
 	dbId?: number;
 	tenantId: number;
@@ -149,61 +163,6 @@ const EXCHANGE_QUICK_REPLIES: Record<
 		metadata: { exchangeAction: "operator_reply" },
 	},
 };
-
-function escapeHtml(v: string): string {
-	return v
-		.replaceAll("&", "&amp;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll('"', "&quot;")
-		.replaceAll("'", "&#39;");
-}
-
-function parseJsonObject(
-	value: string | null | undefined,
-): Record<string, unknown> {
-	if (!value) return {};
-	try {
-		const parsed = JSON.parse(value) as unknown;
-		return typeof parsed === "object" &&
-			parsed !== null &&
-			!Array.isArray(parsed)
-			? (parsed as Record<string, unknown>)
-			: {};
-	} catch {
-		return {};
-	}
-}
-
-function stringValue(value: unknown): string | null {
-	return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function objectValue(value: unknown): Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: {};
-}
-
-function pickupWindowFromDestination(
-	value: string | null | undefined,
-): string | null {
-	if (!value?.trim()) return null;
-	try {
-		const parsed = JSON.parse(value) as unknown;
-		const obj = objectValue(parsed);
-		return (
-			stringValue(obj.pickupWindow) ??
-			stringValue(obj.pickup_window) ??
-			stringValue(obj.window) ??
-			stringValue(obj.timeWindow) ??
-			stringValue(obj.time_window) ??
-			stringValue(obj.slot)
-		);
-	} catch {
-		return null;
-	}
-}
 
 /** "2h" / "30m" / "1d" → секунды; "off"/"0"/"" → 0; мусор → null. */
 export function parseMuteSeconds(arg: string): number | null {
@@ -1032,7 +991,7 @@ export class OperatorBotHandler {
 			};
 		}
 
-		const code = order.payoutCode ?? this.createPayoutCode(order.id);
+		const code = order.payoutCode ?? createPayoutCode(order.id);
 		const expiresAt =
 			order.payoutCodeExpiresAt && order.payoutCodeExpiresAt > input.now
 				? order.payoutCodeExpiresAt
@@ -1440,69 +1399,15 @@ export class OperatorBotHandler {
 			return this.applyKycDecisionSideEffect(tx, draft, now, contactId, action);
 		}
 		if (action === "payment_confirmed") {
-			return this.applyPaymentConfirmedSideEffect(tx, draft, now);
+			return applyPaymentConfirmedSideEffect(tx, draft, now);
 		}
 		if (action === "payout_ready") {
-			return this.applyPayoutReadySideEffect(tx, draft, now);
+			return applyPayoutReadySideEffect(tx, draft, now);
 		}
 		if (action === "office_details") {
-			return this.applyOfficeDetailsSideEffect(tx, draft);
+			return applyOfficeDetailsSideEffect(tx, draft);
 		}
 		return null;
-	}
-
-	private async findExchangeOrderForDraft(
-		tx: Db,
-		draft: PendingOperatorDraft,
-	): Promise<{
-		id: number;
-		leadId: number | null;
-		status: string;
-		payoutCode: string | null;
-		payoutCodeExpiresAt: number | null;
-		verificationId: string | null;
-		payoutMethod: string | null;
-		payoutLocation: string | null;
-		payoutDestinationJson: string | null;
-	} | null> {
-		const orderId = this.metadataOrderId(draft.metadata);
-		const selection = {
-			id: exchangeOrders.id,
-			leadId: exchangeOrders.leadId,
-			status: exchangeOrders.status,
-			payoutCode: exchangeOrders.payoutCode,
-			payoutCodeExpiresAt: exchangeOrders.payoutCodeExpiresAt,
-			verificationId: exchangeOrders.verificationId,
-			payoutMethod: exchangeOrders.payoutMethod,
-			payoutLocation: exchangeOrders.payoutLocation,
-			payoutDestinationJson: exchangeOrders.payoutDestinationJson,
-		};
-		if (orderId) {
-			const [order] = await tx
-				.select(selection)
-				.from(exchangeOrders)
-				.where(
-					and(
-						eq(exchangeOrders.tenantId, draft.tenantId),
-						eq(exchangeOrders.conversationId, draft.conversationId),
-						eq(exchangeOrders.id, orderId),
-					),
-				)
-				.limit(1);
-			return order ?? null;
-		}
-		const [order] = await tx
-			.select(selection)
-			.from(exchangeOrders)
-			.where(
-				and(
-					eq(exchangeOrders.tenantId, draft.tenantId),
-					eq(exchangeOrders.conversationId, draft.conversationId),
-				),
-			)
-			.orderBy(desc(exchangeOrders.createdAt))
-			.limit(1);
-		return order ?? null;
 	}
 
 	private async applyKycDecisionSideEffect(
@@ -1583,7 +1488,7 @@ export class OperatorBotHandler {
 
 		let orderId: number | null = null;
 		let orderVerificationPatched = false;
-		const order = await this.findExchangeOrderForDraft(tx, draft);
+		const order = await findExchangeOrderForDraft(tx, draft);
 		if (order) {
 			orderId = order.id;
 			const patchableStatuses = new Set(["quote", "awaiting_payment"]);
@@ -1828,166 +1733,6 @@ export class OperatorBotHandler {
 		};
 	}
 
-	private async applyPaymentConfirmedSideEffect(
-		tx: Db,
-		draft: PendingOperatorDraft,
-		now: number,
-	): Promise<Record<string, unknown>> {
-		const orderId = this.metadataOrderId(draft.metadata);
-		const order = await this.findExchangeOrderForDraft(tx, draft);
-		if (!order) {
-			return {
-				action: "payment_confirmed",
-				...(orderId ? { orderId } : {}),
-				orderFound: false,
-				statusPatched: false,
-			};
-		}
-
-		const terminal = new Set([
-			"paid",
-			"payout",
-			"completed",
-			"cancelled",
-			"expired",
-		]);
-		if (terminal.has(order.status)) {
-			return {
-				action: "payment_confirmed",
-				orderId: order.id,
-				previousStatus: order.status,
-				statusPatched: false,
-			};
-		}
-
-		await tx
-			.update(exchangeOrders)
-			.set({ status: "paid", updatedAt: now })
-			.where(
-				and(
-					eq(exchangeOrders.tenantId, draft.tenantId),
-					eq(exchangeOrders.id, order.id),
-				),
-			);
-		return {
-			action: "payment_confirmed",
-			orderId: order.id,
-			previousStatus: order.status,
-			nextStatus: "paid",
-			statusPatched: true,
-		};
-	}
-
-	private async applyPayoutReadySideEffect(
-		tx: Db,
-		draft: PendingOperatorDraft,
-		now: number,
-	): Promise<Record<string, unknown>> {
-		const orderId = this.metadataOrderId(draft.metadata);
-		const order = await this.findExchangeOrderForDraft(tx, draft);
-		if (!order) {
-			return {
-				action: "payout_ready",
-				...(orderId ? { orderId } : {}),
-				orderFound: false,
-				statusPatched: false,
-			};
-		}
-		if (order.status !== "paid" && order.status !== "payout") {
-			return {
-				action: "payout_ready",
-				orderId: order.id,
-				previousStatus: order.status,
-				statusPatched: false,
-				reason: "invalid_status",
-			};
-		}
-
-		const metadataCode = stringValue(draft.metadata?.payoutCode);
-		const code =
-			order.payoutCode ?? metadataCode ?? this.createPayoutCode(order.id);
-		const metadataExpiresAt = this.numericMetadata(
-			draft.metadata?.payoutCodeExpiresAt,
-		);
-		const expiresAt =
-			order.payoutCodeExpiresAt && order.payoutCodeExpiresAt > now
-				? order.payoutCodeExpiresAt
-				: metadataExpiresAt && metadataExpiresAt > now
-					? metadataExpiresAt
-					: now + PAYOUT_CODE_TTL_SEC;
-		await tx
-			.update(exchangeOrders)
-			.set({
-				status: "payout",
-				payoutCode: code,
-				payoutCodeExpiresAt: expiresAt,
-				updatedAt: now,
-			})
-			.where(
-				and(
-					eq(exchangeOrders.tenantId, draft.tenantId),
-					eq(exchangeOrders.id, order.id),
-				),
-			);
-		return {
-			action: "payout_ready",
-			orderId: order.id,
-			previousStatus: order.status,
-			nextStatus: "payout",
-			payoutCodeIssued: true,
-			statusPatched: order.status !== "payout",
-		};
-	}
-
-	private async applyOfficeDetailsSideEffect(
-		tx: Db,
-		draft: PendingOperatorDraft,
-	): Promise<Record<string, unknown>> {
-		const orderId = this.metadataOrderId(draft.metadata);
-		const order = await this.findExchangeOrderForDraft(tx, draft);
-		if (!order) {
-			return {
-				action: "office_details",
-				...(orderId ? { orderId } : {}),
-				orderFound: false,
-				confirmationState: "not_recorded",
-			};
-		}
-		const pickupWindow =
-			stringValue(draft.metadata?.pickupWindow) ??
-			pickupWindowFromDestination(order.payoutDestinationJson);
-		return {
-			action: "office_details",
-			orderId: order.id,
-			confirmationState: "operator_confirmed",
-			payoutMethod: order.payoutMethod,
-			payoutLocation: order.payoutLocation,
-			...(pickupWindow ? { pickupWindow } : {}),
-			statusPatched: false,
-		};
-	}
-
-	private metadataOrderId(
-		metadata: Record<string, unknown> | undefined,
-	): number | null {
-		const raw = metadata?.orderId;
-		if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) {
-			return raw;
-		}
-		if (typeof raw !== "string" || !raw.trim()) return null;
-		const parsed = Number.parseInt(raw, 10);
-		return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-	}
-
-	private numericMetadata(value: unknown): number | null {
-		if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-			return Math.floor(value);
-		}
-		if (typeof value !== "string" || !value.trim()) return null;
-		const parsed = Number.parseInt(value, 10);
-		return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-	}
-
 	private async createPendingDraft(
 		draft: PendingOperatorDraft,
 	): Promise<PendingOperatorDraft> {
@@ -2122,13 +1867,6 @@ export class OperatorBotHandler {
 			if (id.length >= 6 && !this.pendingDrafts.has(id)) return id;
 		}
 		return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-	}
-
-	private createPayoutCode(orderId: number): string {
-		const suffix =
-			globalThis.crypto?.randomUUID?.().replaceAll("-", "").slice(0, 6) ??
-			Math.random().toString(36).slice(2, 8);
-		return `CODE-${orderId}-${suffix.toUpperCase()}`;
 	}
 
 	private async handleOperatorAction(
