@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.28.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.28.0...@chatman-media/conversation-engine-v3.28.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **exchange:** forced/fallback-реплики следуют языку диалога (перевод при выдаче) ([5cd48a0](https://github.com/chatman-media/lead-engine/commit/5cd48a04609a3acf92045d8d435a9e1a79453296)), closes [#730](https://github.com/chatman-media/lead-engine/issues/730)
+
 # [@chatman-media/conversation-engine-v3.28.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.27.1...@chatman-media/conversation-engine-v3.28.0) (2026-06-20)
 
 
