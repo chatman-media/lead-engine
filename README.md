@@ -60,9 +60,9 @@ with **Postgres Row-Level Security**, not only application filters.
 | Messenger channels | Telegram bot, Telegram userbot (MTProto), WhatsApp Cloud API, Facebook Messenger, VK community messages, MAX Bot API, WebSocket web widget |
 | AI routing | Per-tenant provider configs, encrypted BYOK keys, hot reload in API, separate purposes for chat / embeddings / vision / judge / reranker / voice transcription |
 | Retrieval | Hybrid RAG with pgvector, BM25, RRF, multi-query expansion, dynamic trimming, MMR, Jina/Cohere reranker, hallucination guard |
-| Workflows | Universal funnel backbone, AI funnel builder, drag-drop stages/fields, multi-request concierge flows, exchange rates/orders, operator-awaiting stages |
+| Workflows | Universal funnel backbone, AI funnel builder, drag-drop stages/fields, multi-request concierge flows, exchange rates/orders/payout points (ATM map), operator-awaiting stages |
 | Service marketplace | Curated Phuket providers, custom providers, service catalog routes, partner services, partner deals, commission tracking, handoff modes |
-| Operator UI | Inbox, AI/human takeover, leads board, service catalog, partners, notifications, outreach, templates, audit log, diagnostics, admin copilot |
+| Operator UI | Inbox with auto-translate (operator works in RU, client keeps their language), AI/human takeover, leads board, service catalog, partners, notifications, outreach, templates, audit log, diagnostics, admin copilot |
 | Security | Tenant RLS, AES-256-GCM secrets, webhook signature checks, rate limiting, audit records without raw secrets |
 
 ---

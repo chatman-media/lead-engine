@@ -36,7 +36,7 @@ bun run dev:worker    # apps/worker (outbound queue + channel-reload polling)
 bun run dev:ui        # apps/admin-ui on http://localhost:5173
 
 bun run typecheck     # tsc across all packages (must pass before pushing)
-bun run test          # full test suite (~950 tests)
+bun run test          # full test suite (~3300 tests across ~300 files)
 bun run check         # biome lint + format check
 ```
 
