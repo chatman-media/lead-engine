@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.28.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.28.1...@chatman-media/conversation-engine-v3.28.2) (2026-06-22)
+
+
+### Bug Fixes
+
+* **notifications:** операционные алерты доходят до владельца + честный индикатор доставки ([f61bdc0](https://github.com/chatman-media/lead-engine/commit/f61bdc0e120aed9270c6fcfe4895e9cab6b62eef))
+
 # [@chatman-media/conversation-engine-v3.28.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.28.0...@chatman-media/conversation-engine-v3.28.1) (2026-06-22)
 
 
