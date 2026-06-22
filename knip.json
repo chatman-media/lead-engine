@@ -1,0 +1,37 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.ts"]
+    },
+    "apps/api": {
+      "entry": ["src/index.ts", "scripts/**/*.ts"]
+    },
+    "apps/worker": {
+      "entry": ["src/index.ts"]
+    },
+    "apps/admin-ui": {
+      "entry": ["src/main.tsx", "index.html", "vite.config.ts"]
+    },
+    "apps/landing": {
+      "entry": ["src/main.tsx", "index.html", "vite.config.ts"]
+    },
+    "apps/widget": {
+      "entry": ["src/**/*.ts", "vite.config.ts"]
+    },
+    "packages/*": {
+      "entry": ["src/index.ts"]
+    }
+  },
+  "ignore": [".design-sync/**", ".claude/**", "**/.ds-*", "packages/kb/examples/**"],
+  "ignoreDependencies": [
+    "@biomejs/biome",
+    "madge",
+    "jscpd",
+    "knip",
+    "semantic-release",
+    "semantic-release-monorepo",
+    "@semantic-release/.+"
+  ],
+  "ignoreExportsUsedInFile": true
+}
