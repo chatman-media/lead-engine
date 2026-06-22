@@ -123,6 +123,40 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         run: bun run --filter './apps/admin-ui' --filter './apps/landing' --filter './apps/widget' build
 
+  quality:
+    name: quality — связность + дубликаты (без PG)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun + node_modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.github/workflows/ci.yml') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install deps (workspace)
+        run: bun install --frozen-lockfile
+
+      # Архитектурный гейт: циклических импортов быть не должно (madge).
+      - name: No circular dependencies (madge)
+        run: bun run lint:cycles
+
+      # Анти-дубликат гейт: порог 6% (текущий уровень ~3.5% токенов).
+      - name: No excessive duplication (jscpd)
+        run: bun run lint:dup
+
   release:
     name: Release — publish @chatman-media/* to npm
     needs: workspace
