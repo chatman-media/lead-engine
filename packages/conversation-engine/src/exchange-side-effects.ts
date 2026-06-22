@@ -5,9 +5,9 @@
 import { and, desc, eq } from "drizzle-orm";
 import { exchangeOrders } from "@chatman-media/storage";
 import type { Db } from "./dal/types.ts";
-import type { PendingOperatorDraft } from "./operator-bot-handler.ts";
 import {
 	PAYOUT_CODE_TTL_SEC,
+	type PendingOperatorDraft,
 	pickupWindowFromDestination,
 	stringValue,
 } from "./operator-bot-shared.ts";
