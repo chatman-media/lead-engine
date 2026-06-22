@@ -143,9 +143,6 @@ export async function fetchMarketQuotePerUnit(
   }
 }
 
-/** @deprecated Старое THB-имя; считает в платформенной котируемой валюте. */
-export const fetchMarketThbPerUnit = fetchMarketQuotePerUnit;
-
 /**
  * Базовый курс в ориентации quote_mode:
  *   multiply → quote за 1 единицу asset;

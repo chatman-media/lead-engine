@@ -1,37 +1,36 @@
 {
-  "name": "@chatman-media/worker",
-  "version": "0.1.0",
-  "description": "Long-running data plane lead-engine: outbound dispatcher (pop pending outbound_queue → ChannelAdapter.send), MTProto userbot loops, scheduled jobs (SLA/stale-sweep/self-play).",
-  "private": true,
-  "type": "module",
-  "main": "./src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "scripts": {
-    "dev": "bun --watch run src/index.ts",
-    "start": "bun run src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "check": "biome check ./src",
-    "format": "biome format --write ./src",
-    "test": "bun test"
-  },
-  "dependencies": {
-    "@chatman-media/channel-core": "workspace:*",
-    "@chatman-media/channel-facebook": "workspace:*",
-    "@chatman-media/channel-max": "workspace:*",
-    "@chatman-media/channel-telegram": "workspace:*",
-    "@chatman-media/channel-vk": "workspace:*",
-    "@chatman-media/channel-whatsapp": "workspace:*",
-    "@chatman-media/conversation-engine": "workspace:*",
-    "@chatman-media/llm-router": "workspace:*",
-    "@chatman-media/storage": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "postgres": "^3.4.5"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
-    "@types/bun": "1.3.14",
-    "typescript": "^6.0.3"
-  }
+	"name": "@chatman-media/worker",
+	"version": "0.1.0",
+	"description": "Long-running data plane lead-engine: outbound dispatcher (pop pending outbound_queue → ChannelAdapter.send), MTProto userbot loops, scheduled jobs (SLA/stale-sweep/self-play).",
+	"private": true,
+	"type": "module",
+	"main": "./src/index.ts",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"dev": "bun --watch run src/index.ts",
+		"start": "bun run src/index.ts",
+		"typecheck": "tsc --noEmit",
+		"check": "biome check ./src",
+		"format": "biome format --write ./src",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@chatman-media/channel-core": "workspace:*",
+		"@chatman-media/channel-facebook": "workspace:*",
+		"@chatman-media/channel-max": "workspace:*",
+		"@chatman-media/channel-telegram": "workspace:*",
+		"@chatman-media/channel-vk": "workspace:*",
+		"@chatman-media/channel-whatsapp": "workspace:*",
+		"@chatman-media/conversation-engine": "workspace:*",
+		"@chatman-media/storage": "workspace:*",
+		"drizzle-orm": "^0.45.2",
+		"postgres": "^3.4.5"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.0",
+		"@types/bun": "1.3.14",
+		"typescript": "^6.0.3"
+	}
 }
