@@ -76,6 +76,13 @@ const LANG_LABEL: Record<string, string> = {
   ko: "KO 한국어",
   zh: "ZH 中文",
 };
+// Родительный падеж для подписи «переведено с …» на сообщении.
+const LANG_FROM: Record<string, string> = {
+  ru: "русского",
+  en: "английского",
+  ko: "корейского",
+  zh: "китайского",
+};
 const STATE_RU: Record<string, string> = {
   active: "активен",
   won: "выигран",
@@ -1761,8 +1768,11 @@ export function SaasConversations() {
                         {showTranslation && (
                           <details className="mt-1 text-[11px] text-muted-foreground">
                             <summary className="cursor-pointer select-none">
-                              🌐 {LANG_LABEL[clientLang ?? ""] ?? (clientLang ?? "").toUpperCase()}{" "}
-                              · оригинал
+                              🌐 переведено с{" "}
+                              {LANG_FROM[clientLang ?? ""] ??
+                                LANG_LABEL[clientLang ?? ""] ??
+                                (clientLang ?? "").toUpperCase()}{" "}
+                              · показать оригинал
                             </summary>
                             <div className="mt-1 whitespace-pre-wrap break-words italic">
                               {m.text}
