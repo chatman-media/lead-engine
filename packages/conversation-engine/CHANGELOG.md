@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.29.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.28.2...@chatman-media/conversation-engine-v3.29.0) (2026-06-22)
+
+
+### Features
+
+* **typing:** keepalive индикатора «печатает…» + typing на debounce-пути ([f74b040](https://github.com/chatman-media/lead-engine/commit/f74b0408f4ee920b840ebaef87664fc0b1e5aed7)), closes [#628](https://github.com/chatman-media/lead-engine/issues/628)
+
 # [@chatman-media/conversation-engine-v3.28.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.28.1...@chatman-media/conversation-engine-v3.28.2) (2026-06-22)
 
 
