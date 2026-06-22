@@ -22,7 +22,6 @@
 import { TelegramClient } from "@chatman-media/channel-telegram";
 import { admins, operatorSettings, tenants } from "@chatman-media/storage";
 import { and, eq, isNotNull } from "drizzle-orm";
-import type { AdminInformer } from "./admin-informer.ts";
 import type { Db } from "./dal/types.ts";
 import { withTenant } from "./with-tenant.ts";
 
@@ -48,6 +47,14 @@ export interface OpsAlert {
 
 export interface OpsAlertSink {
   emit(alert: OpsAlert): Promise<void>;
+}
+
+/**
+ * Минимальная структурная поверхность AdminInformer для ops-alerts. Локальный
+ * интерфейс вместо импорта класса — разрывает цикл ops-alerts ↔ admin-informer.
+ */
+export interface AdminInformerLike {
+  emitOpsAlert(alert: OpsAlert): Promise<void>;
 }
 
 /** Минимальный контракт отправителя email (Mailer из apps/api ему соответствует). */
@@ -83,7 +90,7 @@ export interface OpsAlertRouterDeps {
    * (чтобы не было дублей). ops-watch-sweep не трогаем: он по-прежнему зовёт
    * sink.emit(). Без informer — standalone-поведение (back-compat для тестов).
    */
-  informer?: AdminInformer;
+  informer?: AdminInformerLike;
   log?: { warn?: (msg: string, ctx?: unknown) => void; info?: (msg: string, ctx?: unknown) => void };
 }
 

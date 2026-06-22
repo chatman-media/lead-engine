@@ -13,7 +13,7 @@ import {
   metadataOrderId,
   numericMetadata,
 } from "./exchange-side-effects.ts";
-import type { PendingOperatorDraft } from "./operator-bot-handler.ts";
+import type { PendingOperatorDraft } from "./operator-bot-shared.ts";
 
 function draft(metadata: Record<string, unknown> = {}): PendingOperatorDraft {
   return {

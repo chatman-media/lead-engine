@@ -3,6 +3,7 @@ import {
 	objectValue,
 	parseJsonObject,
 	PAYOUT_CODE_TTL_SEC,
+	type PendingOperatorDraft,
 	pickupWindowFromDestination,
 	stringValue,
 } from "./operator-bot-shared.ts";
@@ -90,19 +91,6 @@ const PREVIEW_TTL_SEC = 10 * 60;
 const EXCHANGE_VERTICAL_TEMPLATE_ID = "exchange_v1";
 const EXCHANGE_REQUEST_TYPE = "exchange";
 
-export interface PendingOperatorDraft {
-	draftId: string;
-	dbId?: number;
-	tenantId: number;
-	adminId: number;
-	chatId: string;
-	conversationId: number;
-	text: string;
-	metadata?: Record<string, unknown>;
-	status?: string;
-	createdAt: number;
-	expiresAt: number;
-}
 
 interface ExchangeQuickReplyDraft {
 	title: string;

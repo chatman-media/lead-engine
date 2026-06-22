@@ -1,5 +1,4 @@
 import { TelegramClient, type TgInlineKeyboardButton } from "@chatman-media/channel-telegram";
-import type { AdminInformer } from "./admin-informer.ts";
 import type { NotificationRule, NotificationsRepo } from "./dal/notifications.ts";
 import type { Db } from "./dal/types.ts";
 import {
@@ -20,6 +19,16 @@ function trimTrailingSlashes(value: string): string {
     end--;
   }
   return value.slice(0, end);
+}
+
+/**
+ * Минимальная структурная поверхность AdminInformer, нужная нотификациям.
+ * Локальный интерфейс вместо импорта класса — разрывает цикл
+ * notifications ↔ admin-informer (AdminInformer его структурно удовлетворяет).
+ */
+export interface AdminInformerLike {
+  resolveOwnerAdminId(tenantId: number): Promise<number | null>;
+  emitNotificationEvent(event: NotificationEvent): Promise<void>;
 }
 
 export interface NotificationEvent {
@@ -137,7 +146,7 @@ export class NotificationService {
      * дайджест + лента) и пропускается в per-operator-рассылке ниже, чтобы не
      * было дублей. Операторские правила/группы — без изменений.
      */
-    private readonly informer?: AdminInformer,
+    private readonly informer?: AdminInformerLike,
     private readonly mediaDownloader?: NotificationMediaDownloader,
     /**
      * #651 — нужен для форум-топиков: чтение/запись

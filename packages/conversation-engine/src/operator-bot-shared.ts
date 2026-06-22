@@ -5,6 +5,25 @@
 /** TTL кода выдачи (payout code) — 1 час. */
 export const PAYOUT_CODE_TTL_SEC = 60 * 60;
 
+/**
+ * Черновик ответа оператора, ожидающий подтверждения/отправки. Живёт здесь
+ * (а не в handler), чтобы exchange-side-effects могли типизировать `tx`-операции
+ * без циклического импорта из operator-bot-handler.
+ */
+export interface PendingOperatorDraft {
+  draftId: string;
+  dbId?: number;
+  tenantId: number;
+  adminId: number;
+  chatId: string;
+  conversationId: number;
+  text: string;
+  metadata?: Record<string, unknown>;
+  status?: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
 export function escapeHtml(v: string): string {
   return v
     .replaceAll("&", "&amp;")
