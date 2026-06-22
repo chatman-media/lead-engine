@@ -13,7 +13,7 @@
 | [engineering/CONCIERGE_FUNNEL_CONVERGENCE.md](engineering/CONCIERGE_FUNNEL_CONVERGENCE.md) | Как срастаются концерж (#207) и универсальная воронка (#208): «общий хребет, разъединённые концы» — 3 шва + продуктовый разбор + дорожная карта конвергенции (R1–R6) |
 | [engineering/ONBOARDING.md](engineering/ONBOARDING.md) | Путь тенанта: закрытая регистрация → обязательный визард → каналы/LLM/KB/обменник (UI + curl) |
 | [engineering/CONFIGURATION.md](engineering/CONFIGURATION.md) | Полный референс env-переменных (all vars, required/optional, fallback/per-tenant) |
-| [engineering/EXCHANGE.md](engineering/EXCHANGE.md) | Обменная вертикаль: воронка, курсы/тиры, guardrails, ops-watch, реквизиты, orders CRM |
+| [engineering/EXCHANGE.md](engineering/EXCHANGE.md) | Обменная вертикаль: воронка, курсы/тиры + предложения курса, guardrails, ops-watch, реквизиты, orders CRM, точки выдачи + ATM-карта, покрытие операторов, per-currency округление, мультиязык (PH), симулятор + scripted-диалоги |
 | [engineering/SERVICE_CATALOG.md](engineering/SERVICE_CATALOG.md) | Каталог услуг + marketplace провайдеров: curated/custom providers, routes (`funnel`/`partner_service`/`webhook`/`manual`), partners/deals |
 | [engineering/NOTIFICATIONS.md](engineering/NOTIFICATIONS.md) | Stage webhooks + правила/шаблоны уведомлений + operator settings + Telegram-группы + ops-алерты |
 | [engineering/AGENTIC_TOOLS.md](engineering/AGENTIC_TOOLS.md) | Tool-loop: контракт инструмента, встроенные (booking), подключение в pipeline, кастомный инструмент |
