@@ -24,6 +24,17 @@ export interface PendingOperatorDraft {
   expiresAt: number;
 }
 
+/** "2h" / "30m" / "1d" → секунды; "off"/"0"/"" → 0; мусор → null. */
+export function parseMuteSeconds(arg: string): number | null {
+  const a = arg.trim().toLowerCase();
+  if (!a || a === "off" || a === "0") return 0;
+  const m = /^(\d+)\s*(m|h|d)$/.exec(a);
+  if (!m) return null;
+  const n = Number.parseInt(m[1] as string, 10);
+  const unit = m[2];
+  return unit === "m" ? n * 60 : unit === "h" ? n * 3600 : n * 86400;
+}
+
 export function escapeHtml(v: string): string {
   return v
     .replaceAll("&", "&amp;")
