@@ -36,6 +36,11 @@ export interface ReplyDebounceOpts {
 	sink?: PipelineSink;
 	/** #628 — резолвер настроек бота, чтобы отложенный ответ тоже дробился. */
 	resolveBotSettings?: ((tenantId: number) => Promise<BotSettings>) | null;
+	/**
+	 * #628 — индикатор «печатает…» для отложенного ответа: шлёт typing в канал
+	 * по (channelDbId, externalUserId). Строится из ChannelRegistry в apps/api.
+	 */
+	signalTyping?: ((channelDbId: number, externalUserId: string) => Promise<void>) | null;
 	log?: { warn?: (msg: string) => void; info?: (msg: string) => void };
 }
 
@@ -85,6 +90,9 @@ export async function replyDebounceTick(
 							: {}),
 						...(settings?.handoffAfterFallbacks
 							? { handoffAfterFallbacks: settings.handoffAfterFallbacks }
+							: {}),
+						...(settings?.typingIndicator && opts.signalTyping
+							? { signalTyping: opts.signalTyping }
 							: {}),
 						...(opts.sink ? { sink: opts.sink } : {}),
 					});

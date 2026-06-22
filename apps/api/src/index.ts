@@ -1491,6 +1491,9 @@ async function main() {
 				notifications: notificationService,
 				sink,
 				resolveBotSettings,
+				signalTyping: async (channelDbId, externalUserId) => {
+					await channels.byChannelId(channelDbId)?.adapter.signalTyping(externalUserId);
+				},
 				log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
 			}).catch((e) =>
 				log.warn("reply-debounce tick failed", {
