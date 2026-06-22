@@ -200,12 +200,18 @@ describe("AdminInformer.emit", () => {
     expect(await rowCount(tenantWith, "dup")).toBe(1);
   });
 
-  it("нет Telegram + не critical → пропуск (нет строки)", async () => {
+  it("нет Telegram + не critical → Telegram молчит, но строка в ленте есть (in-app)", async () => {
     if (!enabled) return;
     const tg = new FakeTelegram();
-    await makeInformer(tg, new FakeEmail()).emit(ev(tenantNoTg, { severity: "important", dedupKey: "n-imp" }));
-    expect(tg.sends.length).toBe(0);
-    expect(await rowCount(tenantNoTg, "n-imp")).toBe(0);
+    const realtime: Array<{ id: number }> = [];
+    await makeInformer(tg, new FakeEmail(), (e) => realtime.push({ id: e.id })).emit(
+      ev(tenantNoTg, { severity: "important", dedupKey: "n-imp" }),
+    );
+    expect(tg.sends.length).toBe(0); // нет чата владельца → пуш не уходит
+    const row = await lastRow(tenantNoTg, "n-imp");
+    expect(row).toBeDefined();
+    expect(row?.deliveredAt).toBeNull(); // не доставлено пушем → копится для in-app/дайджеста
+    expect(realtime.length).toBe(1); // in-app SSE сработал даже без Telegram
   });
 
   it("нет Telegram + critical → email-гарантия + строка в ленте", async () => {

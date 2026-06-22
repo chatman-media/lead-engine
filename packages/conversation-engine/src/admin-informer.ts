@@ -362,15 +362,17 @@ export class AdminInformer {
       if (!topicEnabled(owner.settings, event.topic)) return null;
 
       const chatId = owner.settings?.telegramChatId ?? null;
-      // Нет канала доставки и событие не critical (для critical есть email-гарантия) → пропускаем.
-      if (!chatId && event.severity !== "critical") return null;
 
       // Persisted-дедуп (анти-шторм).
       const recent = await repo.findRecentByDedup(event.tenantId, event.dedupKey, now - this.cooldownSec);
       if (recent) return null;
 
       const level = (owner.settings?.informerLevel ?? "important") as InformerLevel;
+      // Реалтайм-пуш в Telegram возможен только при привязанном чате владельца.
+      // Без чата строка всё равно пишется в ленту (in-app колокол) и копится в
+      // дайджест — поэтому НЕ отбрасываем событие из-за отсутствия Telegram.
       const realtime =
+        !!chatId &&
         !isMuted(owner.settings, now) &&
         !inQuietHours(owner.settings, now) &&
         passesThreshold(event.severity, level);

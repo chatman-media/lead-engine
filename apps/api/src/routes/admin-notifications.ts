@@ -188,8 +188,11 @@ export function makeAdminNotificationsRoutes(opts: {
   // GET /api/admin/notifications/ops-status — готовность доставки владельцу.
   app.get("/ops-status", async (c) => {
     const tenantId = c.var.tenantId;
-    const settings = await opts.repo.findOperatorSettingsByTenant(tenantId);
-    const telegramLinked = settings.some((s) => !!s.telegramChatId);
+    // Операционные алерты доставляются ВЛАДЕЛЬЦУ (superadmin), а не любому
+    // оператору. Статус привязки Telegram считаем по его личному чату — иначе
+    // индикатор «Доставка настроена» зеленеет, пока владелец не получает алерты.
+    const owner = await opts.repo.resolveOwnerSettings(tenantId);
+    const telegramLinked = !!owner?.settings?.telegramChatId;
     return c.json({
       enabled: !!opts.opsRouter,
       botConfigured: !!opts.botUsername,
