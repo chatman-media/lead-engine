@@ -8,6 +8,10 @@ import {
 	stringValue,
 } from "./operator-bot-shared.ts";
 import {
+	extractConversationIdFromReply,
+	previewOrderLine,
+} from "./operator-draft-parsing.ts";
+import {
 	DIGEST_LABEL,
 	DIGESTS,
 	digestKeyboard,
@@ -362,7 +366,7 @@ export class OperatorBotHandler {
 		text: string,
 	): Promise<boolean> {
 		if (!this.client) return false;
-		const conversationId = this.extractConversationIdFromReply(
+		const conversationId = extractConversationIdFromReply(
 			message.reply_to_message,
 		);
 		if (!conversationId) return false;
@@ -892,7 +896,7 @@ export class OperatorBotHandler {
 			text:
 				`🧾 <b>${escapeHtml(title)}</b>\n\n` +
 				`Диалог: #${draft.conversationId}\n\n` +
-				this.previewOrderLine(draft) +
+				previewOrderLine(draft) +
 				`<b>Текст:</b>\n${escapeHtml(draft.text)}\n\n` +
 				"После отправки сообщение попадёт в историю, уйдёт клиенту в активный канал, а диалог останется в human mode.",
 			replyMarkup: {
@@ -915,34 +919,6 @@ export class OperatorBotHandler {
 				],
 			},
 		});
-	}
-
-	private previewOrderLine(draft: PendingOperatorDraft): string {
-		const rawOrderId = draft.metadata?.orderId;
-		const orderId =
-			typeof rawOrderId === "number" && Number.isInteger(rawOrderId)
-				? rawOrderId
-				: typeof rawOrderId === "string"
-					? Number.parseInt(rawOrderId, 10)
-					: null;
-		return orderId && orderId > 0 ? `Заявка: #${orderId}\n\n` : "";
-	}
-
-	private extractConversationIdFromReply(
-		message: TgMessage | undefined,
-	): number | null {
-		if (!message) return null;
-		const rows = message.reply_markup?.inline_keyboard ?? [];
-		for (const row of rows) {
-			for (const button of row) {
-				const action = parseOperatorActionCallbackData(button.callback_data);
-				if (action.ok) return action.payload.conversationId;
-				const urlMatch = button.url?.match(/\/conversations\/(\d+)(?:\D|$)/);
-				if (urlMatch?.[1]) return Number.parseInt(urlMatch[1], 10);
-			}
-		}
-		const textMatch = message.text?.match(/(?:Диалог|чат)\s*#?(\d+)/i);
-		return textMatch?.[1] ? Number.parseInt(textMatch[1], 10) : null;
 	}
 
 	private async handlePreviewAction(
