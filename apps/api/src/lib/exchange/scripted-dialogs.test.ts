@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { loadScriptedDialogs, parseCandidateCaseMarkdown } from "./scripted-dialogs.ts";
+import {
+  __clearScriptedDialogsCache,
+  getScriptedDialog,
+  loadScriptedDialogs,
+  parseCandidateCaseMarkdown,
+} from "./scripted-dialogs.ts";
 
 describe("parseCandidateCaseMarkdown", () => {
   it("извлекает заголовок, ходы и медиа", () => {
@@ -76,5 +81,31 @@ describe("loadScriptedDialogs", () => {
     const dialogs = loadScriptedDialogs("PHP");
     expect(dialogs.length).toBeGreaterThanOrEqual(5);
     for (const d of dialogs) expect(d.currency).toBe("PHP");
+  });
+});
+
+describe("getScriptedDialog", () => {
+  it("находит диалог по id (lines 168-171)", () => {
+    const all = loadScriptedDialogs("THB");
+    const first = all[0];
+    expect(first).toBeDefined();
+    if (!first) return;
+    const found = getScriptedDialog("THB", first.id);
+    expect(found?.id).toBe(first.id);
+  });
+
+  it("неизвестный id → undefined", () => {
+    expect(getScriptedDialog("THB", "no-such-dialog-xyz")).toBeUndefined();
+  });
+});
+
+describe("__clearScriptedDialogsCache", () => {
+  it("сбрасывает кэш — повторная загрузка перечитывает файлы (line 176)", () => {
+    const before = loadScriptedDialogs("THB");
+    __clearScriptedDialogsCache();
+    const after = loadScriptedDialogs("THB");
+    // другой инстанс массива (кэш был очищен), но тот же контент
+    expect(after).not.toBe(before);
+    expect(after.length).toBe(before.length);
   });
 });

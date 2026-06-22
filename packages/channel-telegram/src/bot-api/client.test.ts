@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { TelegramApiError, TelegramClient } from "./client.ts";
 import type { FetchLike } from "./client.ts";
+import { TelegramApiError, TelegramClient } from "./client.ts";
 
 function envelope(result: unknown): Response {
   return new Response(JSON.stringify({ ok: true, result }), { status: 200 });
@@ -41,8 +41,44 @@ describe("TelegramClient методы", () => {
     });
     expect(r.message_id).toBe(9);
     const b = bodyOf(calls[0]!.init);
-    expect(b).toMatchObject({ chat_id: "100", text: "hi", parse_mode: "HTML", disable_web_page_preview: true, reply_to_message_id: 5 });
+    expect(b).toMatchObject({
+      chat_id: "100",
+      text: "hi",
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      reply_to_message_id: 5,
+    });
     expect(b.reply_markup.inline_keyboard).toBeDefined();
+  });
+
+  it("createForumTopic — параметры + icon_color", async () => {
+    const { fn, calls } = mock(() => envelope({ message_thread_id: 42, name: "Лид #7" }));
+    const r = await client(fn).createForumTopic({
+      chatId: -100,
+      name: "Лид #7",
+      iconColor: 7322096,
+    });
+    expect(r.message_thread_id).toBe(42);
+    expect(calls[0]!.url).toContain("/createForumTopic");
+    expect(bodyOf(calls[0]!.init)).toMatchObject({
+      chat_id: -100,
+      name: "Лид #7",
+      icon_color: 7322096,
+    });
+  });
+
+  it("createForumTopic — без icon_color", async () => {
+    const { fn, calls } = mock(() => envelope({ message_thread_id: 1, name: "t" }));
+    await client(fn).createForumTopic({ chatId: -100, name: "t" });
+    expect(bodyOf(calls[0]!.init).icon_color).toBeUndefined();
+  });
+
+  it("sendLocation — координаты", async () => {
+    const { fn, calls } = mock(() => envelope({ message_id: 3 }));
+    const r = await client(fn).sendLocation({ chatId: 1, latitude: 13.75, longitude: 100.5 });
+    expect(r.message_id).toBe(3);
+    expect(calls[0]!.url).toContain("/sendLocation");
+    expect(bodyOf(calls[0]!.init)).toMatchObject({ chat_id: 1, latitude: 13.75, longitude: 100.5 });
   });
 
   it("sendPhoto / sendVideo / sendDocument", async () => {
@@ -107,13 +143,23 @@ describe("TelegramClient методы", () => {
   });
 
   it("sendLocalVideo — не поддержано (throws)", () => {
-    expect(() => client(mock(() => envelope({})).fn).sendLocalVideo({ chatId: 1, localFilePath: "/x" })).toThrow();
+    expect(() =>
+      client(mock(() => envelope({})).fn).sendLocalVideo({ chatId: 1, localFilePath: "/x" }),
+    ).toThrow();
   });
 
   it("editMessageText / deleteMessage", async () => {
-    const { fn, calls } = mock((url) => (url.includes("delete") ? envelope(true) : envelope({ message_id: 2 })));
+    const { fn, calls } = mock((url) =>
+      url.includes("delete") ? envelope(true) : envelope({ message_id: 2 }),
+    );
     const c = client(fn);
-    await c.editMessageText({ chatId: 1, messageId: 2, text: "new", parseMode: "HTML", replyMarkup: {} });
+    await c.editMessageText({
+      chatId: 1,
+      messageId: 2,
+      text: "new",
+      parseMode: "HTML",
+      replyMarkup: {},
+    });
     expect(await c.deleteMessage({ chatId: 1, messageId: 2 })).toBe(true);
     expect(bodyOf(calls[0]!.init)).toMatchObject({ message_id: 2, text: "new" });
   });
@@ -121,12 +167,19 @@ describe("TelegramClient методы", () => {
   it("answerCallbackQuery — text + show_alert", async () => {
     const { fn, calls } = mock(() => envelope(true));
     await client(fn).answerCallbackQuery({ callbackQueryId: "cb", text: "ok", showAlert: true });
-    expect(bodyOf(calls[0]!.init)).toMatchObject({ callback_query_id: "cb", text: "ok", show_alert: true });
+    expect(bodyOf(calls[0]!.init)).toMatchObject({
+      callback_query_id: "cb",
+      text: "ok",
+      show_alert: true,
+    });
   });
 
   it("answerCallbackQuery — url", async () => {
     const { fn, calls } = mock(() => envelope(true));
-    await client(fn).answerCallbackQuery({ callbackQueryId: "cb", url: "https://app.test/conversations/7" });
+    await client(fn).answerCallbackQuery({
+      callbackQueryId: "cb",
+      url: "https://app.test/conversations/7",
+    });
     expect(bodyOf(calls[0]!.init)).toMatchObject({
       callback_query_id: "cb",
       url: "https://app.test/conversations/7",
@@ -141,17 +194,30 @@ describe("TelegramClient методы", () => {
 
   it("setWebhook / deleteWebhook / getWebhookInfo", async () => {
     const { fn, calls } = mock((url) =>
-      url.includes("getWebhookInfo") ? envelope({ url: "u", pending_update_count: 0 }) : envelope(true),
+      url.includes("getWebhookInfo")
+        ? envelope({ url: "u", pending_update_count: 0 })
+        : envelope(true),
     );
     const c = client(fn);
-    await c.setWebhook({ url: "https://x", secretToken: "s", allowedUpdates: ["message"], dropPendingUpdates: true });
+    await c.setWebhook({
+      url: "https://x",
+      secretToken: "s",
+      allowedUpdates: ["message"],
+      dropPendingUpdates: true,
+    });
     await c.deleteWebhook(true);
     expect((await c.getWebhookInfo()).url).toBe("u");
-    expect(bodyOf(calls[0]!.init)).toMatchObject({ url: "https://x", secret_token: "s", drop_pending_updates: true });
+    expect(bodyOf(calls[0]!.init)).toMatchObject({
+      url: "https://x",
+      secret_token: "s",
+      drop_pending_updates: true,
+    });
   });
 
   it("getFile + downloadFile (two-step)", async () => {
-    const { fn } = mock((url) => (url.includes("/getFile") ? envelope({ file_path: "photos/a.jpg" }) : new Response("BYTES")));
+    const { fn } = mock((url) =>
+      url.includes("/getFile") ? envelope({ file_path: "photos/a.jpg" }) : new Response("BYTES"),
+    );
     const res = await client(fn).downloadFile("fid");
     expect(await res.text()).toBe("BYTES");
   });
@@ -164,11 +230,18 @@ describe("TelegramClient методы", () => {
 
 describe("TelegramClient.call error-ветки", () => {
   it("HTTP !ok → TelegramApiError", async () => {
-    const { fn } = mock(() => new Response(JSON.stringify({ ok: false, error_code: 401, description: "bad" }), { status: 401 }));
+    const { fn } = mock(
+      () =>
+        new Response(JSON.stringify({ ok: false, error_code: 401, description: "bad" }), {
+          status: 401,
+        }),
+    );
     await expect(client(fn).getMe()).rejects.toBeInstanceOf(TelegramApiError);
   });
   it("body.ok=false → TelegramApiError с описанием", async () => {
-    const { fn } = mock(() => new Response(JSON.stringify({ ok: false, description: "nope" }), { status: 200 }));
+    const { fn } = mock(
+      () => new Response(JSON.stringify({ ok: false, description: "nope" }), { status: 200 }),
+    );
     await expect(client(fn).getMe()).rejects.toThrow("nope");
   });
   it("non-JSON → TelegramApiError", async () => {
