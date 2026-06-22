@@ -16,6 +16,7 @@ import {
 	resolveExchangeActionScope,
 	resolveExchangeQuickReply,
 } from "./operator-exchange-quick-reply.ts";
+import { translateOperatorReply } from "./operator-reply-translation.ts";
 import {
 	DIGEST_LABEL,
 	DIGESTS,
@@ -836,37 +837,6 @@ export class OperatorBotHandler {
 	 * (LLM-вызов нельзя внутри withTenant). Канны (exchangeAction — коды/
 	 * реквизиты) и ru-диалоги не переводим. Нет resolveChat / ошибка → null.
 	 */
-	private async translateOperatorReply(
-		draft: PendingOperatorDraft,
-		db: Db,
-	): Promise<{ text: string; lang: Lang } | null> {
-		const resolveChat = this.actions.resolveChat;
-		if (!resolveChat) return null;
-		if (draft.metadata?.exchangeAction) return null;
-		if (!draft.text?.trim()) return null;
-		const lang = await withTenant(db, draft.tenantId, async (tx) => {
-			const [conv] = await tx
-				.select({ detectedLang: conversations.detectedLang })
-				.from(conversations)
-				.where(
-					and(
-						eq(conversations.tenantId, draft.tenantId),
-						eq(conversations.id, draft.conversationId),
-					),
-				)
-				.limit(1);
-			return asSupportedLang(conv?.detectedLang);
-		});
-		if (!lang || !needsTranslation(OPERATOR_LANG, lang)) return null;
-		const translated = await translateText({
-			chat: resolveChat(draft.tenantId),
-			text: draft.text,
-			targetLang: lang,
-			onWarn: (m) => console.warn(m),
-		});
-		return translated === draft.text ? null : { text: translated, lang };
-	}
-
 	private async sendDraftToClient(draft: PendingOperatorDraft): Promise<{
 		kind: "sent" | "not_found" | "no_channel" | "already_handled";
 		toast: string;
@@ -882,7 +852,7 @@ export class OperatorBotHandler {
 		}
 		const now = this.actions.nowEpoch?.() ?? Math.floor(Date.now() / 1000);
 		// #731: перевод RU→язык клиента ВНЕ tx (LLM нельзя внутри withTenant).
-		const translation = await this.translateOperatorReply(draft, db);
+		const translation = await translateOperatorReply(this.actions.resolveChat, draft, db);
 		const outcome = await withTenant(db, draft.tenantId, async (tx) => {
 			const [conv] = await tx
 				.select({ id: conversations.id, contactId: conversations.userId })
