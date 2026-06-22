@@ -1168,10 +1168,12 @@ export function SaasNotifications() {
               </div>
             </div>
             {opsStatus &&
-              (opsStatus.telegramLinked || opsStatus.emailConfigured ? (
+              (opsStatus.telegramLinked ? (
                 <Badge variant="success" className="gap-1">
                   <CheckIcon className="size-3" /> Доставка настроена
                 </Badge>
+              ) : opsStatus.emailConfigured ? (
+                <Badge variant="warning">Только critical (email)</Badge>
               ) : (
                 <Badge variant="warning">Нет канала</Badge>
               ))}
@@ -1193,7 +1195,8 @@ export function SaasNotifications() {
                 className={`size-3.5 shrink-0 ${opsStatus?.emailConfigured ? "text-green-500" : "text-muted-foreground/40"}`}
               />
               <span className="text-muted-foreground">
-                Email {opsStatus?.emailConfigured ? "настроен" : "не настроен (RESEND_API_KEY)"}
+                Email{" "}
+                {opsStatus?.emailConfigured ? "настроен (только critical)" : "не настроен (RESEND_API_KEY)"}
               </span>
             </div>
           </div>
