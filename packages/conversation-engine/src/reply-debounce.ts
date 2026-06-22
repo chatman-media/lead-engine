@@ -15,6 +15,7 @@ import type {
   ProcessInboundResult,
   TenantContext,
 } from "./types.ts";
+import { startTypingKeepalive } from "./typing-keepalive.ts";
 import { withTenant } from "./with-tenant.ts";
 
 /**
@@ -44,6 +45,12 @@ export interface GenerateReplyForConversationDeps {
   fallbackText?: string | null;
   /** #627 — порог серии фолбэков для передачи оператору (из botSettings). */
   handoffAfterFallbacks?: number | null;
+  /**
+   * #628 — индикатор «печатает…» для отложенного ответа: резолвер шлёт typing
+   * в канал по (channelDbId, externalUserId). Инжектится из apps/api, где есть
+   * ChannelRegistry. null/undefined — индикатор не шлём.
+   */
+  signalTyping?: ((channelDbId: number, externalUserId: string) => Promise<void>) | null;
 }
 
 function partsFromMetaJson(metaJson: string | null, fallbackText: string): InboundPart[] {
@@ -106,6 +113,7 @@ export async function generateReplyForConversation(
   if (!ctx.channelRow || !ctx.identity || !ctx.latest) return { outboundEnqueued: 0 };
   const text = ctx.latest.text.trim();
   if (text.length === 0) return { outboundEnqueued: 0 };
+  const recipientExternalUserId = ctx.identity.externalUserId;
 
   const channel: ChannelContext = {
     channelId,
@@ -132,22 +140,34 @@ export async function generateReplyForConversation(
     mediaOnly: false,
   };
 
-  const gen = await generateReplyAndEnqueue({
-    db: deps.db,
-    tenant: deps.tenant,
-    channel,
-    channelDbId: channelId,
-    inbound,
-    result,
-    replyStrategy: deps.replyStrategy,
-    notifications: deps.notifications ?? null,
-    clock: deps.clock ?? systemClock,
-    ...(deps.splitReplies ? { splitReplies: true } : {}),
-    ...(deps.fallbackText ? { fallbackText: deps.fallbackText } : {}),
-    ...(deps.handoffAfterFallbacks
-      ? { handoffAfterFallbacks: deps.handoffAfterFallbacks }
-      : {}),
-    ...(deps.sink ? { sink: deps.sink } : {}),
-  });
+  // #628 — «печатает…» на время генерации отложенного ответа (best-effort,
+  // авто-переподнятие). signalTyping no-op для каналов без typing-capability.
+  const stopTyping = deps.signalTyping
+    ? startTypingKeepalive(
+        () => deps.signalTyping?.(channelId, recipientExternalUserId) ?? Promise.resolve(),
+      )
+    : null;
+  let gen: { outboundEnqueued: number };
+  try {
+    gen = await generateReplyAndEnqueue({
+      db: deps.db,
+      tenant: deps.tenant,
+      channel,
+      channelDbId: channelId,
+      inbound,
+      result,
+      replyStrategy: deps.replyStrategy,
+      notifications: deps.notifications ?? null,
+      clock: deps.clock ?? systemClock,
+      ...(deps.splitReplies ? { splitReplies: true } : {}),
+      ...(deps.fallbackText ? { fallbackText: deps.fallbackText } : {}),
+      ...(deps.handoffAfterFallbacks
+        ? { handoffAfterFallbacks: deps.handoffAfterFallbacks }
+        : {}),
+      ...(deps.sink ? { sink: deps.sink } : {}),
+    });
+  } finally {
+    stopTyping?.();
+  }
   return { outboundEnqueued: gen.outboundEnqueued };
 }

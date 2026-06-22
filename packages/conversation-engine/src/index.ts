@@ -242,6 +242,7 @@ export {
   type GenerateReplyForConversationDeps,
   generateReplyForConversation,
 } from "./reply-debounce.ts";
+export { startTypingKeepalive, type TypingKeepaliveOptions } from "./typing-keepalive.ts";
 export {
   EXCHANGE_KYC_FALLBACK,
   EXCHANGE_PAYMENT_FALLBACK,

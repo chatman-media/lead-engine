@@ -20,6 +20,7 @@ import {
 	processInbound,
 	type ReplyStrategy,
 	runDeferredInboundPostProcessing,
+	startTypingKeepalive,
 	type StageClassifier,
 	transcribeInboundVoice,
 	withTenant,
@@ -371,10 +372,11 @@ export function makeTelegramWebhookRoutes(opts: {
 					delaySec,
 				});
 			} else {
-				// #628 — индикатор «печатает…» на время генерации (best-effort).
-				if (botSettings.typingIndicator) {
-					void adapter.signalTyping(inbound.externalUserId).catch(() => {});
-				}
+				// #628 — индикатор «печатает…» на время генерации (best-effort, с
+				// авто-переподнятием каждые ~4с, чтобы не гас на медленной генерации).
+				const stopTyping = botSettings.typingIndicator
+					? startTypingKeepalive(() => adapter.signalTyping(inbound.externalUserId))
+					: null;
 				const replyStrategyWithButtons = wrapWithConciergeButtons(
 					opts.replyStrategy,
 					opts.db,
@@ -394,6 +396,7 @@ export function makeTelegramWebhookRoutes(opts: {
 					...(opts.sink ? { sink: opts.sink } : {}),
 				});
 				result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+				stopTyping?.();
 			}
 		}
 
