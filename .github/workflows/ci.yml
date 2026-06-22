@@ -124,13 +124,14 @@ jobs:
         run: bun run --filter './apps/admin-ui' --filter './apps/landing' --filter './apps/widget' build
 
   quality:
-    name: quality — связность + дубликаты (без PG)
+    name: quality — связность + дубликаты + формат diff (без PG)
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          # Полная история нужна для biome --changed (merge-base с main).
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -148,6 +149,16 @@ jobs:
 
       - name: Install deps (workspace)
         run: bun install --frozen-lockfile
+
+      # origin/main как база для biome --changed (PR-ы всегда в main).
+      - name: Fetch base (origin/main)
+        run: git fetch --no-tags origin main
+
+      # Формат-храповик (Biome): проверяет ТОЛЬКО изменённые в PR файлы. Легаси
+      # не трогаем; тронул файл → он должен быть отформатирован. Постепенная
+      # адаптация на смешанном (табы/пробелы) репозитории.
+      - name: Format gate on changed files (biome --changed)
+        run: bun run lint:format
 
       # Архитектурный гейт: циклических импортов быть не должно (madge).
       - name: No circular dependencies (madge)
