@@ -157,6 +157,20 @@ jobs:
       - name: No excessive duplication (jscpd)
         run: bun run lint:dup
 
+      # Информационно (не блокирует): неиспользуемые файлы/экспорты/зависимости.
+      # Отчёт в summary; станет гейтом после чистки реальных находок.
+      - name: Dead code report (knip, non-blocking)
+        if: always()
+        continue-on-error: true
+        run: |
+          {
+            echo '## knip — неиспользуемый код (информационно)'
+            echo ''
+            echo '```'
+            bun run lint:unused 2>&1 | grep -E "\([0-9]+\)$" || echo 'no findings'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   release:
     name: Release — publish @chatman-media/* to npm
     needs: workspace

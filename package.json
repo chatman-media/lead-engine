@@ -40,7 +40,8 @@
 		"db:reset": "docker compose down -v && docker compose up -d && docker compose exec -T postgres bash -c 'until pg_isready -U lead -d lead_engine >/dev/null 2>&1; do sleep 1; done' && DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun run apps/api/scripts/reset-and-migrate.ts",
 		"db:psql": "docker compose exec postgres psql -U lead lead_engine",
 		"lint:cycles": "madge --circular --extensions ts packages apps",
-		"lint:dup": "jscpd packages apps --min-lines 30 --min-tokens 70 --ignore '**/*.test.ts,**/*.spec.ts,**/dist/**' --threshold 6 --reporters consoleFull"
+		"lint:dup": "jscpd packages apps --min-lines 30 --min-tokens 70 --ignore '**/*.test.ts,**/*.spec.ts,**/dist/**' --threshold 6 --reporters consoleFull",
+		"lint:unused": "knip"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
@@ -51,6 +52,7 @@
 		"@semantic-release/github": "^12.0.8",
 		"@semantic-release/npm": "^13.1.5",
 		"jscpd": "^4.0.5",
+		"knip": "^5.64.4",
 		"madge": "^8.0.0",
 		"semantic-release": "^25.0.5",
 		"semantic-release-monorepo": "^8.0.2"
