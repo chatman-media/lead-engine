@@ -27,6 +27,13 @@ export const DIGEST_LABEL: Record<string, string> = {
   shift: "2×/день",
 };
 
+/** Эмодзи серьёзности для ленты последних событий (/last). */
+export const SEV_EMOJI: Record<string, string> = {
+  critical: "🔴",
+  important: "🟡",
+  info: "ℹ️",
+};
+
 export function levelKeyboard(current: string): TgReplyMarkup {
   return {
     inline_keyboard: LEVELS.map((l) => [

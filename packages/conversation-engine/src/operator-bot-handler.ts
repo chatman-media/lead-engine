@@ -20,6 +20,8 @@ import {
 	topicsKeyboard,
 } from "./operator-informer-ui.ts";
 import { DraftStore } from "./operator-draft-store.ts";
+import { InformerCommands } from "./operator-informer-commands.ts";
+export { parseMuteSeconds } from "./operator-bot-shared.ts";
 import {
 	applyOfficeDetailsSideEffect,
 	applyPaymentConfirmedSideEffect,
@@ -72,11 +74,6 @@ import { withTenant } from "./with-tenant.ts";
 // ── Информер: справочники для команд ────────────────────────────────────────
 
 
-const SEV_EMOJI: Record<string, string> = {
-	critical: "🔴",
-	important: "🟡",
-	info: "ℹ️",
-};
 
 const PREVIEW_TTL_SEC = 10 * 60;
 const EXCHANGE_VERTICAL_TEMPLATE_ID = "exchange_v1";
@@ -143,20 +140,11 @@ const EXCHANGE_QUICK_REPLIES: Record<
 	},
 };
 
-/** "2h" / "30m" / "1d" → секунды; "off"/"0"/"" → 0; мусор → null. */
-export function parseMuteSeconds(arg: string): number | null {
-	const a = arg.trim().toLowerCase();
-	if (!a || a === "off" || a === "0") return 0;
-	const m = /^(\d+)\s*(m|h|d)$/.exec(a);
-	if (!m) return null;
-	const n = Number.parseInt(m[1] as string, 10);
-	const unit = m[2];
-	return unit === "m" ? n * 60 : unit === "h" ? n * 3600 : n * 86400;
-}
 
 export class OperatorBotHandler {
 	private client: TelegramClient | null = null;
 	private readonly draftStore: DraftStore;
+	private readonly informer: InformerCommands;
 
 	constructor(
 		private readonly repo: NotificationsRepo,
@@ -174,6 +162,7 @@ export class OperatorBotHandler {
 			this.client = new TelegramClient({ token: botToken });
 		}
 		this.draftStore = new DraftStore(this.actions.db);
+		this.informer = new InformerCommands(() => this.client, this.repo);
 	}
 
 	async handleUpdate(update: TgUpdate): Promise<void> {
@@ -250,14 +239,14 @@ export class OperatorBotHandler {
 		}
 
 		// 3. Команды информера (личный чат владельца/оператора).
-		if (text === "/status") return this.cmdStatus(chatId);
-		if (text === "/level") return this.cmdLevel(chatId);
-		if (text === "/topics") return this.cmdTopics(chatId);
-		if (text === "/digest") return this.cmdDigest(chatId);
+		if (text === "/status") return this.informer.cmdStatus(chatId);
+		if (text === "/level") return this.informer.cmdLevel(chatId);
+		if (text === "/topics") return this.informer.cmdTopics(chatId);
+		if (text === "/digest") return this.informer.cmdDigest(chatId);
 		if (text === "/mute" || text.startsWith("/mute "))
-			return this.cmdMute(chatId, text);
+			return this.informer.cmdMute(chatId, text);
 		if (text === "/last" || text.startsWith("/last "))
-			return this.cmdLast(chatId, text);
+			return this.informer.cmdLast(chatId, text);
 
 		// 4. Базовый /start без параметров
 		if (text === "/start") {
@@ -279,115 +268,6 @@ export class OperatorBotHandler {
 	}
 
 	// ── Команды информера ──────────────────────────────────────────────────
-
-	private async cmdStatus(chatId: string): Promise<void> {
-		const s = await this.repo.findOperatorSettingsByChatId(chatId);
-		if (!s) return this.replyNotLinked(chatId);
-		const now = Math.floor(Date.now() / 1000);
-		const muted =
-			s.informerMutedUntil && s.informerMutedUntil > now
-				? `вкл (ещё ${Math.ceil((s.informerMutedUntil - now) / 60)} мин)`
-				: "выкл";
-		const map = topicMap(s.informerTopics);
-		const topicsLine = TOPICS.map(
-			(t) => `${map[t] ? "✅" : "⬜"} ${TOPIC_LABEL[t]}`,
-		).join("\n");
-		await this.client?.sendMessage({
-			chatId,
-			parseMode: "HTML",
-			text:
-				"⚙️ <b>Информер</b>\n\n" +
-				`Уровень: <b>${LEVEL_LABEL[s.informerLevel] ?? s.informerLevel}</b>\n` +
-				`Дайджест: <b>${DIGEST_LABEL[s.informerDigest] ?? s.informerDigest}</b> ` +
-				`(${s.informerDigestHour}:00 ${s.informerTz})\n` +
-				`Мут: <b>${muted}</b>\n\n` +
-				`Темы:\n${topicsLine}\n\n` +
-				"Изменить: /level · /topics · /digest · /mute",
-		});
-	}
-
-	private async cmdLevel(chatId: string): Promise<void> {
-		const s = await this.repo.findOperatorSettingsByChatId(chatId);
-		if (!s) return this.replyNotLinked(chatId);
-		await this.client?.sendMessage({
-			chatId,
-			text: "Насколько громко информировать?",
-			replyMarkup: levelKeyboard(s.informerLevel),
-		});
-	}
-
-	private async cmdTopics(chatId: string): Promise<void> {
-		const s = await this.repo.findOperatorSettingsByChatId(chatId);
-		if (!s) return this.replyNotLinked(chatId);
-		await this.client?.sendMessage({
-			chatId,
-			text: "Темы (нажми, чтобы вкл/выкл):",
-			replyMarkup: topicsKeyboard(topicMap(s.informerTopics)),
-		});
-	}
-
-	private async cmdDigest(chatId: string): Promise<void> {
-		const s = await this.repo.findOperatorSettingsByChatId(chatId);
-		if (!s) return this.replyNotLinked(chatId);
-		await this.client?.sendMessage({
-			chatId,
-			text: "Как часто слать сводку?",
-			replyMarkup: digestKeyboard(s.informerDigest),
-		});
-	}
-
-	private async cmdMute(chatId: string, text: string): Promise<void> {
-		const arg = text.split(/\s+/)[1] ?? "";
-		const sec = parseMuteSeconds(arg);
-		if (sec === null) {
-			await this.client?.sendMessage({
-				chatId,
-				text: "Формат: /mute 30m · /mute 2h · /mute 1d · /mute off",
-			});
-			return;
-		}
-		const s = await this.repo.findOperatorSettingsByChatId(chatId);
-		if (!s) return this.replyNotLinked(chatId);
-		const until = sec === 0 ? null : Math.floor(Date.now() / 1000) + sec;
-		await this.repo.updateInformerPrefs(s.adminId, {
-			informerMutedUntil: until,
-		});
-		await this.client?.sendMessage({
-			chatId,
-			text: until
-				? `🔇 Заглушено на ${Math.round(sec / 60)} мин. Реалтайм вернётся, события всё равно попадут в дайджест.`
-				: "🔔 Мут снят.",
-		});
-	}
-
-	private async cmdLast(chatId: string, text: string): Promise<void> {
-		const s = await this.repo.findOperatorSettingsByChatId(chatId);
-		if (!s) return this.replyNotLinked(chatId);
-		const arg = Number.parseInt(text.split(/\s+/)[1] ?? "", 10);
-		const limit = Number.isFinite(arg) ? Math.min(Math.max(arg, 1), 20) : 10;
-		const rows = await this.repo.listRecentNotifications(
-			s.tenantId,
-			s.adminId,
-			limit,
-		);
-		if (rows.length === 0) {
-			await this.client?.sendMessage({
-				chatId,
-				text: "Пока пусто — событий ещё не было.",
-			});
-			return;
-		}
-		let msg = `🗒 <b>Последние ${rows.length}:</b>`;
-		for (const r of rows) {
-			const when = new Date(r.createdAt * 1000)
-				.toISOString()
-				.slice(5, 16)
-				.replace("T", " ");
-			msg += `\n\n${SEV_EMOJI[r.severity] ?? ""} <b>${escapeHtml(r.title)}</b> · ${when}`;
-			if (r.body) msg += `\n${escapeHtml(r.body)}`;
-		}
-		await this.client?.sendMessage({ chatId, parseMode: "HTML", text: msg });
-	}
 
 	// ── Callback (нажатия кнопок) ──────────────────────────────────────────
 
