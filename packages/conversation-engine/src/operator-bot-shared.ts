@@ -5,6 +5,12 @@
 /** TTL кода выдачи (payout code) — 1 час. */
 export const PAYOUT_CODE_TTL_SEC = 60 * 60;
 
+/** Ссылка на диалог в админке (без appUrl — относительный путь). */
+export function conversationUrl(appUrl: string | undefined, conversationId: number): string {
+  const base = appUrl?.replace(/\/+$/, "");
+  return base ? `${base}/conversations/${conversationId}` : `/conversations/${conversationId}`;
+}
+
 /**
  * Черновик ответа оператора, ожидающий подтверждения/отправки. Живёт здесь
  * (а не в handler), чтобы exchange-side-effects могли типизировать `tx`-операции

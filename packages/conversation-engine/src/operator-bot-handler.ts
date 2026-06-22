@@ -1,4 +1,5 @@
 import {
+	conversationUrl,
 	escapeHtml,
 	objectValue,
 	parseJsonObject,
@@ -7,6 +8,7 @@ import {
 	pickupWindowFromDestination,
 	stringValue,
 } from "./operator-bot-shared.ts";
+import { OperatorActionHandler } from "./operator-conversation-actions.ts";
 import {
 	extractConversationIdFromReply,
 	previewOrderLine,
@@ -149,6 +151,7 @@ const EXCHANGE_QUICK_REPLIES: Record<
 export class OperatorBotHandler {
 	private client: TelegramClient | null = null;
 	private readonly draftStore: DraftStore;
+	private readonly operatorActions: OperatorActionHandler;
 	private readonly informer: InformerCommands;
 	private readonly linking: LinkingCommands;
 
@@ -168,6 +171,7 @@ export class OperatorBotHandler {
 			this.client = new TelegramClient({ token: botToken });
 		}
 		this.draftStore = new DraftStore(this.actions.db);
+		this.operatorActions = new OperatorActionHandler(() => this.client, this.actions);
 		this.informer = new InformerCommands(() => this.client, this.repo);
 		this.linking = new LinkingCommands(() => this.client, this.repo);
 	}
@@ -291,7 +295,7 @@ export class OperatorBotHandler {
 		}
 		const operatorAction = parseOperatorActionCallbackData(cq.data);
 		if (operatorAction.ok) {
-			await this.handleOperatorAction(cq, s, operatorAction.payload);
+			await this.operatorActions.handleOperatorAction(cq, s, operatorAction.payload);
 			return;
 		}
 		if (operatorAction.reason === "malformed") {
@@ -711,7 +715,7 @@ export class OperatorBotHandler {
 					[
 						{
 							text: "👁 Открыть чат",
-							url: this.conversationUrl(input.conversationId),
+							url: conversationUrl(this.actions.appUrl, input.conversationId),
 						},
 					],
 				],
@@ -824,7 +828,7 @@ export class OperatorBotHandler {
 					[
 						{
 							text: "👁 Открыть чат",
-							url: this.conversationUrl(draft.conversationId),
+							url: conversationUrl(this.actions.appUrl, draft.conversationId),
 						},
 					],
 				],
@@ -1025,180 +1029,6 @@ export class OperatorBotHandler {
 			toast: "Отправлено клиенту",
 			messageHtml: `✅ <b>Отправлено клиенту</b>\n\nДиалог #${draft.conversationId} переведён в human mode. Сообщение добавлено в историю и поставлено в очередь доставки.`,
 		};
-	}
-
-	private async handleOperatorAction(
-		cq: TgCallbackQuery,
-		settings: { adminId: number; tenantId: number },
-		input: OperatorActionPayload,
-	): Promise<void> {
-		if (!this.client) return;
-		if (input.tenantId > 0 && input.tenantId !== settings.tenantId) {
-			await this.client.answerCallbackQuery({
-				callbackQueryId: cq.id,
-				text: "Нет доступа к этому чату",
-				showAlert: true,
-			});
-			return;
-		}
-		if (input.action === "open_chat") {
-			const appUrl = this.actions.appUrl?.replace(/\/+$/, "");
-			await this.client.answerCallbackQuery(
-				appUrl
-					? {
-							callbackQueryId: cq.id,
-							url: `${appUrl}/conversations/${input.conversationId}`,
-						}
-					: {
-							callbackQueryId: cq.id,
-							text: `Откройте чат #${input.conversationId} в админке`,
-							showAlert: true,
-						},
-			);
-			return;
-		}
-		if (!this.actions.db) {
-			await this.client.answerCallbackQuery({
-				callbackQueryId: cq.id,
-				text: "Действия оператора ещё не настроены",
-				showAlert: true,
-			});
-			return;
-		}
-
-		const result = await this.applyConversationModeAction({
-			tenantId: settings.tenantId,
-			adminId: settings.adminId,
-			conversationId: input.conversationId,
-			action: input.action,
-		});
-
-		await this.client.answerCallbackQuery({
-			callbackQueryId: cq.id,
-			text: result.toast,
-			showAlert: result.kind === "not_found" || result.kind === "error",
-		});
-		await this.client.sendMessage({
-			chatId: String(cq.message?.chat.id ?? cq.from.id),
-			parseMode: "HTML",
-			text: result.messageHtml,
-			replyMarkup: {
-				inline_keyboard: [
-					[
-						{
-							text: "👁 Открыть чат",
-							url: this.conversationUrl(input.conversationId),
-						},
-					],
-				],
-			},
-		});
-	}
-
-	private async applyConversationModeAction(input: {
-		tenantId: number;
-		adminId: number;
-		conversationId: number;
-		action: OperatorBotActionKind;
-	}): Promise<{
-		kind: "changed" | "noop" | "not_found" | "error";
-		toast: string;
-		messageHtml: string;
-	}> {
-		const db = this.actions.db;
-		if (!db) {
-			return {
-				kind: "error",
-				toast: "Действия не настроены",
-				messageHtml: "⚠️ Действия оператора ещё не настроены.",
-			};
-		}
-		const now = this.actions.nowEpoch?.() ?? Math.floor(Date.now() / 1000);
-		const nextMode = input.action === "takeover" ? "human" : "ai";
-		const actionName =
-			input.action === "takeover"
-				? "conversation.mode.takeover.operator_bot"
-				: "conversation.mode.return_to_ai.operator_bot";
-
-		const outcome = await withTenant(db, input.tenantId, async (tx) => {
-			const [existing] = await tx
-				.select({ mode: conversations.mode })
-				.from(conversations)
-				.where(
-					and(
-						eq(conversations.tenantId, input.tenantId),
-						eq(conversations.id, input.conversationId),
-					),
-				)
-				.limit(1);
-			if (!existing) return { kind: "not_found" } as const;
-			if (existing.mode === nextMode) {
-				return { kind: "noop", from: existing.mode, to: nextMode } as const;
-			}
-
-			await tx
-				.update(conversations)
-				.set({
-					mode: nextMode,
-					lastMessageAt: now,
-					...(nextMode === "human"
-						? { assignedAdminId: input.adminId, unreadCount: 0 }
-						: {}),
-				})
-				.where(eq(conversations.id, input.conversationId));
-
-			await tx.insert(auditLog).values({
-				tenantId: input.tenantId,
-				adminId: input.adminId,
-				action: actionName,
-				targetKind: "conversation",
-				targetId: String(input.conversationId),
-				detailsJson: JSON.stringify({
-					from: existing.mode,
-					to: nextMode,
-					source: "operator_bot",
-				}),
-				createdAt: now,
-			});
-
-			return { kind: "changed", from: existing.mode, to: nextMode } as const;
-		});
-
-		if (outcome.kind === "not_found") {
-			return {
-				kind: "not_found",
-				toast: "Диалог не найден",
-				messageHtml: `⚠️ Диалог #${input.conversationId} не найден или недоступен вашему tenant.`,
-			};
-		}
-		if (outcome.kind === "noop") {
-			const label =
-				nextMode === "human"
-					? "уже в работе оператора"
-					: "уже под управлением AI";
-			return {
-				kind: "noop",
-				toast: "Уже актуально",
-				messageHtml: `ℹ️ Диалог #${input.conversationId} ${label}.`,
-			};
-		}
-
-		const text =
-			nextMode === "human"
-				? `✅ <b>Взято в работу</b>\n\nДиалог #${input.conversationId} переведён в human mode. AI больше не отвечает, пока оператор не вернёт управление.`
-				: `🤖 <b>AI снова активен</b>\n\nДиалог #${input.conversationId} возвращён под управление AI.`;
-		return {
-			kind: "changed",
-			toast: nextMode === "human" ? "Взято в работу" : "AI включён",
-			messageHtml: text,
-		};
-	}
-
-	private conversationUrl(conversationId: number): string {
-		const appUrl = this.actions.appUrl?.replace(/\/+$/, "");
-		return appUrl
-			? `${appUrl}/conversations/${conversationId}`
-			: `/conversations/${conversationId}`;
 	}
 
 	private async editKeyboard(
