@@ -7,6 +7,7 @@ import {
 	pickupWindowFromDestination,
 	stringValue,
 } from "./operator-bot-shared.ts";
+import { DraftStore } from "./operator-draft-store.ts";
 import {
 	applyOfficeDetailsSideEffect,
 	applyPaymentConfirmedSideEffect,
@@ -165,7 +166,7 @@ export function parseMuteSeconds(arg: string): number | null {
 
 export class OperatorBotHandler {
 	private client: TelegramClient | null = null;
-	private readonly pendingDrafts = new Map<string, PendingOperatorDraft>();
+	private readonly draftStore: DraftStore;
 
 	constructor(
 		private readonly repo: NotificationsRepo,
@@ -182,6 +183,7 @@ export class OperatorBotHandler {
 		if (botToken) {
 			this.client = new TelegramClient({ token: botToken });
 		}
+		this.draftStore = new DraftStore(this.actions.db);
 	}
 
 	async handleUpdate(update: TgUpdate): Promise<void> {
@@ -521,7 +523,7 @@ export class OperatorBotHandler {
 		// без claim'а черновика.
 		const now = this.actions.nowEpoch?.() ?? Math.floor(Date.now() / 1000);
 		const draft: PendingOperatorDraft = {
-			draftId: this.createDraftId(),
+			draftId: this.draftStore.createDraftId(),
 			tenantId: settings.tenantId,
 			adminId: settings.adminId,
 			chatId,
@@ -598,7 +600,7 @@ export class OperatorBotHandler {
 
 		const now = this.actions.nowEpoch?.() ?? Math.floor(Date.now() / 1000);
 		const draft: PendingOperatorDraft = {
-			draftId: this.createDraftId(),
+			draftId: this.draftStore.createDraftId(),
 			tenantId: rule.tenantId,
 			adminId,
 			chatId,
@@ -710,8 +712,8 @@ export class OperatorBotHandler {
 			});
 			return;
 		}
-		const draft = await this.createPendingDraft({
-			draftId: this.createDraftId(),
+		const draft = await this.draftStore.createPendingDraft({
+			draftId: this.draftStore.createDraftId(),
 			tenantId: settings.tenantId,
 			adminId: settings.adminId,
 			chatId,
@@ -758,7 +760,7 @@ export class OperatorBotHandler {
 		}
 
 		const draft: PendingOperatorDraft = {
-			draftId: this.createDraftId(),
+			draftId: this.draftStore.createDraftId(),
 			tenantId: settings.tenantId,
 			adminId: settings.adminId,
 			chatId,
@@ -1078,7 +1080,7 @@ export class OperatorBotHandler {
 		if (!this.client) return;
 		const chatId = String(cq.message?.chat.id ?? cq.from.id);
 		const now = this.actions.nowEpoch?.() ?? Math.floor(Date.now() / 1000);
-		const draft = await this.findPendingDraft(input.draftId, settings.tenantId);
+		const draft = await this.draftStore.findPendingDraft(input.draftId, settings.tenantId);
 		if (
 			!draft ||
 			draft.tenantId !== settings.tenantId ||
@@ -1088,7 +1090,7 @@ export class OperatorBotHandler {
 			now >= draft.expiresAt
 		) {
 			if (draft && now >= draft.expiresAt && draft.status === "pending") {
-				await this.expireDraft(draft, now);
+				await this.draftStore.expireDraft(draft, now);
 			}
 			await this.client.answerCallbackQuery({
 				callbackQueryId: cq.id,
@@ -1099,7 +1101,7 @@ export class OperatorBotHandler {
 		}
 
 		if (input.action === "cancel") {
-			await this.cancelDraft(draft, now);
+			await this.draftStore.cancelDraft(draft, now);
 			await this.client.answerCallbackQuery({
 				callbackQueryId: cq.id,
 				text: "Отменено",
@@ -1122,7 +1124,7 @@ export class OperatorBotHandler {
 
 		const result = await this.sendDraftToClient(draft);
 		if (result.kind === "sent") {
-			this.pendingDrafts.delete(input.draftId);
+			this.draftStore.deletePending(input.draftId);
 		}
 		await this.client.answerCallbackQuery({
 			callbackQueryId: cq.id,
@@ -1719,142 +1721,6 @@ export class OperatorBotHandler {
 			toState: target.slug,
 			stageDefinitionId: target.id,
 		};
-	}
-
-	private async createPendingDraft(
-		draft: PendingOperatorDraft,
-	): Promise<PendingOperatorDraft> {
-		const db = this.actions.db;
-		if (!db) {
-			this.pendingDrafts.set(draft.draftId, { ...draft, status: "pending" });
-			return { ...draft, status: "pending" };
-		}
-		const [row] = await withTenant(db, draft.tenantId, async (tx) =>
-			tx
-				.insert(operatorActionDrafts)
-				.values({
-					tenantId: draft.tenantId,
-					adminId: draft.adminId,
-					conversationId: draft.conversationId,
-					draftKey: draft.draftId,
-					chatId: draft.chatId,
-					kind: "client_reply",
-					status: "pending",
-					text: draft.text,
-					metadataJson: JSON.stringify(draft.metadata ?? {}),
-					createdAt: draft.createdAt,
-					expiresAt: draft.expiresAt,
-					updatedAt: draft.createdAt,
-				})
-				.returning({ id: operatorActionDrafts.id }),
-		);
-		return {
-			...draft,
-			dbId: row?.id,
-			status: "pending",
-		};
-	}
-
-	private async findPendingDraft(
-		draftId: string,
-		tenantId: number,
-	): Promise<PendingOperatorDraft | null> {
-		const db = this.actions.db;
-		if (!db) return this.pendingDrafts.get(draftId) ?? null;
-		const [row] = await withTenant(db, tenantId, async (tx) =>
-			tx
-				.select({
-					id: operatorActionDrafts.id,
-					tenantId: operatorActionDrafts.tenantId,
-					adminId: operatorActionDrafts.adminId,
-					conversationId: operatorActionDrafts.conversationId,
-					draftKey: operatorActionDrafts.draftKey,
-					chatId: operatorActionDrafts.chatId,
-					status: operatorActionDrafts.status,
-					text: operatorActionDrafts.text,
-					metadataJson: operatorActionDrafts.metadataJson,
-					createdAt: operatorActionDrafts.createdAt,
-					expiresAt: operatorActionDrafts.expiresAt,
-				})
-				.from(operatorActionDrafts)
-				.where(
-					and(
-						eq(operatorActionDrafts.tenantId, tenantId),
-						eq(operatorActionDrafts.draftKey, draftId),
-					),
-				)
-				.limit(1),
-		);
-		if (!row || row.adminId === null) return null;
-		return {
-			draftId: row.draftKey,
-			dbId: row.id,
-			tenantId: row.tenantId,
-			adminId: row.adminId,
-			chatId: row.chatId,
-			conversationId: row.conversationId,
-			text: row.text,
-			metadata: parseJsonObject(row.metadataJson),
-			status: row.status,
-			createdAt: row.createdAt,
-			expiresAt: row.expiresAt,
-		};
-	}
-
-	private async cancelDraft(
-		draft: PendingOperatorDraft,
-		now: number,
-	): Promise<void> {
-		const db = this.actions.db;
-		if (!db || !draft.dbId) {
-			this.pendingDrafts.delete(draft.draftId);
-			return;
-		}
-		await withTenant(db, draft.tenantId, async (tx) => {
-			await tx
-				.update(operatorActionDrafts)
-				.set({ status: "cancelled", handledAt: now, updatedAt: now })
-				.where(
-					and(
-						eq(operatorActionDrafts.id, draft.dbId as number),
-						eq(operatorActionDrafts.tenantId, draft.tenantId),
-						eq(operatorActionDrafts.status, "pending"),
-					),
-				);
-		});
-	}
-
-	private async expireDraft(
-		draft: PendingOperatorDraft,
-		now: number,
-	): Promise<void> {
-		const db = this.actions.db;
-		if (!db || !draft.dbId) {
-			this.pendingDrafts.delete(draft.draftId);
-			return;
-		}
-		await withTenant(db, draft.tenantId, async (tx) => {
-			await tx
-				.update(operatorActionDrafts)
-				.set({ status: "expired", handledAt: now, updatedAt: now })
-				.where(
-					and(
-						eq(operatorActionDrafts.id, draft.dbId as number),
-						eq(operatorActionDrafts.tenantId, draft.tenantId),
-						eq(operatorActionDrafts.status, "pending"),
-					),
-				);
-		});
-	}
-
-	private createDraftId(): string {
-		for (let i = 0; i < 5; i++) {
-			const id =
-				globalThis.crypto?.randomUUID?.().replaceAll("-", "").slice(0, 16) ??
-				Math.random().toString(36).slice(2, 14);
-			if (id.length >= 6 && !this.pendingDrafts.has(id)) return id;
-		}
-		return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 	}
 
 	private async handleOperatorAction(
