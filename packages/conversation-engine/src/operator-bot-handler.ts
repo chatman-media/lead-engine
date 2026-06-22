@@ -7,6 +7,18 @@ import {
 	pickupWindowFromDestination,
 	stringValue,
 } from "./operator-bot-shared.ts";
+import {
+	DIGEST_LABEL,
+	DIGESTS,
+	digestKeyboard,
+	LEVEL_LABEL,
+	LEVELS,
+	levelKeyboard,
+	TOPIC_LABEL,
+	TOPICS,
+	topicMap,
+	topicsKeyboard,
+} from "./operator-informer-ui.ts";
 import { DraftStore } from "./operator-draft-store.ts";
 import {
 	applyOfficeDetailsSideEffect,
@@ -59,28 +71,6 @@ import { withTenant } from "./with-tenant.ts";
 
 // ── Информер: справочники для команд ────────────────────────────────────────
 
-const LEVELS = ["silent", "critical", "important", "all"] as const;
-const LEVEL_LABEL: Record<string, string> = {
-	silent: "🔕 Тихо",
-	critical: "🔴 Только критичное",
-	important: "🟡 Важное",
-	all: "📢 Всё подряд",
-};
-
-const TOPICS = ["leads", "escalation", "orders", "system"] as const;
-const TOPIC_LABEL: Record<string, string> = {
-	leads: "🆕 Лиды",
-	escalation: "🆘 Эскалации",
-	orders: "💱 Заявки",
-	system: "🛠 Система",
-};
-
-const DIGESTS = ["off", "daily", "shift"] as const;
-const DIGEST_LABEL: Record<string, string> = {
-	off: "Выкл",
-	daily: "Раз в день",
-	shift: "2×/день",
-};
 
 const SEV_EMOJI: Record<string, string> = {
 	critical: "🔴",
@@ -298,7 +288,7 @@ export class OperatorBotHandler {
 			s.informerMutedUntil && s.informerMutedUntil > now
 				? `вкл (ещё ${Math.ceil((s.informerMutedUntil - now) / 60)} мин)`
 				: "выкл";
-		const map = this.topicMap(s.informerTopics);
+		const map = topicMap(s.informerTopics);
 		const topicsLine = TOPICS.map(
 			(t) => `${map[t] ? "✅" : "⬜"} ${TOPIC_LABEL[t]}`,
 		).join("\n");
@@ -322,7 +312,7 @@ export class OperatorBotHandler {
 		await this.client?.sendMessage({
 			chatId,
 			text: "Насколько громко информировать?",
-			replyMarkup: this.levelKeyboard(s.informerLevel),
+			replyMarkup: levelKeyboard(s.informerLevel),
 		});
 	}
 
@@ -332,7 +322,7 @@ export class OperatorBotHandler {
 		await this.client?.sendMessage({
 			chatId,
 			text: "Темы (нажми, чтобы вкл/выкл):",
-			replyMarkup: this.topicsKeyboard(this.topicMap(s.informerTopics)),
+			replyMarkup: topicsKeyboard(topicMap(s.informerTopics)),
 		});
 	}
 
@@ -342,7 +332,7 @@ export class OperatorBotHandler {
 		await this.client?.sendMessage({
 			chatId,
 			text: "Как часто слать сводку?",
-			replyMarkup: this.digestKeyboard(s.informerDigest),
+			replyMarkup: digestKeyboard(s.informerDigest),
 		});
 	}
 
@@ -442,7 +432,7 @@ export class OperatorBotHandler {
 			await this.editKeyboard(
 				cq,
 				"Насколько громко информировать?",
-				this.levelKeyboard(val as string),
+				levelKeyboard(val as string),
 			);
 			await this.client.answerCallbackQuery({
 				callbackQueryId: cq.id,
@@ -455,7 +445,7 @@ export class OperatorBotHandler {
 			await this.editKeyboard(
 				cq,
 				"Как часто слать сводку?",
-				this.digestKeyboard(val as string),
+				digestKeyboard(val as string),
 			);
 			await this.client.answerCallbackQuery({
 				callbackQueryId: cq.id,
@@ -464,7 +454,7 @@ export class OperatorBotHandler {
 			return;
 		}
 		if (kind === "tpc" && (TOPICS as readonly string[]).includes(val ?? "")) {
-			const map = this.topicMap(s.informerTopics);
+			const map = topicMap(s.informerTopics);
 			map[val as string] = !map[val as string];
 			await this.repo.updateInformerPrefs(s.adminId, {
 				informerTopics: JSON.stringify(map),
@@ -472,7 +462,7 @@ export class OperatorBotHandler {
 			await this.editKeyboard(
 				cq,
 				"Темы (нажми, чтобы вкл/выкл):",
-				this.topicsKeyboard(map),
+				topicsKeyboard(map),
 			);
 			await this.client.answerCallbackQuery({
 				callbackQueryId: cq.id,
@@ -1911,59 +1901,6 @@ export class OperatorBotHandler {
 				replyMarkup: markup,
 			})
 			.catch(() => {});
-	}
-
-	// ── Клавиатуры / хелперы ───────────────────────────────────────────────
-
-	private levelKeyboard(current: string): TgReplyMarkup {
-		return {
-			inline_keyboard: LEVELS.map((l) => [
-				{
-					text: `${l === current ? "• " : ""}${LEVEL_LABEL[l]}`,
-					callback_data: `lvl:${l}`,
-				},
-			]),
-		};
-	}
-
-	private digestKeyboard(current: string): TgReplyMarkup {
-		return {
-			inline_keyboard: DIGESTS.map((d) => [
-				{
-					text: `${d === current ? "• " : ""}${DIGEST_LABEL[d]}`,
-					callback_data: `dig:${d}`,
-				},
-			]),
-		};
-	}
-
-	private topicsKeyboard(map: Record<string, boolean>): TgReplyMarkup {
-		return {
-			inline_keyboard: TOPICS.map((t) => [
-				{
-					text: `${map[t] ? "✅" : "⬜"} ${TOPIC_LABEL[t]}`,
-					callback_data: `tpc:${t}`,
-				},
-			]),
-		};
-	}
-
-	/** JSON-карта тоглов → полная карта {topic:bool} с дефолтом true. */
-	private topicMap(raw: string | null): Record<string, boolean> {
-		const base: Record<string, boolean> = {
-			leads: true,
-			escalation: true,
-			orders: true,
-			system: true,
-		};
-		if (!raw) return base;
-		try {
-			const m = JSON.parse(raw) as Record<string, boolean>;
-			for (const t of TOPICS) if (m[t] === false) base[t] = false;
-			return base;
-		} catch {
-			return base;
-		}
 	}
 
 	private async replyNotLinked(chatId: string): Promise<void> {
