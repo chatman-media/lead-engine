@@ -390,8 +390,8 @@ const DEFAULT_STREAM_INTERVAL_SEC = 60;
 const MIN_STREAM_INTERVAL_SEC = 5;
 const MAX_STREAM_CLIENTS = 50;
 
-function personaSystemPrompt(brief: string): string {
-  return buildSimPersonaSystemPrompt(brief, DONE_TOKEN);
+function personaSystemPrompt(brief: string, languageCode?: string): string {
+  return buildSimPersonaSystemPrompt(brief, DONE_TOKEN, languageCode);
 }
 
 function firstPartText(parts: OutboundPart[]): string {
@@ -1126,16 +1126,24 @@ export function makeAdminSimRoutes(opts: {
     const nextPersonaMessage = async (): Promise<string | null> => {
       const personaClient = ctx.personaClient;
       if (!personaClient) return null;
-      const msgs: ChatMessage[] = [{ role: "system", content: personaSystemPrompt(params.brief) }];
+      const msgs: ChatMessage[] = [
+        { role: "system", content: personaSystemPrompt(params.brief, params.languageCode) },
+      ];
       for (const ex of exchanges) {
         msgs.push({ role: "assistant", content: ex.user }); // реплика клиента
         msgs.push({ role: "user", content: ex.bot }); // ответ бота (собеседник)
       }
       // Якорь роли в КОНЦЕ контекста (модель сильнее весит последнее): напоминаем,
       // что нужна реплика клиента — снижает role-flip ещё до проверки/перезапроса.
+      const langReminder =
+        params.languageCode && params.languageCode.slice(0, 2).toLowerCase() !== "ru"
+          ? ` Пиши на языке клиента (${params.languageCode}), не на русском.`
+          : "";
       msgs.push({
         role: "system",
-        content: "Напиши следующую реплику КЛИЕНТА (не обменника) — только то, что говорит клиент.",
+        content:
+          "Напиши следующую реплику КЛИЕНТА (не обменника) — только то, что говорит клиент." +
+          langReminder,
       });
       const complete = async (extra?: ChatMessage, temperature = 0.8): Promise<string> => {
         const out = await personaClient.complete(extra ? [...msgs, extra] : msgs, {
