@@ -31,6 +31,7 @@ import {
 	OperatorBotHandler,
 	parseMuteSeconds,
 } from "./operator-bot-handler.ts";
+import { DraftStore } from "./operator-draft-store.ts";
 
 // ── Fakes ──────────────────────────────────────────────────────────────────────
 
@@ -2648,15 +2649,7 @@ describe("draft cancel/expire persistence", () => {
 
 	it("cancelDraft помечает durable-черновик cancelled", async () => {
 		const { db, updates } = makeSendDraftDb();
-		const repo = new FakeRepo(makeSettings({ telegramChatId: "777" }));
-		const handler = new OperatorBotHandler(
-			repo as unknown as NotificationsRepo,
-			"token",
-			{ db: db as never, nowEpoch: () => 200 },
-		);
-
-		// @ts-expect-error private method
-		await handler.cancelDraft(draftWithDb(), 200);
+		await new DraftStore(db as never).cancelDraft(draftWithDb(), 200);
 
 		const patch = updates.find(
 			(u) => u.table === "operator_action_drafts",
@@ -2670,15 +2663,7 @@ describe("draft cancel/expire persistence", () => {
 
 	it("expireDraft помечает durable-черновик expired", async () => {
 		const { db, updates } = makeSendDraftDb();
-		const repo = new FakeRepo(makeSettings({ telegramChatId: "777" }));
-		const handler = new OperatorBotHandler(
-			repo as unknown as NotificationsRepo,
-			"token",
-			{ db: db as never, nowEpoch: () => 300 },
-		);
-
-		// @ts-expect-error private method
-		await handler.expireDraft(draftWithDb(), 300);
+		await new DraftStore(db as never).expireDraft(draftWithDb(), 300);
 
 		const patch = updates.find(
 			(u) => u.table === "operator_action_drafts",
