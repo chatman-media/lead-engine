@@ -34,6 +34,7 @@ import type {
   ReplyStrategyOutput,
   ReplyStrategyResult,
 } from "../process-inbound.ts";
+import { translateText } from "../translation.ts";
 import {
   buildExchangeGenericOperatorHandoff,
   buildExchangeOperatorHandoff,
@@ -938,6 +939,28 @@ function exchangeReplyOutput(input: {
   };
 }
 
+/**
+ * Перевод canned/forced exchange-реплик на язык диалога (#730 follow-up).
+ * Forced-шаги (котировка/способ оплаты/заявка/сводка) и `EXCHANGE_SAFE_FALLBACK` —
+ * это русские строки/шаблоны, которые идут МИМО answerWithRag и его языковой
+ * директивы, поэтому остаются русскими даже когда диалог на ko/zh/en. Свободный
+ * LLM-ответ уже на нужном языке — его НЕ переводим (вызывается только на canned).
+ * Гейт `lang≠ru`; перевод fail-safe (ошибка → оригинал, см. translateText).
+ */
+async function localizeForcedExchangeReply(
+  text: string,
+  lang: ReplyLang | null | undefined,
+  chat: ChatClient,
+): Promise<string> {
+  if (!lang || lang === "ru") return text;
+  return translateText({
+    chat,
+    text,
+    targetLang: lang,
+    onWarn: (m) => console.warn(`[rag-reply] forced-reply translate: ${m}`),
+  });
+}
+
 export class RagReplyStrategy implements ReplyStrategy {
   constructor(private readonly opts: RagReplyStrategyOpts) {}
 
@@ -1127,7 +1150,9 @@ export class RagReplyStrategy implements ReplyStrategy {
       return exchangeReplyOutput({
         channelId: input.channel.channelId,
         externalUserId: input.inbound.externalUserId,
-        text: guarded.text,
+        // forced-реплики — русские шаблоны мимо языковой директивы → переводим
+        // на язык диалога (operatorHandoff остаётся на RU для оператора).
+        text: await localizeForcedExchangeReply(guarded.text, ctx.lang, chat),
         operatorHandoff,
         customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
       });
@@ -1348,11 +1373,19 @@ export class RagReplyStrategy implements ReplyStrategy {
         })
       : null;
 
+    // Свободный LLM-ответ уже на языке диалога (директива в composeSystemPrompt).
+    // Переводим ТОЛЬКО canned-подстановку guard'а (EXCHANGE_SAFE_FALLBACK) — она
+    // русская и идёт мимо директивы. LLM-текст не трогаем (иначе двойной перевод).
+    const customerText =
+      isExchange && guarded.text.trim() === EXCHANGE_SAFE_FALLBACK
+        ? await localizeForcedExchangeReply(guarded.text, ctx.lang, chat)
+        : guarded.text;
+
     return isExchange
       ? exchangeReplyOutput({
           channelId: input.channel.channelId,
           externalUserId: input.inbound.externalUserId,
-          text: guarded.text,
+          text: customerText,
           operatorHandoff,
           customerNoticeEnabled: ctx.exchangeCustomerNoticeEnabled ?? true,
         })
@@ -1360,7 +1393,7 @@ export class RagReplyStrategy implements ReplyStrategy {
           {
             channelId: String(input.channel.channelId),
             externalUserId: input.inbound.externalUserId,
-            parts: [{ kind: "text", text: guarded.text }],
+            parts: [{ kind: "text", text: customerText }],
           },
         ];
   }
