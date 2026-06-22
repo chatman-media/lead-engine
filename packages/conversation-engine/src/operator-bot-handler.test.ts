@@ -1463,9 +1463,9 @@ describe("operator action callbacks", () => {
 		};
 
 		// @ts-expect-error private method
-		const first = await handler.sendDraftToClient(draft);
+		const first = await handler.draftFlow.sendDraftToClient(draft);
 		// @ts-expect-error private method
-		const second = await handler.sendDraftToClient(draft);
+		const second = await handler.draftFlow.sendDraftToClient(draft);
 
 		expect(first.kind).toBe("sent");
 		expect(second.kind).toBe("already_handled");
@@ -1875,7 +1875,7 @@ describe("operator action callbacks", () => {
 		);
 
 		// @ts-expect-error private method
-		const result = await handler.sendDraftToClient({
+		const result = await handler.draftFlow.sendDraftToClient({
 			draftId: "abc123",
 			dbId: 700,
 			tenantId: 3,
@@ -1998,7 +1998,7 @@ describe("operator action callbacks", () => {
 		);
 
 		// @ts-expect-error private method
-		const result = await handler.sendDraftToClient({
+		const result = await handler.draftFlow.sendDraftToClient({
 			draftId: "abc123",
 			dbId: 700,
 			tenantId: 3,
@@ -2085,7 +2085,7 @@ describe("operator action callbacks", () => {
 			);
 
 			// @ts-expect-error private method
-			const result = await handler.sendDraftToClient({
+			const result = await handler.draftFlow.sendDraftToClient({
 				draftId: `${action.replaceAll("_", "")}1`,
 				dbId: 700,
 				tenantId: 3,
@@ -2151,7 +2151,7 @@ describe("operator action callbacks", () => {
 		);
 
 		// @ts-expect-error private method
-		const result = await handler.sendDraftToClient({
+		const result = await handler.draftFlow.sendDraftToClient({
 			draftId: "office123",
 			dbId: 700,
 			tenantId: 3,
@@ -2444,7 +2444,7 @@ describe("exchange payment/payout side effects", () => {
 		const handler = makeHandler(db);
 
 		// @ts-expect-error private method
-		const result = await handler.sendDraftToClient(
+		const result = await handler.draftFlow.sendDraftToClient(
 			makeDraft({ exchangeAction: "payment_confirmed", orderId: 77 }),
 		);
 
@@ -2464,7 +2464,7 @@ describe("exchange payment/payout side effects", () => {
 		const handler = makeHandler(db);
 
 		// @ts-expect-error private method
-		const result = await handler.sendDraftToClient(
+		const result = await handler.draftFlow.sendDraftToClient(
 			makeDraft({ exchangeAction: "payment_confirmed", orderId: "88" }),
 		);
 
@@ -2490,7 +2490,7 @@ describe("exchange payment/payout side effects", () => {
 		const handler = makeHandler(db);
 
 		// @ts-expect-error private method
-		await handler.sendDraftToClient(
+		await handler.draftFlow.sendDraftToClient(
 			makeDraft({ exchangeAction: "payment_confirmed", orderId: 77 }),
 		);
 
@@ -2508,7 +2508,7 @@ describe("exchange payment/payout side effects", () => {
 		const handler = makeHandler(db);
 
 		// @ts-expect-error private method
-		await handler.sendDraftToClient(
+		await handler.draftFlow.sendDraftToClient(
 			makeDraft({ exchangeAction: "payout_ready", orderId: 77 }),
 		);
 
@@ -2533,7 +2533,7 @@ describe("exchange payment/payout side effects", () => {
 		const handler = makeHandler(db);
 
 		// @ts-expect-error private method
-		await handler.sendDraftToClient(
+		await handler.draftFlow.sendDraftToClient(
 			makeDraft({ exchangeAction: "payout_ready", orderId: 77 }),
 		);
 
@@ -2560,7 +2560,7 @@ describe("exchange payment/payout side effects", () => {
 		const handler = makeHandler(db, 1000);
 
 		// @ts-expect-error private method
-		await handler.sendDraftToClient(
+		await handler.draftFlow.sendDraftToClient(
 			makeDraft({ exchangeAction: "payout_ready", orderId: 77 }),
 		);
 
@@ -2590,7 +2590,7 @@ describe("exchange payment/payout side effects", () => {
 		const handler = makeHandler(db, 1000);
 
 		// @ts-expect-error private method
-		await handler.sendDraftToClient(
+		await handler.draftFlow.sendDraftToClient(
 			makeDraft({ exchangeAction: "payout_ready", orderId: 77 }),
 		);
 
@@ -2616,7 +2616,7 @@ describe("exchange payment/payout side effects", () => {
 		const handler = makeHandler(db, 1000);
 
 		// @ts-expect-error private method
-		await handler.sendDraftToClient(
+		await handler.draftFlow.sendDraftToClient(
 			makeDraft({
 				exchangeAction: "payout_ready",
 				orderId: 77,
