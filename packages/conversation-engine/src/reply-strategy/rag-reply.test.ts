@@ -653,6 +653,51 @@ describe("RagReplyStrategy.generate", () => {
     expect(recorded[0]?.telemetry.toolCalls?.[0]?.name).toBe("compute_exchange_quote");
   });
 
+  it("exchange: forced reply translated to dialog language (ko) — #730 follow-up", async () => {
+    // forced quote-reply — русский шаблон; при ctx.lang='ko' он обязан пройти
+    // через translateText (единственный chat.complete на forced-пути), иначе
+    // клиент-кореец получает русский текст.
+    const chat = new CapturingRagChat("【KO】번역된 견적입니다");
+    const s = mk(
+      ctxWith({
+        template: EXCHANGE_TEMPLATE,
+        chat,
+        kb: kbWith([HIT]),
+        lang: "ko",
+        exchangeCollected: {
+          asset: "RUB",
+          amount: 10000,
+          amountSetThisTurn: true,
+        },
+        tools: [
+          {
+            name: "compute_exchange_quote",
+            description: "compute quote",
+            parameters: {},
+            execute: async () => ({
+              direction: "RUB->PHP",
+              asset: "RUB",
+              quoteAsset: "PHP",
+              amountMode: "source_amount",
+              amountFrom: 10000,
+              rate: 1.230575,
+              amountToThb: 8126,
+            }),
+          },
+        ] as never,
+      }),
+      { reflect: false },
+    );
+
+    const r = await s.generate({ ...baseInput(), userMessageText: "10к рублей" });
+
+    // forced-текст переведён (мок-перевод вернул корейский); русский шаблон
+    // («получите …») наружу не ушёл; перевод = реальный chat.complete.
+    expect(firstReplyText(r)).toBe("【KO】번역된 견적입니다");
+    expect(firstReplyText(r)).not.toContain("получите");
+    expect(chat.lastCall).not.toBeNull();
+  });
+
   it("exchange: явный вопрос про курс → показываем курс", async () => {
     const chat = new CapturingRagChat("Сейчас посчитаю через RAG.");
     const s = mk(
