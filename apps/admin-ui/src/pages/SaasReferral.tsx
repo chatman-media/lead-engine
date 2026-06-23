@@ -29,7 +29,9 @@ export function SaasReferral() {
     }
   }
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+  }, []);
 
   async function handleCreate() {
     setCreating(true);
@@ -63,32 +65,33 @@ export function SaasReferral() {
     setTimeout(() => setCopied(null), 1500);
   }
 
-  if (loading) return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <Skeleton className="h-6 w-40" />
-        <Skeleton className="h-4 w-80" />
-      </div>
-      <div className="rounded-lg border p-5 space-y-3">
-        <Skeleton className="h-5 w-28" />
-        <div className="flex gap-2">
-          <Skeleton className="h-9 w-64" />
-          <Skeleton className="h-9 w-24" />
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <div className="space-y-1">
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <div className="rounded-lg border p-5 space-y-3">
+          <Skeleton className="h-5 w-28" />
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-64" />
+            <Skeleton className="h-9 w-24" />
+          </div>
+        </div>
+        <div className="rounded-lg border p-4 space-y-2">
+          <Skeleton className="h-5 w-24" />
+          {[0, 1].map((i) => (
+            <div key={i} className="flex items-center gap-3 py-2">
+              <Skeleton className="h-8 flex-1 rounded-md" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-8 w-8" />
+              <Skeleton className="h-8 w-8" />
+            </div>
+          ))}
         </div>
       </div>
-      <div className="rounded-lg border p-4 space-y-2">
-        <Skeleton className="h-5 w-24" />
-        {[0, 1].map((i) => (
-          <div key={i} className="flex items-center gap-3 py-2">
-            <Skeleton className="h-8 flex-1 rounded-md" />
-            <Skeleton className="h-4 w-20" />
-            <Skeleton className="h-8 w-8" />
-            <Skeleton className="h-8 w-8" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+    );
 
   return (
     <div className="space-y-6">

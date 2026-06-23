@@ -251,9 +251,9 @@ export function SaasLeadDetail() {
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [recentMessages, setRecentMessages] = useState<import("@/api/saas").MessageRow[]>([]);
-  const [conversation, setConversation] = useState<
-    import("@/api/saas").ConversationDetail | null
-  >(null);
+  const [conversation, setConversation] = useState<import("@/api/saas").ConversationDetail | null>(
+    null,
+  );
   const [unescalating, setUnescalating] = useState(false);
   const [orderBusy, setOrderBusy] = useState<"pay" | "code" | null>(null);
   const [orderMsg, setOrderMsg] = useState("");
@@ -271,7 +271,6 @@ export function SaasLeadDetail() {
   const [fieldEdits, setFieldEdits] = useState<Record<number, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
-
 
   // Verification state
   const [revokingVerification, setRevokingVerification] = useState(false);
@@ -368,9 +367,7 @@ export function SaasLeadDetail() {
     // Оптимистично прячем баннер сразу: иначе он «мигает» — пока летит запрос,
     // фоновый 5-секундный поллинг успевает подтянуть ещё-эскалированное
     // состояние и баннер на миг всплывает обратно.
-    setConversation((prev) =>
-      prev ? { ...prev, mode: "ai", escalatedAt: null } : prev,
-    );
+    setConversation((prev) => (prev ? { ...prev, mode: "ai", escalatedAt: null } : prev));
     try {
       await saas.setConversationMode(conversationId, "ai");
       const cid = data?.contact?.id;
@@ -388,9 +385,7 @@ export function SaasLeadDetail() {
     setOrderMsg("");
     try {
       const r = await saas.confirmExchangePayment(orderId);
-      setOrderMsg(
-        r.delivered ? "Оплата подтверждена, клиент уведомлён" : "Оплата подтверждена",
-      );
+      setOrderMsg(r.delivered ? "Оплата подтверждена, клиент уведомлён" : "Оплата подтверждена");
       reload();
     } catch (err) {
       if (!onAuthError(err)) setOrderMsg("Не удалось подтвердить оплату");
@@ -404,9 +399,7 @@ export function SaasLeadDetail() {
     setOrderMsg("");
     try {
       const r = await saas.issueExchangePayoutCode(orderId, { generate: true });
-      setOrderMsg(
-        `Код выдачи: ${r.payoutCode}${r.delivered ? " — отправлен клиенту" : ""}`,
-      );
+      setOrderMsg(`Код выдачи: ${r.payoutCode}${r.delivered ? " — отправлен клиенту" : ""}`);
       reload();
     } catch (err) {
       if (!onAuthError(err)) setOrderMsg("Не удалось выдать код");
@@ -742,8 +735,7 @@ export function SaasLeadDetail() {
               const orders = data.orders ?? [];
               if (orders.length === 0) return null;
               const latest = orders.reduce((a, b) => (a.id > b.id ? a : b));
-              const done =
-                latest.status === "completed" || latest.status === "cancelled";
+              const done = latest.status === "completed" || latest.status === "cancelled";
               return (
                 <div className="mt-1 space-y-1.5 border-t pt-2">
                   <p className="text-[11px] font-medium text-muted-foreground">
@@ -751,10 +743,7 @@ export function SaasLeadDetail() {
                   </p>
                   {latest.payoutCode && (
                     <p className="text-[11px]">
-                      Код:{" "}
-                      <span className="font-mono font-semibold">
-                        {latest.payoutCode}
-                      </span>
+                      Код: <span className="font-mono font-semibold">{latest.payoutCode}</span>
                     </p>
                   )}
                   {!done && (
@@ -779,9 +768,7 @@ export function SaasLeadDetail() {
                       </Button>
                     </div>
                   )}
-                  {orderMsg && (
-                    <p className="text-[10px] text-muted-foreground">{orderMsg}</p>
-                  )}
+                  {orderMsg && <p className="text-[10px] text-muted-foreground">{orderMsg}</p>}
                 </div>
               );
             })()}
@@ -1523,9 +1510,7 @@ function LeadVerificationCard({
     : passportName || passportNumber
       ? LEAD_KYC_STATUS_RU.documents_received
       : undefined;
-  const masked = passportNumber
-    ? `•••• ${passportNumber.replace(/\s+/g, "").slice(-4)}`
-    : null;
+  const masked = passportNumber ? `•••• ${passportNumber.replace(/\s+/g, "").slice(-4)}` : null;
   const reviewedAt = typeof kyc.reviewedAt === "number" ? kyc.reviewedAt : null;
   const canRevoke =
     onRevoke && (status === "verified" || kyc.verified === true || attrs.isVerified === true);

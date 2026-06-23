@@ -122,38 +122,39 @@ export function SaasTeam() {
     }
   }
 
-  if (loading) return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <Skeleton className="h-6 w-32" />
-        <Skeleton className="h-4 w-64" />
-      </div>
-      <div className="rounded-lg border p-6 space-y-3">
-        <Skeleton className="h-5 w-40" />
-        <div className="flex gap-3">
-          <Skeleton className="h-9 flex-1" />
-          <Skeleton className="h-9 w-40" />
-          <Skeleton className="h-9 w-28" />
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <div className="space-y-1">
+          <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-4 w-64" />
+        </div>
+        <div className="rounded-lg border p-6 space-y-3">
+          <Skeleton className="h-5 w-40" />
+          <div className="flex gap-3">
+            <Skeleton className="h-9 flex-1" />
+            <Skeleton className="h-9 w-40" />
+            <Skeleton className="h-9 w-28" />
+          </div>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          {[0, 1].map((i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-3">
+              <Skeleton className="h-5 w-32" />
+              {[0, 1, 2].map((j) => (
+                <div key={j} className="flex justify-between items-center py-2">
+                  <div className="space-y-1">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                  <Skeleton className="h-5 w-16" />
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        {[0, 1].map((i) => (
-          <div key={i} className="rounded-lg border p-4 space-y-3">
-            <Skeleton className="h-5 w-32" />
-            {[0, 1, 2].map((j) => (
-              <div key={j} className="flex justify-between items-center py-2">
-                <div className="space-y-1">
-                  <Skeleton className="h-4 w-40" />
-                  <Skeleton className="h-3 w-24" />
-                </div>
-                <Skeleton className="h-5 w-16" />
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+    );
 
   return (
     <div className="space-y-6">
@@ -282,20 +283,30 @@ export function SaasTeam() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{inv.email}</p>
                       <div className="mt-0.5 flex items-center gap-1.5">
-                        <Badge variant="outline">{inv.role === "superadmin" ? "суперадмин" : "оператор"}</Badge>
+                        <Badge variant="outline">
+                          {inv.role === "superadmin" ? "суперадмин" : "оператор"}
+                        </Badge>
                         {inv.status === "pending" && <Badge variant="warning">ожидает</Badge>}
                         {inv.status === "accepted" && <Badge variant="success">принято</Badge>}
                         {inv.status === "expired" && <Badge variant="secondary">истёк</Badge>}
                       </div>
                     </div>
-                    {inv.status === "pending" && (
-                      confirmRevokeId === inv.id ? (
+                    {inv.status === "pending" &&
+                      (confirmRevokeId === inv.id ? (
                         <div className="flex items-center gap-1 text-sm">
                           <AlertTriangleIcon className="size-3.5 text-warning" />
-                          <Button size="sm" variant="destructive" onClick={() => handleRevoke(inv.id)}>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleRevoke(inv.id)}
+                          >
                             Да
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setConfirmRevokeId(null)}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setConfirmRevokeId(null)}
+                          >
                             Нет
                           </Button>
                         </div>
@@ -307,8 +318,7 @@ export function SaasTeam() {
                         >
                           Отозвать
                         </Button>
-                      )
-                    )}
+                      ))}
                   </li>
                 ))}
               </ul>

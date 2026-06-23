@@ -3,8 +3,7 @@ import * as React from "react";
 import { Button } from "./button";
 import { Input } from "./input";
 
-export interface PasswordInputProps
-  extends Omit<React.ComponentProps<"input">, "type"> {}
+export interface PasswordInputProps extends Omit<React.ComponentProps<"input">, "type"> {}
 
 /**
  * Input с переключателем видимости пароля.

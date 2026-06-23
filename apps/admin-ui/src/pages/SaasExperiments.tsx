@@ -1,13 +1,26 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type ExperimentItem, type ExperimentPreview, type StyleItem } from "@/api/saas";
+import {
+  ApiError,
+  clearToken,
+  saas,
+  type ExperimentItem,
+  type ExperimentPreview,
+  type StyleItem,
+} from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertTriangleIcon,
@@ -29,24 +42,45 @@ const STATUS_BADGE: Record<string, string> = {
   done: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
 };
 const STATUS_LABEL: Record<string, string> = {
-  draft: "черновик", running: "идёт", paused: "пауза", done: "завершён",
+  draft: "черновик",
+  running: "идёт",
+  paused: "пауза",
+  done: "завершён",
 };
 const METRIC_LABEL: Record<string, string> = {
-  qualified: "Квалификация", won: "Сделка", "replied_3+": "3+ ответа",
+  qualified: "Квалификация",
+  won: "Сделка",
+  "replied_3+": "3+ ответа",
 };
 const METRICS = ["qualified", "won", "replied_3+"] as const;
 
 function formatDate(epoch: number) {
-  return new Date(epoch * 1000).toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" });
+  return new Date(epoch * 1000).toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
-interface AllocEntry { styleSlug: string; weight: number }
+interface AllocEntry {
+  styleSlug: string;
+  weight: number;
+}
 
 function parseAlloc(json: string): AllocEntry[] {
   try {
-    const arr = JSON.parse(json) as Array<{ style_slug?: string; styleSlug?: string; weight?: number }>;
-    return arr.map((e) => ({ styleSlug: e.style_slug ?? e.styleSlug ?? "", weight: e.weight ?? 1 }));
-  } catch { return []; }
+    const arr = JSON.parse(json) as Array<{
+      style_slug?: string;
+      styleSlug?: string;
+      weight?: number;
+    }>;
+    return arr.map((e) => ({
+      styleSlug: e.style_slug ?? e.styleSlug ?? "",
+      weight: e.weight ?? 1,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 function totalWeight(entries: AllocEntry[]) {
@@ -65,7 +99,10 @@ export function SaasExperiments() {
   const [metric, setMetric] = useState<string>("qualified");
   const [alloc, setAlloc] = useState<AllocEntry[]>([]);
   const [saving, setSaving] = useState(false);
-  const [confirmStatus, setConfirmStatus] = useState<{ id: number; status: "running" | "paused" | "done" } | null>(null);
+  const [confirmStatus, setConfirmStatus] = useState<{
+    id: number;
+    status: "running" | "paused" | "done";
+  } | null>(null);
   const [previews, setPreviews] = useState<Record<number, ExperimentPreview>>({});
   const [previewingId, setPreviewingId] = useState<number | null>(null);
 
@@ -77,33 +114,41 @@ export function SaasExperiments() {
         setStyles(styleRes.items.filter((s) => s.isActive));
       })
       .catch((err) => {
-        if (err instanceof ApiError && err.status === 401) { clearToken(); navigate("/login", { replace: true }); }
-        else setError("Не удалось загрузить данные");
+        if (err instanceof ApiError && err.status === 401) {
+          clearToken();
+          navigate("/login", { replace: true });
+        } else setError("Не удалось загрузить данные");
       })
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openCreate() {
-    setSlug(""); setMetric("qualified");
+    setSlug("");
+    setMetric("qualified");
     setAlloc(styles.slice(0, 2).map((s) => ({ styleSlug: s.slug, weight: 1 })));
     setEditingId(0);
   }
 
   function openEdit(exp: ExperimentItem) {
-    setSlug(exp.slug); setMetric(exp.successMetric);
+    setSlug(exp.slug);
+    setMetric(exp.successMetric);
     setAlloc(parseAlloc(exp.allocationJson));
     setEditingId(exp.id);
   }
 
-  function closeForm() { setEditingId(null); }
+  function closeForm() {
+    setEditingId(null);
+  }
 
   function setAllocStyle(idx: number, styleSlug: string) {
-    setAlloc((a) => a.map((e, i) => i === idx ? { ...e, styleSlug } : e));
+    setAlloc((a) => a.map((e, i) => (i === idx ? { ...e, styleSlug } : e)));
   }
   function setAllocWeight(idx: number, w: number) {
-    setAlloc((a) => a.map((e, i) => i === idx ? { ...e, weight: Math.max(1, w) } : e));
+    setAlloc((a) => a.map((e, i) => (i === idx ? { ...e, weight: Math.max(1, w) } : e)));
   }
   function addAllocRow() {
     const used = new Set(alloc.map((e) => e.styleSlug));
@@ -115,13 +160,27 @@ export function SaasExperiments() {
   }
 
   async function handleSave() {
-    if (!slug || !/^[a-z0-9_-]+$/.test(slug)) { toast.error("Slug: только a-z, 0-9, _"); return; }
-    if (alloc.length < 2) { toast.error("Нужно минимум 2 варианта"); return; }
-    if (alloc.some((e) => !e.styleSlug)) { toast.error("Выбери стиль для каждого варианта"); return; }
+    if (!slug || !/^[a-z0-9_-]+$/.test(slug)) {
+      toast.error("Slug: только a-z, 0-9, _");
+      return;
+    }
+    if (alloc.length < 2) {
+      toast.error("Нужно минимум 2 варианта");
+      return;
+    }
+    if (alloc.some((e) => !e.styleSlug)) {
+      toast.error("Выбери стиль для каждого варианта");
+      return;
+    }
     const slugSet = new Set(alloc.map((e) => e.styleSlug));
-    if (slugSet.size < alloc.length) { toast.error("Стили не должны повторяться"); return; }
+    if (slugSet.size < alloc.length) {
+      toast.error("Стили не должны повторяться");
+      return;
+    }
 
-    const allocationJson = JSON.stringify(alloc.map((e) => ({ style_slug: e.styleSlug, weight: e.weight })));
+    const allocationJson = JSON.stringify(
+      alloc.map((e) => ({ style_slug: e.styleSlug, weight: e.weight })),
+    );
     setSaving(true);
     try {
       if (editingId === 0) {
@@ -136,18 +195,22 @@ export function SaasExperiments() {
         });
         toast.success("Эксперимент обновлён");
       }
-      closeForm(); load();
+      closeForm();
+      load();
     } catch (err) {
-      const msg = err instanceof ApiError && err.status === 409 ? "Slug уже занят" : "Не удалось сохранить";
+      const msg =
+        err instanceof ApiError && err.status === 409 ? "Slug уже занят" : "Не удалось сохранить";
       toast.error(msg);
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleStatus(id: number, status: "running" | "paused" | "done") {
     setConfirmStatus(null);
     try {
       const updated = await saas.setExperimentStatus(id, status);
-      setItems((prev) => prev.map((e) => e.id === id ? updated : e));
+      setItems((prev) => prev.map((e) => (e.id === id ? updated : e)));
       setPreviews((prev) => {
         const next = { ...prev };
         delete next[id];
@@ -175,10 +238,7 @@ export function SaasExperiments() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="A/B эксперименты"
-        description="Сравнение стилей общения по исходу лидов"
-      />
+      <PageHeader title="A/B эксперименты" description="Сравнение стилей общения по исходу лидов" />
 
       <div>
         <Button onClick={openCreate} size="sm" disabled={editingId === 0 || styles.length < 2}>
@@ -186,7 +246,9 @@ export function SaasExperiments() {
           Новый эксперимент
         </Button>
         {styles.length < 2 && (
-          <p className="mt-2 text-xs text-muted-foreground">Нужно минимум 2 активных стиля — создайте их на странице «Стили».</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Нужно минимум 2 активных стиля — создайте их на странице «Стили».
+          </p>
         )}
       </div>
 
@@ -194,18 +256,25 @@ export function SaasExperiments() {
       {editingId !== null && (
         <Card className="border-primary/50">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">{editingId === 0 ? "Новый эксперимент" : "Редактировать эксперимент"}</CardTitle>
+            <CardTitle className="text-sm">
+              {editingId === 0 ? "Новый эксперимент" : "Редактировать эксперимент"}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {editingId === 0 && (
               <div className="space-y-1">
-                <Label htmlFor="exp-slug">Slug <span className="text-muted-foreground text-xs font-normal">(a-z, 0-9, _)</span></Label>
+                <Label htmlFor="exp-slug">
+                  Slug{" "}
+                  <span className="text-muted-foreground text-xs font-normal">(a-z, 0-9, _)</span>
+                </Label>
                 <Input
                   id="exp-slug"
                   className="font-mono"
                   placeholder="например: friendly_vs_consultant_q3"
                   value={slug}
-                  onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                  onChange={(e) =>
+                    setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))
+                  }
                 />
               </div>
             )}
@@ -218,7 +287,9 @@ export function SaasExperiments() {
                 </SelectTrigger>
                 <SelectContent>
                   {METRICS.map((m) => (
-                    <SelectItem key={m} value={m}>{METRIC_LABEL[m]}</SelectItem>
+                    <SelectItem key={m} value={m}>
+                      {METRIC_LABEL[m]}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -226,12 +297,15 @@ export function SaasExperiments() {
 
             <div className="space-y-2">
               <Label>Варианты (стиль → вес)</Label>
-              <p className="text-xs text-muted-foreground">Вес — относительный. 2 и 1 означает 67% / 33% трафика.</p>
+              <p className="text-xs text-muted-foreground">
+                Вес — относительный. 2 и 1 означает 67% / 33% трафика.
+              </p>
               <div className="space-y-2">
                 {alloc.map((entry, idx) => {
-                  const pct = totalWeight(alloc) > 0
-                    ? Math.round((entry.weight / totalWeight(alloc)) * 100)
-                    : 0;
+                  const pct =
+                    totalWeight(alloc) > 0
+                      ? Math.round((entry.weight / totalWeight(alloc)) * 100)
+                      : 0;
                   return (
                     <div key={idx} className="flex items-center gap-2">
                       <Select value={entry.styleSlug} onValueChange={(v) => setAllocStyle(idx, v)}>
@@ -240,7 +314,9 @@ export function SaasExperiments() {
                         </SelectTrigger>
                         <SelectContent>
                           {styles.map((s) => (
-                            <SelectItem key={s.slug} value={s.slug}>{s.displayName}</SelectItem>
+                            <SelectItem key={s.slug} value={s.slug}>
+                              {s.displayName}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -254,7 +330,12 @@ export function SaasExperiments() {
                       />
                       <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
                       {alloc.length > 2 && (
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeAllocRow(idx)}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeAllocRow(idx)}
+                        >
                           <XIcon className="h-3.5 w-3.5" />
                         </Button>
                       )}
@@ -286,7 +367,10 @@ export function SaasExperiments() {
         <div className="flex flex-col gap-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="rounded-lg border p-4 space-y-2">
-              <div className="flex justify-between"><Skeleton className="h-5 w-40" /><Skeleton className="h-5 w-16" /></div>
+              <div className="flex justify-between">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-5 w-16" />
+              </div>
               <Skeleton className="h-3 w-56" />
             </div>
           ))}
@@ -310,7 +394,9 @@ export function SaasExperiments() {
                     <Badge className={STATUS_BADGE[exp.status] ?? ""} variant="outline">
                       {STATUS_LABEL[exp.status] ?? exp.status}
                     </Badge>
-                    <Badge variant="secondary" className="text-xs shrink-0">{METRIC_LABEL[exp.successMetric] ?? exp.successMetric}</Badge>
+                    <Badge variant="secondary" className="text-xs shrink-0">
+                      {METRIC_LABEL[exp.successMetric] ?? exp.successMetric}
+                    </Badge>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <Button
@@ -324,40 +410,74 @@ export function SaasExperiments() {
                       {previewingId === exp.id ? "Preview…" : "Preview"}
                     </Button>
                     {canEdit && (
-                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(exp)} disabled={editingId !== null}>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() => openEdit(exp)}
+                        disabled={editingId !== null}
+                      >
                         <EditIcon className="h-3.5 w-3.5" />
                       </Button>
                     )}
                     {/* Status controls */}
-                    {exp.status === "draft" && (
-                      confirmStatus?.id === exp.id ? (
+                    {exp.status === "draft" &&
+                      (confirmStatus?.id === exp.id ? (
                         <div className="flex items-center gap-1">
                           <AlertTriangleIcon className="size-3.5 text-primary shrink-0" />
-                          <Button size="sm" onClick={() => handleStatus(exp.id, "running")}>Запустить</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setConfirmStatus(null)}>Нет</Button>
+                          <Button size="sm" onClick={() => handleStatus(exp.id, "running")}>
+                            Запустить
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setConfirmStatus(null)}>
+                            Нет
+                          </Button>
                         </div>
                       ) : (
-                        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => setConfirmStatus({ id: exp.id, status: "running" })}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => setConfirmStatus({ id: exp.id, status: "running" })}
+                        >
                           <PlayIcon className="h-3 w-3" /> Запустить
                         </Button>
-                      )
-                    )}
+                      ))}
                     {exp.status === "running" && (
                       <div className="flex gap-1">
-                        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => handleStatus(exp.id, "paused")}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => handleStatus(exp.id, "paused")}
+                        >
                           <PauseIcon className="h-3 w-3" /> Пауза
                         </Button>
-                        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={() => handleStatus(exp.id, "done")}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+                          onClick={() => handleStatus(exp.id, "done")}
+                        >
                           <SquareIcon className="h-3 w-3" /> Завершить
                         </Button>
                       </div>
                     )}
                     {exp.status === "paused" && (
                       <div className="flex gap-1">
-                        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => handleStatus(exp.id, "running")}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => handleStatus(exp.id, "running")}
+                        >
                           <PlayIcon className="h-3 w-3" /> Возобновить
                         </Button>
-                        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={() => handleStatus(exp.id, "done")}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+                          onClick={() => handleStatus(exp.id, "done")}
+                        >
                           <SquareIcon className="h-3 w-3" /> Завершить
                         </Button>
                       </div>
@@ -373,19 +493,34 @@ export function SaasExperiments() {
                     const style = styles.find((s) => s.slug === entry.styleSlug);
                     return (
                       <div key={entry.styleSlug} className="flex items-center gap-2 text-xs">
-                        <span className="w-32 truncate text-muted-foreground font-mono">{entry.styleSlug}</span>
+                        <span className="w-32 truncate text-muted-foreground font-mono">
+                          {entry.styleSlug}
+                        </span>
                         <div className="flex-1 rounded-full bg-secondary h-1.5 overflow-hidden">
-                          <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                          <div
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${pct}%` }}
+                          />
                         </div>
                         <span className="w-8 text-right text-muted-foreground">{pct}%</span>
-                        {style && <span className="text-muted-foreground">· {style.displayName}</span>}
+                        {style && (
+                          <span className="text-muted-foreground">· {style.displayName}</span>
+                        )}
                       </div>
                     );
                   })}
                 </div>
                 <div className="flex gap-4 text-xs text-muted-foreground">
-                  {exp.startedAt && <span>Старт: <span className="text-foreground">{formatDate(exp.startedAt)}</span></span>}
-                  {exp.endedAt && <span>Конец: <span className="text-foreground">{formatDate(exp.endedAt)}</span></span>}
+                  {exp.startedAt && (
+                    <span>
+                      Старт: <span className="text-foreground">{formatDate(exp.startedAt)}</span>
+                    </span>
+                  )}
+                  {exp.endedAt && (
+                    <span>
+                      Конец: <span className="text-foreground">{formatDate(exp.endedAt)}</span>
+                    </span>
+                  )}
                 </div>
                 {preview && (
                   <div className="space-y-3 rounded-md border bg-muted/25 p-3">
@@ -393,7 +528,9 @@ export function SaasExperiments() {
                       <div className="flex items-center gap-2 text-xs font-medium">
                         <GitBranchIcon className="h-3.5 w-3.5 text-muted-foreground" />
                         <span>Routing preview</span>
-                        <Badge variant="outline" className="font-mono">{preview.sampleSize} ids</Badge>
+                        <Badge variant="outline" className="font-mono">
+                          {preview.sampleSize} ids
+                        </Badge>
                       </div>
                       <Badge variant={preview.canRun ? "success" : "destructive"}>
                         {preview.canRun ? "ready" : "blocked"}
@@ -402,24 +539,46 @@ export function SaasExperiments() {
 
                     <div className="grid gap-2 md:grid-cols-2">
                       {preview.variants.map((variant) => {
-                        const observed = preview.counts.find((item) => item.styleSlug === variant.styleSlug);
+                        const observed = preview.counts.find(
+                          (item) => item.styleSlug === variant.styleSlug,
+                        );
                         return (
-                          <div key={variant.styleSlug} className="rounded-md border bg-background/70 p-2">
+                          <div
+                            key={variant.styleSlug}
+                            className="rounded-md border bg-background/70 p-2"
+                          >
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0">
                                 <p className="truncate font-mono text-xs">{variant.styleSlug}</p>
                                 {variant.displayName && (
-                                  <p className="truncate text-xs text-muted-foreground">{variant.displayName}</p>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {variant.displayName}
+                                  </p>
                                 )}
                               </div>
-                              <Badge variant={variant.status === "valid" ? "secondary" : "destructive"}>
+                              <Badge
+                                variant={variant.status === "valid" ? "secondary" : "destructive"}
+                              >
                                 {variant.status}
                               </Badge>
                             </div>
                             <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                              <span className="text-muted-foreground">weight <span className="font-mono text-foreground">{variant.weight}</span></span>
-                              <span className="text-muted-foreground">target <span className="font-mono text-foreground">{variant.targetPct}%</span></span>
-                              <span className="text-muted-foreground">sample <span className="font-mono text-foreground">{observed?.observedPct ?? 0}%</span></span>
+                              <span className="text-muted-foreground">
+                                weight{" "}
+                                <span className="font-mono text-foreground">{variant.weight}</span>
+                              </span>
+                              <span className="text-muted-foreground">
+                                target{" "}
+                                <span className="font-mono text-foreground">
+                                  {variant.targetPct}%
+                                </span>
+                              </span>
+                              <span className="text-muted-foreground">
+                                sample{" "}
+                                <span className="font-mono text-foreground">
+                                  {observed?.observedPct ?? 0}%
+                                </span>
+                              </span>
                             </div>
                           </div>
                         );
@@ -447,7 +606,9 @@ export function SaasExperiments() {
       </div>
 
       {!loading && items.length === 0 && !error && editingId === null && (
-        <p className="text-muted-foreground text-sm">Экспериментов пока нет. Создайте первый — нужно минимум 2 активных стиля.</p>
+        <p className="text-muted-foreground text-sm">
+          Экспериментов пока нет. Создайте первый — нужно минимум 2 активных стиля.
+        </p>
       )}
     </div>
   );

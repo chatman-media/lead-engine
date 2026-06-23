@@ -8,7 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangleIcon, EditIcon, GripVerticalIcon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  EditIcon,
+  GripVerticalIcon,
+  PlusIcon,
+  SaveIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -82,7 +90,7 @@ export function SaasHooks() {
 
   useEffect(() => {
     load();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function openCreate() {
@@ -170,7 +178,9 @@ export function SaasHooks() {
     try {
       await saas.updateDirectorHook(hook.id, { isActive: newVal });
     } catch {
-      setItems((prev) => prev.map((h) => (h.id === hook.id ? { ...h, isActive: hook.isActive } : h)));
+      setItems((prev) =>
+        prev.map((h) => (h.id === hook.id ? { ...h, isActive: hook.isActive } : h)),
+      );
       toast.error("Не удалось обновить хук");
     }
   }
@@ -306,7 +316,10 @@ export function SaasHooks() {
             <div key={i} className="rounded-lg border p-4 space-y-2">
               <div className="flex justify-between">
                 <Skeleton className="h-4 w-40" />
-                <div className="flex gap-1"><Skeleton className="h-7 w-7" /><Skeleton className="h-7 w-7" /></div>
+                <div className="flex gap-1">
+                  <Skeleton className="h-7 w-7" />
+                  <Skeleton className="h-7 w-7" />
+                </div>
               </div>
               <Skeleton className="h-3 w-64" />
             </div>
@@ -356,10 +369,19 @@ export function SaasHooks() {
                         {confirmDeleteHookId === hook.id ? (
                           <div className="flex items-center gap-1">
                             <AlertTriangleIcon className="size-3.5 text-destructive shrink-0" />
-                            <Button size="sm" variant="destructive" onClick={() => handleDelete(hook.id)} disabled={deletingId === hook.id}>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleDelete(hook.id)}
+                              disabled={deletingId === hook.id}
+                            >
                               Да
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteHookId(null)}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setConfirmDeleteHookId(null)}
+                            >
                               Нет
                             </Button>
                           </div>

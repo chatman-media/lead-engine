@@ -10,7 +10,13 @@ import { toast } from "sonner";
 import { ApiError, type EarlyAccessRequest, type TenantRow, saas } from "../api/saas.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const PLAN_LABEL: Record<string, string> = { free: "Free", starter: "Starter", pro: "Pro" };
@@ -82,7 +88,9 @@ export function SaasSuperadmin() {
     setChanging(id);
     try {
       const updated = await saas.updateTenantPlan(id, plan);
-      setTenants((prev) => prev?.map((t) => (t.id === id ? { ...t, plan: updated.plan } : t)) ?? null);
+      setTenants(
+        (prev) => prev?.map((t) => (t.id === id ? { ...t, plan: updated.plan } : t)) ?? null,
+      );
       toast.success(`${updated.slug}: план изменён на ${PLAN_LABEL[plan] ?? plan}`);
     } catch {
       toast.error("Не удалось изменить план");
@@ -157,12 +165,24 @@ export function SaasSuperadmin() {
           <table className="w-full min-w-[980px] text-sm">
             <thead className="bg-muted/50">
               <tr>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Заявка</th>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Workflow</th>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Статус</th>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Tenant</th>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Invite</th>
-                <th scope="col" className="px-4 py-2 text-right font-medium">Действие</th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Заявка
+                </th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Workflow
+                </th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Статус
+                </th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Tenant
+                </th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Invite
+                </th>
+                <th scope="col" className="px-4 py-2 text-right font-medium">
+                  Действие
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -179,14 +199,19 @@ export function SaasSuperadmin() {
                     </tr>
                   ))
                 : alpha.map((item) => (
-                    <tr key={item.id} className="border-t align-top transition-colors hover:bg-muted/30">
+                    <tr
+                      key={item.id}
+                      className="border-t align-top transition-colors hover:bg-muted/30"
+                    >
                       <td className="px-4 py-3">
                         <div className="space-y-1">
                           <p className="font-medium">{item.email}</p>
                           <p className="text-xs text-muted-foreground">
                             {[item.name, item.company].filter(Boolean).join(" · ") || "—"}
                           </p>
-                          <p className="text-xs text-muted-foreground">{fmtDateTime(item.createdAt)}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {fmtDateTime(item.createdAt)}
+                          </p>
                         </div>
                       </td>
                       <td className="max-w-[300px] whitespace-normal px-4 py-3 text-muted-foreground">
@@ -230,7 +255,12 @@ export function SaasSuperadmin() {
                               className="size-8"
                               asChild
                             >
-                              <a href={item.inviteUrl} target="_blank" rel="noreferrer" aria-label="Открыть invite link">
+                              <a
+                                href={item.inviteUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label="Открыть invite link"
+                              >
                                 <ExternalLinkIcon className="size-4" />
                               </a>
                             </Button>
@@ -289,13 +319,27 @@ export function SaasSuperadmin() {
           <table className="w-full min-w-[860px] text-sm">
             <thead className="bg-muted/50">
               <tr>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Слаг</th>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Email владельца</th>
-                <th scope="col" className="px-4 py-2 text-left font-medium">План</th>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Статус</th>
-                <th scope="col" className="px-4 py-2 text-right font-medium">Лиды</th>
-                <th scope="col" className="px-4 py-2 text-right font-medium">Диалоги</th>
-                <th scope="col" className="px-4 py-2 text-left font-medium">Создан</th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Слаг
+                </th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Email владельца
+                </th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  План
+                </th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Статус
+                </th>
+                <th scope="col" className="px-4 py-2 text-right font-medium">
+                  Лиды
+                </th>
+                <th scope="col" className="px-4 py-2 text-right font-medium">
+                  Диалоги
+                </th>
+                <th scope="col" className="px-4 py-2 text-left font-medium">
+                  Создан
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -346,7 +390,9 @@ export function SaasSuperadmin() {
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums">{t.leadCount}</td>
                       <td className="px-4 py-2 text-right tabular-nums">{t.conversationCount}</td>
-                      <td className="px-4 py-2 text-xs text-muted-foreground">{fmtDate(t.createdAt)}</td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground">
+                        {fmtDate(t.createdAt)}
+                      </td>
                     </tr>
                   ))}
             </tbody>

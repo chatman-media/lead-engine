@@ -69,10 +69,14 @@ const REQUEST_STATUS_LABEL: Record<ProviderRequestStatus, string> = {
   failed: "Ошибка",
 };
 
-function statusVariant(status: string): "default" | "secondary" | "outline" | "success" | "warning" | "destructive" {
+function statusVariant(
+  status: string,
+): "default" | "secondary" | "outline" | "success" | "warning" | "destructive" {
   if (["fulfilled", "paid", "confirmed", "accepted"].includes(status)) return "success";
-  if (["offer_ready", "awaiting_customer_payment", "quoted", "sent", "seen"].includes(status)) return "warning";
-  if (["cancelled", "failed", "provider_declined", "declined", "expired"].includes(status)) return "destructive";
+  if (["offer_ready", "awaiting_customer_payment", "quoted", "sent", "seen"].includes(status))
+    return "warning";
+  if (["cancelled", "failed", "provider_declined", "declined", "expired"].includes(status))
+    return "destructive";
   if (["matching", "awaiting_provider"].includes(status)) return "default";
   return "secondary";
 }
@@ -288,8 +292,8 @@ export function SaasProviderOrders() {
               )}
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Управляет отправкой запросов провайдерам, офферами клиентам и статусными
-              переходами брокерских заказов.
+              Управляет отправкой запросов провайдерам, офферами клиентам и статусными переходами
+              брокерских заказов.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -354,10 +358,7 @@ export function SaasProviderOrders() {
                     {orders.map((order) => (
                       <TableRow
                         key={order.id}
-                        className={cn(
-                          "cursor-pointer",
-                          selectedId === order.id && "bg-muted/60",
-                        )}
+                        className={cn("cursor-pointer", selectedId === order.id && "bg-muted/60")}
                         onClick={() => setSelectedId(order.id)}
                       >
                         <TableCell className="min-w-[220px] whitespace-normal">
@@ -389,7 +390,15 @@ export function SaasProviderOrders() {
                         </TableCell>
                         <TableCell>{formatMoney(order.customerAmount, order.currency)}</TableCell>
                         <TableCell>
-                          <Badge variant={order.sla.state === "breached" ? "destructive" : order.sla.state === "risk" ? "warning" : "outline"}>
+                          <Badge
+                            variant={
+                              order.sla.state === "breached"
+                                ? "destructive"
+                                : order.sla.state === "risk"
+                                  ? "warning"
+                                  : "outline"
+                            }
+                          >
                             {slaText(order.sla)}
                           </Badge>
                         </TableCell>
@@ -415,8 +424,7 @@ export function SaasProviderOrders() {
                 <CardHeader className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <CardTitle className="flex items-center gap-2 text-base">
-                      <ClipboardListIcon className="size-4" />
-                      #{selectedOrder.id}
+                      <ClipboardListIcon className="size-4" />#{selectedOrder.id}
                     </CardTitle>
                     <Badge variant={statusVariant(selectedOrder.status)}>
                       {ORDER_STATUS_LABEL[selectedOrder.status]}
@@ -424,8 +432,14 @@ export function SaasProviderOrders() {
                   </div>
                   <div className="grid gap-2 text-sm sm:grid-cols-3">
                     <Metric label="Клиент" value={selectedOrder.customer.name ?? "—"} />
-                    <Metric label="Оплата" value={detail?.order.payment.status ?? selectedOrder.paymentStatus} />
-                    <Metric label="SLA" value={detail ? slaText(detail.sla) : slaText(selectedOrder.sla)} />
+                    <Metric
+                      label="Оплата"
+                      value={detail?.order.payment.status ?? selectedOrder.paymentStatus}
+                    />
+                    <Metric
+                      label="SLA"
+                      value={detail ? slaText(detail.sla) : slaText(selectedOrder.sla)}
+                    />
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -550,7 +564,10 @@ export function SaasProviderOrders() {
                       onClick={() =>
                         void runAction("cancel", async () => {
                           if (!selectedId) return;
-                          await saas.cancelProviderOrder(selectedId, cancelReason.trim() || undefined);
+                          await saas.cancelProviderOrder(
+                            selectedId,
+                            cancelReason.trim() || undefined,
+                          );
                           setCancelReason("");
                           toast.success("Заказ отменён");
                         })

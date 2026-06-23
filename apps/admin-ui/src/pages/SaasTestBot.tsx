@@ -81,22 +81,18 @@ function BotParts({ parts }: { parts: TestOutboundPart[] }) {
           const src = part.mediaRef.externalRef;
           return (
             <div key={i} className="space-y-1">
-              {part.caption && (
-                <p className="text-xs text-muted-foreground">{part.caption}</p>
-              )}
+              {part.caption && <p className="text-xs text-muted-foreground">{part.caption}</p>}
               {part.kind === "photo" ? (
                 <img
                   src={src}
                   alt="photo"
                   className="max-h-64 rounded-md object-cover"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
                 />
               ) : (
-                <video
-                  src={src}
-                  controls
-                  className="max-h-64 w-full rounded-md"
-                />
+                <video src={src} controls className="max-h-64 w-full rounded-md" />
               )}
             </div>
           );
@@ -132,7 +128,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       <div
         className={cn(
           "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full",
-          isUser ? "bg-primary/15 text-primary" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+          isUser
+            ? "bg-primary/15 text-primary"
+            : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
         )}
       >
         {isUser ? <UserIcon className="size-3.5" /> : <BotIcon className="size-3.5" />}
@@ -141,7 +139,12 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       {/* Bubble */}
       <div className={cn("max-w-[75%] space-y-1", isUser ? "items-end" : "items-start")}>
         {msg.hint && (
-          <p className={cn("text-[10px] text-muted-foreground/70", isUser ? "text-right" : "text-left")}>
+          <p
+            className={cn(
+              "text-[10px] text-muted-foreground/70",
+              isUser ? "text-right" : "text-left",
+            )}
+          >
             {msg.hint}
           </p>
         )}
@@ -169,7 +172,12 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
           )}
         </div>
-        <p className={cn("text-[10px] text-muted-foreground/60", isUser ? "text-right" : "text-left")}>
+        <p
+          className={cn(
+            "text-[10px] text-muted-foreground/60",
+            isUser ? "text-right" : "text-left",
+          )}
+        >
           {formatTime(msg.ts)}
         </p>
       </div>
@@ -197,10 +205,13 @@ export function SaasTestBot() {
 
   // Load scenarios on mount
   useEffect(() => {
-    saas.getTestScenarios().then((r) => {
-      setScenarios(r.scenarios);
-      if (r.scenarios.length > 0) setSelectedScenario(r.scenarios[0]!.id);
-    }).catch(() => {});
+    saas
+      .getTestScenarios()
+      .then((r) => {
+        setScenarios(r.scenarios);
+        if (r.scenarios.length > 0) setSelectedScenario(r.scenarios[0]!.id);
+      })
+      .catch(() => {});
   }, []);
 
   // Scroll to bottom on new messages
@@ -222,7 +233,13 @@ export function SaasTestBot() {
     caption?: string;
     hint?: string;
   }) {
-    const { text = "", mediaUrl: mUrl = "", mediaType: mType = "photo", caption: cap = "", hint } = opts;
+    const {
+      text = "",
+      mediaUrl: mUrl = "",
+      mediaType: mType = "photo",
+      caption: cap = "",
+      hint,
+    } = opts;
     if (!text && !mUrl) return;
 
     // Add user bubble
@@ -380,7 +397,11 @@ export function SaasTestBot() {
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex-1 min-w-48">
             <Label className="mb-1 text-xs text-muted-foreground">Сценарий</Label>
-            <Select value={selectedScenario} onValueChange={setSelectedScenario} disabled={runningScenario}>
+            <Select
+              value={selectedScenario}
+              onValueChange={setSelectedScenario}
+              disabled={runningScenario}
+            >
               <SelectTrigger className="h-8 text-sm">
                 <SelectValue placeholder="Выбрать сценарий…" />
               </SelectTrigger>
@@ -411,11 +432,7 @@ export function SaasTestBot() {
               Стоп
             </Button>
           ) : (
-            <Button
-              size="sm"
-              onClick={handleRunScenario}
-              disabled={!selectedScenario || sending}
-            >
+            <Button size="sm" onClick={handleRunScenario} disabled={!selectedScenario || sending}>
               <PlayIcon className="size-3.5" />
               Запустить
             </Button>
@@ -480,10 +497,14 @@ export function SaasTestBot() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="photo">
-                    <span className="flex items-center gap-1"><ImageIcon className="size-3" /> Фото</span>
+                    <span className="flex items-center gap-1">
+                      <ImageIcon className="size-3" /> Фото
+                    </span>
                   </SelectItem>
                   <SelectItem value="video">
-                    <span className="flex items-center gap-1"><VideoIcon className="size-3" /> Видео</span>
+                    <span className="flex items-center gap-1">
+                      <VideoIcon className="size-3" /> Видео
+                    </span>
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -504,7 +525,11 @@ export function SaasTestBot() {
               size="sm"
               variant="ghost"
               className="h-7 px-1.5"
-              onClick={() => { setShowMedia(false); setMediaUrl(""); setCaption(""); }}
+              onClick={() => {
+                setShowMedia(false);
+                setMediaUrl("");
+                setCaption("");
+              }}
             >
               <XIcon className="size-3.5" />
             </Button>
@@ -556,7 +581,8 @@ export function SaasTestBot() {
         </div>
 
         <p className="text-[10px] text-muted-foreground/60 px-1">
-          Enter — отправить · Shift+Enter — новая строка · Сообщения обрабатываются боотом, но не доставляются в Telegram
+          Enter — отправить · Shift+Enter — новая строка · Сообщения обрабатываются боотом, но не
+          доставляются в Telegram
         </p>
       </div>
     </div>

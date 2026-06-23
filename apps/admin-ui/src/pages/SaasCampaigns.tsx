@@ -2,13 +2,7 @@ import { PlayIcon, PauseIcon, RocketIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  ApiError,
-  clearToken,
-  type DripCampaign,
-  type LeadListItem,
-  saas,
-} from "@/api/saas";
+import { ApiError, clearToken, type DripCampaign, type LeadListItem, saas } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,8 +35,7 @@ function matchLeads(
     const key = raw.trim().toLowerCase();
     if (!key) continue;
     const hit =
-      byName.get(key) ??
-      leads.find((l) => l.contactName?.trim().toLowerCase().includes(key));
+      byName.get(key) ?? leads.find((l) => l.contactName?.trim().toLowerCase().includes(key));
     if (hit && !seen.has(hit.id)) {
       seen.add(hit.id);
       matched.push(hit);
@@ -78,10 +71,7 @@ export function SaasCampaigns() {
   async function load() {
     setLoading(true);
     try {
-      const [c, l] = await Promise.all([
-        saas.listDripCampaigns(),
-        saas.listLeads({ limit: 500 }),
-      ]);
+      const [c, l] = await Promise.all([saas.listDripCampaigns(), saas.listLeads({ limit: 500 })]);
       setCampaigns(c.campaigns);
       setLeads(l.items);
     } catch (err) {
@@ -142,7 +132,10 @@ export function SaasCampaigns() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <PageHeader title="Капельные кампании" description="Рассылка лидам по одному с заданной скоростью" />
+        <PageHeader
+          title="Капельные кампании"
+          description="Рассылка лидам по одному с заданной скоростью"
+        />
         <Skeleton className="h-40 w-full" />
       </div>
     );
@@ -159,23 +152,38 @@ export function SaasCampaigns() {
         <CardHeader>
           <CardTitle className="text-base">Новая кампания</CardTitle>
           <p className="text-muted-foreground text-xs">
-            Telegram-бот может писать только тем, кто уже писал боту — холодные контакты будут пропущены.
+            Telegram-бот может писать только тем, кто уже писал боту — холодные контакты будут
+            пропущены.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label className="text-xs">Название</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Напр. Весенняя рассылка" />
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Напр. Весенняя рассылка"
+              />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs">По сколько за раз</Label>
-                <Input type="number" min={1} value={perTick} onChange={(e) => setPerTick(e.target.value)} />
+                <Input
+                  type="number"
+                  min={1}
+                  value={perTick}
+                  onChange={(e) => setPerTick(e.target.value)}
+                />
               </div>
               <div>
                 <Label className="text-xs">Интервал, сек</Label>
-                <Input type="number" min={0} value={intervalSec} onChange={(e) => setIntervalSec(e.target.value)} />
+                <Input
+                  type="number"
+                  min={0}
+                  value={intervalSec}
+                  onChange={(e) => setIntervalSec(e.target.value)}
+                />
               </div>
             </div>
           </div>
@@ -232,12 +240,22 @@ export function SaasCampaigns() {
               </div>
               <div className="flex shrink-0 gap-1">
                 {c.status !== "active" && c.status !== "completed" && (
-                  <Button size="sm" variant="outline" className="gap-1" onClick={() => setStatus(c.id, "active")}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => setStatus(c.id, "active")}
+                  >
                     <PlayIcon className="size-3.5" /> Запустить
                   </Button>
                 )}
                 {c.status === "active" && (
-                  <Button size="sm" variant="outline" className="gap-1" onClick={() => setStatus(c.id, "paused")}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => setStatus(c.id, "paused")}
+                  >
                     <PauseIcon className="size-3.5" /> Пауза
                   </Button>
                 )}

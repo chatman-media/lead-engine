@@ -1211,13 +1211,11 @@ export function SaasChannels() {
           <Card>
             <CardHeader>
               <CardTitle>
-                {existingVk && reconnectKind !== "vk"
-                  ? "VK Messenger"
-                  : "Подключить VK Messenger"}
+                {existingVk && reconnectKind !== "vk" ? "VK Messenger" : "Подключить VK Messenger"}
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                VK community → Управление → Работа с API: укажите Group ID, ключ доступа
-                сообщества и confirmation code из Callback API.
+                VK community → Управление → Работа с API: укажите Group ID, ключ доступа сообщества
+                и confirmation code из Callback API.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1329,8 +1327,8 @@ export function SaasChannels() {
                   : "Подключить MAX Messenger"}
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                MAX для бизнеса → Чат-боты: вставьте Bot token. Webhook secret можно
-                оставить пустым — платформа сгенерирует значение для subscription.
+                MAX для бизнеса → Чат-боты: вставьте Bot token. Webhook secret можно оставить пустым
+                — платформа сгенерирует значение для subscription.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">

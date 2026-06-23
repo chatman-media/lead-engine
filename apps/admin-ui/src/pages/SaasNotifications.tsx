@@ -87,7 +87,12 @@ const INFORMER_DIGESTS: Array<{ v: string; label: string }> = [
 const SEV_DOT: Record<string, string> = { critical: "🔴", important: "🟡", info: "ℹ️" };
 
 function parseTopics(raw: string | null | undefined): Record<string, boolean> {
-  const base: Record<string, boolean> = { leads: true, escalation: true, orders: true, system: true };
+  const base: Record<string, boolean> = {
+    leads: true,
+    escalation: true,
+    orders: true,
+    system: true,
+  };
   if (!raw) return base;
   try {
     const m = JSON.parse(raw) as Record<string, boolean>;
@@ -348,7 +353,10 @@ export function SaasNotifications() {
     if (!newRuleTarget.trim()) return;
     setSavingRule(true);
     try {
-      await saas.createNotificationRule({ eventType: newRuleEvent, targetId: newRuleTarget.trim() });
+      await saas.createNotificationRule({
+        eventType: newRuleEvent,
+        targetId: newRuleTarget.trim(),
+      });
       closeAddRule();
       await reloadRules();
       toast.success("Правило добавлено");
@@ -433,7 +441,8 @@ export function SaasNotifications() {
 
   const connected = !!settings?.telegramChatId;
   const botUsername = settings?.botUsername;
-  const deepLink = linkToken && botUsername ? `https://t.me/${botUsername}?start=${linkToken}` : null;
+  const deepLink =
+    linkToken && botUsername ? `https://t.me/${botUsername}?start=${linkToken}` : null;
 
   // Informer derived
   const level = settings?.informerLevel ?? "important";
@@ -478,12 +487,14 @@ export function SaasNotifications() {
         <CardContent className="space-y-4">
           {/* Пояснение: зачем отдельный бот, если клиентский уже подключён */}
           <div className="flex gap-2.5 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs text-muted-foreground">
-            <span aria-hidden className="shrink-0 text-base leading-none">💡</span>
+            <span aria-hidden className="shrink-0 text-base leading-none">
+              💡
+            </span>
             <p>
-              Служебный бот команды: присылает рабочие уведомления (новый лид, эскалация,
-              крупная сделка) вам и операторам в личные сообщения. Бот из «Каналов» общается
-              с клиентами — это разные боты. Подключается один раз, дальше каждый оператор
-              привязывает свой Telegram.
+              Служебный бот команды: присылает рабочие уведомления (новый лид, эскалация, крупная
+              сделка) вам и операторам в личные сообщения. Бот из «Каналов» общается с клиентами —
+              это разные боты. Подключается один раз, дальше каждый оператор привязывает свой
+              Telegram.
             </p>
           </div>
 
@@ -538,7 +549,8 @@ export function SaasNotifications() {
               {!linkToken ? (
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Нажмите кнопку — получите ссылку для привязки, откройте её в Telegram и нажмите Start.
+                    Нажмите кнопку — получите ссылку для привязки, откройте её в Telegram и нажмите
+                    Start.
                   </p>
                   <Button onClick={handleGenerateLink} disabled={generating} className="gap-2">
                     <BellIcon className="size-4" />
@@ -549,10 +561,16 @@ export function SaasNotifications() {
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
                     Ссылка действует 1 час.{" "}
-                    {deepLink
-                      ? <>Нажмите кнопку — откроется бот, нажмите <strong>Start</strong>.</>
-                      : <>Отправьте команду ниже боту-оператору и нажмите <strong>Start</strong>.</>}
-                    {" "}После этого нажмите «Проверить».
+                    {deepLink ? (
+                      <>
+                        Нажмите кнопку — откроется бот, нажмите <strong>Start</strong>.
+                      </>
+                    ) : (
+                      <>
+                        Отправьте команду ниже боту-оператору и нажмите <strong>Start</strong>.
+                      </>
+                    )}{" "}
+                    После этого нажмите «Проверить».
                   </p>
 
                   {deepLink ? (
@@ -598,16 +616,21 @@ export function SaasNotifications() {
 
                   {!botUsername && (
                     <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-                      ⚠️ Бот-оператор пока не подключён к платформе — это отдельный
-                      служебный Telegram-бот, который шлёт уведомления операторам (не
-                      клиентский бот). Без него имя бота и прямая ссылка недоступны.
-                      Попросите администратора задать <code>PLATFORM_OPERATOR_BOT_TOKEN</code>{" "}
-                      и <code>PLATFORM_OPERATOR_BOT_USERNAME</code> в конфиге API.
+                      ⚠️ Бот-оператор пока не подключён к платформе — это отдельный служебный
+                      Telegram-бот, который шлёт уведомления операторам (не клиентский бот). Без
+                      него имя бота и прямая ссылка недоступны. Попросите администратора задать{" "}
+                      <code>PLATFORM_OPERATOR_BOT_TOKEN</code> и{" "}
+                      <code>PLATFORM_OPERATOR_BOT_USERNAME</code> в конфиге API.
                     </p>
                   )}
 
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={handleGenerateLink} disabled={generating}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateLink}
+                      disabled={generating}
+                    >
                       Обновить токен
                     </Button>
                     <Button variant="outline" size="sm" onClick={reloadSettings}>
@@ -630,8 +653,8 @@ export function SaasNotifications() {
               <div>
                 <CardTitle className="text-base">Информер</CardTitle>
                 <CardDescription className="mt-0.5">
-                  Громкость уведомлений в Telegram: что и как часто присылать. То же можно
-                  настроить командами бота (/level, /topics, /digest, /mute).
+                  Громкость уведомлений в Telegram: что и как часто присылать. То же можно настроить
+                  командами бота (/level, /topics, /digest, /mute).
                 </CardDescription>
               </div>
             </div>
@@ -650,8 +673,8 @@ export function SaasNotifications() {
             <>
               {!connected && (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-muted-foreground">
-                  Telegram ещё не привязан — настройки сохранятся, но уведомления начнут
-                  приходить только после подключения (см. «Личные уведомления» выше).
+                  Telegram ещё не привязан — настройки сохранятся, но уведомления начнут приходить
+                  только после подключения (см. «Личные уведомления» выше).
                 </div>
               )}
               {/* Порог важности */}
@@ -706,7 +729,10 @@ export function SaasNotifications() {
                       value={digest}
                       disabled={savingInformer}
                       onChange={(e) =>
-                        saveInformer({ informerDigest: e.target.value }, { informerDigest: e.target.value })
+                        saveInformer(
+                          { informerDigest: e.target.value },
+                          { informerDigest: e.target.value },
+                        )
                       }
                       className="flex-1 rounded-md border bg-background px-3 py-1.5 text-sm"
                     >
@@ -733,17 +759,28 @@ export function SaasNotifications() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Что не ушло сразу — придёт сводкой{digest !== "off" ? ` в ${digestHour}:00` : ""}.
+                    Что не ушло сразу — придёт сводкой
+                    {digest !== "off" ? ` в ${digestHour}:00` : ""}.
                   </p>
                 </div>
 
                 <div className="space-y-2">
                   <Label className="text-sm">Заглушить реалтайм</Label>
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline" disabled={savingInformer} onClick={() => handleMute(30 * 60)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={savingInformer}
+                      onClick={() => handleMute(30 * 60)}
+                    >
                       30 мин
                     </Button>
-                    <Button size="sm" variant="outline" disabled={savingInformer} onClick={() => handleMute(2 * 3600)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={savingInformer}
+                      onClick={() => handleMute(2 * 3600)}
+                    >
                       2 часа
                     </Button>
                     <Button
@@ -881,7 +918,12 @@ export function SaasNotifications() {
               </div>
             </div>
             {addMode === null && (
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddMode("bot")}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => setAddMode("bot")}
+              >
                 <PlusIcon className="size-3.5" />
                 Добавить
               </Button>
@@ -936,7 +978,10 @@ export function SaasNotifications() {
               <div className="flex gap-2 text-xs">
                 <button
                   type="button"
-                  onClick={() => { setAddMode("bot"); setGroupLinkToken(null); }}
+                  onClick={() => {
+                    setAddMode("bot");
+                    setGroupLinkToken(null);
+                  }}
                   className={`px-2 py-1 rounded ${addMode === "bot" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   🤖 Через бота
@@ -957,11 +1002,16 @@ export function SaasNotifications() {
                     <Label className="text-xs">Событие</Label>
                     <select
                       value={groupLinkEvent}
-                      onChange={(e) => { setGroupLinkEvent(e.target.value); setGroupLinkToken(null); }}
+                      onChange={(e) => {
+                        setGroupLinkEvent(e.target.value);
+                        setGroupLinkToken(null);
+                      }}
                       className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
                     >
                       {Object.entries(GROUP_EVENT_TYPES).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
+                        <option key={val} value={val}>
+                          {label}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -969,9 +1019,15 @@ export function SaasNotifications() {
                   {!groupLinkToken ? (
                     <div className="space-y-2">
                       <p className="text-xs text-muted-foreground">
-                        Добавьте бота в Telegram-группу, получите токен и отправьте его туда — бот сам создаст правило.
+                        Добавьте бота в Telegram-группу, получите токен и отправьте его туда — бот
+                        сам создаст правило.
                       </p>
-                      <Button size="sm" onClick={handleGenerateGroupToken} disabled={generatingGroupToken} className="gap-1.5">
+                      <Button
+                        size="sm"
+                        onClick={handleGenerateGroupToken}
+                        disabled={generatingGroupToken}
+                        className="gap-1.5"
+                      >
                         <SendIcon className="size-3.5" />
                         {generatingGroupToken ? "Генерируем…" : "Получить токен"}
                       </Button>
@@ -986,17 +1042,32 @@ export function SaasNotifications() {
                           /setup {groupLinkToken}
                         </code>
                         <Button
-                          variant="ghost" size="icon" className="shrink-0 h-7 w-7"
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0 h-7 w-7"
                           onClick={() => copyToClipboard(`/setup ${groupLinkToken}`)}
                         >
                           <ClipboardCopyIcon className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={async () => { await reloadRules(); closeAddRule(); toast.success("Обновлено"); }}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            await reloadRules();
+                            closeAddRule();
+                            toast.success("Обновлено");
+                          }}
+                        >
                           Готово — проверить
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={handleGenerateGroupToken} disabled={generatingGroupToken}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={handleGenerateGroupToken}
+                          disabled={generatingGroupToken}
+                        >
                           Новый токен
                         </Button>
                       </div>
@@ -1016,7 +1087,9 @@ export function SaasNotifications() {
                       className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
                     >
                       {Object.entries(EVENT_TYPES).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
+                        <option key={val} value={val}>
+                          {label}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -1038,7 +1111,13 @@ export function SaasNotifications() {
                 </form>
               )}
 
-              <Button type="button" size="sm" variant="ghost" className="text-muted-foreground" onClick={closeAddRule}>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={closeAddRule}
+              >
                 Отмена
               </Button>
             </div>
@@ -1055,7 +1134,8 @@ export function SaasNotifications() {
               <div>
                 <CardTitle className="text-base">Шаблоны сообщений</CardTitle>
                 <CardDescription className="mt-0.5">
-                  Кастомный текст уведомлений вместо стандартного. Переменные: <code className="text-xs">{PLACEHOLDERS}</code>
+                  Кастомный текст уведомлений вместо стандартного. Переменные:{" "}
+                  <code className="text-xs">{PLACEHOLDERS}</code>
                 </CardDescription>
               </div>
             </div>
@@ -1079,9 +1159,12 @@ export function SaasNotifications() {
                 </p>
               )}
               <div className="space-y-2">
-                {templates.map((tpl) => (
+                {templates.map((tpl) =>
                   editingSlug === tpl.slug ? null : (
-                    <div key={tpl.slug} className="flex items-start gap-3 rounded-md border px-3 py-2 text-sm">
+                    <div
+                      key={tpl.slug}
+                      className="flex items-start gap-3 rounded-md border px-3 py-2 text-sm"
+                    >
                       <Badge variant="secondary" className="mt-0.5 shrink-0 text-xs">
                         {EVENT_TYPES[tpl.slug] ?? tpl.slug}
                       </Badge>
@@ -1105,8 +1188,8 @@ export function SaasNotifications() {
                         <Trash2Icon className="size-3.5" />
                       </Button>
                     </div>
-                  )
-                ))}
+                  ),
+                )}
               </div>
             </>
           )}
@@ -1122,7 +1205,9 @@ export function SaasNotifications() {
                     className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
                   >
                     {Object.entries(EVENT_TYPES).map(([val, label]) => (
-                      <option key={val} value={val}>{label}</option>
+                      <option key={val} value={val}>
+                        {label}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -1137,14 +1222,20 @@ export function SaasNotifications() {
                   className="font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;code&gt;</code>
+                  Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>,{" "}
+                  <code>&lt;code&gt;</code>
                 </p>
               </div>
               <div className="flex gap-2">
                 <Button type="submit" size="sm" disabled={savingTemplate || !editBody.trim()}>
                   Сохранить
                 </Button>
-                <Button type="button" size="sm" variant="outline" onClick={() => setEditingSlug(null)}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setEditingSlug(null)}
+                >
                   Отмена
                 </Button>
               </div>
@@ -1196,7 +1287,9 @@ export function SaasNotifications() {
               />
               <span className="text-muted-foreground">
                 Email{" "}
-                {opsStatus?.emailConfigured ? "настроен (только critical)" : "не настроен (RESEND_API_KEY)"}
+                {opsStatus?.emailConfigured
+                  ? "настроен (только critical)"
+                  : "не настроен (RESEND_API_KEY)"}
               </span>
             </div>
           </div>

@@ -52,12 +52,7 @@ export function LeadKbGuidanceCard({
   const Wrapper = variant === "card" ? Card : "section";
 
   return (
-    <Wrapper
-      className={cn(
-        variant === "section" && "rounded-lg border bg-background",
-        className,
-      )}
-    >
+    <Wrapper className={cn(variant === "section" && "rounded-lg border bg-background", className)}>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <BookOpenIcon className="size-4 text-muted-foreground" />
