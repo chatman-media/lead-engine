@@ -75,9 +75,7 @@ export function verifyStripeSignature(opts: VerifyOptions): void {
     );
   }
   const signedPayload = `${timestamp}.${opts.payload}`;
-  const expectedHex = createHmac("sha256", opts.secret)
-    .update(signedPayload, "utf8")
-    .digest("hex");
+  const expectedHex = createHmac("sha256", opts.secret).update(signedPayload, "utf8").digest("hex");
   const expectedBuf = Buffer.from(expectedHex, "hex");
   for (const sig of signatures) {
     let sigBuf: Buffer;

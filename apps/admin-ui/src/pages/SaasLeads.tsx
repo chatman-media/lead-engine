@@ -56,7 +56,6 @@ const STAGE_TYPE_RU: Record<string, string> = {
   milestone: "Контрольная точка",
 };
 
-
 export function SaasLeads() {
   const navigate = useNavigate();
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
@@ -611,7 +610,9 @@ export function SaasLeads() {
         (() => {
           const isAll = (listStageId ?? -1) === -1;
           const recencyOf = (l: LeadListItem) => l.lastMessageAt ?? l.updatedAt ?? 0;
-          const activeStage = isAll ? null : (stages.find((s) => s.id === listStageId) ?? stages[0]);
+          const activeStage = isAll
+            ? null
+            : (stages.find((s) => s.id === listStageId) ?? stages[0]);
           const activeLeads = isAll
             ? [...filteredLeads].sort((a, b) => recencyOf(b) - recencyOf(a))
             : (leadsByStage.get(`stage:${activeStage?.id}`) ?? []);
@@ -892,7 +893,12 @@ function LeadCard({
   const v = leadView(lead);
   const primary = v.fields[0];
   return (
-    <div draggable onDragStart={onDragStart} onDragEnd={onDragEnd} className={isDragging ? "opacity-40" : ""}>
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className={isDragging ? "opacity-40" : ""}
+    >
       <Link to={`/leads/${lead.id}`} className="block">
         <div
           className="group rounded-lg border bg-card/60 p-2.5 transition-all hover:border-foreground/25 hover:bg-accent/30 hover:shadow-sm"
@@ -903,7 +909,9 @@ function LeadCard({
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="truncate text-[13px] font-semibold leading-tight">{v.name}</span>
-                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{v.recency}</span>
+                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                  {v.recency}
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <ChannelChip source={lead.source} />
@@ -919,13 +927,17 @@ function LeadCard({
 
           {primary && (
             <div className="mt-2 flex items-baseline gap-1.5">
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{primary.label}</span>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {primary.label}
+              </span>
               <span className="truncate font-mono text-[13px] font-semibold">{primary.value}</span>
             </div>
           )}
 
           {lead.lastMessageText && (
-            <p className="mt-1.5 line-clamp-1 text-[11px] text-muted-foreground/80">{lead.lastMessageText}</p>
+            <p className="mt-1.5 line-clamp-1 text-[11px] text-muted-foreground/80">
+              {lead.lastMessageText}
+            </p>
           )}
 
           <div className="mt-2 flex items-center justify-between gap-2">
@@ -955,7 +967,9 @@ function LeadRow({ lead }: { lead: LeadListItem }) {
         <div className="w-40 min-w-0 shrink-0">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-semibold">{v.name}</span>
-            {v.awaiting && <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-400" />}
+            {v.awaiting && (
+              <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-400" />
+            )}
           </div>
           <ChannelChip source={lead.source} />
         </div>
@@ -970,7 +984,9 @@ function LeadRow({ lead }: { lead: LeadListItem }) {
             ))}
           </div>
           {lead.lastMessageText && (
-            <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground/70">{lead.lastMessageText}</p>
+            <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground/70">
+              {lead.lastMessageText}
+            </p>
           )}
         </div>
 

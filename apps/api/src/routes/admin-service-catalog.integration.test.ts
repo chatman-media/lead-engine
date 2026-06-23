@@ -97,9 +97,11 @@ describe("admin service catalog", () => {
       }),
     });
     expect(createRes.status).toBe(201);
-    const created = ((await createRes.json()) as {
-      item: { id: number; slug: string; routeType: string };
-    }).item;
+    const created = (
+      (await createRes.json()) as {
+        item: { id: number; slug: string; routeType: string };
+      }
+    ).item;
     expect(created.slug).toBe("podbor_nedvizhimosti");
     expect(created.routeType).toBe("manual");
 
@@ -123,9 +125,11 @@ describe("admin service catalog", () => {
       body: JSON.stringify({ routeType: "webhook", webhookUrl: "https://partner.example/hook" }),
     });
     expect(webhookRes.status).toBe(200);
-    const updated = ((await webhookRes.json()) as {
-      item: { routeType: string; webhookUrl: string | null };
-    }).item;
+    const updated = (
+      (await webhookRes.json()) as {
+        item: { routeType: string; webhookUrl: string | null };
+      }
+    ).item;
     expect(updated.routeType).toBe("webhook");
     expect(updated.webhookUrl).toBe("https://partner.example/hook");
 

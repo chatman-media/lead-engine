@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { DEFAULT_MODEL_ID, getModelInfo, listModels, listModelsByProvider, MODELS } from "./models.ts";
+import {
+  DEFAULT_MODEL_ID,
+  getModelInfo,
+  listModels,
+  listModelsByProvider,
+  MODELS,
+} from "./models.ts";
 
 describe("models", () => {
   it("MODELS непустой, id уникальны", () => {

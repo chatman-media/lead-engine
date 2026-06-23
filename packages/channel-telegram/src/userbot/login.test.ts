@@ -93,8 +93,17 @@ describe("submitUserbot2fa", () => {
 
 describe("startUserbotLogin (через clientFactory)", () => {
   it("успех → { client, phoneCodeHash }", async () => {
-    const fc = { connect: async () => {}, sendCode: async () => ({ phoneCodeHash: "hash" }), disconnect: async () => {} };
-    const r = await startUserbotLogin({ apiId: 1, apiHash: "h", phone: "+100", clientFactory: (() => fc) as never });
+    const fc = {
+      connect: async () => {},
+      sendCode: async () => ({ phoneCodeHash: "hash" }),
+      disconnect: async () => {},
+    };
+    const r = await startUserbotLogin({
+      apiId: 1,
+      apiHash: "h",
+      phone: "+100",
+      clientFactory: (() => fc) as never,
+    });
     expect(r.phoneCodeHash).toBe("hash");
     expect(r.client).toBe(fc as never);
   });
@@ -111,7 +120,12 @@ describe("startUserbotLogin (через clientFactory)", () => {
       },
     };
     await expect(
-      startUserbotLogin({ apiId: 1, apiHash: "h", phone: "+100", clientFactory: (() => fc) as never }),
+      startUserbotLogin({
+        apiId: 1,
+        apiHash: "h",
+        phone: "+100",
+        clientFactory: (() => fc) as never,
+      }),
     ).rejects.toMatchObject({ code: "phone_invalid" });
     expect(disconnected).toBe(true);
   });

@@ -13,7 +13,14 @@ export const VIDEO_INTAKE: QuestionnaireSchema = {
       question: "Какой формат съёмки/производства вас интересует?",
       kind: "enum",
       required: true,
-      options: ["Съёмка мероприятия", "Корпоративное видео", "Reels / Shorts", "Фотосессия", "Анимация / Motion", "Другое"],
+      options: [
+        "Съёмка мероприятия",
+        "Корпоративное видео",
+        "Reels / Shorts",
+        "Фотосессия",
+        "Анимация / Motion",
+        "Другое",
+      ],
       hint: "Тип услуги: event, corporate video, reels, photoshoot, animation.",
     },
     {

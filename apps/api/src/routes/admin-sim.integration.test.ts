@@ -24,7 +24,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_sim_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-sim-flow-12345";
 
 let sql: Sql | null = null;
@@ -40,51 +49,52 @@ const fakePersona = {
   complete: async () => "Здравствуйте, хочу обменять 500 USDT на баты",
 };
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route(
-      "/",
-      makeAdminSimRoutes({
-        db,
-        // biome-ignore lint/suspicious/noExplicitAny: reply-strategy fake
-        replyStrategy: {
-          generate: async () => [
-            { channelId: "x", externalUserId: "u", parts: [{ kind: "text", text: "Курс 36.5, подтверждаете?" }] },
-          ],
-        } as any,
-        // biome-ignore lint/suspicious/noExplicitAny: chat-client fake
-        resolveSimChat: () => fakePersona as any,
-      }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route(
+    "/",
+    makeAdminSimRoutes({
+      db,
+      // biome-ignore lint/suspicious/noExplicitAny: reply-strategy fake
+      replyStrategy: {
+        generate: async () => [
+          {
+            channelId: "x",
+            externalUserId: "u",
+            parts: [{ kind: "text", text: "Курс 36.5, подтверждаете?" }],
+          },
+        ],
+      } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: chat-client fake
+      resolveSimChat: () => fakePersona as any,
+    }),
+  );
 
-    appNoChat = new Hono();
-    appNoChat.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    appNoChat.route("/", makeAdminSimRoutes({ db, replyStrategy: null, resolveSimChat: () => null }));
+  appNoChat = new Hono();
+  appNoChat.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  appNoChat.route("/", makeAdminSimRoutes({ db, replyStrategy: null, resolveSimChat: () => null }));
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "sim@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    token = sba.token;
-    tenantId = sba.admin.tenantId;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "sim@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  token = sba.token;
+  tenantId = sba.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -93,7 +103,12 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function req(method: string, path: string, body?: unknown, instance?: Hono): Promise<Response> {
+async function req(
+  method: string,
+  path: string,
+  body?: unknown,
+  instance?: Hono,
+): Promise<Response> {
   return (instance ?? app).request(path, {
     method,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -133,13 +148,17 @@ describe("admin-sim dialog simulator", () => {
 
   it("POST /start без активного канала → 400", async () => {
     if (!sql) return;
-    expect((await req("POST", START, { personaId: "exchange_usdt", maxTurns: 1 })).status).toBe(400);
+    expect((await req("POST", START, { personaId: "exchange_usdt", maxTurns: 1 })).status).toBe(
+      400,
+    );
   });
 
   it("POST /start (happy) → self_play диалог с user+assistant", async () => {
     if (!sql) return;
     await withTenant(db, tenantId, async (tx) =>
-      tx.insert(channels).values({ tenantId, kind: "telegram_bot", externalId: "@simbot", status: "active" }),
+      tx
+        .insert(channels)
+        .values({ tenantId, kind: "telegram_bot", externalId: "@simbot", status: "active" }),
     );
     const res = await req("POST", START, { personaId: "exchange_usdt", maxTurns: 1 });
     expect(res.status).toBe(200);
@@ -161,7 +180,9 @@ describe("admin-sim dialog simulator", () => {
       tx
         .select({ role: messages.role, text: messages.text })
         .from(messages)
-        .where(and(eq(messages.tenantId, tenantId), eq(messages.conversationId, body.conversationId))),
+        .where(
+          and(eq(messages.tenantId, tenantId), eq(messages.conversationId, body.conversationId)),
+        ),
     );
     const roles = msgs.map((m) => m.role).sort();
     expect(roles).toContain("user");

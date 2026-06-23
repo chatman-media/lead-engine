@@ -26,7 +26,16 @@ import { makeFacebookWebhookRoutes } from "./webhook-facebook.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_fbwh_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-fbwh-12345";
 const APP_SECRET = "fb-app-secret-abcdef";
 const VERIFY_TOKEN = "fb-verify-token-xyz";
@@ -47,19 +56,23 @@ function sign(payload: string): string {
 function fbPayload(text: string, senderId = SENDER_PSID): string {
   return JSON.stringify({
     object: "page",
-    entry: [{
-      id: PAGE_ID,
-      time: Math.floor(Date.now() / 1000),
-      messaging: [{
-        sender: { id: senderId },
-        recipient: { id: PAGE_ID },
-        timestamp: Math.floor(Date.now() / 1000) * 1000,
-        message: {
-          mid: `m_${Math.random().toString(36).slice(2, 10)}`,
-          text,
-        },
-      }],
-    }],
+    entry: [
+      {
+        id: PAGE_ID,
+        time: Math.floor(Date.now() / 1000),
+        messaging: [
+          {
+            sender: { id: senderId },
+            recipient: { id: PAGE_ID },
+            timestamp: Math.floor(Date.now() / 1000) * 1000,
+            message: {
+              mid: `m_${Math.random().toString(36).slice(2, 10)}`,
+              text,
+            },
+          },
+        ],
+      },
+    ],
   });
 }
 
@@ -90,12 +103,15 @@ beforeAll(async () => {
   app = new Hono();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
   app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-  app.route("/", makeFacebookWebhookRoutes({
-    db,
-    channels: registry,
-    verifyToken: VERIFY_TOKEN,
-    appSecret: APP_SECRET,
-  }));
+  app.route(
+    "/",
+    makeFacebookWebhookRoutes({
+      db,
+      channels: registry,
+      verifyToken: VERIFY_TOKEN,
+      appSecret: APP_SECRET,
+    }),
+  );
 
   const signup = await app.request("/api/auth/signup", {
     method: "POST",
@@ -106,14 +122,17 @@ beforeAll(async () => {
   tenantId = signupBody.tenant.id;
 
   // Create a Facebook channel in DB
-  const [ch] = await db.insert(channels).values({
-    tenantId,
-    kind: "facebook",
-    externalId: PAGE_ID,
-    status: "active",
-    createdAt: Math.floor(Date.now() / 1000),
-    updatedAt: Math.floor(Date.now() / 1000),
-  }).returning({ id: channels.id });
+  const [ch] = await db
+    .insert(channels)
+    .values({
+      tenantId,
+      kind: "facebook",
+      externalId: PAGE_ID,
+      status: "active",
+      createdAt: Math.floor(Date.now() / 1000),
+      updatedAt: Math.floor(Date.now() / 1000),
+    })
+    .returning({ id: channels.id });
   channelDbId = ch!.id;
 
   const adapter = new MessengerAdapter({
@@ -200,25 +219,32 @@ describe("webhook-facebook POST — rate-limit", () => {
     const registry = new ChannelRegistry();
     const adapter = new MessengerAdapter({ id: String(channelDbId), pageAccessToken: "stub" });
     // biome-ignore lint/suspicious/noExplicitAny: inject
-    (registry as any).byTenantSlug.set(SLUG, [{
-      channelDbId,
-      tenantId,
-      tenantSlug: SLUG,
-      tenantPlan: "free",
-      kind: "facebook",
-      externalId: PAGE_ID,
-      adapter,
-      facebookAppSecret: APP_SECRET,
-    }]);
+    (registry as any).byTenantSlug.set(SLUG, [
+      {
+        channelDbId,
+        tenantId,
+        tenantSlug: SLUG,
+        tenantPlan: "free",
+        kind: "facebook",
+        externalId: PAGE_ID,
+        adapter,
+        facebookAppSecret: APP_SECRET,
+      },
+    ]);
 
     const appRl = new Hono();
-    appRl.route("/", makeFacebookWebhookRoutes({
-      db,
-      channels: registry,
-      verifyToken: VERIFY_TOKEN,
-      appSecret: APP_SECRET,
-      rateLimiter: { check: () => ({ allowed: false, reason: "per_minute", retryAfterSec: 60 }) } as never,
-    }));
+    appRl.route(
+      "/",
+      makeFacebookWebhookRoutes({
+        db,
+        channels: registry,
+        verifyToken: VERIFY_TOKEN,
+        appSecret: APP_SECRET,
+        rateLimiter: {
+          check: () => ({ allowed: false, reason: "per_minute", retryAfterSec: 60 }),
+        } as never,
+      }),
+    );
 
     const body = fbPayload("rate limit test");
     const res = await appRl.request(`/webhook/facebook/${SLUG}`, {
@@ -243,7 +269,8 @@ describe("webhook-facebook POST — happy path", () => {
 
     // Verify message persisted
     const saved = await withTenant(db, tenantId, async (tx) =>
-      tx.select({ text: messages.text })
+      tx
+        .select({ text: messages.text })
         .from(messages)
         .where(eq(messages.tenantId, tenantId))
         .limit(10),

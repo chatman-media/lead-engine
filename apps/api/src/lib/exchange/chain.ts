@@ -117,7 +117,12 @@ export async function verifyTronUsdt(opts: {
     return { ok: false, txHash, network: "TRC20", reason: `Статус транзакции: ${ret}` };
   }
   if (info.confirmed === false) {
-    return { ok: false, txHash, network: "TRC20", reason: "Транзакция ещё не подтверждена в сети." };
+    return {
+      ok: false,
+      txHash,
+      network: "TRC20",
+      reason: "Транзакция ещё не подтверждена в сети.",
+    };
   }
 
   const confirmedAt = resolveConfirmedAt(info);

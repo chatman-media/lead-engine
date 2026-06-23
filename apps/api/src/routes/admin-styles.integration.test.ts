@@ -21,7 +21,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_styles_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-styles-flow-12345";
 
 let sql: Sql | null = null;
@@ -47,41 +56,44 @@ const VALID_STYLE = {
     qualify: { goal: "понять сумму и валюту обмена" },
     close: { goal: "подтвердить заявку и реквизиты" },
   },
-  fewShot: [{ user: "хочу поменять usdt", assistant: "Привет! Сколько USDT и на какую валюту?", stage: "qualify" }],
+  fewShot: [
+    {
+      user: "хочу поменять usdt",
+      assistant: "Привет! Сколько USDT и на какую валюту?",
+      stage: "qualify",
+    },
+  ],
   guardrails: { forbiddenTopics: [] },
 };
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminStylesRoutes({ db, resolveChat: () => fakeClient }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminStylesRoutes({ db, resolveChat: () => fakeClient }));
 
-    appNoLlm = new Hono();
-    appNoLlm.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    appNoLlm.route("/", makeAdminStylesRoutes({ db }));
+  appNoLlm = new Hono();
+  appNoLlm.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  appNoLlm.route("/", makeAdminStylesRoutes({ db }));
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "styles@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string };
-    token = sba.token;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "styles@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string };
+  token = sba.token;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -154,11 +166,15 @@ describe("admin-styles /generate-full", () => {
     const list = await app.request("/api/admin/styles", {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const listed = (await list.json()) as { items: Array<{ slug: string; isActive: boolean; configJson: string }> };
+    const listed = (await list.json()) as {
+      items: Array<{ slug: string; isActive: boolean; configJson: string }>;
+    };
     const saved = listed.items.find((s) => s.slug === "exchange-pro");
     expect(saved).toBeDefined();
     expect(saved?.isActive).toBe(true);
-    expect((JSON.parse(saved?.configJson ?? "{}") as { framework?: string }).framework).toBe("SPIN");
+    expect((JSON.parse(saved?.configJson ?? "{}") as { framework?: string }).framework).toBe(
+      "SPIN",
+    );
   });
 
   it("повторная генерация того же slug → 409", async () => {
@@ -216,7 +232,11 @@ describe("admin-styles /generate (metadata extract)", () => {
 
   it("LLM бросает → 502", async () => {
     if (!sql) return;
-    const errClient = { complete: async () => { throw new Error("llm down"); } } as unknown as ChatClient;
+    const errClient = {
+      complete: async () => {
+        throw new Error("llm down");
+      },
+    } as unknown as ChatClient;
     const appErr = new Hono();
     appErr.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
     appErr.route("/", makeAdminStylesRoutes({ db, resolveChat: () => errClient }));

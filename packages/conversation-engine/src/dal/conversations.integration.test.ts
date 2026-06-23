@@ -2,7 +2,12 @@
  * ConversationsRepo — CRUD + inbox-метаданные (unread / status / assignee /
  * summary) + tenant-изоляция. Требует DATABASE_URL; без него — graceful-skip.
  */
-import { applyAllMigrations, createIsolatedDb, schema, tryConnectToPg } from "@chatman-media/storage";
+import {
+  applyAllMigrations,
+  createIsolatedDb,
+  schema,
+  tryConnectToPg,
+} from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -13,7 +18,14 @@ import { ConversationsRepo } from "./conversations.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_conv_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "storage", "migrations");
+const migrationsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -30,13 +42,22 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   enabled = true;
   n = Math.floor(Date.now() / 1000);
-  const [a] = await db.insert(schema.tenants).values({ slug: `conv-a-${n}` }).returning({ id: schema.tenants.id });
-  const [b] = await db.insert(schema.tenants).values({ slug: `conv-b-${n}` }).returning({ id: schema.tenants.id });
+  const [a] = await db
+    .insert(schema.tenants)
+    .values({ slug: `conv-a-${n}` })
+    .returning({ id: schema.tenants.id });
+  const [b] = await db
+    .insert(schema.tenants)
+    .values({ slug: `conv-b-${n}` })
+    .returning({ id: schema.tenants.id });
   t1 = a!.id;
   t2 = b!.id;
   const [c] = await db
@@ -55,7 +76,11 @@ afterAll(async () => {
 async function freshContact(): Promise<number> {
   const [c] = await db
     .insert(schema.contacts)
-    .values({ tenantId: t1, displayName: `c-${Math.random().toString(36).slice(2, 8)}`, createdAt: n })
+    .values({
+      tenantId: t1,
+      displayName: `c-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: n,
+    })
     .returning({ id: schema.contacts.id });
   return c!.id;
 }
@@ -93,14 +118,22 @@ describe("ConversationsRepo", () => {
 
   it("touchLastMessageAt обновляет таймстамп", async () => {
     if (!enabled) return;
-    const conv = await repo().create({ contactId: await freshContact(), source: "bot", nowEpoch: n });
+    const conv = await repo().create({
+      contactId: await freshContact(),
+      source: "bot",
+      nowEpoch: n,
+    });
     await repo().touchLastMessageAt(conv.id, n + 500);
     expect((await repo().findById(conv.id))?.lastMessageAt).toBe(n + 500);
   });
 
   it("updateInboxMetadata: text + status + incrementUnread", async () => {
     if (!enabled) return;
-    const conv = await repo().create({ contactId: await freshContact(), source: "bot", nowEpoch: n });
+    const conv = await repo().create({
+      contactId: await freshContact(),
+      source: "bot",
+      nowEpoch: n,
+    });
     await repo().updateInboxMetadata(conv.id, {
       lastMessageText: "привет",
       lastMessageAt: n + 10,
@@ -116,7 +149,11 @@ describe("ConversationsRepo", () => {
 
   it("markAsRead обнуляет unreadCount", async () => {
     if (!enabled) return;
-    const conv = await repo().create({ contactId: await freshContact(), source: "bot", nowEpoch: n });
+    const conv = await repo().create({
+      contactId: await freshContact(),
+      source: "bot",
+      nowEpoch: n,
+    });
     await repo().updateInboxMetadata(conv.id, { incrementUnread: true });
     await repo().markAsRead(conv.id);
     expect((await repo().findById(conv.id))?.unreadCount).toBe(0);
@@ -124,7 +161,11 @@ describe("ConversationsRepo", () => {
 
   it("setAssignee / setSummaryJson", async () => {
     if (!enabled) return;
-    const conv = await repo().create({ contactId: await freshContact(), source: "bot", nowEpoch: n });
+    const conv = await repo().create({
+      contactId: await freshContact(),
+      source: "bot",
+      nowEpoch: n,
+    });
     await repo().setAssignee(conv.id, 42);
     await repo().setSummaryJson(conv.id, '{"summary":"x"}');
     const row = await repo().findById(conv.id);
@@ -161,7 +202,11 @@ describe("ConversationsRepo", () => {
       })
       .returning({ id: schema.experiments.id });
     if (!style || !experiment) throw new Error("expected style and experiment rows");
-    const conv = await repo().create({ contactId: await freshContact(), source: "bot", nowEpoch: n });
+    const conv = await repo().create({
+      contactId: await freshContact(),
+      source: "bot",
+      nowEpoch: n,
+    });
 
     await new ConversationsRepo({ db, tenantId: t2 }).setAssignment(conv.id, {
       styleId: style.id,
@@ -178,7 +223,11 @@ describe("ConversationsRepo", () => {
 
   it("findConversationByOperatorThread: находит по треду, tenant-scoped (#651)", async () => {
     if (!enabled) return;
-    const conv = await repo().create({ contactId: await freshContact(), source: "bot", nowEpoch: n });
+    const conv = await repo().create({
+      contactId: await freshContact(),
+      source: "bot",
+      nowEpoch: n,
+    });
     // Привязываем топик форум-группы к диалогу (нет публичного сеттера — пишем
     // напрямую, как и другие интеграционные тесты делают со схемой).
     await db

@@ -23,22 +23,21 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
-	MessagesRepo,
-	normalizeReplyStrategyResult,
-	OutboundQueueRepo,
-	processInbound,
+  MessagesRepo,
+  normalizeReplyStrategyResult,
+  OutboundQueueRepo,
+  processInbound,
   type ReplyStrategy,
   withTenant,
 } from "@chatman-media/conversation-engine";
-import type { ChannelAdapter, Inbound, InboundPart, OutboundPart } from "@chatman-media/channel-core";
+import type {
+  ChannelAdapter,
+  Inbound,
+  InboundPart,
+  OutboundPart,
+} from "@chatman-media/channel-core";
 import type { PhotoProcessor } from "../lib/photo-processor.ts";
-import {
-  channelIdentities,
-  channels,
-  contacts,
-  messages,
-  tenants,
-} from "@chatman-media/storage";
+import { channelIdentities, channels, contacts, messages, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -275,7 +274,11 @@ export function makeAdminTestRoutes(opts: {
     };
 
     const tenant = { tenantId, slug: tenantSlug, llmBillingMode: "byok" as const };
-    const channel = { channelId: ch.id, kind: ch.kind as "telegram_bot", externalId: ch.externalId };
+    const channel = {
+      channelId: ch.id,
+      kind: ch.kind as "telegram_bot",
+      externalId: ch.externalId,
+    };
 
     // 4. processInbound (reply: null — только persist + stage classify)
     let piResult: { contactId: number; conversationId: number } | null = null;
@@ -294,7 +297,10 @@ export function makeAdminTestRoutes(opts: {
         }),
       );
     } catch (err) {
-      return c.json({ error: `pipeline error: ${err instanceof Error ? err.message : String(err)}` }, 500);
+      return c.json(
+        { error: `pipeline error: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
     }
 
     if (!piResult) {
@@ -337,24 +343,27 @@ export function makeAdminTestRoutes(opts: {
     // 6. Вызвать replyStrategy.generate() напрямую — БЕЗ записи в outbound_queue
     let responseParts: OutboundPart[] = [];
     try {
-			const result = await opts.replyStrategy.generate({
-				tenant,
-				channel,
-				conversationId: piResult.conversationId,
-				contactId: piResult.contactId,
-				inbound,
-				userMessageText:
-					text ||
-					(mediaUrl
-						? `[${body.mediaType ?? "photo"}]${body.caption ? ` ${body.caption}` : ""}`
-						: ""),
-			});
-			responseParts = normalizeReplyStrategyResult(result)?.envelopes.flatMap((e) => e.parts) ?? [];
-		} catch (err) {
-      return c.json({
-        error: `reply strategy error: ${err instanceof Error ? err.message : String(err)}`,
+      const result = await opts.replyStrategy.generate({
+        tenant,
+        channel,
         conversationId: piResult.conversationId,
-      }, 500);
+        contactId: piResult.contactId,
+        inbound,
+        userMessageText:
+          text ||
+          (mediaUrl
+            ? `[${body.mediaType ?? "photo"}]${body.caption ? ` ${body.caption}` : ""}`
+            : ""),
+      });
+      responseParts = normalizeReplyStrategyResult(result)?.envelopes.flatMap((e) => e.parts) ?? [];
+    } catch (err) {
+      return c.json(
+        {
+          error: `reply strategy error: ${err instanceof Error ? err.message : String(err)}`,
+          conversationId: piResult.conversationId,
+        },
+        500,
+      );
     }
 
     // 7. Записать ответ бота в messages (для multi-turn контекста)

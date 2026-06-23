@@ -27,7 +27,9 @@ function makeRef(overrides: {
 function makeDb() {
   // Minimal stub — withTenant should never be reached in these tests.
   return {
-    transaction: () => { throw new Error("DB should not be reached"); },
+    transaction: () => {
+      throw new Error("DB should not be reached");
+    },
     // biome-ignore lint/suspicious/noExplicitAny: minimal stub
   } as any;
 }
@@ -57,12 +59,7 @@ describe("makeFieldExtractor — early exits", () => {
 });
 
 describe("selectNextStage — branch-aware advance (concierge)", () => {
-  const CONCIERGE_BRANCHES = [
-    "exchange_request",
-    "transfer_request",
-    "food_request",
-    "cancelled",
-  ];
+  const CONCIERGE_BRANCHES = ["exchange_request", "transfer_request", "food_request", "cancelled"];
 
   it("ветвит по request_type в соответствующую ветку и фиксирует тип", () => {
     expect(
@@ -135,4 +132,3 @@ describe("selectNextStage — branch-aware advance (concierge)", () => {
     ).toBeNull();
   });
 });
-

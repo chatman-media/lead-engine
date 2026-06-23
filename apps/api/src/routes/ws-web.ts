@@ -2,11 +2,7 @@ import type { IWebSocket } from "@chatman-media/channel-web";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { WebChannelRegistry } from "../lib/web-channel-registry.ts";
-import {
-  newWebUserId,
-  signWebSession,
-  verifyWebSession,
-} from "../lib/web-session-token.ts";
+import { newWebUserId, signWebSession, verifyWebSession } from "../lib/web-session-token.ts";
 
 /**
  * Per-connection context, прикреплённый Bun'ом к каждому ServerWebSocket.

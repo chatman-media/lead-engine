@@ -43,8 +43,7 @@ export const MODELS: readonly ModelInfo[] = [
     size: "~9 GB",
     russian: "excellent",
     approxTokensPerSec: 18,
-    recommendation:
-      "When 8B is producing inconsistent style and you can spare the memory.",
+    recommendation: "When 8B is producing inconsistent style and you can spare the memory.",
   },
   {
     id: "qwen2.5:7b",
@@ -53,8 +52,7 @@ export const MODELS: readonly ModelInfo[] = [
     size: "~4.7 GB",
     russian: "good",
     approxTokensPerSec: 38,
-    recommendation:
-      "Solid fallback if Qwen 3 misbehaves on your stack; no thinking-mode quirks.",
+    recommendation: "Solid fallback if Qwen 3 misbehaves on your stack; no thinking-mode quirks.",
   },
   {
     id: "llama3.2:latest",
@@ -73,8 +71,7 @@ export const MODELS: readonly ModelInfo[] = [
     size: "~5.5 GB",
     russian: "good",
     approxTokensPerSec: 28,
-    recommendation:
-      "Alternative voice when you want to A/B-test backbones with the same persona.",
+    recommendation: "Alternative voice when you want to A/B-test backbones with the same persona.",
   },
   {
     id: "moondream:v2",
@@ -105,8 +102,7 @@ export const MODELS: readonly ModelInfo[] = [
     size: "hosted",
     russian: "good",
     approxTokensPerSec: 70,
-    recommendation:
-      "Good cheaper alternative on Ollama Cloud when Qwen 3.5 is overkill.",
+    recommendation: "Good cheaper alternative on Ollama Cloud when Qwen 3.5 is overkill.",
   },
 
   // ─── OpenRouter ────────────────────────────────────────────────────────
@@ -127,8 +123,7 @@ export const MODELS: readonly ModelInfo[] = [
     size: "hosted",
     russian: "excellent",
     approxTokensPerSec: 80,
-    recommendation:
-      "Best style adherence and few-shot pickup of any model tested. Premium tier.",
+    recommendation: "Best style adherence and few-shot pickup of any model tested. Premium tier.",
   },
   {
     id: "openai/gpt-4o-mini",
@@ -137,8 +132,7 @@ export const MODELS: readonly ModelInfo[] = [
     size: "hosted",
     russian: "good",
     approxTokensPerSec: 100,
-    recommendation:
-      "Fast and cheap. Russian is fine but stylistically blander than Claude/Qwen.",
+    recommendation: "Fast and cheap. Russian is fine but stylistically blander than Claude/Qwen.",
   },
   {
     id: "google/gemini-2.5-flash",
@@ -147,8 +141,7 @@ export const MODELS: readonly ModelInfo[] = [
     size: "hosted",
     russian: "good",
     approxTokensPerSec: 110,
-    recommendation:
-      "Cheapest of the frontier-class. Good for high-volume cold outreach.",
+    recommendation: "Cheapest of the frontier-class. Good for high-volume cold outreach.",
   },
 ];
 
@@ -160,9 +153,7 @@ export function listModels(): readonly ModelInfo[] {
   return MODELS;
 }
 
-export function listModelsByProvider(
-  provider: ModelInfo["provider"],
-): readonly ModelInfo[] {
+export function listModelsByProvider(provider: ModelInfo["provider"]): readonly ModelInfo[] {
   return MODELS.filter((m) => m.provider === provider);
 }
 

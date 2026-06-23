@@ -37,8 +37,7 @@ import { hashPassword } from "../src/lib/auth.ts";
 import { seedFunnelByKey } from "../src/routes/admin-funnel.ts";
 
 const SLUG = "modeling-demo";
-const url =
-  process.env.DATABASE_URL ?? "postgres://lead:lead@localhost:5434/lead_engine";
+const url = process.env.DATABASE_URL ?? "postgres://lead:lead@localhost:5434/lead_engine";
 const client = postgres(url, { max: 2, prepare: false });
 // biome-ignore lint/suspicious/noExplicitAny: seed script
 const db = drizzle(client) as any;
@@ -58,7 +57,10 @@ const SAMPLE: LeadSpec[] = [
     name: "Алина Смирнова",
     msgs: [
       { role: "user", text: "Добрый день, хочу попробовать себя в модельном бизнесе" },
-      { role: "assistant", text: "Привет, Алина! Отлично 🌟 Расскажи немного — сколько лет, какой рост и откуда ты?" },
+      {
+        role: "assistant",
+        text: "Привет, Алина! Отлично 🌟 Расскажи немного — сколько лет, какой рост и откуда ты?",
+      },
     ],
   },
   {
@@ -66,7 +68,10 @@ const SAMPLE: LeadSpec[] = [
     name: "Карина Попова",
     msgs: [
       { role: "user", text: "Меня интересует работа в Дубае, это возможно?" },
-      { role: "assistant", text: "Привет! Да, мы работаем с Дубаем и Стамбулом. Заполни анкету — это первый шаг 👇" },
+      {
+        role: "assistant",
+        text: "Привет! Да, мы работаем с Дубаем и Стамбулом. Заполни анкету — это первый шаг 👇",
+      },
     ],
   },
   {
@@ -74,7 +79,10 @@ const SAMPLE: LeadSpec[] = [
     name: "Дарья Иванова",
     msgs: [
       { role: "user", text: "Анкету заполнила, когда ответите?" },
-      { role: "assistant", text: "Даша, анкету получили! Теперь пришли 3–5 фото (лицо + полный рост) и короткое видео 30–60 сек." },
+      {
+        role: "assistant",
+        text: "Даша, анкету получили! Теперь пришли 3–5 фото (лицо + полный рост) и короткое видео 30–60 сек.",
+      },
       { role: "user", text: "Хорошо, скину сегодня вечером" },
     ],
   },
@@ -83,7 +91,10 @@ const SAMPLE: LeadSpec[] = [
     name: "Виктория Козлова",
     msgs: [
       { role: "user", text: "Вот мои фото" },
-      { role: "assistant", text: "Получила, спасибо 🙌 Передаю кастинг-директору — ответим в течение 2–3 дней." },
+      {
+        role: "assistant",
+        text: "Получила, спасибо 🙌 Передаю кастинг-директору — ответим в течение 2–3 дней.",
+      },
     ],
   },
   {
@@ -91,7 +102,10 @@ const SAMPLE: LeadSpec[] = [
     name: "Полина Медведева",
     msgs: [
       { role: "user", text: "Отлично, когда кастинг?" },
-      { role: "assistant", text: "Кастинг в пятницу 14 июня в 15:00, офис на Патонге, ул. Рат Утит 200 Пай. Возьми паспорт." },
+      {
+        role: "assistant",
+        text: "Кастинг в пятницу 14 июня в 15:00, офис на Патонге, ул. Рат Утит 200 Пай. Возьми паспорт.",
+      },
       { role: "user", text: "Буду!" },
     ],
   },
@@ -101,8 +115,14 @@ const SAMPLE: LeadSpec[] = [
     operator: true,
     msgs: [
       { role: "user", text: "Мне 17 лет, можно участвовать?" },
-      { role: "assistant", text: "Да, с 16 лет. Для несовершеннолетних нужно согласие родителей. Передаю кастинг-директору." },
-      { role: "human", text: "Анастасия, здравствуйте! Пришлите, пожалуйста, контакт родителя — обсудим формат участия." },
+      {
+        role: "assistant",
+        text: "Да, с 16 лет. Для несовершеннолетних нужно согласие родителей. Передаю кастинг-директору.",
+      },
+      {
+        role: "human",
+        text: "Анастасия, здравствуйте! Пришлите, пожалуйста, контакт родителя — обсудим формат участия.",
+      },
     ],
   },
   {
@@ -110,7 +130,10 @@ const SAMPLE: LeadSpec[] = [
     name: "Марина Орлова",
     msgs: [
       { role: "user", text: "Кастинг прошла, что дальше?" },
-      { role: "assistant", text: "Поздравляем! 🎉 Кастинг-директор одобрил. Готовим контракт — пришлю для ознакомления." },
+      {
+        role: "assistant",
+        text: "Поздравляем! 🎉 Кастинг-директор одобрил. Готовим контракт — пришлю для ознакомления.",
+      },
     ],
   },
   {
@@ -118,7 +141,10 @@ const SAMPLE: LeadSpec[] = [
     name: "Юлия Белова",
     msgs: [
       { role: "user", text: "Контракт подписала!" },
-      { role: "assistant", text: "Добро пожаловать в агентство, Юля! 🌟 Первый показ — 20 июня в Dubai Mall. Детали пришлём отдельно." },
+      {
+        role: "assistant",
+        text: "Добро пожаловать в агентство, Юля! 🌟 Первый показ — 20 июня в Dubai Mall. Детали пришлём отдельно.",
+      },
     ],
   },
   {
@@ -126,7 +152,10 @@ const SAMPLE: LeadSpec[] = [
     name: "Светлана Громова",
     msgs: [
       { role: "user", text: "Мне 14 лет, берёте?" },
-      { role: "assistant", text: "Привет! К сожалению, минимальный возраст — 16 лет. Можем вернуться к разговору через 2 года 🙏" },
+      {
+        role: "assistant",
+        text: "Привет! К сожалению, минимальный возраст — 16 лет. Можем вернуться к разговору через 2 года 🙏",
+      },
     ],
   },
 ];
@@ -158,10 +187,7 @@ async function upsertAdmin(
   role: "superadmin" | "manager",
 ): Promise<number> {
   const passwordHash = await hashPassword("test1234");
-  const [existing] = await db
-    .select({ id: admins.id })
-    .from(admins)
-    .where(eq(admins.email, email));
+  const [existing] = await db.select({ id: admins.id }).from(admins).where(eq(admins.email, email));
   if (existing) {
     await db
       .update(admins)
@@ -187,11 +213,25 @@ async function main() {
   await withTenant(db, tenantId, async (tx: any) => {
     await tx
       .insert(channels)
-      .values({ tenantId, kind: "web", externalId: SLUG, status: "active", createdAt: now, updatedAt: now })
+      .values({
+        tenantId,
+        kind: "web",
+        externalId: SLUG,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
       .onConflictDoNothing();
     await tx
       .insert(llmProviderConfigs)
-      .values({ tenantId, purpose: "chat", provider: "openai", model: "gpt-4o-mini", createdAt: now, updatedAt: now })
+      .values({
+        tenantId,
+        purpose: "chat",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        createdAt: now,
+        updatedAt: now,
+      })
       .onConflictDoNothing();
   });
 
@@ -229,13 +269,26 @@ async function main() {
 
       const [ct] = await tx
         .insert(contacts)
-        .values({ tenantId, displayName: spec.name, attributesJson: "{}", createdAt, updatedAt: createdAt })
+        .values({
+          tenantId,
+          displayName: spec.name,
+          attributesJson: "{}",
+          createdAt,
+          updatedAt: createdAt,
+        })
         .returning({ id: contacts.id });
       const contactId = ct!.id as number;
 
       const [ld] = await tx
         .insert(leads)
-        .values({ tenantId, userId: contactId, state: spec.stage, stageDefinitionId: sid, createdAt, updatedAt: createdAt })
+        .values({
+          tenantId,
+          userId: contactId,
+          state: spec.stage,
+          stageDefinitionId: sid,
+          createdAt,
+          updatedAt: createdAt,
+        })
         .returning({ id: leads.id });
       const _leadId = ld!.id as number;
       leadCount++;
@@ -246,7 +299,9 @@ async function main() {
       const [cv] = await tx
         .insert(conversations)
         .values({
-          tenantId, userId: contactId, source: "bot",
+          tenantId,
+          userId: contactId,
+          source: "bot",
           mode: onOperator ? "human" : "ai",
           status: onOperator ? "pending" : "open",
           unreadCount: last.role === "user" ? 1 : 0,
@@ -263,8 +318,12 @@ async function main() {
       for (let j = 0; j < spec.msgs.length; j++) {
         const m = spec.msgs[j]!;
         await tx.insert(messages).values({
-          tenantId, conversationId: convId, role: m.role,
-          text: m.text, stage: spec.stage, createdAt: createdAt + j * 120,
+          tenantId,
+          conversationId: convId,
+          role: m.role,
+          text: m.text,
+          stage: spec.stage,
+          createdAt: createdAt + j * 120,
         });
         msgCount++;
       }

@@ -178,7 +178,11 @@ function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">):
 }
 
 function normalizeSlug(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_-]/g, "");
 }
 
 function uniqueFunnelSlug(base: string, items: FunnelListItem[]): string {
@@ -300,10 +304,7 @@ export function SaasFunnel() {
     try {
       const result = await saas.listFunnelVersions(funnelId);
       setVersions(result.items);
-      if (
-        versionPreview &&
-        !result.items.some((item) => item.id === versionPreview.version.id)
-      ) {
+      if (versionPreview && !result.items.some((item) => item.id === versionPreview.version.id)) {
         setVersionPreview(null);
       }
     } catch (err) {
@@ -611,7 +612,8 @@ export function SaasFunnel() {
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span>{selectedTemplate.description}</span>
                 <span className="font-medium text-foreground">
-                  {selectedTemplate.stagesCount} стадий · {fieldCountLabel(selectedTemplate.fieldsCount)}
+                  {selectedTemplate.stagesCount} стадий ·{" "}
+                  {fieldCountLabel(selectedTemplate.fieldsCount)}
                 </span>
               </div>
             )}
@@ -642,7 +644,8 @@ export function SaasFunnel() {
                           </span>
                           <span className="block truncate text-muted-foreground">
                             {stageTypeLabel(stage.stageType)}
-                            {stage.phase ? ` · ${stage.phase}` : ""} · {fieldCountLabel(stage.fieldsCount)}
+                            {stage.phase ? ` · ${stage.phase}` : ""} ·{" "}
+                            {fieldCountLabel(stage.fieldsCount)}
                           </span>
                         </span>
                       </div>
@@ -798,9 +801,7 @@ export function SaasFunnel() {
                       <Button
                         size="sm"
                         variant="destructive"
-                        disabled={
-                          rollbackLoading || versionPreview.validation.errors.length > 0
-                        }
+                        disabled={rollbackLoading || versionPreview.validation.errors.length > 0}
                         onClick={() => setRollbackConfirm(true)}
                       >
                         Восстановить
@@ -884,9 +885,7 @@ export function SaasFunnel() {
                             {idx + 1}
                           </span>
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium">
-                              {stage.displayName}
-                            </div>
+                            <div className="truncate text-sm font-medium">{stage.displayName}</div>
                             <div className="truncate text-xs text-muted-foreground">
                               {stage.slug} · {stageTypeLabel(stage.stageType)}
                               {stage.phase ? ` · ${stage.phase}` : ""}
@@ -1353,7 +1352,9 @@ function StageCard({
                     key={field.id}
                     field={field}
                     onDelete={() => handleDeleteField(field.id)}
-                    onEdit={(patch) => saas.updateStageField(stage.id, field.id, patch).then(onReload)}
+                    onEdit={(patch) =>
+                      saas.updateStageField(stage.id, field.id, patch).then(onReload)
+                    }
                   />
                 ))}
               </div>
@@ -1478,9 +1479,9 @@ function StageBehaviourEditor({
   const [stale, setStale] = useState(stage.staleTimeoutDays?.toString() ?? "");
   const [checkin, setCheckin] = useState(stage.checkinIntervalDays?.toString() ?? "");
   const [partnerWebhookUrl, setPartnerWebhookUrl] = useState(stage.partnerWebhookUrl ?? "");
-  const [partnerWebhookMode, setPartnerWebhookMode] = useState<"fire_and_forget" | "await_callback">(
-    stage.partnerWebhookMode ?? "fire_and_forget",
-  );
+  const [partnerWebhookMode, setPartnerWebhookMode] = useState<
+    "fire_and_forget" | "await_callback"
+  >(stage.partnerWebhookMode ?? "fire_and_forget");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -1544,143 +1545,154 @@ function StageBehaviourEditor({
               </Badge>
             ))}
           <ChevronDownIcon
-            className={cn("size-4 text-muted-foreground transition-transform", open ? "rotate-180" : "")}
+            className={cn(
+              "size-4 text-muted-foreground transition-transform",
+              open ? "rotate-180" : "",
+            )}
           />
         </span>
       </button>
       {open && (
         <div className="space-y-2 border-t px-3 pb-3 pt-2.5">
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">🎯 Цель (что достичь боту)</Label>
-          <Textarea
-            rows={2}
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            placeholder="выяснить сумму и сеть, подтвердить курс"
-            className="text-sm resize-none"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">🧠 Поведение (тон, что можно/нельзя)</Label>
-          <Textarea
-            rows={2}
-            value={guidance}
-            onChange={(e) => setGuidance(e.target.value)}
-            placeholder="дружелюбно, не называй курс без инструмента"
-            className="text-sm resize-none"
-          />
-        </div>
-      </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">🎯 Цель (что достичь боту)</Label>
+              <Textarea
+                rows={2}
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                placeholder="выяснить сумму и сеть, подтвердить курс"
+                className="text-sm resize-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">
+                🧠 Поведение (тон, что можно/нельзя)
+              </Label>
+              <Textarea
+                rows={2}
+                value={guidance}
+                onChange={(e) => setGuidance(e.target.value)}
+                placeholder="дружелюбно, не называй курс без инструмента"
+                className="text-sm resize-none"
+              />
+            </div>
+          </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-1.5">
-          <Label className="text-xs text-muted-foreground whitespace-nowrap">⏰ Завис через</Label>
-          <Input
-            type="number"
-            min={0}
-            value={stale}
-            onChange={(e) => setStale(e.target.value)}
-            placeholder="—"
-            className="h-7 w-16 text-sm"
-          />
-          <span className="text-xs text-muted-foreground">дн.</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Label className="text-xs text-muted-foreground whitespace-nowrap">🔁 Автопинг каждые</Label>
-          <Input
-            type="number"
-            min={0}
-            value={checkin}
-            onChange={(e) => setCheckin(e.target.value)}
-            placeholder="—"
-            className="h-7 w-16 text-sm"
-          />
-          <span className="text-xs text-muted-foreground">дн.</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Switch
-            id={`auto-${stage.id}`}
-            checked={autoAdvance}
-            onCheckedChange={(v) => onUpdate({ autoAdvanceCondition: v ? AUTO_ADVANCE_FILLED : null })}
-          />
-          <Label htmlFor={`auto-${stage.id}`} className="text-xs text-muted-foreground">
-            Авто-переход по полям
-          </Label>
-        </div>
-      </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-1.5">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">
+                ⏰ Завис через
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                value={stale}
+                onChange={(e) => setStale(e.target.value)}
+                placeholder="—"
+                className="h-7 w-16 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">дн.</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">
+                🔁 Автопинг каждые
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                value={checkin}
+                onChange={(e) => setCheckin(e.target.value)}
+                placeholder="—"
+                className="h-7 w-16 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">дн.</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Switch
+                id={`auto-${stage.id}`}
+                checked={autoAdvance}
+                onCheckedChange={(v) =>
+                  onUpdate({ autoAdvanceCondition: v ? AUTO_ADVANCE_FILLED : null })
+                }
+              />
+              <Label htmlFor={`auto-${stage.id}`} className="text-xs text-muted-foreground">
+                Авто-переход по полям
+              </Label>
+            </div>
+          </div>
 
-      <div className="space-y-1.5">
-        <Label className="text-xs">🔀 Переходы дальше (next stages)</Label>
-        <div className="flex flex-wrap gap-1.5">
-          {allStages
-            .filter((s) => s.id !== stage.id)
-            .map((s) => {
-              const on = (stage.nextStages ?? []).includes(s.slug);
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => toggleNext(s.slug, !on)}
-                  className={cn(
-                    "rounded-full border px-2 py-0.5 text-xs transition-colors",
-                    on
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:text-foreground",
-                  )}
+          <div className="space-y-1.5">
+            <Label className="text-xs">🔀 Переходы дальше (next stages)</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {allStages
+                .filter((s) => s.id !== stage.id)
+                .map((s) => {
+                  const on = (stage.nextStages ?? []).includes(s.slug);
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => toggleNext(s.slug, !on)}
+                      className={cn(
+                        "rounded-full border px-2 py-0.5 text-xs transition-colors",
+                        on
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {s.displayName}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+
+          <details className="rounded-md border border-dashed bg-muted/20">
+            <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sm font-medium marker:text-muted-foreground">
+              <span>Внешняя передача</span>
+              {partnerWebhookUrl ? (
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  настроено
+                </Badge>
+              ) : (
+                <span className="text-xs font-normal text-muted-foreground">опционально</span>
+              )}
+            </summary>
+            <div className="grid gap-2 border-t px-3 pb-3 pt-2.5 sm:grid-cols-[1fr_220px]">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Webhook / Telegram</Label>
+                <Input
+                  value={partnerWebhookUrl}
+                  onChange={(e) => setPartnerWebhookUrl(e.target.value)}
+                  placeholder="https://provider.example/webhook или tg://123456789"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Режим ответа</Label>
+                <Select
+                  value={partnerWebhookMode}
+                  onValueChange={(v) => setPartnerWebhookMode(v as typeof partnerWebhookMode)}
                 >
-                  {s.displayName}
-                </button>
-              );
-            })}
-        </div>
-      </div>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fire_and_forget">Отправить и продолжить</SelectItem>
+                    <SelectItem value="await_callback">Ждать callback</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </details>
 
-      <details className="rounded-md border border-dashed bg-muted/20">
-        <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sm font-medium marker:text-muted-foreground">
-          <span>Внешняя передача</span>
-          {partnerWebhookUrl ? (
-            <Badge variant="outline" className="text-[10px] font-normal">
-              настроено
-            </Badge>
-          ) : (
-            <span className="text-xs font-normal text-muted-foreground">опционально</span>
-          )}
-        </summary>
-        <div className="grid gap-2 border-t px-3 pb-3 pt-2.5 sm:grid-cols-[1fr_220px]">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Webhook / Telegram</Label>
-            <Input
-              value={partnerWebhookUrl}
-              onChange={(e) => setPartnerWebhookUrl(e.target.value)}
-              placeholder="https://provider.example/webhook или tg://123456789"
-              className="h-8 text-sm"
-            />
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={save} disabled={saving || !dirty}>
+              {saving ? "…" : "Сохранить"}
+            </Button>
+            {saved && <span className="text-xs text-emerald-500">✓ сохранено</span>}
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Режим ответа</Label>
-            <Select
-              value={partnerWebhookMode}
-              onValueChange={(v) => setPartnerWebhookMode(v as typeof partnerWebhookMode)}
-            >
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fire_and_forget">Отправить и продолжить</SelectItem>
-                <SelectItem value="await_callback">Ждать callback</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </details>
-
-      <div className="flex items-center gap-2">
-        <Button size="sm" onClick={save} disabled={saving || !dirty}>
-          {saving ? "…" : "Сохранить"}
-        </Button>
-        {saved && <span className="text-xs text-emerald-500">✓ сохранено</span>}
-      </div>
         </div>
       )}
     </div>
@@ -1728,22 +1740,43 @@ function FieldRow({
           </SelectTrigger>
           <SelectContent>
             {FIELD_TYPES.map((t) => (
-              <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
+              <SelectItem key={t.value} value={t.value} className="text-xs">
+                {t.label}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
-          <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} className="size-3" />
+          <input
+            type="checkbox"
+            checked={required}
+            onChange={(e) => setRequired(e.target.checked)}
+            className="size-3"
+          />
           обяз.
         </label>
         <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
-          <input type="checkbox" checked={ai} onChange={(e) => setAi(e.target.checked)} className="size-3" />
+          <input
+            type="checkbox"
+            checked={ai}
+            onChange={(e) => setAi(e.target.checked)}
+            className="size-3"
+          />
           AI
         </label>
-        <button type="button" onClick={save} disabled={saving || !name} className="text-emerald-500 hover:text-emerald-400 transition-colors">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !name}
+          className="text-emerald-500 hover:text-emerald-400 transition-colors"
+        >
           <CheckIcon className="size-3.5" />
         </button>
-        <button type="button" onClick={() => setEditing(false)} className="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
+        <button
+          type="button"
+          onClick={() => setEditing(false)}
+          className="text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+        >
           <XIcon className="size-3.5" />
         </button>
       </div>
@@ -1758,7 +1791,9 @@ function FieldRow({
       <span className="text-xs text-muted-foreground">{field.fieldType}</span>
       {field.required && <span className="text-xs text-destructive font-bold">*</span>}
       {field.aiExtractable && (
-        <Badge variant="secondary" className="text-[10px] px-1 py-0">AI</Badge>
+        <Badge variant="secondary" className="text-[10px] px-1 py-0">
+          AI
+        </Badge>
       )}
       <button
         type="button"

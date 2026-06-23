@@ -30,11 +30,9 @@ export interface BookingConfig {
 }
 
 export const tools = {
-  listTools: (): Promise<{ tools: ToolConfig[] }> =>
-    request("/api/admin/tools"),
+  listTools: (): Promise<{ tools: ToolConfig[] }> => request("/api/admin/tools"),
 
-  getBookingConfig: (): Promise<BookingConfig> =>
-    request("/api/admin/tools/booking"),
+  getBookingConfig: (): Promise<BookingConfig> => request("/api/admin/tools/booking"),
 
   saveBookingUrl: (url: string): Promise<{ ok: boolean; url: string }> =>
     request("/api/admin/tools/booking", {

@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
 import type { IKbStore } from "@chatman-media/kb";
-import type { ChatClient, ChatCompletionOpts, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
+import type {
+  ChatClient,
+  ChatCompletionOpts,
+  ChatMessage,
+  EmbeddingClient,
+} from "@chatman-media/llm-router";
 import {
   admins,
   agentToolCalls,
@@ -149,26 +154,29 @@ beforeAll(async () => {
   managerTokenA = await createManagerToken("quality-manager@demo.io", tenantA);
 
   const now = Math.floor(Date.now() / 1000);
-  const insertedStyles = await db.insert(stylesTable).values([
-    {
-      tenantId: tenantA,
-      slug: "style-a",
-      displayName: "Style A",
-      configJson: JSON.stringify(styleConfig("style-a", "Style A", "direct")),
-      isActive: true,
-      version: 1,
-      createdAt: now - 100,
-    },
-    {
-      tenantId: tenantA,
-      slug: "style-b",
-      displayName: "Style B",
-      configJson: JSON.stringify(styleConfig("style-b", "Style B", "neutral")),
-      isActive: true,
-      version: 1,
-      createdAt: now - 90,
-    },
-  ]).returning({ id: stylesTable.id, slug: stylesTable.slug });
+  const insertedStyles = await db
+    .insert(stylesTable)
+    .values([
+      {
+        tenantId: tenantA,
+        slug: "style-a",
+        displayName: "Style A",
+        configJson: JSON.stringify(styleConfig("style-a", "Style A", "direct")),
+        isActive: true,
+        version: 1,
+        createdAt: now - 100,
+      },
+      {
+        tenantId: tenantA,
+        slug: "style-b",
+        displayName: "Style B",
+        configJson: JSON.stringify(styleConfig("style-b", "Style B", "neutral")),
+        isActive: true,
+        version: 1,
+        createdAt: now - 90,
+      },
+    ])
+    .returning({ id: stylesTable.id, slug: stylesTable.slug });
 
   const styleA = insertedStyles.find((style) => style.slug === "style-a");
   const styleB = insertedStyles.find((style) => style.slug === "style-b");
@@ -196,54 +204,57 @@ beforeAll(async () => {
     { tenantId: tenantA, styleId: styleB.id, skillId: skill.id },
   ]);
 
-  const insertedSelfPlay = await db.insert(selfPlayMatches).values([
-    {
-      tenantId: tenantA,
-      styleSlug: "style-a",
-      personaSlug: "skeptic-anya",
-      outcome: "won",
-      judgeReason: "candidate committed",
-      transcriptJson: JSON.stringify([
-        { role: "candidate", text: "привет" },
-        { role: "salesperson", text: "расскажу коротко" },
-      ]),
-      turns: 1,
-      skillsJson: JSON.stringify(["mirroring"]),
-      leadId: null,
-      fabricationsCaught: 1,
-      createdAt: now,
-    },
-    {
-      tenantId: tenantA,
-      styleSlug: "style-b",
-      personaSlug: "price-sensitive",
-      outcome: "lost",
-      judgeReason: "walked away",
-      transcriptJson: JSON.stringify([{ role: "candidate", text: "дорого" }]),
-      turns: 1,
-      skillsJson: JSON.stringify(["urgency"]),
-      leadId: null,
-      fabricationsCaught: 0,
-      createdAt: now - 10,
-    },
-    {
-      tenantId: tenantB,
-      styleSlug: "style-a",
-      personaSlug: "skeptic-anya",
-      outcome: "draw",
-      judgeReason: "tenant b only",
-      transcriptJson: JSON.stringify([{ role: "candidate", text: "чужой" }]),
-      turns: 1,
-      skillsJson: "[]",
-      leadId: null,
-      fabricationsCaught: 0,
-      createdAt: now,
-    },
-  ]).returning({
-    id: selfPlayMatches.id,
-    tenantId: selfPlayMatches.tenantId,
-    styleSlug: selfPlayMatches.styleSlug,
-  });
+  const insertedSelfPlay = await db
+    .insert(selfPlayMatches)
+    .values([
+      {
+        tenantId: tenantA,
+        styleSlug: "style-a",
+        personaSlug: "skeptic-anya",
+        outcome: "won",
+        judgeReason: "candidate committed",
+        transcriptJson: JSON.stringify([
+          { role: "candidate", text: "привет" },
+          { role: "salesperson", text: "расскажу коротко" },
+        ]),
+        turns: 1,
+        skillsJson: JSON.stringify(["mirroring"]),
+        leadId: null,
+        fabricationsCaught: 1,
+        createdAt: now,
+      },
+      {
+        tenantId: tenantA,
+        styleSlug: "style-b",
+        personaSlug: "price-sensitive",
+        outcome: "lost",
+        judgeReason: "walked away",
+        transcriptJson: JSON.stringify([{ role: "candidate", text: "дорого" }]),
+        turns: 1,
+        skillsJson: JSON.stringify(["urgency"]),
+        leadId: null,
+        fabricationsCaught: 0,
+        createdAt: now - 10,
+      },
+      {
+        tenantId: tenantB,
+        styleSlug: "style-a",
+        personaSlug: "skeptic-anya",
+        outcome: "draw",
+        judgeReason: "tenant b only",
+        transcriptJson: JSON.stringify([{ role: "candidate", text: "чужой" }]),
+        turns: 1,
+        skillsJson: "[]",
+        leadId: null,
+        fabricationsCaught: 0,
+        createdAt: now,
+      },
+    ])
+    .returning({
+      id: selfPlayMatches.id,
+      tenantId: selfPlayMatches.tenantId,
+      styleSlug: selfPlayMatches.styleSlug,
+    });
 
   const matchA = insertedSelfPlay.find(
     (row) => row.tenantId === tenantA && row.styleSlug === "style-a",
@@ -296,51 +307,58 @@ beforeAll(async () => {
     },
   ]);
 
-  const insertedProposals = await db.insert(coachProposals).values([
-    {
-      tenantId: tenantA,
-      styleSlug: "style-b",
-      sampleSize: 8,
-      personaFilter: "price-sensitive",
-      summary: "Handle price objections earlier",
-      editsJson: JSON.stringify({
-        voice_tone: "warmer and specific",
-        stage_guidance: { objection: "Anchor savings before quoting the price." },
-      }),
-      rationaleJson: JSON.stringify(["The candidate walked away after an unanchored price answer."]),
-      rawOutput: '{"summary":"Handle price objections earlier"}',
-      status: "pending",
-      createdAt: now + 15,
-    },
-    {
-      tenantId: tenantA,
-      styleSlug: "style-a",
-      sampleSize: 5,
-      personaFilter: null,
-      summary: "Tighten close on skeptical personas",
-      editsJson: JSON.stringify({ hooks_add: [{ kind: "social_proof", text: "Recent peer result." }] }),
-      rationaleJson: JSON.stringify(["Skeptical persona asked for proof before committing."]),
-      rawOutput: null,
-      status: "applied",
-      createdAt: now - 25,
-      decidedAt: now - 5,
-    },
-    {
-      tenantId: tenantB,
-      styleSlug: "style-a",
-      sampleSize: 3,
-      personaFilter: null,
-      summary: "tenant b coach only",
-      editsJson: JSON.stringify({ voice_tone: "tenant-b" }),
-      rationaleJson: JSON.stringify(["tenant b rationale"]),
-      status: "pending",
-      createdAt: now,
-    },
-  ]).returning({
-    id: coachProposals.id,
-    tenantId: coachProposals.tenantId,
-    summary: coachProposals.summary,
-  });
+  const insertedProposals = await db
+    .insert(coachProposals)
+    .values([
+      {
+        tenantId: tenantA,
+        styleSlug: "style-b",
+        sampleSize: 8,
+        personaFilter: "price-sensitive",
+        summary: "Handle price objections earlier",
+        editsJson: JSON.stringify({
+          voice_tone: "warmer and specific",
+          stage_guidance: { objection: "Anchor savings before quoting the price." },
+        }),
+        rationaleJson: JSON.stringify([
+          "The candidate walked away after an unanchored price answer.",
+        ]),
+        rawOutput: '{"summary":"Handle price objections earlier"}',
+        status: "pending",
+        createdAt: now + 15,
+      },
+      {
+        tenantId: tenantA,
+        styleSlug: "style-a",
+        sampleSize: 5,
+        personaFilter: null,
+        summary: "Tighten close on skeptical personas",
+        editsJson: JSON.stringify({
+          hooks_add: [{ kind: "social_proof", text: "Recent peer result." }],
+        }),
+        rationaleJson: JSON.stringify(["Skeptical persona asked for proof before committing."]),
+        rawOutput: null,
+        status: "applied",
+        createdAt: now - 25,
+        decidedAt: now - 5,
+      },
+      {
+        tenantId: tenantB,
+        styleSlug: "style-a",
+        sampleSize: 3,
+        personaFilter: null,
+        summary: "tenant b coach only",
+        editsJson: JSON.stringify({ voice_tone: "tenant-b" }),
+        rationaleJson: JSON.stringify(["tenant b rationale"]),
+        status: "pending",
+        createdAt: now,
+      },
+    ])
+    .returning({
+      id: coachProposals.id,
+      tenantId: coachProposals.tenantId,
+      summary: coachProposals.summary,
+    });
 
   const proposalAPending = insertedProposals.find(
     (row) => row.tenantId === tenantA && row.summary === "Handle price objections earlier",
@@ -457,51 +475,54 @@ beforeAll(async () => {
   if (!toolConvA || !toolConvB) throw new Error("tool conversation fixture mismatch");
   toolConversationA = toolConvA.id;
 
-  const insertedToolCalls = await db.insert(agentToolCalls).values([
-    {
-      tenantId: tenantA,
-      conversationId: toolConvA.id,
-      contactId: toolContactA.id,
-      source: "rag_reply",
-      toolName: "compute_exchange_quote",
-      argsJson: JSON.stringify({ asset: "USDT", amount: 100 }),
-      resultJson: JSON.stringify({ ok: true, amountToThb: 3150 }),
-      error: false,
-      cycle: 0,
-      toolCallIndex: 0,
-      createdAt: now + 30,
-    },
-    {
-      tenantId: tenantA,
-      conversationId: toolConvA.id,
-      contactId: toolContactA.id,
-      source: "llm_reply",
-      toolName: "create_exchange_order",
-      argsJson: JSON.stringify({ quoteId: "q1" }),
-      resultJson: JSON.stringify({ error: "needs verification" }),
-      error: true,
-      cycle: 1,
-      toolCallIndex: 1,
-      createdAt: now + 31,
-    },
-    {
-      tenantId: tenantB,
-      conversationId: toolConvB.id,
-      contactId: toolContactB.id,
-      source: "rag_reply",
-      toolName: "compute_exchange_quote",
-      argsJson: JSON.stringify({ asset: "USDT", amount: 999 }),
-      resultJson: JSON.stringify({ ok: true, amountToThb: 1 }),
-      error: false,
-      cycle: 0,
-      toolCallIndex: 0,
-      createdAt: now + 32,
-    },
-  ]).returning({
-    id: agentToolCalls.id,
-    tenantId: agentToolCalls.tenantId,
-    toolName: agentToolCalls.toolName,
-  });
+  const insertedToolCalls = await db
+    .insert(agentToolCalls)
+    .values([
+      {
+        tenantId: tenantA,
+        conversationId: toolConvA.id,
+        contactId: toolContactA.id,
+        source: "rag_reply",
+        toolName: "compute_exchange_quote",
+        argsJson: JSON.stringify({ asset: "USDT", amount: 100 }),
+        resultJson: JSON.stringify({ ok: true, amountToThb: 3150 }),
+        error: false,
+        cycle: 0,
+        toolCallIndex: 0,
+        createdAt: now + 30,
+      },
+      {
+        tenantId: tenantA,
+        conversationId: toolConvA.id,
+        contactId: toolContactA.id,
+        source: "llm_reply",
+        toolName: "create_exchange_order",
+        argsJson: JSON.stringify({ quoteId: "q1" }),
+        resultJson: JSON.stringify({ error: "needs verification" }),
+        error: true,
+        cycle: 1,
+        toolCallIndex: 1,
+        createdAt: now + 31,
+      },
+      {
+        tenantId: tenantB,
+        conversationId: toolConvB.id,
+        contactId: toolContactB.id,
+        source: "rag_reply",
+        toolName: "compute_exchange_quote",
+        argsJson: JSON.stringify({ asset: "USDT", amount: 999 }),
+        resultJson: JSON.stringify({ ok: true, amountToThb: 1 }),
+        error: false,
+        cycle: 0,
+        toolCallIndex: 0,
+        createdAt: now + 32,
+      },
+    ])
+    .returning({
+      id: agentToolCalls.id,
+      tenantId: agentToolCalls.tenantId,
+      toolName: agentToolCalls.toolName,
+    });
   const orderToolCall = insertedToolCalls.find(
     (row) => row.tenantId === tenantA && row.toolName === "create_exchange_order",
   );
@@ -530,12 +551,25 @@ describe("admin quality JSONL export", () => {
     expect((await authReq(managerTokenA, "/api/admin/quality/pairwise/summary")).status).toBe(200);
     expect((await authReq(managerTokenA, "/api/admin/quality/coach/summary")).status).toBe(200);
     expect((await authReq(managerTokenA, "/api/admin/quality/run-options")).status).toBe(200);
-    expect((await authReq(managerTokenA, "/api/admin/quality/tool-call-feedback/summary")).status).toBe(200);
-    expect((await authReq(managerTokenA, "/api/admin/quality/self-play/export.jsonl")).status).toBe(200);
-    expect((await authReq(managerTokenA, "/api/admin/quality/pairwise/export.jsonl")).status).toBe(200);
-    expect((await authReq(managerTokenA, "/api/admin/quality/tool-call-feedback/export.jsonl")).status).toBe(200);
-    expect((await authReq(managerTokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`)).status).toBe(200);
-    expect((await authReq(managerTokenA, "/api/admin/quality/tool-calls?limit=10")).status).toBe(200);
+    expect(
+      (await authReq(managerTokenA, "/api/admin/quality/tool-call-feedback/summary")).status,
+    ).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/self-play/export.jsonl")).status).toBe(
+      200,
+    );
+    expect((await authReq(managerTokenA, "/api/admin/quality/pairwise/export.jsonl")).status).toBe(
+      200,
+    );
+    expect(
+      (await authReq(managerTokenA, "/api/admin/quality/tool-call-feedback/export.jsonl")).status,
+    ).toBe(200);
+    expect(
+      (await authReq(managerTokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`))
+        .status,
+    ).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/tool-calls?limit=10")).status).toBe(
+      200,
+    );
 
     const coachSummary = (await (
       await authReq(managerTokenA, "/api/admin/quality/coach/summary")
@@ -594,7 +628,8 @@ describe("admin quality JSONL export", () => {
       ).status,
     ).toBe(403);
     expect(
-      (await authPostReq(managerTokenA, `/api/admin/quality/coach/proposals/${proposalId}/apply`)).status,
+      (await authPostReq(managerTokenA, `/api/admin/quality/coach/proposals/${proposalId}/apply`))
+        .status,
     ).toBe(403);
     expect(
       (
@@ -615,12 +650,20 @@ describe("admin quality JSONL export", () => {
       ).status,
     ).toBe(403);
     expect(
-      (await authPostReq(managerTokenA, `/api/admin/quality/coach/shadow-evaluations/${shadowId}/retry`))
-        .status,
+      (
+        await authPostReq(
+          managerTokenA,
+          `/api/admin/quality/coach/shadow-evaluations/${shadowId}/retry`,
+        )
+      ).status,
     ).toBe(403);
     expect(
-      (await authPostReq(managerTokenA, `/api/admin/quality/coach/shadow-evaluations/${shadowId}/cancel`))
-        .status,
+      (
+        await authPostReq(
+          managerTokenA,
+          `/api/admin/quality/coach/shadow-evaluations/${shadowId}/cancel`,
+        )
+      ).status,
     ).toBe(403);
   });
 
@@ -656,10 +699,7 @@ describe("admin quality JSONL export", () => {
     expect(filtered.items[0]?.source).toBe("rag_reply");
 
     const crossTenant = (await (
-      await authReq(
-        tokenB,
-        `/api/admin/quality/tool-calls?conversationId=${toolConversationA}`,
-      )
+      await authReq(tokenB, `/api/admin/quality/tool-calls?conversationId=${toolConversationA}`)
     ).json()) as QualityToolCallsResponse;
     expect(crossTenant.items).toEqual([]);
   });
@@ -693,10 +733,7 @@ describe("admin quality JSONL export", () => {
     );
     expect(second.status).toBe(201);
 
-    const list = await authReq(
-      tokenA,
-      `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`,
-    );
+    const list = await authReq(tokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`);
     expect(list.status).toBe(200);
     const listBody = (await list.json()) as QualityToolCallFeedbackListResponse;
     expect(listBody.items.map((item) => item.label)).toEqual(["wrong_tool", "bad_args"]);
@@ -737,9 +774,7 @@ describe("admin quality JSONL export", () => {
         errorCount: 2,
       }),
     ]);
-    expect(body.bySource).toEqual([
-      expect.objectContaining({ source: "llm_reply", total: 2 }),
-    ]);
+    expect(body.bySource).toEqual([expect.objectContaining({ source: "llm_reply", total: 2 })]);
     expect(body.byError).toEqual([expect.objectContaining({ error: true, total: 2 })]);
     expect(body.recent.map((item) => item.feedback.label)).toEqual(["wrong_tool", "bad_args"]);
     expect(body.recent[0]?.toolCall).toMatchObject({
@@ -940,7 +975,10 @@ describe("admin quality JSONL export", () => {
     expect(pendingAfterApply.items.some((item) => item.id === first.id)).toBe(false);
 
     const all = (await (
-      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals?status=all")
+      await authReq(
+        tokenA,
+        "/api/admin/quality/tool-call-feedback/improvement-proposals?status=all",
+      )
     ).json()) as QualityToolCallImprovementProposalsResponse;
     expect(
       all.items.some(
@@ -1069,7 +1107,9 @@ describe("admin quality JSONL export", () => {
       "tool-call-regression-cases.jsonl",
     );
     const exportedLines = (await exported.text()).trim().split("\n");
-    const exportedRow = JSON.parse(exportedLines[0] ?? "{}") as QualityToolCallRegressionCaseResponse & {
+    const exportedRow = JSON.parse(
+      exportedLines[0] ?? "{}",
+    ) as QualityToolCallRegressionCaseResponse & {
       recordType?: string;
     };
     expect(exportedRow).toMatchObject({
@@ -1162,20 +1202,30 @@ describe("admin quality JSONL export", () => {
       (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/proposals?limit=0")).status,
     ).toBe(400);
     expect(
-      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals?status=bad"))
-        .status,
+      (
+        await authReq(
+          tokenA,
+          "/api/admin/quality/tool-call-feedback/improvement-proposals?status=bad",
+        )
+      ).status,
     ).toBe(400);
     expect(
       (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals?limit=0"))
         .status,
     ).toBe(400);
-    expect((await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?status=bad")).status)
-      .toBe(400);
-    expect((await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?limit=0")).status)
-      .toBe(400);
     expect(
-      (await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases/export.jsonl?status=bad"))
-        .status,
+      (await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?status=bad")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?limit=0")).status,
+    ).toBe(400);
+    expect(
+      (
+        await authReq(
+          tokenA,
+          "/api/admin/quality/tool-call-regression-cases/export.jsonl?status=bad",
+        )
+      ).status,
     ).toBe(400);
     expect(
       (await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases/export.jsonl?limit=0"))
@@ -1186,20 +1236,26 @@ describe("admin quality JSONL export", () => {
   it("validates tool-call feedback payloads", async () => {
     if (!sql) return;
     expect(
-      (await authPostJsonReq(tokenA, "/api/admin/quality/tool-calls/0/feedback", {
-        label: "good_reply",
-      })).status,
+      (
+        await authPostJsonReq(tokenA, "/api/admin/quality/tool-calls/0/feedback", {
+          label: "good_reply",
+        })
+      ).status,
     ).toBe(400);
     expect(
-      (await authPostJsonReq(tokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`, {
-        label: "unknown",
-      })).status,
+      (
+        await authPostJsonReq(tokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`, {
+          label: "unknown",
+        })
+      ).status,
     ).toBe(400);
     expect(
-      (await authPostJsonReq(tokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`, {
-        label: "good_reply",
-        note: 123,
-      })).status,
+      (
+        await authPostJsonReq(tokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`, {
+          label: "good_reply",
+          note: 123,
+        })
+      ).status,
     ).toBe(400);
   });
 
@@ -1449,7 +1505,11 @@ describe("admin quality JSONL export", () => {
       rationale: ["The candidate objected to price and did not get a concrete value anchor."],
     });
 
-    const prompt = salesCalls.at(-1)?.map((message) => message.content).join("\n") ?? "";
+    const prompt =
+      salesCalls
+        .at(-1)
+        ?.map((message) => message.content)
+        .join("\n") ?? "";
     expect(prompt).toContain("currently_attached_skills");
     expect(prompt).toContain("mirroring");
     expect(prompt).toContain("дорого");
@@ -1630,9 +1690,7 @@ describe("admin quality JSONL export", () => {
     };
     expect(config.slug).toBe(`style-b-coach-${pending.id}`);
     expect(config.voice?.tone).toBe("warmer and specific");
-    expect(config.stages?.objection?.guidance).toBe(
-      "Anchor savings before quoting the price.",
-    );
+    expect(config.stages?.objection?.guidance).toBe("Anchor savings before quoting the price.");
     expect(reloads).toContain(tenantA);
 
     const after = (await (
@@ -2278,9 +2336,9 @@ describe("admin quality JSONL export", () => {
     expect(
       (await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl?winner=bad")).status,
     ).toBe(400);
-    expect(
-      (await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl?limit=0")).status,
-    ).toBe(400);
+    expect((await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl?limit=0")).status).toBe(
+      400,
+    );
   });
 
   it("returns quality runner options", async () => {
@@ -2440,10 +2498,7 @@ describe("admin quality JSONL export", () => {
     expect(storedPairwise?.matchAId).toBe(body.pairwise.matchA.matchId);
     expect(storedPairwise?.matchBId).toBe(body.pairwise.matchB.matchId);
 
-    const ratings = await db
-      .select()
-      .from(styleRatings)
-      .where(eq(styleRatings.tenantId, tenantA));
+    const ratings = await db.select().from(styleRatings).where(eq(styleRatings.tenantId, tenantA));
     expect(ratings.some((rating) => rating.styleSlug === "style-a")).toBe(true);
     expect(ratings.some((rating) => rating.styleSlug === "style-b")).toBe(true);
 

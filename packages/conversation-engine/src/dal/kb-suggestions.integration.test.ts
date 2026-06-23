@@ -1,6 +1,9 @@
 import {
-  applyAllMigrations, createIsolatedDb, kbSuggestions,
-  schema, tryConnectToPg,
+  applyAllMigrations,
+  createIsolatedDb,
+  kbSuggestions,
+  schema,
+  tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
@@ -12,7 +15,14 @@ import { KbSuggestionsRepo } from "./kb-suggestions.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_kbsug_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "storage", "migrations");
+const migrationsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -25,11 +35,17 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 2, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 2,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   const now = Math.floor(Date.now() / 1000);
-  const [t] = await db.insert(schema.tenants).values({ slug: `kbsug-${now}` }).returning({ id: schema.tenants.id });
+  const [t] = await db
+    .insert(schema.tenants)
+    .values({ slug: `kbsug-${now}` })
+    .returning({ id: schema.tenants.id });
   tenantId = t!.id;
   repo = new KbSuggestionsRepo({ db: db as never, tenantId });
   enabled = true;

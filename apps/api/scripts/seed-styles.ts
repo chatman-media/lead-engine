@@ -66,10 +66,7 @@ async function main() {
         );
 
       if (existing) {
-        await db
-          .update(styles)
-          .set({ configJson, displayName })
-          .where(eq(styles.id, existing.id));
+        await db.update(styles).set({ configJson, displayName }).where(eq(styles.id, existing.id));
         updated += 1;
       } else {
         await db.insert(styles).values({

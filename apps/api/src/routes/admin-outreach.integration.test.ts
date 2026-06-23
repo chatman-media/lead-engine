@@ -38,7 +38,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_outreach_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-outreach-12345";
 
 let sql: Sql | null = null;
@@ -51,9 +60,9 @@ let superAdminId = 0;
 let managerAdminId = 0;
 
 // Созданные в beforeAll
-let leadWithChannel = 0;    // лид с channel_identity → должен быть enqueued
+let leadWithChannel = 0; // лид с channel_identity → должен быть enqueued
 let leadWithoutChannel = 0; // лид без channel_identity → skipped
-let stageId = 0;            // stage_definition.id
+let stageId = 0; // stage_definition.id
 
 const now = Math.floor(Date.now() / 1000);
 const sentTelegram: Array<{ chatId: string; htmlText: string }> = [];
@@ -64,94 +73,113 @@ const fakeNotificationService = {
   },
 };
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 3, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 3, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminOutreachRoutes({ db, notificationService: fakeNotificationService }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminOutreachRoutes({ db, notificationService: fakeNotificationService }));
 
-    // Signup
-    const signupRes = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "outreach-test@demo.io", password: "strong-pwd-12345" }),
-    });
-    const signup = (await signupRes.json()) as {
-      token: string;
-      admin: { id: number; tenantId: number };
-    };
-    token = signup.token;
-    tenantId = signup.admin.tenantId;
-    superAdminId = signup.admin.id;
+  // Signup
+  const signupRes = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "outreach-test@demo.io", password: "strong-pwd-12345" }),
+  });
+  const signup = (await signupRes.json()) as {
+    token: string;
+    admin: { id: number; tenantId: number };
+  };
+  token = signup.token;
+  tenantId = signup.admin.tenantId;
+  superAdminId = signup.admin.id;
 
-    const [manager] = await db.insert(admins).values({
+  const [manager] = await db
+    .insert(admins)
+    .values({
       tenantId,
       email: "outreach-manager@demo.io",
       passwordHash: "test-hash",
       role: "manager",
       createdAt: now,
-    }).returning({ id: admins.id });
-    if (!manager) throw new Error("manager insert returned no row");
-    managerAdminId = manager.id;
-    managerToken = signAuthToken({
+    })
+    .returning({ id: admins.id });
+  if (!manager) throw new Error("manager insert returned no row");
+  managerAdminId = manager.id;
+  managerToken = signAuthToken(
+    {
       adminId: managerAdminId,
       tenantId,
       role: "manager",
       exp: Math.floor(Date.now() / 1000) + 3600,
-    }, SECRET);
-    await db.insert(operatorSettings).values({
-      tenantId,
-      adminId: managerAdminId,
-      telegramChatId: "telegram-manager-1",
-      updatedAt: now,
-    });
+    },
+    SECRET,
+  );
+  await db.insert(operatorSettings).values({
+    tenantId,
+    adminId: managerAdminId,
+    telegramChatId: "telegram-manager-1",
+    updatedAt: now,
+  });
 
-    // Создаём telegram_bot channel (status=active).
-    // source="bot" — единственное значение для bot-initiated каналов.
-    // "web" и "whatsapp" тоже маппятся на "bot" (см. admin-outreach.ts).
-    const [channel] = await db.insert(channels).values({
+  // Создаём telegram_bot channel (status=active).
+  // source="bot" — единственное значение для bot-initiated каналов.
+  // "web" и "whatsapp" тоже маппятся на "bot" (см. admin-outreach.ts).
+  const [channel] = await db
+    .insert(channels)
+    .values({
       tenantId,
       kind: "telegram_bot",
       externalId: "bot-test-12345",
       status: "active",
       createdAt: now,
       updatedAt: now,
-    }).returning({ id: channels.id });
+    })
+    .returning({ id: channels.id });
 
-    // Контакт 1: с channel identity
-    const [contact1] = await db.insert(contacts).values({ tenantId, createdAt: now, updatedAt: now }).returning({ id: contacts.id });
-    await db.insert(channelIdentities).values({
-      contactId: contact1!.id,
-      channelId: channel!.id,
-      externalUserId: "user-111",
-      createdAt: now,
-    });
+  // Контакт 1: с channel identity
+  const [contact1] = await db
+    .insert(contacts)
+    .values({ tenantId, createdAt: now, updatedAt: now })
+    .returning({ id: contacts.id });
+  await db.insert(channelIdentities).values({
+    contactId: contact1!.id,
+    channelId: channel!.id,
+    externalUserId: "user-111",
+    createdAt: now,
+  });
 
-    // Контакт 2: без channel identity (будет skipped)
-    const [contact2] = await db.insert(contacts).values({ tenantId, createdAt: now, updatedAt: now }).returning({ id: contacts.id });
+  // Контакт 2: без channel identity (будет skipped)
+  const [contact2] = await db
+    .insert(contacts)
+    .values({ tenantId, createdAt: now, updatedAt: now })
+    .returning({ id: contacts.id });
 
-    // Funnel (обязателен для stage_definitions)
-    const [funnel] = await db.insert(funnels).values({
+  // Funnel (обязателен для stage_definitions)
+  const [funnel] = await db
+    .insert(funnels)
+    .values({
       tenantId,
       slug: "test-funnel",
       stagesJson: "[]",
       createdAt: now,
       updatedAt: now,
-    }).returning({ id: funnels.id });
+    })
+    .returning({ id: funnels.id });
 
-    // Stage definition
-    const [stage] = await db.insert(stageDefinitions).values({
+  // Stage definition
+  const [stage] = await db
+    .insert(stageDefinitions)
+    .values({
       tenantId,
       funnelId: funnel!.id,
       slug: "test-stage",
@@ -160,35 +188,43 @@ beforeAll(
       position: 1,
       createdAt: now,
       updatedAt: now,
-    }).returning({ id: stageDefinitions.id });
-    stageId = stage!.id;
+    })
+    .returning({ id: stageDefinitions.id });
+  stageId = stage!.id;
 
-    // Лид 1: привязан к contact1 (с каналом), в stage
-    const [lead1] = await db.insert(leads).values({
+  // Лид 1: привязан к contact1 (с каналом), в stage
+  const [lead1] = await db
+    .insert(leads)
+    .values({
       tenantId,
       userId: contact1!.id,
       state: "test-stage",
       stageDefinitionId: stageId,
       createdAt: now,
       updatedAt: now,
-    }).returning({ id: leads.id });
-    leadWithChannel = lead1!.id;
+    })
+    .returning({ id: leads.id });
+  leadWithChannel = lead1!.id;
 
-    // Лид 2: привязан к contact2 (без канала), не в stage
-    const [lead2] = await db.insert(leads).values({
+  // Лид 2: привязан к contact2 (без канала), не в stage
+  const [lead2] = await db
+    .insert(leads)
+    .values({
       tenantId,
       userId: contact2!.id,
       state: "other",
       createdAt: now,
       updatedAt: now,
-    }).returning({ id: leads.id });
-    leadWithoutChannel = lead2!.id;
-  },
-  30_000,
-);
+    })
+    .returning({ id: leads.id });
+  leadWithoutChannel = lead2!.id;
+}, 30_000);
 
 afterAll(async () => {
-  if (sql) { await sql.end({ timeout: 0 }).catch(() => {}); sql = null; }
+  if (sql) {
+    await sql.end({ timeout: 0 }).catch(() => {});
+    sql = null;
+  }
 }, 10_000);
 
 function post(path: string, body: unknown) {
@@ -307,28 +343,37 @@ describe("POST /api/admin/outreach — by stageSlug", () => {
 describe("POST /api/admin/outreach — web channel kind", () => {
   it("web channel identity → enqueued=1 (маппится на source='bot')", async () => {
     if (!sql) return;
-    const [webChannel] = await db.insert(channels).values({
-      tenantId,
-      kind: "web",
-      externalId: "web-test-99999",
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    }).returning({ id: channels.id });
-    const [webContact] = await db.insert(contacts).values({ tenantId, createdAt: now, updatedAt: now }).returning({ id: contacts.id });
+    const [webChannel] = await db
+      .insert(channels)
+      .values({
+        tenantId,
+        kind: "web",
+        externalId: "web-test-99999",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: channels.id });
+    const [webContact] = await db
+      .insert(contacts)
+      .values({ tenantId, createdAt: now, updatedAt: now })
+      .returning({ id: contacts.id });
     await db.insert(channelIdentities).values({
       contactId: webContact!.id,
       channelId: webChannel!.id,
       externalUserId: "web-user-999",
       createdAt: now,
     });
-    const [webLead] = await db.insert(leads).values({
-      tenantId,
-      userId: webContact!.id,
-      state: "new",
-      createdAt: now,
-      updatedAt: now,
-    }).returning({ id: leads.id });
+    const [webLead] = await db
+      .insert(leads)
+      .values({
+        tenantId,
+        userId: webContact!.id,
+        state: "new",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
 
     const res = await post("/api/admin/outreach", {
       text: "Привет из web-канала!",

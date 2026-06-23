@@ -37,7 +37,13 @@ export function makePartnerCallbackRoutes(opts: {
     // Verify token
     const payload = await verifyCallbackToken(token, opts.callbackSecret);
     if (!payload) {
-      return c.html(htmlPage("Неверная ссылка", "❌ Ссылка недействительна или уже была использована.", "error"));
+      return c.html(
+        htmlPage(
+          "Неверная ссылка",
+          "❌ Ссылка недействительна или уже была использована.",
+          "error",
+        ),
+      );
     }
 
     const { tenantId, leadId, stageId } = payload;
@@ -51,10 +57,14 @@ export function makePartnerCallbackRoutes(opts: {
         return c.html(htmlPage("Лид не найден", "❌ Заявка не найдена в системе.", "error"));
       }
       if (page.kind === "already_processed") {
-        return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
+        return c.html(
+          htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"),
+        );
       }
       if (page.kind === "stage_mismatch") {
-        return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
+        return c.html(
+          htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"),
+        );
       }
 
       const confirmUrl = `${opts.appUrl}/api/partner/cb/${token}?a=confirm`;
@@ -85,16 +95,30 @@ export function makePartnerCallbackRoutes(opts: {
       dispatchEffectsIfAny(outcome);
 
       if (outcome.kind === "advanced") {
-        return c.html(htmlPage("Подтверждено!", `✅ Заявка #${leadId} переведена на этап «${outcome.toDisplayName}».`, "success"));
+        return c.html(
+          htmlPage(
+            "Подтверждено!",
+            `✅ Заявка #${leadId} переведена на этап «${outcome.toDisplayName}».`,
+            "success",
+          ),
+        );
       }
       if (outcome.kind === "terminal") {
-        return c.html(htmlPage("Подтверждено!", "✅ Заявка подтверждена и находится на финальном этапе.", "success"));
+        return c.html(
+          htmlPage(
+            "Подтверждено!",
+            "✅ Заявка подтверждена и находится на финальном этапе.",
+            "success",
+          ),
+        );
       }
       if (outcome.kind === "no_lead") {
         return c.html(htmlPage("Лид не найден", "❌ Заявка не найдена в системе.", "error"));
       }
       if (outcome.kind === "already_processed" || outcome.kind === "stage_mismatch") {
-        return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
+        return c.html(
+          htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"),
+        );
       }
       return c.html(htmlPage("Подтверждено!", "✅ Подтверждение получено.", "success"));
     }
@@ -117,10 +141,18 @@ export function makePartnerCallbackRoutes(opts: {
         return c.html(htmlPage("Лид не найден", "❌ Заявка не найдена в системе.", "error"));
       }
       if (outcome.kind === "already_processed" || outcome.kind === "stage_mismatch") {
-        return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
+        return c.html(
+          htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"),
+        );
       }
 
-      return c.html(htmlPage("Отклонено", `❌ Заявка #${leadId} отклонена партнёром. Менеджер свяжется с клиентом.`, "cancel"));
+      return c.html(
+        htmlPage(
+          "Отклонено",
+          `❌ Заявка #${leadId} отклонена партнёром. Менеджер свяжется с клиентом.`,
+          "cancel",
+        ),
+      );
     }
 
     return c.html(htmlPage("Неверный запрос", "Неизвестное действие.", "error"));

@@ -12,12 +12,7 @@
  */
 
 import { type Db, OutboundQueueRepo, withTenant } from "@chatman-media/conversation-engine";
-import {
-  channelIdentities,
-  channels,
-  exchangeOrders,
-  tenants,
-} from "@chatman-media/storage";
+import { channelIdentities, channels, exchangeOrders, tenants } from "@chatman-media/storage";
 import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 
 const EXCLUDED_KINDS = ["web"];
@@ -90,7 +85,9 @@ export class ExchangePaymentSweeper {
       if (expired.length === 0) return;
 
       // Каналы для контактов (как в checkin-sweep).
-      const contactIds = [...new Set(expired.map((o) => o.contactId).filter((x): x is number => x != null))];
+      const contactIds = [
+        ...new Set(expired.map((o) => o.contactId).filter((x): x is number => x != null)),
+      ];
       const identityByContact = new Map<
         number,
         { channelId: number; channelExternalId: string; externalUserId: string }
@@ -116,7 +113,10 @@ export class ExchangePaymentSweeper {
           .where(
             and(
               inArray(channelIdentities.contactId, contactIds),
-              sql`${channels.kind} NOT IN (${sql.join(EXCLUDED_KINDS.map((k) => sql`${k}`), sql`, `)})`,
+              sql`${channels.kind} NOT IN (${sql.join(
+                EXCLUDED_KINDS.map((k) => sql`${k}`),
+                sql`, `,
+              )})`,
             ),
           );
         for (const i of identities) {
@@ -149,7 +149,8 @@ export class ExchangePaymentSweeper {
 
         // Ещё не напоминали → напомнить (если есть канал).
         if (order.lastReminderAt === null) {
-          const identity = order.contactId != null ? identityByContact.get(order.contactId) : undefined;
+          const identity =
+            order.contactId != null ? identityByContact.get(order.contactId) : undefined;
           if (identity) {
             const text =
               this.opts.reminderText ??

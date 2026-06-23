@@ -61,10 +61,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -325,10 +338,7 @@ function proposalSeverityBadge(severity: QualityToolCallImprovementSeverity) {
 function proposalStatusBadge(status: QualityToolCallImprovementStatus) {
   return (
     <Badge
-      className={cn(
-        "border-transparent font-mono text-[11px]",
-        TOOL_PROPOSAL_STATUS_CLASS[status],
-      )}
+      className={cn("border-transparent font-mono text-[11px]", TOOL_PROPOSAL_STATUS_CLASS[status])}
     >
       {status}
     </Badge>
@@ -407,9 +417,7 @@ export function SaasQuality() {
   const [coachSampleSize, setCoachSampleSize] = useState("8");
   const [toolCallLimit, setToolCallLimit] = useState("50");
   const [toolCallSource, setToolCallSource] = useState<"all" | QualityToolCallSource>("all");
-  const [toolCallErrorFilter, setToolCallErrorFilter] = useState<"all" | "true" | "false">(
-    "all",
-  );
+  const [toolCallErrorFilter, setToolCallErrorFilter] = useState<"all" | "true" | "false">("all");
   const [toolCallName, setToolCallName] = useState("");
   const [toolFeedbackLimit, setToolFeedbackLimit] = useState("25");
   const [toolFeedbackSource, setToolFeedbackSource] = useState<"all" | QualityToolCallSource>(
@@ -418,9 +426,9 @@ export function SaasQuality() {
   const [toolFeedbackLabel, setToolFeedbackLabel] = useState<"all" | QualityToolCallFeedbackLabel>(
     "all",
   );
-  const [toolFeedbackErrorFilter, setToolFeedbackErrorFilter] = useState<
-    "all" | "true" | "false"
-  >("all");
+  const [toolFeedbackErrorFilter, setToolFeedbackErrorFilter] = useState<"all" | "true" | "false">(
+    "all",
+  );
   const [toolFeedbackName, setToolFeedbackName] = useState("");
   const [trackedToolProposalStatus, setTrackedToolProposalStatus] = useState<
     "all" | QualityToolCallImprovementStatus
@@ -431,7 +439,10 @@ export function SaasQuality() {
   const [toolRegressionCasesExporting, setToolRegressionCasesExporting] = useState(false);
   const [toolRegressionCaseActionId, setToolRegressionCaseActionId] = useState<number | null>(null);
 
-  const styleOptions = useMemo(() => summary?.byStyle.map((item) => item.styleSlug) ?? [], [summary]);
+  const styleOptions = useMemo(
+    () => summary?.byStyle.map((item) => item.styleSlug) ?? [],
+    [summary],
+  );
   const personaOptions = useMemo(
     () => summary?.byPersona.map((item) => item.personaSlug) ?? [],
     [summary],
@@ -884,7 +895,9 @@ export function SaasQuality() {
     try {
       await saas.setQualityToolCallRegressionCaseStatus(item.id, { status });
       await loadToolRegressionCases(toolRegressionCaseStatus);
-      toast.success(status === "archived" ? "Regression case archived" : "Regression case restored");
+      toast.success(
+        status === "archived" ? "Regression case archived" : "Regression case restored",
+      );
     } catch (err) {
       if (redirectOnUnauthorized(err)) return;
       toast.error(err instanceof Error ? err.message : "Не удалось обновить regression case");
@@ -1240,7 +1253,11 @@ export function SaasQuality() {
           <MetricCard icon={BugIcon} label="Фабрикации" value={totals?.fabricationsCaught ?? 0} />
           <MetricCard icon={TimerIcon} label="Avg turns" value={totals?.avgTurns ?? "нет"} />
           <MetricCard icon={TargetIcon} label="Pairwise" value={pairwiseTotals?.total ?? 0} />
-          <MetricCard icon={LightbulbIcon} label="Coach pending" value={proposalTotals?.pending ?? 0} />
+          <MetricCard
+            icon={LightbulbIcon}
+            label="Coach pending"
+            value={proposalTotals?.pending ?? 0}
+          />
           <MetricCard icon={TimerIcon} label="Shadow running" value={shadowTotals?.running ?? 0} />
         </div>
       )}
@@ -1309,14 +1326,20 @@ export function SaasQuality() {
                 inputMode="numeric"
                 className="font-mono"
                 value={runMaxTurns}
-                onChange={(event) => setRunMaxTurns(event.target.value.replace(/\D/g, "").slice(0, 2))}
+                onChange={(event) =>
+                  setRunMaxTurns(event.target.value.replace(/\D/g, "").slice(0, 2))
+                }
               />
             </div>
 
             <div className="flex items-end">
               <div className="flex h-9 w-full items-center justify-between gap-3 rounded-md border px-3 text-sm">
                 <Label htmlFor="quality-run-reflect">Fact-check</Label>
-                <Switch id="quality-run-reflect" checked={runReflect} onCheckedChange={setRunReflect} />
+                <Switch
+                  id="quality-run-reflect"
+                  checked={runReflect}
+                  onCheckedChange={setRunReflect}
+                />
               </div>
             </div>
 
@@ -1325,7 +1348,11 @@ export function SaasQuality() {
                 className="w-full"
                 variant="outline"
                 onClick={() => void handleSelfPlayRun()}
-                disabled={runningKind !== null || runStyleOptions.length === 0 || runPersonaOptions.length === 0}
+                disabled={
+                  runningKind !== null ||
+                  runStyleOptions.length === 0 ||
+                  runPersonaOptions.length === 0
+                }
               >
                 <FlaskConicalIcon className="size-4" />
                 {runningKind === "self-play" ? "Running…" : "Self-play"}
@@ -1336,7 +1363,11 @@ export function SaasQuality() {
               <Button
                 className="w-full"
                 onClick={() => void handlePairwiseRun()}
-                disabled={runningKind !== null || runStyleOptions.length < 2 || runPersonaOptions.length === 0}
+                disabled={
+                  runningKind !== null ||
+                  runStyleOptions.length < 2 ||
+                  runPersonaOptions.length === 0
+                }
               >
                 <PlayIcon className="size-4" />
                 {runningKind === "pairwise" ? "Running…" : "Pairwise"}
@@ -1457,7 +1488,10 @@ export function SaasQuality() {
 
             <div className="space-y-1.5">
               <Label>Исход</Label>
-              <Select value={outcome} onValueChange={(value) => setOutcome(value as "all" | QualityOutcome)}>
+              <Select
+                value={outcome}
+                onValueChange={(value) => setOutcome(value as "all" | QualityOutcome)}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -1573,19 +1607,28 @@ export function SaasQuality() {
                 inputMode="numeric"
                 className="font-mono"
                 value={pairLimit}
-                onChange={(event) => setPairLimit(event.target.value.replace(/\D/g, "").slice(0, 4))}
+                onChange={(event) =>
+                  setPairLimit(event.target.value.replace(/\D/g, "").slice(0, 4))
+                }
               />
             </div>
 
             <div className="flex items-end">
               <div className="flex h-9 w-full items-center justify-between gap-3 rounded-md border px-3 text-sm">
                 <span>Transcript</span>
-                <Switch checked={pairIncludeTranscript} onCheckedChange={setPairIncludeTranscript} />
+                <Switch
+                  checked={pairIncludeTranscript}
+                  onCheckedChange={setPairIncludeTranscript}
+                />
               </div>
             </div>
 
             <div className="flex items-end">
-              <Button className="w-full" onClick={handlePairwiseExport} disabled={pairwiseExporting}>
+              <Button
+                className="w-full"
+                onClick={handlePairwiseExport}
+                disabled={pairwiseExporting}
+              >
                 <DownloadIcon className="size-4" />
                 {pairwiseExporting ? "Экспорт…" : "Pairwise"}
               </Button>
@@ -1637,9 +1680,7 @@ export function SaasQuality() {
               <Label>Error</Label>
               <Select
                 value={toolCallErrorFilter}
-                onValueChange={(value) =>
-                  setToolCallErrorFilter(value as "all" | "true" | "false")
-                }
+                onValueChange={(value) => setToolCallErrorFilter(value as "all" | "true" | "false")}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -1950,9 +1991,7 @@ export function SaasQuality() {
                       <TableCell className="text-right font-mono text-xs">
                         {item.missingTool}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {item.badArgs}
-                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">{item.badArgs}</TableCell>
                       <TableCell className="text-right font-mono text-xs">
                         {item.errorCount}
                       </TableCell>
@@ -2743,14 +2782,15 @@ export function SaasQuality() {
         state={trackedToolProposalApply}
         submitting={trackedToolProposalActionId === trackedToolProposalApply?.proposal.id}
         onChange={(patch) =>
-          setTrackedToolProposalApply((current) =>
-            current ? { ...current, ...patch } : current,
-          )
+          setTrackedToolProposalApply((current) => (current ? { ...current, ...patch } : current))
         }
         onSubmit={() => void handleTrackedToolProposalApply()}
         onOpenChange={(open) => !open && setTrackedToolProposalApply(null)}
       />
-      <QualityInspectorDialog inspector={inspector} onOpenChange={(open) => !open && setInspector(null)} />
+      <QualityInspectorDialog
+        inspector={inspector}
+        onOpenChange={(open) => !open && setInspector(null)}
+      />
       <ToolCallInspectorDialog
         inspector={toolCallInspector}
         canSubmitFeedback={canWriteQuality}
@@ -2999,10 +3039,7 @@ function ToolCallInspectorDialog({
                 <InspectorMetric label="Conversation" value={toolCall.conversationId} />
                 <InspectorMetric label="Contact" value={toolCall.contactId ?? "нет"} />
                 <InspectorMetric label="Message" value={toolCall.messageId ?? "нет"} />
-                <InspectorMetric
-                  label="Outbound"
-                  value={toolCall.outboundQueueId ?? "нет"}
-                />
+                <InspectorMetric label="Outbound" value={toolCall.outboundQueueId ?? "нет"} />
                 <InspectorMetric
                   label="Cycle"
                   value={`${toolCall.cycle}.${toolCall.toolCallIndex}`}

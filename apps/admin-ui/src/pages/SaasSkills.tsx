@@ -57,7 +57,7 @@ export function SaasSkills() {
 
   useEffect(() => {
     load();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSeed() {
@@ -81,7 +81,9 @@ export function SaasSkills() {
       await saas.updateSkill(skill.slug, { isEnabled: newVal });
     } catch {
       // rollback
-      setItems((prev) => prev.map((s) => (s.id === skill.id ? { ...s, isEnabled: skill.isEnabled } : s)));
+      setItems((prev) =>
+        prev.map((s) => (s.id === skill.id ? { ...s, isEnabled: skill.isEnabled } : s)),
+      );
       toast.error("Не удалось обновить навык");
     }
   }
@@ -119,12 +121,7 @@ export function SaasSkills() {
       />
 
       <div className="flex items-center gap-3">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleSeed}
-          disabled={seeding}
-        >
+        <Button variant="outline" size="sm" onClick={handleSeed} disabled={seeding}>
           <DatabaseZapIcon className="mr-2 h-4 w-4" />
           {seeding ? "Засеваем…" : "Засеять каталог"}
         </Button>
@@ -167,7 +164,10 @@ export function SaasSkills() {
                         <span>{skill.displayName}</span>
                         <div className="flex items-center gap-2 shrink-0">
                           <Badge
-                            className={FAMILY_COLORS[skill.family] ?? "bg-secondary text-secondary-foreground"}
+                            className={
+                              FAMILY_COLORS[skill.family] ??
+                              "bg-secondary text-secondary-foreground"
+                            }
                             variant="outline"
                           >
                             {skill.intent}

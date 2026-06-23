@@ -34,7 +34,14 @@ describe("parseWebhookPayload (Messenger)", () => {
   it("image attachment → photo InboundPart (externalRef = url)", () => {
     const out = parseWebhookPayload(
       CH,
-      page([ev({ message: { mid: "m.M2", attachments: [{ type: "image", payload: { url: "https://cdn/i.jpg" } }] } })]),
+      page([
+        ev({
+          message: {
+            mid: "m.M2",
+            attachments: [{ type: "image", payload: { url: "https://cdn/i.jpg" } }],
+          },
+        }),
+      ]),
     );
     expect(out[0]?.parts).toEqual([
       { kind: "photo", mediaRef: { channelId: CH, externalRef: "https://cdn/i.jpg" } },
@@ -44,7 +51,14 @@ describe("parseWebhookPayload (Messenger)", () => {
   it("video attachment → video InboundPart", () => {
     const out = parseWebhookPayload(
       CH,
-      page([ev({ message: { mid: "m.MV", attachments: [{ type: "video", payload: { url: "https://cdn/v.mp4" } }] } })]),
+      page([
+        ev({
+          message: {
+            mid: "m.MV",
+            attachments: [{ type: "video", payload: { url: "https://cdn/v.mp4" } }],
+          },
+        }),
+      ]),
     );
     expect(out[0]?.parts).toEqual([
       { kind: "video", mediaRef: { channelId: CH, externalRef: "https://cdn/v.mp4" } },
@@ -54,21 +68,37 @@ describe("parseWebhookPayload (Messenger)", () => {
   it("audio → voice, file → document", () => {
     const audio = parseWebhookPayload(
       CH,
-      page([ev({ message: { mid: "a", attachments: [{ type: "audio", payload: { url: "u-a" } }] } })]),
+      page([
+        ev({ message: { mid: "a", attachments: [{ type: "audio", payload: { url: "u-a" } }] } }),
+      ]),
     );
-    expect(audio[0]?.parts).toEqual([{ kind: "voice", mediaRef: { channelId: CH, externalRef: "u-a" } }]);
+    expect(audio[0]?.parts).toEqual([
+      { kind: "voice", mediaRef: { channelId: CH, externalRef: "u-a" } },
+    ]);
 
     const file = parseWebhookPayload(
       CH,
-      page([ev({ message: { mid: "f", attachments: [{ type: "file", payload: { url: "u-f" } }] } })]),
+      page([
+        ev({ message: { mid: "f", attachments: [{ type: "file", payload: { url: "u-f" } }] } }),
+      ]),
     );
-    expect(file[0]?.parts).toEqual([{ kind: "document", mediaRef: { channelId: CH, externalRef: "u-f" } }]);
+    expect(file[0]?.parts).toEqual([
+      { kind: "document", mediaRef: { channelId: CH, externalRef: "u-f" } },
+    ]);
   });
 
   it("text + attachment в одном сообщении → две части", () => {
     const out = parseWebhookPayload(
       CH,
-      page([ev({ message: { mid: "m.M5", text: "look", attachments: [{ type: "image", payload: { url: "u" } }] } })]),
+      page([
+        ev({
+          message: {
+            mid: "m.M5",
+            text: "look",
+            attachments: [{ type: "image", payload: { url: "u" } }],
+          },
+        }),
+      ]),
     );
     expect(out[0]?.parts).toEqual([
       { kind: "text", text: "look" },
@@ -91,7 +121,9 @@ describe("parseWebhookPayload (Messenger)", () => {
       CH,
       page([ev({ message: { mid: "m.QR", quick_reply: { payload: "RUB" } } })]),
     );
-    expect(out[0]?.parts).toEqual([{ kind: "callback_query", data: "RUB", originalMessageId: "m.QR" }]);
+    expect(out[0]?.parts).toEqual([
+      { kind: "callback_query", data: "RUB", originalMessageId: "m.QR" },
+    ]);
   });
 
   it("echo собственного сообщения → skip", () => {
@@ -113,7 +145,11 @@ describe("parseWebhookPayload (Messenger)", () => {
   it("attachment неизвестного типа (location) → skip", () => {
     const out = parseWebhookPayload(
       CH,
-      page([ev({ message: { mid: "m.L", attachments: [{ type: "location", payload: { url: "u-l" } }] } })]),
+      page([
+        ev({
+          message: { mid: "m.L", attachments: [{ type: "location", payload: { url: "u-l" } }] },
+        }),
+      ]),
     );
     expect(out).toEqual([]);
   });
@@ -121,7 +157,11 @@ describe("parseWebhookPayload (Messenger)", () => {
   it("attachment без url (стикер/fallback) → skip", () => {
     const out = parseWebhookPayload(
       CH,
-      page([ev({ message: { mid: "m.S", attachments: [{ type: "image", payload: { sticker_id: 369 } }] } })]),
+      page([
+        ev({
+          message: { mid: "m.S", attachments: [{ type: "image", payload: { sticker_id: 369 } }] },
+        }),
+      ]),
     );
     expect(out).toEqual([]);
   });

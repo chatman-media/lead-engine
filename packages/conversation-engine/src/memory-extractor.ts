@@ -60,10 +60,7 @@ export class LlmMemoryExtractor implements MemoryExtractor {
   }): Promise<Record<string, string>> {
     const history =
       input.history ??
-      (await this.messagesRepoFor(input.tenantId).recent(
-        input.conversationId,
-        this.historyLimit,
-      ));
+      (await this.messagesRepoFor(input.tenantId).recent(input.conversationId, this.historyLimit));
     if (history.length === 0) return {};
 
     const llmMessages = mapToRagMessages(history);

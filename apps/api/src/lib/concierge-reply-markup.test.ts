@@ -75,13 +75,13 @@ describe("expandCallbackQuery", () => {
 // ── wrapWithConciergeButtons ───────────────────────────────────────────────────
 
 const MOCK_ENVELOPE: OutboundEnvelope = {
-	channelId: "ch1",
-	externalUserId: "u1",
-	parts: [{ kind: "text", text: "Здравствуйте!" }],
+  channelId: "ch1",
+  externalUserId: "u1",
+  parts: [{ kind: "text", text: "Здравствуйте!" }],
 };
 
 function makeStrategy(envelopes: OutboundEnvelope[]) {
-	return { generate: mock(async () => envelopes) };
+  return { generate: mock(async () => envelopes) };
 }
 
 async function makeDbWithStage(slug: string | null) {
@@ -92,8 +92,7 @@ async function makeDbWithStage(slug: string | null) {
         leftJoin: () => ({
           where: () => ({
             orderBy: () => ({
-              limit: async () =>
-                slug ? [{ slug, kind: "lead" }] : [],
+              limit: async () => (slug ? [{ slug, kind: "lead" }] : []),
             }),
           }),
         }),
@@ -111,30 +110,28 @@ const MOCK_OPTS = {
   userMessageText: "hi",
 };
 
-function resultEnvelopes(
-	result: Parameters<typeof normalizeReplyStrategyResult>[0],
-) {
-	return normalizeReplyStrategyResult(result)?.envelopes ?? [];
+function resultEnvelopes(result: Parameters<typeof normalizeReplyStrategyResult>[0]) {
+  return normalizeReplyStrategyResult(result)?.envelopes ?? [];
 }
 
 describe("wrapWithConciergeButtons", () => {
   it("does not add buttons when stage is not request_received", async () => {
     const inner = makeStrategy([MOCK_ENVELOPE]);
-		const db = await makeDbWithStage("exchange_request");
-		const wrapped = wrapWithConciergeButtons(inner, db);
-		const result = await wrapped.generate(MOCK_OPTS);
-		expect(resultEnvelopes(result)[0]?.replyMarkup).toBeUndefined();
-	});
+    const db = await makeDbWithStage("exchange_request");
+    const wrapped = wrapWithConciergeButtons(inner, db);
+    const result = await wrapped.generate(MOCK_OPTS);
+    expect(resultEnvelopes(result)[0]?.replyMarkup).toBeUndefined();
+  });
 
   it("adds inline buttons when stage is request_received", async () => {
     const inner = makeStrategy([MOCK_ENVELOPE]);
-		const db = await makeDbWithStage(CONCIERGE_INTAKE_STAGE);
-		const wrapped = wrapWithConciergeButtons(inner, db);
-		const result = await wrapped.generate(MOCK_OPTS);
-		const envelopes = resultEnvelopes(result);
-		expect(envelopes[0]?.replyMarkup).toBeDefined();
-		const buttons = envelopes[0]?.replyMarkup?.inlineButtons ?? [];
-		const allData = buttons.flat().map((b) => b.callbackData);
+    const db = await makeDbWithStage(CONCIERGE_INTAKE_STAGE);
+    const wrapped = wrapWithConciergeButtons(inner, db);
+    const result = await wrapped.generate(MOCK_OPTS);
+    const envelopes = resultEnvelopes(result);
+    expect(envelopes[0]?.replyMarkup).toBeDefined();
+    const buttons = envelopes[0]?.replyMarkup?.inlineButtons ?? [];
+    const allData = buttons.flat().map((b) => b.callbackData);
     expect(allData).toContain(`${SERVICE_BUTTON_PREFIX}exchange`);
     expect(allData).toContain(`${SERVICE_BUTTON_PREFIX}transfer`);
     expect(allData).toContain(`${SERVICE_BUTTON_PREFIX}food`);
@@ -144,30 +141,32 @@ describe("wrapWithConciergeButtons", () => {
 
   it("adds buttons only to last envelope when multiple", async () => {
     const inner = makeStrategy([MOCK_ENVELOPE, MOCK_ENVELOPE]);
-		const db = await makeDbWithStage(CONCIERGE_INTAKE_STAGE);
-		const wrapped = wrapWithConciergeButtons(inner, db);
-		const result = await wrapped.generate(MOCK_OPTS);
-		const envelopes = resultEnvelopes(result);
-		expect(envelopes.length).toBe(2);
-		expect(envelopes[0]?.replyMarkup).toBeUndefined();
-		expect(envelopes[1]?.replyMarkup).toBeDefined();
-	});
+    const db = await makeDbWithStage(CONCIERGE_INTAKE_STAGE);
+    const wrapped = wrapWithConciergeButtons(inner, db);
+    const result = await wrapped.generate(MOCK_OPTS);
+    const envelopes = resultEnvelopes(result);
+    expect(envelopes.length).toBe(2);
+    expect(envelopes[0]?.replyMarkup).toBeUndefined();
+    expect(envelopes[1]?.replyMarkup).toBeDefined();
+  });
 
   it("returns null/empty when inner strategy does", async () => {
     const inner = makeStrategy([]);
-		const db = await makeDbWithStage(CONCIERGE_INTAKE_STAGE);
-		const wrapped = wrapWithConciergeButtons(inner, db);
-		const result = await wrapped.generate(MOCK_OPTS);
-		expect(resultEnvelopes(result)).toHaveLength(0);
-	});
+    const db = await makeDbWithStage(CONCIERGE_INTAKE_STAGE);
+    const wrapped = wrapWithConciergeButtons(inner, db);
+    const result = await wrapped.generate(MOCK_OPTS);
+    expect(resultEnvelopes(result)).toHaveLength(0);
+  });
 
   it("returns inner result unchanged when db throws", async () => {
     const inner = makeStrategy([MOCK_ENVELOPE]);
     const badDb = {
-      select: () => { throw new Error("db error"); },
-	    } as never;
-	    const wrapped = wrapWithConciergeButtons(inner, badDb);
-	    const result = await wrapped.generate(MOCK_OPTS);
-	    expect(resultEnvelopes(result)[0]?.replyMarkup).toBeUndefined();
-	  });
+      select: () => {
+        throw new Error("db error");
+      },
+    } as never;
+    const wrapped = wrapWithConciergeButtons(inner, badDb);
+    const result = await wrapped.generate(MOCK_OPTS);
+    expect(resultEnvelopes(result)[0]?.replyMarkup).toBeUndefined();
+  });
 });

@@ -20,7 +20,10 @@ export const creativeProducerAida: Style = StyleSchema.parse({
   framework: "AIDA",
   hooks: [
     { kind: "authority", text: "сотни проектов — от небольших reels до многодневных съёмок" },
-    { kind: "social_proof", text: "клиенты возвращаются потому что мы слышим идею, а не просто снимаем" },
+    {
+      kind: "social_proof",
+      text: "клиенты возвращаются потому что мы слышим идею, а не просто снимаем",
+    },
   ],
   stages: {
     opener: {

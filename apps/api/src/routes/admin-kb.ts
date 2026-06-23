@@ -2,9 +2,22 @@ import { createHash } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { type Db, DrizzleKbStore, withTenant } from "@chatman-media/conversation-engine";
-import { chunkText, ingestText, type KbScope, parsePdfBuffer, stripNonContent } from "@chatman-media/kb";
+import {
+  chunkText,
+  ingestText,
+  type KbScope,
+  parsePdfBuffer,
+  stripNonContent,
+} from "@chatman-media/kb";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
-import { funnels, kbChunks, kbDocuments, kbSuggestions, stageDefinitions, stageFields } from "@chatman-media/storage";
+import {
+  funnels,
+  kbChunks,
+  kbDocuments,
+  kbSuggestions,
+  stageDefinitions,
+  stageFields,
+} from "@chatman-media/storage";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import {
@@ -236,9 +249,7 @@ async function readUploadFile(file: File): Promise<{ body: string; originalFile:
 }
 
 function preparedKbText(input: { body: string; fileName: string }): string {
-  return input.fileName.toLowerCase().endsWith(".pdf")
-    ? input.body
-    : stripNonContent(input.body);
+  return input.fileName.toLowerCase().endsWith(".pdf") ? input.body : stripNonContent(input.body);
 }
 
 function textContentHash(body: string): string {
@@ -285,8 +296,8 @@ function scopeToDbFields(scope: KbScope): {
 } {
   return {
     scopeType: scope.scopeType,
-    funnelId: scope.scopeType === "global" ? null : scope.funnelId ?? null,
-    stageSlug: scope.scopeType === "stage" ? scope.stageSlug ?? null : null,
+    funnelId: scope.scopeType === "global" ? null : (scope.funnelId ?? null),
+    stageSlug: scope.scopeType === "stage" ? (scope.stageSlug ?? null) : null,
   };
 }
 
@@ -303,14 +314,13 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
     const scopeTypeParam = c.req.query("scopeType");
     const funnelIdParam = c.req.query("funnelId");
     const stageSlugParam = c.req.query("stageSlug");
-    const scopeFilter =
-      scopeTypeParam
-        ? parseScope({
-            scopeType: scopeTypeParam,
-            funnelId: funnelIdParam,
-            stageSlug: stageSlugParam,
-          })
-        : null;
+    const scopeFilter = scopeTypeParam
+      ? parseScope({
+          scopeType: scopeTypeParam,
+          funnelId: funnelIdParam,
+          stageSlug: stageSlugParam,
+        })
+      : null;
     if (scopeFilter?.error) return c.json({ error: scopeFilter.error }, 400);
     const scopeDb = scopeFilter?.scope ? scopeToDbFields(scopeFilter.scope) : null;
     const funnelFilter = scopeTypeParam ? null : parsePositiveInt(funnelIdParam);
@@ -908,10 +918,7 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
         })
         .from(stageDefinitions)
         .where(
-          and(
-            eq(stageDefinitions.tenantId, tenantId),
-            eq(stageDefinitions.funnelId, funnelId),
-          ),
+          and(eq(stageDefinitions.tenantId, tenantId), eq(stageDefinitions.funnelId, funnelId)),
         )
         .orderBy(asc(stageDefinitions.position));
 
@@ -1132,9 +1139,7 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
           },
         );
       });
-      let storedFile:
-        | Awaited<ReturnType<typeof saveStoredKbFile>>
-        | null = null;
+      let storedFile: Awaited<ReturnType<typeof saveStoredKbFile>> | null = null;
       if (originalFile) {
         const fileMeta = await saveStoredKbFile({
           tenantId,
@@ -1209,14 +1214,13 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
     const scopeTypeParam = c.req.query("scopeType");
     const funnelIdParam = c.req.query("funnelId");
     const stageSlugParam = c.req.query("stageSlug");
-    const scopeFilter =
-      scopeTypeParam
-        ? parseScope({
-            scopeType: scopeTypeParam,
-            funnelId: funnelIdParam,
-            stageSlug: stageSlugParam,
-          })
-        : null;
+    const scopeFilter = scopeTypeParam
+      ? parseScope({
+          scopeType: scopeTypeParam,
+          funnelId: funnelIdParam,
+          stageSlug: stageSlugParam,
+        })
+      : null;
     if (scopeFilter?.error) return c.json({ error: scopeFilter.error }, 400);
     const scopeDb = scopeFilter?.scope ? scopeToDbFields(scopeFilter.scope) : null;
     const funnelFilter = scopeTypeParam ? null : parsePositiveInt(funnelIdParam);

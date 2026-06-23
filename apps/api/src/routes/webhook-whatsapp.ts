@@ -34,10 +34,7 @@ import { resolvePlan } from "../lib/plans.ts";
 import { runPostInboundAutomation } from "../lib/post-inbound-automation.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
 import type { ServiceCatalogRuntime } from "../lib/service-catalog-runtime.ts";
-import {
-  verifyWhatsAppSignature,
-  WhatsAppSignatureError,
-} from "../lib/whatsapp-signature.ts";
+import { verifyWhatsAppSignature, WhatsAppSignatureError } from "../lib/whatsapp-signature.ts";
 
 /**
  * WhatsApp Cloud webhook handler. Meta делает два типа запросов:
@@ -285,7 +282,9 @@ export function makeWhatsAppWebhookRoutes(opts: {
           .catch(() => {});
       }
       if (result.persisted) {
-        const preview = inbound.parts.find((p) => p.kind === "text") as { kind: "text"; text: string } | undefined;
+        const preview = inbound.parts.find((p) => p.kind === "text") as
+          | { kind: "text"; text: string }
+          | undefined;
         adminEventBus.emit({
           type: "new_message",
           tenantId: entry.tenantId,

@@ -20,49 +20,58 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_msgtpl_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-msgtpl-12345";
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
-let token = "";      // tenant A
+let token = ""; // tenant A
 let otherToken = ""; // tenant B (cross-tenant isolation)
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminMessageTemplatesRoutes({ db }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminMessageTemplatesRoutes({ db }));
 
-    const signup = async (email: string) => {
-      const res = await app.request("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password: "strong-pwd-12345" }),
-      });
-      return ((await res.json()) as { token: string }).token;
-    };
+  const signup = async (email: string) => {
+    const res = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: "strong-pwd-12345" }),
+    });
+    return ((await res.json()) as { token: string }).token;
+  };
 
-    token = await signup("tpl-alice@demo.io");
-    otherToken = await signup("tpl-bob@demo.io");
-  },
-  30_000,
-);
+  token = await signup("tpl-alice@demo.io");
+  otherToken = await signup("tpl-bob@demo.io");
+}, 30_000);
 
 afterAll(async () => {
-  if (sql) { await sql.end({ timeout: 0 }).catch(() => {}); sql = null; }
+  if (sql) {
+    await sql.end({ timeout: 0 }).catch(() => {});
+    sql = null;
+  }
 }, 10_000);
 
 function req(tok: string, path: string, init: RequestInit = {}) {

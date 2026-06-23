@@ -47,7 +47,11 @@ function partsFromEvent(channelId: string, ev: FbMessagingEvent): InboundPart[] 
   }
   // quick_reply без текста — трактуем payload как callback_query.
   if (parts.length === 0 && msg.quick_reply) {
-    parts.push({ kind: "callback_query", data: msg.quick_reply.payload, originalMessageId: msg.mid });
+    parts.push({
+      kind: "callback_query",
+      data: msg.quick_reply.payload,
+      originalMessageId: msg.mid,
+    });
   }
   return parts;
 }

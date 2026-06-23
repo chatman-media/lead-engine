@@ -22,7 +22,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_bottest_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-bottest-flow-12345";
 
 let sql: Sql | null = null;
@@ -32,49 +41,46 @@ let appReply: Hono; // с фейковым replyStrategy
 let token = "";
 let tenantId = 0;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminTestRoutes({ db }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminTestRoutes({ db }));
 
-    appReply = new Hono();
-    appReply.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    appReply.route(
-      "/",
-      makeAdminTestRoutes({
-        db,
-        // biome-ignore lint/suspicious/noExplicitAny: reply-strategy fake
-        replyStrategy: {
-          generate: async () => [
-            { channelId: "x", externalUserId: "u", parts: [{ kind: "text", text: "бот ответ" }] },
-          ],
-        } as any,
-      }),
-    );
+  appReply = new Hono();
+  appReply.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  appReply.route(
+    "/",
+    makeAdminTestRoutes({
+      db,
+      // biome-ignore lint/suspicious/noExplicitAny: reply-strategy fake
+      replyStrategy: {
+        generate: async () => [
+          { channelId: "x", externalUserId: "u", parts: [{ kind: "text", text: "бот ответ" }] },
+        ],
+      } as any,
+    }),
+  );
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "bottest@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    token = sba.token;
-    tenantId = sba.admin.tenantId;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "bottest@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  token = sba.token;
+  tenantId = sba.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -83,7 +89,12 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function req(method: string, path: string, body?: unknown, instance?: Hono): Promise<Response> {
+async function req(
+  method: string,
+  path: string,
+  body?: unknown,
+  instance?: Hono,
+): Promise<Response> {
   return (instance ?? app).request(path, {
     method,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -118,7 +129,9 @@ describe("admin-test bot-tester", () => {
   it("POST /send (есть канал, без replyStrategy) → 200 + placeholder", async () => {
     if (!sql) return;
     await withTenant(db, tenantId, async (tx) =>
-      tx.insert(channels).values({ tenantId, kind: "telegram_bot", externalId: "@bottest", status: "active" }),
+      tx
+        .insert(channels)
+        .values({ tenantId, kind: "telegram_bot", externalId: "@bottest", status: "active" }),
     );
     const res = await req("POST", SEND, { text: "привет, хочу обмен" });
     expect(res.status).toBe(200);
@@ -143,7 +156,11 @@ describe("admin-test bot-tester", () => {
       body: "{not json",
     });
     expect(bad.status).toBe(400);
-    const media = await req("POST", SEND, { mediaUrl: "https://x.io/i.jpg", mediaType: "photo", caption: "чек" });
+    const media = await req("POST", SEND, {
+      mediaUrl: "https://x.io/i.jpg",
+      mediaType: "photo",
+      caption: "чек",
+    });
     expect(media.status).toBe(200);
   });
 

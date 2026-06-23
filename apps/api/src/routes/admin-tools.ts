@@ -48,12 +48,7 @@ export function makeAdminToolsRoutes(opts: AdminToolsRoutesOpts): Hono {
       return tx
         .select({ key: tenantSecrets.key })
         .from(tenantSecrets)
-        .where(
-          and(
-            eq(tenantSecrets.tenantId, tenantId),
-            eq(tenantSecrets.key, BOOKING_URL_KEY),
-          ),
-        );
+        .where(and(eq(tenantSecrets.tenantId, tenantId), eq(tenantSecrets.key, BOOKING_URL_KEY)));
     });
 
     const hasBookingUrl = rows.length > 0;
@@ -135,12 +130,7 @@ export function makeAdminToolsRoutes(opts: AdminToolsRoutesOpts): Hono {
     await withTenant(opts.db, tenantId, async (tx) => {
       return tx
         .delete(tenantSecrets)
-        .where(
-          and(
-            eq(tenantSecrets.tenantId, tenantId),
-            eq(tenantSecrets.key, BOOKING_URL_KEY),
-          ),
-        );
+        .where(and(eq(tenantSecrets.tenantId, tenantId), eq(tenantSecrets.key, BOOKING_URL_KEY)));
     });
 
     opts.onReload?.(tenantId);

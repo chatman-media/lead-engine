@@ -27,7 +27,16 @@ import { replyDebounceTick } from "./reply-debounce.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_debounce_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-debounce-12345";
 const TG_SECRET = "tg-debounce-secret-xyz";
 const DELAY_SEC = 3;
@@ -89,13 +98,14 @@ async function convFor(fromId: number) {
     );
   if (!ident) return null;
   const [conv] = await db
-    .select({ id: conversations.id, replyDueAt: conversations.replyDueAt, mode: conversations.mode })
+    .select({
+      id: conversations.id,
+      replyDueAt: conversations.replyDueAt,
+      mode: conversations.mode,
+    })
     .from(conversations)
     .where(
-      and(
-        eq(conversations.userId, ident.contactId),
-        eq(conversations.channelId, channelDbId),
-      ),
+      and(eq(conversations.userId, ident.contactId), eq(conversations.channelId, channelDbId)),
     );
   return conv ?? null;
 }
@@ -153,7 +163,11 @@ beforeAll(async () => {
       .returning();
     return ch!.id;
   });
-  const adapter = new TelegramBotAdapter({ id: String(channelDbId), token: "TKN", fetch: globalThis.fetch });
+  const adapter = new TelegramBotAdapter({
+    id: String(channelDbId),
+    token: "TKN",
+    fetch: globalThis.fetch,
+  });
   entry = {
     tenantId,
     tenantSlug: "demo",

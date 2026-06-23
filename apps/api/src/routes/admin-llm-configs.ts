@@ -39,14 +39,7 @@ export interface AdminLlmConfigsRoutesOpts {
 type Purpose = "chat" | "embed" | "vision" | "judge" | "reranker" | "transcribe";
 type Provider = "openai" | "openrouter" | "ollama" | "anthropic" | "jina" | "cohere";
 
-const PURPOSES: readonly Purpose[] = [
-  "chat",
-  "embed",
-  "vision",
-  "judge",
-  "reranker",
-  "transcribe",
-];
+const PURPOSES: readonly Purpose[] = ["chat", "embed", "vision", "judge", "reranker", "transcribe"];
 const PROVIDERS: readonly Provider[] = [
   "openai",
   "openrouter",

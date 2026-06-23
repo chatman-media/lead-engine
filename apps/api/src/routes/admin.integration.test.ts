@@ -25,7 +25,16 @@ import { makeAdminRoutes } from "./admin.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_admin_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const BASE_DOMAIN = "test.local";
 
 let sql: Sql | null = null;
@@ -38,86 +47,80 @@ let contactId = 0;
 let leadId = 0;
 const nowEpoch = Math.floor(Date.now() / 1000);
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2 });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql);
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2 });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql);
 
-    // Seed: tenant + channel + contact + conversation + message + lead.
-    const [t] = await db
-      .insert(tenants)
-      .values({ slug: "alpha", plan: "free", status: "active", llmBillingMode: "byok" })
-      .returning();
-    tenantId = t.id;
-    const [ch] = await db
-      .insert(channels)
-      .values({
-        tenantId,
-        kind: "telegram_bot",
-        externalId: "alpha_bot",
-        status: "active",
-      })
-      .returning();
-    const [c] = await db
-      .insert(contacts)
-      .values({ tenantId, displayName: "Test User", attributesJson: null })
-      .returning();
-    contactId = c.id;
-    const [conv] = await db
-      .insert(conversations)
-      .values({
-        tenantId,
-        userId: contactId,
-        source: "bot",
-        mode: "ai",
-        lastMessageAt: nowEpoch,
-      })
-      .returning();
-    conversationId = conv.id;
-    await db.insert(messages).values({
+  // Seed: tenant + channel + contact + conversation + message + lead.
+  const [t] = await db
+    .insert(tenants)
+    .values({ slug: "alpha", plan: "free", status: "active", llmBillingMode: "byok" })
+    .returning();
+  tenantId = t.id;
+  const [ch] = await db
+    .insert(channels)
+    .values({
       tenantId,
-      conversationId,
-      role: "user",
-      text: "Привет",
+      kind: "telegram_bot",
+      externalId: "alpha_bot",
+      status: "active",
+    })
+    .returning();
+  const [c] = await db
+    .insert(contacts)
+    .values({ tenantId, displayName: "Test User", attributesJson: null })
+    .returning();
+  contactId = c.id;
+  const [conv] = await db
+    .insert(conversations)
+    .values({
+      tenantId,
+      userId: contactId,
+      source: "bot",
+      mode: "ai",
+      lastMessageAt: nowEpoch,
+    })
+    .returning();
+  conversationId = conv.id;
+  await db.insert(messages).values({
+    tenantId,
+    conversationId,
+    role: "user",
+    text: "Привет",
+    createdAt: nowEpoch,
+  });
+  const [l] = await db
+    .insert(leads)
+    .values({
+      tenantId,
+      userId: contactId,
+      state: "intake_pending",
       createdAt: nowEpoch,
-    });
-    const [l] = await db
-      .insert(leads)
-      .values({
-        tenantId,
-        userId: contactId,
-        state: "intake_pending",
-        createdAt: nowEpoch,
-        updatedAt: nowEpoch,
-      })
-      .returning();
-    leadId = l.id;
-    void ch;
+      updatedAt: nowEpoch,
+    })
+    .returning();
+  leadId = l.id;
+  void ch;
 
-    // Build Hono app — symmetric to apps/api index.ts admin wire-up.
-    app = new Hono();
-    app.use("/admin/*", makeTenantContextMiddleware({ baseDomain: BASE_DOMAIN }));
-    app.use("/admin/*", requireTenant);
-    app.route("/", makeAdminRoutes({ db }));
-  },
-  30_000,
-);
+  // Build Hono app — symmetric to apps/api index.ts admin wire-up.
+  app = new Hono();
+  app.use("/admin/*", makeTenantContextMiddleware({ baseDomain: BASE_DOMAIN }));
+  app.use("/admin/*", requireTenant);
+  app.route("/", makeAdminRoutes({ db }));
+}, 30_000);
 
-afterAll(
-  async () => {
-    if (sql) {
-      await sql.end({ timeout: 0 }).catch(() => {});
-      sql = null;
-    }
-  },
-  10_000,
-);
+afterAll(async () => {
+  if (sql) {
+    await sql.end({ timeout: 0 }).catch(() => {});
+    sql = null;
+  }
+}, 10_000);
 
 function tenantHost(slug: string): string {
   return `${slug}.${BASE_DOMAIN}`;

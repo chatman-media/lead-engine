@@ -44,8 +44,7 @@ let token = "";
 let tenantId = 0;
 
 const fakeTelegramFetch = (async (input: string | URL | Request): Promise<Response> => {
-  const url =
-    typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const m = url.match(/\/bot([^/]+)\/getMe/);
   const tok = m?.[1] ?? "";
   if (tok.startsWith("9999")) {
@@ -63,41 +62,38 @@ const fakeTelegramFetch = (async (input: string | URL | Request): Promise<Respon
   );
 }) as unknown as typeof fetch;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route(
-      "/",
-      makeAdminDiagnosticsRoutes({
-        db,
-        masterKeyHex: MASTER_KEY,
-        fetchImpl: fakeTelegramFetch,
-      }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route(
+    "/",
+    makeAdminDiagnosticsRoutes({
+      db,
+      masterKeyHex: MASTER_KEY,
+      fetchImpl: fakeTelegramFetch,
+    }),
+  );
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "diag@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    token = sba.token;
-    tenantId = sba.admin.tenantId;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "diag@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  token = sba.token;
+  tenantId = sba.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {

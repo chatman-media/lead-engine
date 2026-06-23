@@ -19,33 +19,33 @@
  */
 
 export interface ExchangeGuardrails {
-	/** Макс. |отклонение eff от base|, %. Дефолт 35 — выше похоже на опечатку/глюк. */
-	maxDeviationPct: number;
-	/** Допуск на округление, %. */
-	epsPct: number;
+  /** Макс. |отклонение eff от base|, %. Дефолт 35 — выше похоже на опечатку/глюк. */
+  maxDeviationPct: number;
+  /** Допуск на округление, %. */
+  epsPct: number;
 }
 
 export type RateGuardReason = "nonpositive" | "implausible_deviation";
 
 export interface RateGuardTrip {
-	tripped: boolean;
-	reason?: RateGuardReason;
-	/** Отклонение eff от base, % со знаком (NaN если оценить нельзя). */
-	deviationPct: number;
-	baseRate: number;
-	eff: number;
-	/** Нарушенный порог, для сообщения/алерта. */
-	threshold?: number;
+  tripped: boolean;
+  reason?: RateGuardReason;
+  /** Отклонение eff от base, % со знаком (NaN если оценить нельзя). */
+  deviationPct: number;
+  baseRate: number;
+  eff: number;
+  /** Нарушенный порог, для сообщения/алерта. */
+  threshold?: number;
 }
 
 const DEFAULT_MAX_DEVIATION_PCT = 35;
 const DEFAULT_EPS_PCT = 0.5;
 
 function envNum(key: string, fallback: number): number {
-	const raw = process.env[key];
-	if (raw === undefined || raw === "") return fallback;
-	const n = Number(raw);
-	return Number.isFinite(n) && n > 0 ? n : fallback;
+  const raw = process.env[key];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 /**
@@ -53,13 +53,10 @@ function envNum(key: string, fallback: number): number {
  * per-tenant конфига (UI порогов — #145): передавайте свой объект в computeQuote.
  */
 export function defaultGuardrails(): ExchangeGuardrails {
-	return {
-		maxDeviationPct: envNum(
-			"EXCHANGE_GUARD_MAX_DEVIATION_PCT",
-			DEFAULT_MAX_DEVIATION_PCT,
-		),
-		epsPct: envNum("EXCHANGE_GUARD_EPS_PCT", DEFAULT_EPS_PCT),
-	};
+  return {
+    maxDeviationPct: envNum("EXCHANGE_GUARD_MAX_DEVIATION_PCT", DEFAULT_MAX_DEVIATION_PCT),
+    epsPct: envNum("EXCHANGE_GUARD_EPS_PCT", DEFAULT_EPS_PCT),
+  };
 }
 
 /**
@@ -68,39 +65,39 @@ export function defaultGuardrails(): ExchangeGuardrails {
  * «10 вместо 35»).
  */
 export function checkRateGuard(opts: {
-	eff: number;
-	baseRate: number;
-	mode: "multiply" | "divide";
-	guardrails?: ExchangeGuardrails;
+  eff: number;
+  baseRate: number;
+  mode: "multiply" | "divide";
+  guardrails?: ExchangeGuardrails;
 }): RateGuardTrip {
-	const { eff, baseRate } = opts;
-	const g = opts.guardrails ?? defaultGuardrails();
+  const { eff, baseRate } = opts;
+  const g = opts.guardrails ?? defaultGuardrails();
 
-	if (!Number.isFinite(eff) || eff <= 0) {
-		return {
-			tripped: true,
-			reason: "nonpositive",
-			deviationPct: Number.NaN,
-			baseRate,
-			eff,
-		};
-	}
-	// База невалидна (например, auto-строка ещё не заполнена фидом) — оценить
-	// отклонение нельзя; пусть это ловят другие проверки (eff<=0 / отсутствие курса).
-	if (!Number.isFinite(baseRate) || baseRate <= 0) {
-		return { tripped: false, deviationPct: Number.NaN, baseRate, eff };
-	}
+  if (!Number.isFinite(eff) || eff <= 0) {
+    return {
+      tripped: true,
+      reason: "nonpositive",
+      deviationPct: Number.NaN,
+      baseRate,
+      eff,
+    };
+  }
+  // База невалидна (например, auto-строка ещё не заполнена фидом) — оценить
+  // отклонение нельзя; пусть это ловят другие проверки (eff<=0 / отсутствие курса).
+  if (!Number.isFinite(baseRate) || baseRate <= 0) {
+    return { tripped: false, deviationPct: Number.NaN, baseRate, eff };
+  }
 
-	const deviationPct = (eff / baseRate - 1) * 100;
-	if (Math.abs(deviationPct) > g.maxDeviationPct + g.epsPct) {
-		return {
-			tripped: true,
-			reason: "implausible_deviation",
-			deviationPct,
-			baseRate,
-			eff,
-			threshold: g.maxDeviationPct,
-		};
-	}
-	return { tripped: false, deviationPct, baseRate, eff };
+  const deviationPct = (eff / baseRate - 1) * 100;
+  if (Math.abs(deviationPct) > g.maxDeviationPct + g.epsPct) {
+    return {
+      tripped: true,
+      reason: "implausible_deviation",
+      deviationPct,
+      baseRate,
+      eff,
+      threshold: g.maxDeviationPct,
+    };
+  }
+  return { tripped: false, deviationPct, baseRate, eff };
 }

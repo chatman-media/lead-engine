@@ -39,8 +39,7 @@ import { hashPassword } from "../src/lib/auth.ts";
 import { seedFunnelByKey } from "../src/routes/admin-funnel.ts";
 
 const SLUG = "oleg-demo";
-const url =
-  process.env.DATABASE_URL ?? "postgres://lead:lead@localhost:5434/lead_engine";
+const url = process.env.DATABASE_URL ?? "postgres://lead:lead@localhost:5434/lead_engine";
 const client = postgres(url, { max: 2, prepare: false });
 // biome-ignore lint/suspicious/noExplicitAny: seed script
 const db = drizzle(client) as any;
@@ -188,20 +187,52 @@ type FieldDef = {
 const STAGE_FIELDS: Record<string, FieldDef[]> = {
   new: [
     { slug: "name", displayName: "Имя", fieldType: "text", required: true, ai: true },
-    { slug: "phone", displayName: "Телефон / Telegram", fieldType: "phone", required: true, ai: true },
+    {
+      slug: "phone",
+      displayName: "Телефон / Telegram",
+      fieldType: "phone",
+      required: true,
+      ai: true,
+    },
   ],
   qualify: [
     { slug: "amount", displayName: "Сумма", fieldType: "number", required: true, ai: true },
-    { slug: "currency_from", displayName: "Что отдаёт", fieldType: "select", required: true, ai: true, options: ["USDT", "RUB", "USD", "EUR"] },
-    { slug: "payout_method", displayName: "Способ выдачи", fieldType: "select", required: false, ai: true, options: ["Офис", "Банкомат", "Карта"] },
+    {
+      slug: "currency_from",
+      displayName: "Что отдаёт",
+      fieldType: "select",
+      required: true,
+      ai: true,
+      options: ["USDT", "RUB", "USD", "EUR"],
+    },
+    {
+      slug: "payout_method",
+      displayName: "Способ выдачи",
+      fieldType: "select",
+      required: false,
+      ai: true,
+      options: ["Офис", "Банкомат", "Карта"],
+    },
   ],
   offer: [
     { slug: "exchange_rate", displayName: "Курс", fieldType: "number", required: true },
     { slug: "amount_thb", displayName: "Итог, THB", fieldType: "number", required: true },
-    { slug: "confirmed", displayName: "Клиент подтвердил", fieldType: "boolean", required: true, ai: true },
+    {
+      slug: "confirmed",
+      displayName: "Клиент подтвердил",
+      fieldType: "boolean",
+      required: true,
+      ai: true,
+    },
   ],
   clear: [
-    { slug: "kyc_status", displayName: "Статус KYC", fieldType: "select", required: true, options: ["На проверке", "Пройдено"] },
+    {
+      slug: "kyc_status",
+      displayName: "Статус KYC",
+      fieldType: "select",
+      required: true,
+      options: ["На проверке", "Пройдено"],
+    },
     { slug: "passport_photo", displayName: "Фото паспорта", fieldType: "photo", required: false },
   ],
   fulfill: [
@@ -251,10 +282,7 @@ async function upsertAdmin(
   role: "superadmin" | "manager",
 ): Promise<number> {
   const passwordHash = await hashPassword("test1234");
-  const [existing] = await db
-    .select({ id: admins.id })
-    .from(admins)
-    .where(eq(admins.email, email));
+  const [existing] = await db.select({ id: admins.id }).from(admins).where(eq(admins.email, email));
   if (existing) {
     await db
       .update(admins)
@@ -273,18 +301,8 @@ async function main() {
   const tenantId = await upsertTenant();
   console.log(`[seed] tenant ${SLUG} → id=${tenantId}`);
 
-  const olegId = await upsertAdmin(
-    tenantId,
-    "oleg@demo.io",
-    "Олег Обменников",
-    "superadmin",
-  );
-  const operatorId = await upsertAdmin(
-    tenantId,
-    "operator@demo.io",
-    "Оператор Смены",
-    "manager",
-  );
+  const olegId = await upsertAdmin(tenantId, "oleg@demo.io", "Олег Обменников", "superadmin");
+  const operatorId = await upsertAdmin(tenantId, "operator@demo.io", "Оператор Смены", "manager");
   console.log(`[seed] admins: oleg=${olegId} operator=${operatorId}`);
 
   // Канал + chat-LLM — чтобы пройти onboarding-гейт: кабинет пускает generic-тенанта
@@ -292,11 +310,25 @@ async function main() {
   await withTenant(db, tenantId, async (tx: any) => {
     await tx
       .insert(channels)
-      .values({ tenantId, kind: "web", externalId: SLUG, status: "active", createdAt: now, updatedAt: now })
+      .values({
+        tenantId,
+        kind: "web",
+        externalId: SLUG,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
       .onConflictDoNothing();
     await tx
       .insert(llmProviderConfigs)
-      .values({ tenantId, purpose: "chat", provider: "openai", model: "gpt-4o-mini", createdAt: now, updatedAt: now })
+      .values({
+        tenantId,
+        purpose: "chat",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        createdAt: now,
+        updatedAt: now,
+      })
       .onConflictDoNothing();
   });
 
@@ -343,9 +375,7 @@ async function main() {
             position: p,
             ...(f.options
               ? {
-                  optionsJson: JSON.stringify(
-                    f.options.map((o) => ({ value: o, label: o })),
-                  ),
+                  optionsJson: JSON.stringify(f.options.map((o) => ({ value: o, label: o }))),
                 }
               : {}),
           })

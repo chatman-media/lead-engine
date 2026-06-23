@@ -53,7 +53,12 @@ export async function scoreExchangeDialog(
         payoutCode: exchangeOrders.payoutCode,
       })
       .from(exchangeOrders)
-      .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.conversationId, conversationId)))
+      .where(
+        and(
+          eq(exchangeOrders.tenantId, tenantId),
+          eq(exchangeOrders.conversationId, conversationId),
+        ),
+      )
       .orderBy(asc(exchangeOrders.id))
       .limit(1);
     return {

@@ -24,15 +24,7 @@ if (!databaseUrl) {
 }
 
 const keepData = process.argv.includes("--keep-data");
-const migrationsDir = resolve(
-  __dirname,
-  "..",
-  "..",
-  "..",
-  "packages",
-  "storage",
-  "migrations",
-);
+const migrationsDir = resolve(__dirname, "..", "..", "..", "packages", "storage", "migrations");
 
 async function main() {
   const sql = postgres(databaseUrl as string, { max: 1, prepare: false });
@@ -116,7 +108,9 @@ async function main() {
         process.exit(1);
       }
     }
-    console.log(`[reset] done: applied ${count} new migration(s) (${files.length - count} already applied)`);
+    console.log(
+      `[reset] done: applied ${count} new migration(s) (${files.length - count} already applied)`,
+    );
   }
 
   if (!keepData) {

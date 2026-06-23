@@ -22,7 +22,16 @@ import { makeStripeWebhookRoutes } from "./webhook-stripe.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_stripe_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-stripe-flow-12345";
 const WHSEC = "whsec_test_12345";
 
@@ -47,50 +56,59 @@ async function send(
   const sigMode = opts.sig ?? "valid";
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (sigMode === "valid") headers["Stripe-Signature"] = sign(raw);
-  else if (sigMode === "bad") headers["Stripe-Signature"] = `t=${Math.floor(Date.now() / 1000)},v1=00`;
+  else if (sigMode === "bad")
+    headers["Stripe-Signature"] = `t=${Math.floor(Date.now() / 1000)},v1=00`;
   return (opts.app ?? app).request("/webhook/stripe", { method: "POST", headers, body: raw });
 }
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeStripeWebhookRoutes({ db: db as any, webhookSecret: WHSEC, priceToPlan: { price_pro: "pro" } }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route(
+    "/",
+    makeStripeWebhookRoutes({
+      db: db as any,
+      webhookSecret: WHSEC,
+      priceToPlan: { price_pro: "pro" },
+    }),
+  );
 
-    appMailer = new Hono();
-    appMailer.route(
-      "/",
-      makeStripeWebhookRoutes({
-        // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-        db: db as any,
-        webhookSecret: WHSEC,
-        priceToPlan: { price_pro: "pro" },
-        // biome-ignore lint/suspicious/noExplicitAny: minimal mailer fake
-        mailer: { send: async (m: { to: string; subject: string }) => { sentEmails.push(m); } } as any,
-        appUrl: "https://app.test",
-      }),
-    );
+  appMailer = new Hono();
+  appMailer.route(
+    "/",
+    makeStripeWebhookRoutes({
+      // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+      db: db as any,
+      webhookSecret: WHSEC,
+      priceToPlan: { price_pro: "pro" },
+      // biome-ignore lint/suspicious/noExplicitAny: minimal mailer fake
+      mailer: {
+        send: async (m: { to: string; subject: string }) => {
+          sentEmails.push(m);
+        },
+      } as any,
+      appUrl: "https://app.test",
+    }),
+  );
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "stripe@demo.io", password: "strong-pwd-12345" }),
-    });
-    tenantId = ((await sa.json()) as { admin: { tenantId: number } }).admin.tenantId;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "stripe@demo.io", password: "strong-pwd-12345" }),
+  });
+  tenantId = ((await sa.json()) as { admin: { tenantId: number } }).admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -107,8 +125,14 @@ async function plan(): Promise<string> {
 describe("webhook-stripe", () => {
   it("нет подписи → 400; кривая подпись → 400", async () => {
     if (!sql) return;
-    expect((await send({ id: "evt_x", type: "ping", created: 0, data: { object: {} } }, { sig: "none" })).status).toBe(400);
-    expect((await send({ id: "evt_x", type: "ping", created: 0, data: { object: {} } }, { sig: "bad" })).status).toBe(400);
+    expect(
+      (await send({ id: "evt_x", type: "ping", created: 0, data: { object: {} } }, { sig: "none" }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await send({ id: "evt_x", type: "ping", created: 0, data: { object: {} } }, { sig: "bad" }))
+        .status,
+    ).toBe(400);
   });
 
   it("валидная подпись + битый JSON → 400", async () => {
@@ -174,15 +198,66 @@ describe("webhook-stripe", () => {
 
   it("customer без mapping / неизвестный customer / без items → 200 (no-op ветки)", async () => {
     if (!sql) return;
-    expect((await send({ id: "evt_c2", type: "customer.created", created: 0, data: { object: { id: "cus_2", metadata: {} } } })).status).toBe(200);
-    expect((await send({ id: "evt_unk", type: "customer.subscription.created", created: 0, data: { object: { id: "sub_unk", customer: "cus_unknown", status: "active", items: { data: [{ price: { id: "price_pro" } }] } } } })).status).toBe(200);
-    expect((await send({ id: "evt_noitems", type: "customer.subscription.updated", created: 0, data: { object: { id: "sub_ni", customer: "cus_1", status: "active", items: { data: [] } } } })).status).toBe(200);
+    expect(
+      (
+        await send({
+          id: "evt_c2",
+          type: "customer.created",
+          created: 0,
+          data: { object: { id: "cus_2", metadata: {} } },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await send({
+          id: "evt_unk",
+          type: "customer.subscription.created",
+          created: 0,
+          data: {
+            object: {
+              id: "sub_unk",
+              customer: "cus_unknown",
+              status: "active",
+              items: { data: [{ price: { id: "price_pro" } }] },
+            },
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await send({
+          id: "evt_noitems",
+          type: "customer.subscription.updated",
+          created: 0,
+          data: {
+            object: { id: "sub_ni", customer: "cus_1", status: "active", items: { data: [] } },
+          },
+        })
+      ).status,
+    ).toBe(200);
   });
 
   it("subscription unpaid → tenant suspended", async () => {
     if (!sql) return;
-    await send({ id: "evt_unpaid", type: "customer.subscription.updated", created: 0, data: { object: { id: "sub_1", customer: "cus_1", status: "unpaid", items: { data: [{ price: { id: "price_pro" } }] } } } });
-    const [t] = await db.select({ status: tenants.status }).from(tenants).where(eq(tenants.id, tenantId));
+    await send({
+      id: "evt_unpaid",
+      type: "customer.subscription.updated",
+      created: 0,
+      data: {
+        object: {
+          id: "sub_1",
+          customer: "cus_1",
+          status: "unpaid",
+          items: { data: [{ price: { id: "price_pro" } }] },
+        },
+      },
+    });
+    const [t] = await db
+      .select({ status: tenants.status })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
     expect(t!.status).toBe("suspended");
   });
 
@@ -190,11 +265,29 @@ describe("webhook-stripe", () => {
     if (!sql) return;
     sentEmails.length = 0;
     await send(
-      { id: "evt_trial", type: "customer.subscription.trial_will_end", created: 0, data: { object: { id: "sub_1", customer: "cus_1", status: "trialing", trial_end: Math.floor(Date.now() / 1000) + 3 * 86400, items: { data: [{ price: { id: "price_pro" } }] } } } },
+      {
+        id: "evt_trial",
+        type: "customer.subscription.trial_will_end",
+        created: 0,
+        data: {
+          object: {
+            id: "sub_1",
+            customer: "cus_1",
+            status: "trialing",
+            trial_end: Math.floor(Date.now() / 1000) + 3 * 86400,
+            items: { data: [{ price: { id: "price_pro" } }] },
+          },
+        },
+      },
       { app: appMailer },
     );
     await send(
-      { id: "evt_pf", type: "invoice.payment_failed", created: 0, data: { object: { customer: "cus_1" } } },
+      {
+        id: "evt_pf",
+        type: "invoice.payment_failed",
+        created: 0,
+        data: { object: { customer: "cus_1" } },
+      },
       { app: appMailer },
     );
     expect(sentEmails.length).toBe(2);

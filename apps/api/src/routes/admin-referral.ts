@@ -88,7 +88,10 @@ export function makeAdminReferralRoutes(opts: AdminReferralRoutesOpts): Hono {
       throw err;
     }
 
-    return c.json({ item: { id: row.id, code: row.code, usesCount: row.usesCount, createdAt: row.createdAt } }, 201);
+    return c.json(
+      { item: { id: row.id, code: row.code, usesCount: row.usesCount, createdAt: row.createdAt } },
+      201,
+    );
   });
 
   /**

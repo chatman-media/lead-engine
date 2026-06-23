@@ -5,11 +5,7 @@ import {
 import { and, desc, eq, type SQL } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
-export type AgentToolCallSource =
-  | "rag_reply"
-  | "llm_reply"
-  | "admin_sim"
-  | "self_play";
+export type AgentToolCallSource = "rag_reply" | "llm_reply" | "admin_sim" | "self_play";
 
 export interface AgentToolCallRow {
   id: number;
@@ -106,10 +102,7 @@ export class AgentToolCallsRepo {
       .select()
       .from(agentToolCallsTable)
       .where(
-        and(
-          eq(agentToolCallsTable.tenantId, this.ctx.tenantId),
-          eq(agentToolCallsTable.id, id),
-        ),
+        and(eq(agentToolCallsTable.tenantId, this.ctx.tenantId), eq(agentToolCallsTable.id, id)),
       )
       .limit(1);
     return (row as AgentToolCallRow | undefined) ?? null;
@@ -142,9 +135,7 @@ export class AgentToolCallsRepo {
   }
 
   async list(opts: AgentToolCallListOpts = {}): Promise<AgentToolCallRow[]> {
-    const filters: SQL<unknown>[] = [
-      eq(agentToolCallsTable.tenantId, this.ctx.tenantId),
-    ];
+    const filters: SQL<unknown>[] = [eq(agentToolCallsTable.tenantId, this.ctx.tenantId)];
     if (opts.conversationId !== undefined) {
       filters.push(eq(agentToolCallsTable.conversationId, opts.conversationId));
     }
@@ -200,10 +191,7 @@ export class AgentToolCallsRepo {
     return (row as AgentToolCallFeedbackRow | undefined) ?? null;
   }
 
-  async feedbackForToolCall(
-    toolCallId: number,
-    limit = 50,
-  ): Promise<AgentToolCallFeedbackRow[]> {
+  async feedbackForToolCall(toolCallId: number, limit = 50): Promise<AgentToolCallFeedbackRow[]> {
     const cappedLimit = Math.min(Math.max(Math.trunc(limit), 1), 200);
     const rows = await this.ctx.db
       .select()

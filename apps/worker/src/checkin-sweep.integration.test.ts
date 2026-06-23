@@ -100,18 +100,34 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   enabled = true;
   const now = Math.floor(Date.now() / 1000);
 
-  const [t] = await db.insert(tenants).values({ slug: `chk-${now}` }).returning({ id: tenants.id });
+  const [t] = await db
+    .insert(tenants)
+    .values({ slug: `chk-${now}` })
+    .returning({ id: tenants.id });
   tenantId = t!.id;
-  const [f] = await db.insert(funnels).values({ tenantId, slug: `f-${now}` }).returning({ id: funnels.id });
+  const [f] = await db
+    .insert(funnels)
+    .values({ tenantId, slug: `f-${now}` })
+    .returning({ id: funnels.id });
   const [st] = await db
     .insert(stageDefinitions)
-    .values({ tenantId, funnelId: f!.id, slug: "active", displayName: "Active", kind: "active", checkinIntervalDays: 1 })
+    .values({
+      tenantId,
+      funnelId: f!.id,
+      slug: "active",
+      displayName: "Active",
+      kind: "active",
+      checkinIntervalDays: 1,
+    })
     .returning({ id: stageDefinitions.id });
   const [c] = await db.insert(contacts).values({ tenantId }).returning({ id: contacts.id });
   // updated_at 2 дня назад → overdue при interval=1
@@ -124,7 +140,9 @@ beforeAll(async () => {
     .insert(channels)
     .values({ tenantId, kind: "telegram_bot", externalId: `bot-${now}`, status: "active" })
     .returning({ id: channels.id });
-  await db.insert(channelIdentities).values({ contactId: c!.id, channelId: ch!.id, externalUserId: "tg-1" });
+  await db
+    .insert(channelIdentities)
+    .values({ contactId: c!.id, channelId: ch!.id, externalUserId: "tg-1" });
   await db.insert(conversations).values({ tenantId, userId: c!.id, source: "bot", mode: "ai" });
 }, 30_000);
 
@@ -138,7 +156,10 @@ describe("CheckinSweeper.sweep (интеграция)", () => {
     const sweeper = new CheckinSweeper(db, { intervalMs: 1, messageText: "ping" });
     await runSweep(sweeper);
 
-    const queued = await db.select().from(outboundQueue).where(eq(outboundQueue.tenantId, tenantId));
+    const queued = await db
+      .select()
+      .from(outboundQueue)
+      .where(eq(outboundQueue.tenantId, tenantId));
     expect(queued.length).toBe(1);
     expect(queued[0]!.payloadJson).toContain("ping");
 
@@ -154,7 +175,10 @@ describe("CheckinSweeper.sweep (интеграция)", () => {
   it("жёсткий лимит: ≤ maxCheckinsPerStage пингов на стадию, сброс при смене стадии", async () => {
     if (!enabled) return;
     const now = Math.floor(Date.now() / 1000);
-    const [t] = await db.insert(tenants).values({ slug: `chk-cap-${now}` }).returning({ id: tenants.id });
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `chk-cap-${now}` })
+      .returning({ id: tenants.id });
     const tid = t!.id;
     const [f] = await db
       .insert(funnels)
@@ -179,22 +203,43 @@ describe("CheckinSweeper.sweep (интеграция)", () => {
     const [c] = await db.insert(contacts).values({ tenantId: tid }).returning({ id: contacts.id });
     const [l] = await db
       .insert(leads)
-      .values({ tenantId: tid, userId: c!.id, stageDefinitionId: stage1, updatedAt: now - 2 * 86400 })
+      .values({
+        tenantId: tid,
+        userId: c!.id,
+        stageDefinitionId: stage1,
+        updatedAt: now - 2 * 86400,
+      })
       .returning({ id: leads.id });
     const lid = l!.id;
     const [ch] = await db
       .insert(channels)
-      .values({ tenantId: tid, kind: "telegram_bot", externalId: `bot-cap-${now}`, status: "active" })
+      .values({
+        tenantId: tid,
+        kind: "telegram_bot",
+        externalId: `bot-cap-${now}`,
+        status: "active",
+      })
       .returning({ id: channels.id });
-    await db.insert(channelIdentities).values({ contactId: c!.id, channelId: ch!.id, externalUserId: "tg-cap" });
-    await db.insert(conversations).values({ tenantId: tid, userId: c!.id, source: "bot", mode: "ai" });
+    await db
+      .insert(channelIdentities)
+      .values({ contactId: c!.id, channelId: ch!.id, externalUserId: "tg-cap" });
+    await db
+      .insert(conversations)
+      .values({ tenantId: tid, userId: c!.id, source: "bot", mode: "ai" });
 
     // cap = 2. Между проходами «отматываем» last_checkin_at в прошлое, чтобы лид
     // снова стал overdue (внутри суток idempotencyKey дедупит саму отправку, но
     // checkin_count обновляется при каждом выборе лида — на нём и проверяем).
-    const sweeper = new CheckinSweeper(db, { intervalMs: 1, messageText: "ping", maxCheckinsPerStage: 2 });
+    const sweeper = new CheckinSweeper(db, {
+      intervalMs: 1,
+      messageText: "ping",
+      maxCheckinsPerStage: 2,
+    });
     const overdueAgain = () =>
-      db.update(leads).set({ lastCheckinAt: now - 2 * 86400 }).where(eq(leads.id, lid));
+      db
+        .update(leads)
+        .set({ lastCheckinAt: now - 2 * 86400 })
+        .where(eq(leads.id, lid));
     const leadRow = async () => (await db.select().from(leads).where(eq(leads.id, lid)))[0];
 
     await runSweep(sweeper);
@@ -220,7 +265,10 @@ describe("CheckinSweeper.sweep (интеграция)", () => {
   it("нет overdue-лидов у другого (пустого) тенанта → без отправок", async () => {
     if (!enabled) return;
     const now = Math.floor(Date.now() / 1000);
-    const [t2] = await db.insert(tenants).values({ slug: `chk-empty-${now}` }).returning({ id: tenants.id });
+    const [t2] = await db
+      .insert(tenants)
+      .values({ slug: `chk-empty-${now}` })
+      .returning({ id: tenants.id });
     const sweeper = new CheckinSweeper(db, { intervalMs: 1 });
     await runSweep(sweeper);
     const q = await db.select().from(outboundQueue).where(eq(outboundQueue.tenantId, t2!.id));
@@ -251,14 +299,19 @@ describe("CheckinSweeper.sweep (интеграция)", () => {
       })
       .returning({ id: stageDefinitions.id });
     const [c] = await db.insert(contacts).values({ tenantId: tid }).returning({ id: contacts.id });
-    await db
-      .insert(leads)
-      .values({ tenantId: tid, userId: c!.id, stageDefinitionId: st!.id, updatedAt: now - 2 * 86400 });
+    await db.insert(leads).values({
+      tenantId: tid,
+      userId: c!.id,
+      stageDefinitionId: st!.id,
+      updatedAt: now - 2 * 86400,
+    });
     const [ch] = await db
       .insert(channels)
       .values({ tenantId: tid, kind: "telegram_bot", externalId: `bot-a-${now}`, status: "active" })
       .returning({ id: channels.id });
-    await db.insert(channelIdentities).values({ contactId: c!.id, channelId: ch!.id, externalUserId: "tg-a" });
+    await db
+      .insert(channelIdentities)
+      .values({ contactId: c!.id, channelId: ch!.id, externalUserId: "tg-a" });
     // Диалог со СВЕЖИМ сообщением — клиент в живой переписке.
     await db
       .insert(conversations)

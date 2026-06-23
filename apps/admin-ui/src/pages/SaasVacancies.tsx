@@ -7,7 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangleIcon, ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  ExternalLinkIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -56,7 +63,9 @@ export function SaasVacancies() {
     }
   }
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    reload();
+  }, []);
 
   function openNew() {
     setEditing("new");
@@ -82,8 +91,14 @@ export function SaasVacancies() {
   }
 
   async function handleSave() {
-    if (!formTitle.trim()) { setFormError("Введите название"); return; }
-    if (!formBody.trim()) { setFormError("Введите описание"); return; }
+    if (!formTitle.trim()) {
+      setFormError("Введите название");
+      return;
+    }
+    if (!formBody.trim()) {
+      setFormError("Введите описание");
+      return;
+    }
     setSaving(true);
     setFormError("");
     try {
@@ -158,7 +173,9 @@ export function SaasVacancies() {
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">
-                {editing === "new" ? "Новая запись" : `Редактировать: ${(editing as VacancyItem).title}`}
+                {editing === "new"
+                  ? "Новая запись"
+                  : `Редактировать: ${(editing as VacancyItem).title}`}
               </CardTitle>
               <Button variant="ghost" size="icon" className="size-6" onClick={closeForm}>
                 <XIcon className="size-3.5" />
@@ -195,18 +212,12 @@ export function SaasVacancies() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <Switch
-                id="vacancy-active"
-                checked={formActive}
-                onCheckedChange={setFormActive}
-              />
+              <Switch id="vacancy-active" checked={formActive} onCheckedChange={setFormActive} />
               <Label htmlFor="vacancy-active" className="text-xs cursor-pointer">
                 Активна (бот использует при поиске)
               </Label>
             </div>
-            {formError && (
-              <p className="text-xs text-destructive">{formError}</p>
-            )}
+            {formError && <p className="text-xs text-destructive">{formError}</p>}
             <div className="flex gap-2 pt-1">
               <Button size="sm" disabled={saving} onClick={handleSave}>
                 {saving ? "Сохранение…" : "Сохранить"}
@@ -253,9 +264,13 @@ export function SaasVacancies() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <CardTitle className="text-sm">{v.title}</CardTitle>
                       {v.isActive ? (
-                        <Badge variant="secondary" className="text-xs">Активна</Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          Активна
+                        </Badge>
                       ) : (
-                        <Badge variant="outline" className="text-xs text-muted-foreground">Архив</Badge>
+                        <Badge variant="outline" className="text-xs text-muted-foreground">
+                          Архив
+                        </Badge>
                       )}
                       {v.url && (
                         <a
@@ -297,7 +312,11 @@ export function SaasVacancies() {
                         <Button size="sm" variant="destructive" onClick={() => handleDelete(v)}>
                           Да
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteVacancyId(null)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setConfirmDeleteVacancyId(null)}
+                        >
                           Нет
                         </Button>
                       </div>

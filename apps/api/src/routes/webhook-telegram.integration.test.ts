@@ -24,7 +24,16 @@ import { makeTelegramWebhookRoutes } from "./webhook-telegram.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_tgwh_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-tgwh-flow-12345";
 const TG_SECRET = "tg-webhook-secret-xyz";
 
@@ -40,7 +49,12 @@ let rlAllow = true;
 let fieldExtractCalled = false;
 let appFullEvents: string[] = [];
 
-async function post(slug: string, body: unknown, secret: string | null, instance?: Hono): Promise<Response> {
+async function post(
+  slug: string,
+  body: unknown,
+  secret: string | null,
+  instance?: Hono,
+): Promise<Response> {
   return (instance ?? app).request(`/webhook/telegram/${slug}`, {
     method: "POST",
     headers: {
@@ -64,79 +78,96 @@ function tgUpdate(text: string, fromId = 7): unknown {
   };
 }
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    const channelsStub = {
-      getTelegramBotsByTenant: (slug: string) => (slug === "demo" && entry ? [entry] : []),
-      // biome-ignore lint/suspicious/noExplicitAny: minimal ChannelRegistry stub
-    } as any;
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeTelegramWebhookRoutes({ db: db as any, channels: channelsStub, webhookSecret: TG_SECRET }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  const channelsStub = {
+    getTelegramBotsByTenant: (slug: string) => (slug === "demo" && entry ? [entry] : []),
+    // biome-ignore lint/suspicious/noExplicitAny: minimal ChannelRegistry stub
+  } as any;
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route(
+    "/",
+    makeTelegramWebhookRoutes({ db: db as any, channels: channelsStub, webhookSecret: TG_SECRET }),
+  );
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "tgwh@demo.io", password: "strong-pwd-12345" }),
-    });
-    tenantId = ((await sa.json()) as { admin: { tenantId: number } }).admin.tenantId;
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "tgwh@demo.io", password: "strong-pwd-12345" }),
+  });
+  tenantId = ((await sa.json()) as { admin: { tenantId: number } }).admin.tenantId;
 
-    const channelDbId = await withTenant(db, tenantId, async (tx) => {
-      const [ch] = await tx
-        .insert(channels)
-        .values({ tenantId, kind: "telegram_bot", externalId: "@demobot", status: "active" })
-        .returning();
-      return ch!.id;
-    });
+  const channelDbId = await withTenant(db, tenantId, async (tx) => {
+    const [ch] = await tx
+      .insert(channels)
+      .values({ tenantId, kind: "telegram_bot", externalId: "@demobot", status: "active" })
+      .returning();
+    return ch!.id;
+  });
 
-    const adapter = new TelegramBotAdapter({ id: String(channelDbId), token: "TKN", fetch: globalThis.fetch });
-    entry = {
-      tenantId,
-      tenantSlug: "demo",
-      channelDbId,
-      kind: "telegram_bot",
-      externalId: "@demobot",
-      tenantPlan: "free",
-      adapter,
-    };
+  const adapter = new TelegramBotAdapter({
+    id: String(channelDbId),
+    token: "TKN",
+    fetch: globalThis.fetch,
+  });
+  entry = {
+    tenantId,
+    tenantSlug: "demo",
+    channelDbId,
+    kind: "telegram_bot",
+    externalId: "@demobot",
+    tenantPlan: "free",
+    adapter,
+  };
 
-    appFull = new Hono();
-    appFull.route(
-      "/",
-      makeTelegramWebhookRoutes({
-        // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-        db: db as any,
-        channels: channelsStub,
-        webhookSecret: TG_SECRET,
-        // biome-ignore lint/suspicious/noExplicitAny: rate-limiter fake
-        rateLimiter: { check: () => (rlAllow ? { allowed: true } : { allowed: false, reason: "test", retryAfterSec: 30 }) } as any,
-        // biome-ignore lint/suspicious/noExplicitAny: reply-strategy fake
-        replyStrategy: { generate: async () => { appFullEvents.push("reply"); return []; } } as any,
-        // biome-ignore lint/suspicious/noExplicitAny: field-extractor fake
-        fieldExtractor: { extract: async () => { fieldExtractCalled = true; appFullEvents.push("field"); } } as any,
-        // biome-ignore lint/suspicious/noExplicitAny: service catalog fake
-        serviceCatalogRuntime: {
-          extract: async () => {
-            appFullEvents.push("catalog");
-            return { created: [], skipped: [] };
-          },
-        } as any,
-      }),
-    );
-  },
-  30_000,
-);
+  appFull = new Hono();
+  appFull.route(
+    "/",
+    makeTelegramWebhookRoutes({
+      // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+      db: db as any,
+      channels: channelsStub,
+      webhookSecret: TG_SECRET,
+      // biome-ignore lint/suspicious/noExplicitAny: rate-limiter fake
+      rateLimiter: {
+        check: () =>
+          rlAllow ? { allowed: true } : { allowed: false, reason: "test", retryAfterSec: 30 },
+      } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: reply-strategy fake
+      replyStrategy: {
+        generate: async () => {
+          appFullEvents.push("reply");
+          return [];
+        },
+      } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: field-extractor fake
+      fieldExtractor: {
+        extract: async () => {
+          fieldExtractCalled = true;
+          appFullEvents.push("field");
+        },
+      } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: service catalog fake
+      serviceCatalogRuntime: {
+        extract: async () => {
+          appFullEvents.push("catalog");
+          return { created: [], skipped: [] };
+        },
+      } as any,
+    }),
+  );
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -170,7 +201,10 @@ describe("webhook-telegram", () => {
     expect(body.processed).toBe(true);
     expect(body.result?.persisted).toBe(true);
 
-    const rows = await db.select({ id: messages.id }).from(messages).where(eq(messages.tenantId, tenantId));
+    const rows = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.tenantId, tenantId));
     expect(rows.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -193,7 +227,9 @@ describe("webhook-telegram", () => {
       TG_SECRET,
     );
     expect(sent.status).toBe(200);
-    expect(((await sent.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(true);
+    expect(((await sent.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(
+      true,
+    );
 
     const editedUpdate = {
       update_id: Math.floor(Math.random() * 1e9),
@@ -207,7 +243,9 @@ describe("webhook-telegram", () => {
     };
     const editRes = await post("demo", editedUpdate, TG_SECRET);
     expect(editRes.status).toBe(200);
-    expect(((await editRes.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(true);
+    expect(((await editRes.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(
+      true,
+    );
 
     const userRows = await db
       .select({ id: messages.id, text: messages.text, metaJson: messages.metaJson })
@@ -227,7 +265,9 @@ describe("webhook-telegram", () => {
     // Ретрай той же правки (тот же текст) — идемпотентно: persisted=false, без дублей.
     const retry = await post("demo", editedUpdate, TG_SECRET);
     expect(retry.status).toBe(200);
-    expect(((await retry.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(false);
+    expect(((await retry.json()) as { result?: { persisted?: boolean } }).result?.persisted).toBe(
+      false,
+    );
     const after = await db
       .select({ id: messages.id })
       .from(messages)

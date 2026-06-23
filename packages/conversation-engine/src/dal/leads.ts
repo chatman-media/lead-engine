@@ -47,9 +47,7 @@ export class LeadsRepo {
     const [row] = await this.ctx.db
       .select()
       .from(leadsTable)
-      .where(
-        and(eq(leadsTable.tenantId, this.ctx.tenantId), eq(leadsTable.userId, contactId)),
-      )
+      .where(and(eq(leadsTable.tenantId, this.ctx.tenantId), eq(leadsTable.userId, contactId)))
       .orderBy(desc(leadsTable.updatedAt))
       .limit(1);
     return (row as LeadRow) ?? null;
@@ -60,18 +58,13 @@ export class LeadsRepo {
     const rows = await this.ctx.db
       .select()
       .from(leadsTable)
-      .where(
-        and(eq(leadsTable.tenantId, this.ctx.tenantId), eq(leadsTable.userId, contactId)),
-      )
+      .where(and(eq(leadsTable.tenantId, this.ctx.tenantId), eq(leadsTable.userId, contactId)))
       .orderBy(desc(leadsTable.updatedAt));
     return rows as LeadRow[];
   }
 
   /** Самый свежий лид контакта заданного request_type (concierge). */
-  async findByContactAndType(
-    contactId: number,
-    requestType: string,
-  ): Promise<LeadRow | null> {
+  async findByContactAndType(contactId: number, requestType: string): Promise<LeadRow | null> {
     const [row] = await this.ctx.db
       .select()
       .from(leadsTable)

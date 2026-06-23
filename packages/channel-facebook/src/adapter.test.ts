@@ -39,7 +39,9 @@ function adapter(fetchImpl: typeof globalThis.fetch): MessengerAdapter {
 
 describe("MessengerAdapter", () => {
   it("send text → POST /me/messages с RESPONSE + Bearer", async () => {
-    const { fetch, calls } = fakeFetch([{ status: 200, body: { recipient_id: "PSID", message_id: "m.OUT.1" } }]);
+    const { fetch, calls } = fakeFetch([
+      { status: 200, body: { recipient_id: "PSID", message_id: "m.OUT.1" } },
+    ]);
     const a = adapter(fetch);
     const sent = await a.send({
       channelId: "fb1",
@@ -69,7 +71,9 @@ describe("MessengerAdapter", () => {
     });
     expect(calls[0]?.body).toMatchObject({
       recipient: { id: "PSID" },
-      message: { attachment: { type: "image", payload: { url: "https://cdn/i.jpg", is_reusable: false } } },
+      message: {
+        attachment: { type: "image", payload: { url: "https://cdn/i.jpg", is_reusable: false } },
+      },
     });
   });
 
@@ -102,13 +106,15 @@ describe("MessengerAdapter", () => {
   it("send с пустыми parts → ошибка", async () => {
     const { fetch } = fakeFetch([]);
     const a = adapter(fetch);
-    await expect(
-      a.send({ channelId: "fb1", externalUserId: "PSID", parts: [] }),
-    ).rejects.toThrow(/non-empty/);
+    await expect(a.send({ channelId: "fb1", externalUserId: "PSID", parts: [] })).rejects.toThrow(
+      /non-empty/,
+    );
   });
 
   it("non-2xx от Send API → MessengerApiError", async () => {
-    const { fetch } = fakeFetch([{ status: 401, body: { error: { message: "Invalid OAuth token" } } }]);
+    const { fetch } = fakeFetch([
+      { status: 401, body: { error: { message: "Invalid OAuth token" } } },
+    ]);
     const a = adapter(fetch);
     await expect(
       a.send({ channelId: "fb1", externalUserId: "PSID", parts: [{ kind: "text", text: "x" }] }),
@@ -116,7 +122,7 @@ describe("MessengerAdapter", () => {
   });
 
   it("rawClient отдаёт нижележащий MessengerClient", () => {
-    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const a = adapter((async () => new Response("{}")) as unknown as typeof fetch);
     expect(a.rawClient).toBeDefined();
     expect(typeof a.rawClient.sendText).toBe("function");
   });
@@ -145,7 +151,7 @@ describe("MessengerAdapter", () => {
   });
 
   it("edit/delete → not supported", async () => {
-    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const a = adapter((async () => new Response("{}")) as unknown as typeof fetch);
     await expect(
       a.edit({ channelId: "fb1", externalUserId: "1", externalMessageId: "2", text: "x" }),
     ).rejects.toThrow(/edit not supported/);
@@ -169,7 +175,7 @@ describe("MessengerAdapter", () => {
   });
 
   it("pushUpdate при ожидающем receive() резолвит waiter напрямую", async () => {
-    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const a = adapter((async () => new Response("{}")) as unknown as typeof fetch);
     const iter = a.receive()[Symbol.asyncIterator]();
     const pending = iter.next();
     a.pushUpdate({
@@ -195,7 +201,7 @@ describe("MessengerAdapter", () => {
   });
 
   it("receive: уже aborted signal → done; abort во время ожидания → done", async () => {
-    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const a = adapter((async () => new Response("{}")) as unknown as typeof fetch);
     const aborted = new AbortController();
     aborted.abort();
     expect((await a.receive(aborted.signal)[Symbol.asyncIterator]().next()).done).toBe(true);
@@ -208,7 +214,7 @@ describe("MessengerAdapter", () => {
   });
 
   it("close() при ожидающем receive() → done; после close receive сразу done", async () => {
-    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const a = adapter((async () => new Response("{}")) as unknown as typeof fetch);
     const iter = a.receive()[Symbol.asyncIterator]();
     const pending = iter.next();
     a.close();
@@ -217,7 +223,7 @@ describe("MessengerAdapter", () => {
   });
 
   it("pushUpdate + receive() даёт Inbound", async () => {
-    const a = adapter(((async () => new Response("{}", { status: 200 })) as unknown as typeof fetch));
+    const a = adapter((async () => new Response("{}", { status: 200 })) as unknown as typeof fetch);
     const payload: FbWebhookPayload = {
       object: "page",
       entry: [
@@ -245,7 +251,7 @@ describe("MessengerAdapter", () => {
   });
 
   it("capabilities: callbackQuery + typing включены, edit/delete выключены", () => {
-    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const a = adapter((async () => new Response("{}")) as unknown as typeof fetch);
     expect(a.kind).toBe("facebook");
     expect(a.capabilities.callbackQuery).toBe(true);
     expect(a.capabilities.typing).toBe(true);
@@ -278,7 +284,8 @@ describe("verifyWebhookSubscription (Messenger)", () => {
 
   it("mode != subscribe → 400", () => {
     expect(
-      verifyWebhookSubscription({ mode: "x", token: "s", challenge: "c", expectedVerifyToken: "s" }).status,
+      verifyWebhookSubscription({ mode: "x", token: "s", challenge: "c", expectedVerifyToken: "s" })
+        .status,
     ).toBe(400);
   });
 

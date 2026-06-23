@@ -26,9 +26,16 @@ const CONTENT = {
     tg: {
       messages: [
         { from: "user" as const, text: "Хочу попробовать себя в модельном бизнесе" },
-        { from: "bot" as const, text: "Привет! Рада слышать 🌟 Расскажи немного — сколько лет, рост и откуда ты?" },
+        {
+          from: "bot" as const,
+          text: "Привет! Рада слышать 🌟 Расскажи немного — сколько лет, рост и откуда ты?",
+        },
         { from: "user" as const, text: "19 лет, 174 см, Москва" },
-        { from: "bot" as const, text: "Отлично! Работаем с рынками Дубая и Стамбула. Пришли анкету и 3–5 фото 👇", cta: true },
+        {
+          from: "bot" as const,
+          text: "Отлично! Работаем с рынками Дубая и Стамбула. Пришли анкету и 3–5 фото 👇",
+          cta: true,
+        },
       ],
       notify: "🔔 Новый кандидат передан кастинг-директору",
       botName: "ModelingAgency Bot",
@@ -108,7 +115,11 @@ const CONTENT = {
       },
     ],
     faqDemoBtn: "Записаться на демо →",
-    footer: { privacy: "Политика конфиденциальности", terms: "Условия использования", copy: "© 2026 Lead Engine" },
+    footer: {
+      privacy: "Политика конфиденциальности",
+      terms: "Условия использования",
+      copy: "© 2026 Lead Engine",
+    },
   },
   en: {
     nav: { cta: "Try Free" },
@@ -123,9 +134,16 @@ const CONTENT = {
     tg: {
       messages: [
         { from: "user" as const, text: "I want to try modeling" },
-        { from: "bot" as const, text: "Hi! Great to hear 🌟 Tell me — how old are you, your height, and where are you from?" },
+        {
+          from: "bot" as const,
+          text: "Hi! Great to hear 🌟 Tell me — how old are you, your height, and where are you from?",
+        },
         { from: "user" as const, text: "19, 174 cm, Moscow" },
-        { from: "bot" as const, text: "Perfect! We work with Dubai and Istanbul markets. Please send the intake form and 3–5 photos 👇", cta: true },
+        {
+          from: "bot" as const,
+          text: "Perfect! We work with Dubai and Istanbul markets. Please send the intake form and 3–5 photos 👇",
+          cta: true,
+        },
       ],
       notify: "🔔 New candidate passed to casting director",
       botName: "ModelingAgency Bot",
@@ -230,8 +248,12 @@ export default function LandingModeling() {
               </h1>
               <p className="hero-sub">{c.hero.sub}</p>
               <div className="hero-actions">
-                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">{c.hero.ctaPrimary}</a>
-                <a href={DEMO_URL} className="btn btn-secondary btn-lg">{c.hero.ctaSecondary}</a>
+                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">
+                  {c.hero.ctaPrimary}
+                </a>
+                <a href={DEMO_URL} className="btn btn-secondary btn-lg">
+                  {c.hero.ctaSecondary}
+                </a>
               </div>
               <div className="hero-trust">{c.hero.trust}</div>
             </div>

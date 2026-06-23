@@ -12,7 +12,9 @@ function makeChatClient(response: string): ChatClient {
 
 function makeFailingClient(): ChatClient {
   return {
-    complete: async () => { throw new Error("LLM down"); },
+    complete: async () => {
+      throw new Error("LLM down");
+    },
   } as unknown as ChatClient;
 }
 

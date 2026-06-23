@@ -91,7 +91,10 @@ export interface OpsAlertRouterDeps {
    * sink.emit(). Без informer — standalone-поведение (back-compat для тестов).
    */
   informer?: AdminInformerLike;
-  log?: { warn?: (msg: string, ctx?: unknown) => void; info?: (msg: string, ctx?: unknown) => void };
+  log?: {
+    warn?: (msg: string, ctx?: unknown) => void;
+    info?: (msg: string, ctx?: unknown) => void;
+  };
 }
 
 const SEVERITY_EMOJI: Record<OpsSeverity, string> = {
@@ -170,7 +173,10 @@ export class OpsAlertRouter implements OpsAlertSink {
     if (this.suppressed(alert, Date.now())) return;
 
     const owner = await resolveOwnerContacts(this.deps.db, alert.tenantId).catch((err) => {
-      this.deps.log?.warn?.("[ops-alerts] owner resolve failed", { tenantId: alert.tenantId, err: String(err) });
+      this.deps.log?.warn?.("[ops-alerts] owner resolve failed", {
+        tenantId: alert.tenantId,
+        err: String(err),
+      });
       return null;
     });
     if (!owner) return;
@@ -192,7 +198,8 @@ export class OpsAlertRouter implements OpsAlertSink {
     }
 
     // 2. Email — для critical всегда; для warning/info — только как fallback.
-    const emailNeeded = alert.severity === "critical" || (!telegramDelivered && alert.severity !== "info");
+    const emailNeeded =
+      alert.severity === "critical" || (!telegramDelivered && alert.severity !== "info");
     let emailDelivered = false;
     if (emailNeeded && this.deps.email && owner.email) {
       try {
@@ -203,7 +210,10 @@ export class OpsAlertRouter implements OpsAlertSink {
         });
         emailDelivered = true;
       } catch (err) {
-        this.deps.log?.warn?.("[ops-alerts] email send failed", { to: owner.email, err: String(err) });
+        this.deps.log?.warn?.("[ops-alerts] email send failed", {
+          to: owner.email,
+          err: String(err),
+        });
       }
     }
 
@@ -219,7 +229,12 @@ export class OpsAlertRouter implements OpsAlertSink {
 
 /** Самодостаточный HTML операционного алерта (без зависимости от шаблонов apps/api). */
 export function renderOpsEmailHtml(alert: OpsAlert, appUrl: string): string {
-  const color = alert.severity === "critical" ? "#dc2626" : alert.severity === "warning" ? "#d97706" : "#2563eb";
+  const color =
+    alert.severity === "critical"
+      ? "#dc2626"
+      : alert.severity === "warning"
+        ? "#d97706"
+        : "#2563eb";
   return `<!DOCTYPE html><html lang="ru"><body style="margin:0;background:#f4f4f5;font-family:-apple-system,Segoe UI,sans-serif">
   <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)">
     <div style="background:${color};padding:20px 28px;color:#fff;font-size:18px;font-weight:700">${SEVERITY_EMOJI[alert.severity]} ${escapeHtml(alert.title)}</div>
@@ -248,7 +263,12 @@ export class ResendEmailSender implements OpsEmailSender {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: this.from, to: [opts.to], subject: opts.subject, html: opts.html }),
+      body: JSON.stringify({
+        from: this.from,
+        to: [opts.to],
+        subject: opts.subject,
+        html: opts.html,
+      }),
     });
     if (!res.ok) {
       throw new Error(`Resend error ${res.status}: ${await res.text().catch(() => "")}`);

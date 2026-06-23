@@ -62,7 +62,8 @@ export function makeAdminNotificationsRoutes(opts: {
     const rules = await opts.repo.listRules(tenantId);
     const rule = rules.find((r) => r.id === id);
     if (!rule) return c.json({ ok: false, error: "Правило не найдено" }, 404);
-    if (!opts.notificationService) return c.json({ ok: false, error: "Сервис уведомлений не настроен" });
+    if (!opts.notificationService)
+      return c.json({ ok: false, error: "Сервис уведомлений не настроен" });
     const result = await opts.notificationService.sendTestMessage(rule.targetId);
     return c.json(result);
   });
@@ -84,7 +85,9 @@ export function makeAdminNotificationsRoutes(opts: {
     const body = await c.req.json();
     await opts.repo.partialUpdateSettings(adminId, tenantId, {
       ...("telegramChatId" in body ? { telegramChatId: body.telegramChatId } : {}),
-      ...("notifyOnAssignedOnly" in body ? { notifyOnAssignedOnly: body.notifyOnAssignedOnly } : {}),
+      ...("notifyOnAssignedOnly" in body
+        ? { notifyOnAssignedOnly: body.notifyOnAssignedOnly }
+        : {}),
     });
     return c.json({ ok: true });
   });
@@ -146,7 +149,11 @@ export function makeAdminNotificationsRoutes(opts: {
     ) {
       prefs.informerDigestHour = body.informerDigestHour;
     }
-    if (typeof body.informerTz === "string" && body.informerTz.length > 0 && body.informerTz.length <= 64) {
+    if (
+      typeof body.informerTz === "string" &&
+      body.informerTz.length > 0 &&
+      body.informerTz.length <= 64
+    ) {
       prefs.informerTz = body.informerTz;
     }
     if ("informerMutedUntil" in body) {

@@ -81,9 +81,7 @@ export interface QualityLabPairwiseRecord {
   matchB: QualityLabSelfPlayExport;
 }
 
-export type QualityLabJsonlRecord =
-  | QualityLabSelfPlayRecord
-  | QualityLabPairwiseRecord;
+export type QualityLabJsonlRecord = QualityLabSelfPlayRecord | QualityLabPairwiseRecord;
 
 export type ExportableSelfPlayMatch =
   | SelfPlayMatchResult
@@ -136,9 +134,7 @@ export function toQualityLabPairwiseRecord(
   };
 }
 
-export function formatQualityLabJsonl(
-  records: readonly QualityLabJsonlRecord[],
-): string {
+export function formatQualityLabJsonl(records: readonly QualityLabJsonlRecord[]): string {
   if (records.length === 0) return "";
   return `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
 }
@@ -188,9 +184,7 @@ export async function exportSelfPlayMatchesFromRepoJsonl(
       kind: "self_play_match",
       exportedAt: ctx.exportedAt,
       ...(ctx.source ? { source: ctx.source } : {}),
-      match: transcriptUnavailable
-        ? { ...exported, transcriptUnavailable: true }
-        : exported,
+      match: transcriptUnavailable ? { ...exported, transcriptUnavailable: true } : exported,
     });
   }
 
@@ -229,16 +223,12 @@ function toSelfPlayExport(
       },
       fabricationsCaught: match.fabricationsCaught,
       ...(match.warnings.length > 0 ? { warnings: [...match.warnings] } : {}),
-      ...(ctx.includeTranscript
-        ? { transcript: normalizeTranscript(match.transcript) }
-        : {}),
+      ...(ctx.includeTranscript ? { transcript: normalizeTranscript(match.transcript) } : {}),
     };
     return exported;
   }
 
-  const transcript = hasTranscript(match)
-    ? normalizeTranscript(match.transcript)
-    : undefined;
+  const transcript = hasTranscript(match) ? normalizeTranscript(match.transcript) : undefined;
   return {
     matchId: match.id,
     styleSlug: match.style_slug,
@@ -254,9 +244,7 @@ function toSelfPlayExport(
   };
 }
 
-function isRuntimeSelfPlayResult(
-  match: ExportableSelfPlayMatch,
-): match is SelfPlayMatchResult {
+function isRuntimeSelfPlayResult(match: ExportableSelfPlayMatch): match is SelfPlayMatchResult {
   return "styleSlug" in match;
 }
 
@@ -266,9 +254,7 @@ function hasTranscript(
   return Array.isArray((match as SelfPlayMatchRecord).transcript);
 }
 
-function normalizeTranscript(
-  transcript: readonly SelfPlayTurn[],
-): SelfPlayTurn[] {
+function normalizeTranscript(transcript: readonly SelfPlayTurn[]): SelfPlayTurn[] {
   return transcript.map((turn) => ({
     role: turn.role,
     text: turn.text,

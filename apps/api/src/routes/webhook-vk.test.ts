@@ -96,7 +96,11 @@ describe("webhook-vk", () => {
     const res = await routes.request(`/webhook/vk/${SLUG}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "message_typing_state", group_id: Number(GROUP_ID), secret: SECRET }),
+      body: JSON.stringify({
+        type: "message_typing_state",
+        group_id: Number(GROUP_ID),
+        secret: SECRET,
+      }),
     });
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("ok");

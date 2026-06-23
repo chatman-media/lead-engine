@@ -9,12 +9,7 @@ import { generateReplyAndEnqueue } from "./dispatch-reply.ts";
 import type { ReplyStrategy } from "./process-inbound.ts";
 import type { NotificationService } from "./notifications.ts";
 import { systemClock } from "./types.ts";
-import type {
-  ChannelContext,
-  PipelineSink,
-  ProcessInboundResult,
-  TenantContext,
-} from "./types.ts";
+import type { ChannelContext, PipelineSink, ProcessInboundResult, TenantContext } from "./types.ts";
 import { startTypingKeepalive } from "./typing-keepalive.ts";
 import { withTenant } from "./with-tenant.ts";
 
@@ -161,9 +156,7 @@ export async function generateReplyForConversation(
       clock: deps.clock ?? systemClock,
       ...(deps.splitReplies ? { splitReplies: true } : {}),
       ...(deps.fallbackText ? { fallbackText: deps.fallbackText } : {}),
-      ...(deps.handoffAfterFallbacks
-        ? { handoffAfterFallbacks: deps.handoffAfterFallbacks }
-        : {}),
+      ...(deps.handoffAfterFallbacks ? { handoffAfterFallbacks: deps.handoffAfterFallbacks } : {}),
       ...(deps.sink ? { sink: deps.sink } : {}),
     });
   } finally {

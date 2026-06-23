@@ -655,10 +655,7 @@ export function SaasFaq() {
       )}
 
       <div
-        className={cn(
-          "grid gap-6",
-          suggestions.length > 0 && "xl:grid-cols-[minmax(0,1fr)_360px]",
-        )}
+        className={cn("grid gap-6", suggestions.length > 0 && "xl:grid-cols-[minmax(0,1fr)_360px]")}
       >
         <div className="space-y-6">
           <Card>
@@ -744,9 +741,13 @@ export function SaasFaq() {
                 <span className="text-xs text-muted-foreground">
                   .txt, .md, .json, .pdf · до {formatBytes(storageStats.maxUploadBytes)}
                 </span>
-                <span className="text-xs text-muted-foreground">оригинал сохраняется на сервере</span>
+                <span className="text-xs text-muted-foreground">
+                  оригинал сохраняется на сервере
+                </span>
                 {fileUploadNotice && (
-                  <span className="max-w-full truncate text-xs text-primary">{fileUploadNotice}</span>
+                  <span className="max-w-full truncate text-xs text-primary">
+                    {fileUploadNotice}
+                  </span>
                 )}
                 <input
                   type="file"
@@ -873,7 +874,10 @@ export function SaasFaq() {
                     </p>
                   ) : (
                     kbSearchHits.map((hit) => (
-                      <div key={`${hit.chunkId}-${hit.rank}`} className="rounded-md border px-3 py-3">
+                      <div
+                        key={`${hit.chunkId}-${hit.rank}`}
+                        className="rounded-md border px-3 py-3"
+                      >
                         <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           <Badge variant="secondary">#{hit.rank}</Badge>
                           <Badge variant="outline">{scopeLabel(hit)}</Badge>
@@ -1049,11 +1053,14 @@ export function SaasFaq() {
         )}
       </div>
 
-      <Dialog open={viewingDoc !== null || viewError.length > 0} onOpenChange={(open) => {
-        if (!open) {
-          closeViewer();
-        }
-      }}>
+      <Dialog
+        open={viewingDoc !== null || viewError.length > 0}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeViewer();
+          }
+        }}
+      >
         <DialogContent className="max-h-[86vh] max-w-4xl overflow-hidden p-0">
           <DialogHeader className="border-b px-5 py-4">
             <DialogTitle>{viewingDoc?.title ?? "Документ"}</DialogTitle>
@@ -1075,7 +1082,9 @@ export function SaasFaq() {
                 )}
                 {viewingDoc.topic && <Badge variant="outline">{viewingDoc.topic}</Badge>}
                 <span className="font-mono">{viewingDoc.source}</span>
-                {viewingDoc.fileSizeBytes !== null && <span>{formatBytes(viewingDoc.fileSizeBytes)}</span>}
+                {viewingDoc.fileSizeBytes !== null && (
+                  <span>{formatBytes(viewingDoc.fileSizeBytes)}</span>
+                )}
                 {viewingDoc.hasStoredFile && originalFileUrl && (
                   <>
                     <a
@@ -1217,7 +1226,10 @@ function MarkdownPreview({ text }: { text: string }) {
       }
       if (i < lines.length) i++;
       blocks.push(
-        <pre key={blocks.length} className="overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
+        <pre
+          key={blocks.length}
+          className="overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs"
+        >
           {code.join("\n")}
         </pre>,
       );
@@ -1282,7 +1294,10 @@ function MarkdownPreview({ text }: { text: string }) {
         i++;
       }
       blocks.push(
-        <blockquote key={blocks.length} className="border-l-2 pl-3 text-sm leading-6 text-muted-foreground">
+        <blockquote
+          key={blocks.length}
+          className="border-l-2 pl-3 text-sm leading-6 text-muted-foreground"
+        >
           {quote.map((part, idx) => (
             <p key={idx}>{renderInline(part)}</p>
           ))}

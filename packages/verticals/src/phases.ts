@@ -34,21 +34,17 @@ export const REQUIRED_ACTIVE_PHASES: readonly ActivePhase[] = ["qualify", "offer
 /** Индекс фазы в костяке — для проверки монотонности по position. */
 const _order = {} as Record<FunnelPhase, number>;
 for (let i = 0; i < FUNNEL_PHASES.length; i++) _order[FUNNEL_PHASES[i]!] = i;
-export const PHASE_ORDER: Readonly<Record<FunnelPhase, number>> =
-  Object.freeze(_order);
+export const PHASE_ORDER: Readonly<Record<FunnelPhase, number>> = Object.freeze(_order);
 
 /** kind → якорная фаза. active якоря не имеет — фаза берётся из колонки phase. */
-export const KIND_TO_ANCHOR_PHASE: Readonly<Record<string, FunnelPhase>> =
-  Object.freeze({
-    intake: "capture",
-    terminal_won: "won",
-    terminal_lost: "lost",
-  });
+export const KIND_TO_ANCHOR_PHASE: Readonly<Record<string, FunnelPhase>> = Object.freeze({
+  intake: "capture",
+  terminal_won: "won",
+  terminal_lost: "lost",
+});
 
 export function isActivePhase(v: unknown): v is ActivePhase {
-  return (
-    typeof v === "string" && (ACTIVE_PHASES as readonly string[]).includes(v)
-  );
+  return typeof v === "string" && (ACTIVE_PHASES as readonly string[]).includes(v);
 }
 
 /** Минимальная форма стадии, достаточная для классификации по фазе. */
@@ -107,9 +103,7 @@ function guessPhaseByType(
     case "payment":
       return "fulfill";
     case "waiting":
-      return prevPhase && PHASE_ORDER[prevPhase] >= PHASE_ORDER.fulfill
-        ? "fulfill"
-        : "clear";
+      return prevPhase && PHASE_ORDER[prevPhase] >= PHASE_ORDER.fulfill ? "fulfill" : "clear";
     case "interaction":
       // звонок/встреча/просмотр: до оффера — квалификация, после — исполнение
       return afterOffer ? "fulfill" : "qualify";
@@ -134,9 +128,7 @@ export interface BackboneViolations {
  * Проверяет набор стадий на контракт костяка. `errors` блокируют применение
  * воронки (AI-builder), `warnings` — мягкие подсказки оператору.
  */
-export function validateBackbone(
-  stages: readonly PhaseStageLike[],
-): BackboneViolations {
+export function validateBackbone(stages: readonly PhaseStageLike[]): BackboneViolations {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -145,12 +137,9 @@ export function validateBackbone(
   const lostCount = stages.filter((s) => s.kind === "terminal_lost").length;
 
   if (intakeCount !== 1)
-    errors.push(
-      `Должна быть ровно одна стадия kind=intake (сейчас ${intakeCount}).`,
-    );
+    errors.push(`Должна быть ровно одна стадия kind=intake (сейчас ${intakeCount}).`);
   if (wonCount < 1) errors.push("Нужна хотя бы одна стадия kind=terminal_won.");
-  if (lostCount < 1)
-    errors.push("Нужна хотя бы одна стадия kind=terminal_lost.");
+  if (lostCount < 1) errors.push("Нужна хотя бы одна стадия kind=terminal_lost.");
 
   // Уникальность slug'ов и корректность ссылок nextStages.
   const slugs = new Set<string>();
@@ -162,9 +151,7 @@ export function validateBackbone(
   for (const s of stages) {
     for (const n of s.nextStages ?? []) {
       if (!slugs.has(n))
-        errors.push(
-          `Стадия ${s.slug ?? "?"} ссылается на несуществующий slug в nextStages: ${n}.`,
-        );
+        errors.push(`Стадия ${s.slug ?? "?"} ссылается на несуществующий slug в nextStages: ${n}.`);
     }
   }
 
@@ -174,9 +161,7 @@ export function validateBackbone(
     const p = effectivePhase(s);
     if (p) present.add(p);
     else if (s.kind === "active")
-      errors.push(
-        `Active-стадия ${s.slug ?? "?"} не имеет фазы (phase) и не классифицируется.`,
-      );
+      errors.push(`Active-стадия ${s.slug ?? "?"} не имеет фазы (phase) и не классифицируется.`);
   }
   for (const req of REQUIRED_ACTIVE_PHASES) {
     if (!present.has(req))
@@ -297,9 +282,7 @@ export function buildSkeletonFunnel(opts: SkeletonOptions = {}): SkeletonStage[]
 
   // Связываем переходы: каждый рабочий этап → следующий по потоку + lost;
   // последний рабочий → won + lost. Терминалы — пустой nextStages.
-  const flow = stages
-    .filter((s) => s.kind === "intake" || s.kind === "active")
-    .map((s) => s.slug);
+  const flow = stages.filter((s) => s.kind === "intake" || s.kind === "active").map((s) => s.slug);
   for (const s of stages) {
     if (s.kind === "terminal_won" || s.kind === "terminal_lost") continue;
     const i = flow.indexOf(s.slug);

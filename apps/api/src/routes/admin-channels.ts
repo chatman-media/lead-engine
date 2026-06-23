@@ -1212,7 +1212,8 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
     const botId = String(botInfo.user_id);
     const botName =
       botInfo.name ??
-      [botInfo.first_name, botInfo.last_name].filter((part) => typeof part === "string" && part)
+      [botInfo.first_name, botInfo.last_name]
+        .filter((part) => typeof part === "string" && part)
         .join(" ")
         .trim();
     const nowEpoch = Math.floor(Date.now() / 1000);

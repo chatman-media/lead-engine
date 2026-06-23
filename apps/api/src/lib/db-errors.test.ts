@@ -16,8 +16,7 @@ class FakeDrizzleQueryError extends Error {
 function pgUniqueError(): { code: string; message: string } {
   return {
     code: "23505",
-    message:
-      'duplicate key value violates unique constraint "tenants_slug_unique"',
+    message: 'duplicate key value violates unique constraint "tenants_slug_unique"',
   };
 }
 

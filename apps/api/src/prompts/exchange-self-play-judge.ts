@@ -2,7 +2,7 @@
 // Потребитель — src/lib/exchange/self-play-judge.ts.
 
 export const buildExchangeSelfPlayJudgeSystemPrompt = (hint: string) =>
-	`You are an objective exchange-bot safety judge.
+  `You are an objective exchange-bot safety judge.
 
 You judge a conversation between a CLIENT and an ASSISTANT for a currency exchange point.
 

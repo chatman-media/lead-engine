@@ -26,11 +26,21 @@ const CONTENT = {
     tg: {
       messages: [
         { from: "user" as const, text: "Хочу записаться на курс по Python" },
-        { from: "bot" as const, text: "Отлично! У нас есть курсы с нуля и уровень middle. Какой опыт в программировании?" },
+        {
+          from: "bot" as const,
+          text: "Отлично! У нас есть курсы с нуля и уровень middle. Какой опыт в программировании?",
+        },
         { from: "user" as const, text: "Полный ноль, но очень хочу" },
-        { from: "bot" as const, text: "Идеально для нашего курса «Python с нуля»! Старт 15 июня, стоимость 12 000 ₽. Записать?" },
+        {
+          from: "bot" as const,
+          text: "Идеально для нашего курса «Python с нуля»! Старт 15 июня, стоимость 12 000 ₽. Записать?",
+        },
         { from: "user" as const, text: "Да!" },
-        { from: "bot" as const, text: "Оставьте email — пришлём программу и доступ к первому уроку 👇", cta: true },
+        {
+          from: "bot" as const,
+          text: "Оставьте email — пришлём программу и доступ к первому уроку 👇",
+          cta: true,
+        },
       ],
       notify: "🔔 Горячий лид передан менеджеру",
       botName: "YourBusiness Bot",
@@ -90,12 +100,36 @@ const CONTENT = {
     usecasesTitle: "Уже работает в десятках ниш",
     usecasesCta: "Смотреть живые демо вертикалей →",
     usecases: [
-      { icon: "🏠", title: "Недвижимость", desc: "Квалификация покупателей, запись на просмотр, сбор документов" },
-      { icon: "🩺", title: "Медицина / стоматология", desc: "Запись на приём, сбор жалоб, предварительная анкета" },
-      { icon: "📚", title: "Онлайн-образование", desc: "Квалификация студентов, регистрация на курс, follow-up" },
-      { icon: "💅", title: "Beauty / услуги", desc: "Запись онлайн, подбор услуги, напоминания о визите" },
-      { icon: "🏋️", title: "Фитнес / спорт", desc: "Выбор программы тренировок, продажа абонемента" },
-      { icon: "🎯", title: "Рекрутинг", desc: "Сбор анкет кандидатов, квалификация, handoff рекрутёру" },
+      {
+        icon: "🏠",
+        title: "Недвижимость",
+        desc: "Квалификация покупателей, запись на просмотр, сбор документов",
+      },
+      {
+        icon: "🩺",
+        title: "Медицина / стоматология",
+        desc: "Запись на приём, сбор жалоб, предварительная анкета",
+      },
+      {
+        icon: "📚",
+        title: "Онлайн-образование",
+        desc: "Квалификация студентов, регистрация на курс, follow-up",
+      },
+      {
+        icon: "💅",
+        title: "Beauty / услуги",
+        desc: "Запись онлайн, подбор услуги, напоминания о визите",
+      },
+      {
+        icon: "🏋️",
+        title: "Фитнес / спорт",
+        desc: "Выбор программы тренировок, продажа абонемента",
+      },
+      {
+        icon: "🎯",
+        title: "Рекрутинг",
+        desc: "Сбор анкет кандидатов, квалификация, handoff рекрутёру",
+      },
     ],
     pricingLabel: "Тарифы",
     pricingTitle: "Прозрачные цены без скрытых платежей",
@@ -126,7 +160,11 @@ const CONTENT = {
       },
     ],
     faqDemoBtn: "Записаться на демо →",
-    footer: { privacy: "Политика конфиденциальности", terms: "Условия использования", copy: "© 2026 Lead Engine" },
+    footer: {
+      privacy: "Политика конфиденциальности",
+      terms: "Условия использования",
+      copy: "© 2026 Lead Engine",
+    },
   },
   en: {
     nav: { cta: "Try Free" },
@@ -141,11 +179,21 @@ const CONTENT = {
     tg: {
       messages: [
         { from: "user" as const, text: "I want to join your Python course" },
-        { from: "bot" as const, text: "Great! We have beginner and middle-level tracks. What's your coding experience?" },
+        {
+          from: "bot" as const,
+          text: "Great! We have beginner and middle-level tracks. What's your coding experience?",
+        },
         { from: "user" as const, text: "Complete beginner, but very motivated" },
-        { from: "bot" as const, text: "Perfect for our 'Python from Scratch' course! Starts June 15, $149. Shall I register you?" },
+        {
+          from: "bot" as const,
+          text: "Perfect for our 'Python from Scratch' course! Starts June 15, $149. Shall I register you?",
+        },
         { from: "user" as const, text: "Yes!" },
-        { from: "bot" as const, text: "Drop your email — we'll send the syllabus and first lesson access 👇", cta: true },
+        {
+          from: "bot" as const,
+          text: "Drop your email — we'll send the syllabus and first lesson access 👇",
+          cta: true,
+        },
       ],
       notify: "🔔 Hot lead handed off to manager",
       botName: "YourBusiness Bot",
@@ -205,12 +253,32 @@ const CONTENT = {
     usecasesTitle: "Already running in dozens of verticals",
     usecasesCta: "See live vertical demos →",
     usecases: [
-      { icon: "🏠", title: "Real Estate", desc: "Buyer qualification, viewing bookings, document collection" },
-      { icon: "🩺", title: "Healthcare / Dentistry", desc: "Appointment booking, symptom collection, pre-intake" },
-      { icon: "📚", title: "Online Education", desc: "Student qualification, course registration, follow-up" },
-      { icon: "💅", title: "Beauty / Services", desc: "Online booking, service matching, visit reminders" },
+      {
+        icon: "🏠",
+        title: "Real Estate",
+        desc: "Buyer qualification, viewing bookings, document collection",
+      },
+      {
+        icon: "🩺",
+        title: "Healthcare / Dentistry",
+        desc: "Appointment booking, symptom collection, pre-intake",
+      },
+      {
+        icon: "📚",
+        title: "Online Education",
+        desc: "Student qualification, course registration, follow-up",
+      },
+      {
+        icon: "💅",
+        title: "Beauty / Services",
+        desc: "Online booking, service matching, visit reminders",
+      },
       { icon: "🏋️", title: "Fitness / Sports", desc: "Training plan selection, membership sales" },
-      { icon: "🎯", title: "Recruitment", desc: "Candidate intake, qualification, handoff to recruiter" },
+      {
+        icon: "🎯",
+        title: "Recruitment",
+        desc: "Candidate intake, qualification, handoff to recruiter",
+      },
     ],
     pricingLabel: "Pricing",
     pricingTitle: "Transparent pricing, no hidden fees",
@@ -266,8 +334,12 @@ export default function LandingAnyBusiness() {
               </h1>
               <p className="hero-sub">{c.hero.sub}</p>
               <div className="hero-actions">
-                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">{c.hero.ctaPrimary}</a>
-                <a href={DEMO_URL} className="btn btn-secondary btn-lg">{c.hero.ctaSecondary}</a>
+                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">
+                  {c.hero.ctaPrimary}
+                </a>
+                <a href={DEMO_URL} className="btn btn-secondary btn-lg">
+                  {c.hero.ctaSecondary}
+                </a>
               </div>
               <div className="hero-trust">{c.hero.trust}</div>
             </div>
@@ -311,7 +383,9 @@ export default function LandingAnyBusiness() {
             ))}
           </div>
           <div style={{ marginTop: "2rem", textAlign: "center" }}>
-            <a href="/demo/verticals" className="btn btn-secondary">{c.usecasesCta}</a>
+            <a href="/demo/verticals" className="btn btn-secondary">
+              {c.usecasesCta}
+            </a>
           </div>
         </div>
       </section>

@@ -32,49 +32,43 @@ let appSql: Sql | null = null;
 let ownerDb: PostgresJsDatabase<typeof schema>;
 let appDb: PostgresJsDatabase<typeof schema>;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 }).catch(() => {});
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 }).catch(() => {});
 
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    ownerSql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(ownerSql, migrationsDir);
-    ownerDb = drizzle(ownerSql, { schema });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  ownerSql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(ownerSql, migrationsDir);
+  ownerDb = drizzle(ownerSql, { schema });
 
-    await ownerSql.unsafe(`
+  await ownerSql.unsafe(`
       CREATE ROLE "${appRoleName}" LOGIN PASSWORD '${appRolePass}' NOSUPERUSER NOBYPASSRLS;
       GRANT USAGE ON SCHEMA public TO "${appRoleName}";
       GRANT SELECT ON ALL TABLES IN SCHEMA public TO "${appRoleName}";
     `);
 
-    const parsed = new URL(testUrl);
-    parsed.username = appRoleName;
-    parsed.password = appRolePass;
-    appSql = postgres(parsed.toString(), { max: 2, onnotice: () => {} });
-    appDb = drizzle(appSql, { schema });
-  },
-  30_000,
-);
+  const parsed = new URL(testUrl);
+  parsed.username = appRoleName;
+  parsed.password = appRolePass;
+  appSql = postgres(parsed.toString(), { max: 2, onnotice: () => {} });
+  appDb = drizzle(appSql, { schema });
+}, 30_000);
 
-afterAll(
-  async () => {
-    if (appSql) {
-      await appSql.end({ timeout: 0 }).catch(() => {});
-      appSql = null;
-    }
-    if (ownerSql) {
-      await ownerSql
-        .unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
-        .catch(() => {});
-      await ownerSql.end({ timeout: 0 }).catch(() => {});
-      ownerSql = null;
-    }
-  },
-  10_000,
-);
+afterAll(async () => {
+  if (appSql) {
+    await appSql.end({ timeout: 0 }).catch(() => {});
+    appSql = null;
+  }
+  if (ownerSql) {
+    await ownerSql
+      .unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
+      .catch(() => {});
+    await ownerSql.end({ timeout: 0 }).catch(() => {});
+    ownerSql = null;
+  }
+}, 10_000);
 
 describe("checkRlsEnforcement", () => {
   it("owner connection (superuser локально) → isEnforced=false", async () => {

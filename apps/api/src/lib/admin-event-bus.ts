@@ -7,7 +7,13 @@ export type AdminEvent =
       preview: string | null;
       role: "user" | "assistant" | "human";
     }
-  | { type: "stage_changed"; tenantId: number; leadId: number; toStage: string; toStageDisplayName: string }
+  | {
+      type: "stage_changed";
+      tenantId: number;
+      leadId: number;
+      toStage: string;
+      toStageDisplayName: string;
+    }
   | { type: "conversation_mode"; tenantId: number; conversationId: number; mode: string }
   | {
       type: "admin_notification";
@@ -43,12 +49,19 @@ class AdminEventBus {
     set.add(handler);
     return () => {
       const current = this.subs.get(tenantId);
-      if (current) { current.delete(handler); if (current.size === 0) this.subs.delete(tenantId); }
+      if (current) {
+        current.delete(handler);
+        if (current.size === 0) this.subs.delete(tenantId);
+      }
     };
   }
 
   emit(event: AdminEvent): void {
-    this.subs.get(event.tenantId)?.forEach((h) => { try { h(event); } catch {} });
+    this.subs.get(event.tenantId)?.forEach((h) => {
+      try {
+        h(event);
+      } catch {}
+    });
   }
 }
 

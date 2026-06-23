@@ -41,11 +41,7 @@ export class WebChannelRegistry {
       .from(channels)
       .innerJoin(tenants, eq(tenants.id, channels.tenantId))
       .where(
-        and(
-          eq(channels.kind, "web"),
-          eq(channels.status, "active"),
-          eq(tenants.status, "active"),
-        ),
+        and(eq(channels.kind, "web"), eq(channels.status, "active"), eq(tenants.status, "active")),
       );
 
     for (const row of rows) {

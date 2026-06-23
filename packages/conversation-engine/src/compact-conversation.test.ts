@@ -35,9 +35,7 @@ describe("compactConversation", () => {
 
   it("returns null when LLM returns empty string", async () => {
     const chat = makeChatClient("   ");
-    const messages: ChatMessage[] = [
-      { role: "user", content: "hello" },
-    ];
+    const messages: ChatMessage[] = [{ role: "user", content: "hello" }];
     const result = await compactConversation(messages, chat);
     expect(result).toBeNull();
   });

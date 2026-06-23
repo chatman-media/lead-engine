@@ -10,7 +10,16 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangleIcon, EditIcon, PlusIcon, SaveIcon, SparklesIcon, Trash2Icon, UploadIcon, XIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  EditIcon,
+  PlusIcon,
+  SaveIcon,
+  SparklesIcon,
+  Trash2Icon,
+  UploadIcon,
+  XIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface StyleFormState {
@@ -172,9 +181,10 @@ export function SaasStyles() {
       closeForm();
       load();
     } catch (err) {
-      const msg = err instanceof ApiError && err.status === 409
-        ? "Стиль с таким slug уже существует"
-        : "Не удалось сохранить стиль";
+      const msg =
+        err instanceof ApiError && err.status === 409
+          ? "Стиль с таким slug уже существует"
+          : "Не удалось сохранить стиль";
       toast.error(msg);
     } finally {
       setSaving(false);
@@ -201,7 +211,9 @@ export function SaasStyles() {
     try {
       await saas.updateStyle(item.id, { isActive: newVal });
     } catch {
-      setItems((prev) => prev.map((s) => (s.id === item.id ? { ...s, isActive: item.isActive } : s)));
+      setItems((prev) =>
+        prev.map((s) => (s.id === item.id ? { ...s, isActive: item.isActive } : s)),
+      );
       toast.error("Не удалось обновить стиль");
     }
   }
@@ -217,13 +229,14 @@ export function SaasStyles() {
         if (file.name.endsWith(".json")) {
           // Telegram Desktop export: result.json
           const data = JSON.parse(raw) as {
-            messages?: Array<{ type?: string; text?: string | Array<{text?: string}> }>;
+            messages?: Array<{ type?: string; text?: string | Array<{ text?: string }> }>;
           };
           const msgs = (data.messages ?? [])
             .filter((m) => m.type === "message")
             .map((m) => {
               if (typeof m.text === "string") return m.text;
-              if (Array.isArray(m.text)) return m.text.map((t) => (typeof t === "string" ? t : t.text ?? "")).join("");
+              if (Array.isArray(m.text))
+                return m.text.map((t) => (typeof t === "string" ? t : (t.text ?? ""))).join("");
               return "";
             })
             .filter((t) => t.trim().length > 0);
@@ -304,7 +317,9 @@ export function SaasStyles() {
                     type="button"
                     onClick={() => setGenTab(tab)}
                     className={`rounded px-2.5 py-1 text-xs transition-colors cursor-pointer ${
-                      genTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                      genTab === tab
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     {tab === "text" ? "Вставить текст" : "Загрузить файл"}
@@ -315,7 +330,9 @@ export function SaasStyles() {
               {genTab === "text" ? (
                 <Textarea
                   rows={5}
-                  placeholder={"Вставь 5-15 своих сообщений клиентам — бот проанализирует тон и стиль…"}
+                  placeholder={
+                    "Вставь 5-15 своих сообщений клиентам — бот проанализирует тон и стиль…"
+                  }
                   value={genText}
                   onChange={(e) => setGenText(e.target.value)}
                   className="text-xs resize-none"
@@ -326,7 +343,12 @@ export function SaasStyles() {
                   <span className="text-xs text-muted-foreground">
                     {genFileName ? genFileName : "Telegram result.json или CSV"}
                   </span>
-                  <input type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileUpload} />
+                  <input
+                    type="file"
+                    accept=".json,.csv,.txt"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
                 </label>
               )}
 
@@ -334,7 +356,7 @@ export function SaasStyles() {
                 size="sm"
                 variant="outline"
                 onClick={handleGenerate}
-                disabled={generating || (!genText.trim())}
+                disabled={generating || !genText.trim()}
                 className="border-primary/50 text-primary hover:bg-primary/10"
               >
                 <SparklesIcon className="mr-1.5 h-3.5 w-3.5" />
@@ -354,20 +376,28 @@ export function SaasStyles() {
               </div>
               <div className="space-y-1">
                 <Label htmlFor="style-slug">
-                  Slug <span className="text-muted-foreground text-xs font-normal">(a-z, 0-9, _)</span>
+                  Slug{" "}
+                  <span className="text-muted-foreground text-xs font-normal">(a-z, 0-9, _)</span>
                 </Label>
                 <Input
                   id="style-slug"
                   placeholder="friendly_expert"
                   value={form.slug}
                   disabled={editingId !== 0}
-                  onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") }))}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      slug: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
+                    }))
+                  }
                   className="font-mono"
                 />
               </div>
             </div>
 
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Персона</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Персона
+            </p>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1">
                 <Label htmlFor="style-persona-name">Имя</Label>
@@ -400,14 +430,17 @@ export function SaasStyles() {
 
             <div className="space-y-1">
               <Label htmlFor="style-framework">
-                Фреймворк продаж <span className="text-muted-foreground text-xs font-normal">(необязательно)</span>
+                Фреймворк продаж{" "}
+                <span className="text-muted-foreground text-xs font-normal">(необязательно)</span>
               </Label>
               <div className="flex flex-wrap gap-2">
                 {FRAMEWORKS.map((fw) => (
                   <button
                     key={fw}
                     type="button"
-                    onClick={() => setForm((f) => ({ ...f, framework: f.framework === fw ? "" : fw }))}
+                    onClick={() =>
+                      setForm((f) => ({ ...f, framework: f.framework === fw ? "" : fw }))
+                    }
                     className={`rounded-md border px-2.5 py-1 text-xs transition-colors cursor-pointer ${
                       form.framework === fw
                         ? "border-primary bg-primary/10 text-primary"
@@ -481,11 +514,17 @@ export function SaasStyles() {
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="truncate">{item.displayName}</span>
                       {framework && (
-                        <Badge variant="secondary" className="text-xs shrink-0">{framework}</Badge>
+                        <Badge variant="secondary" className="text-xs shrink-0">
+                          {framework}
+                        </Badge>
                       )}
-                      <Badge variant="outline" className="text-xs shrink-0">v{item.version}</Badge>
+                      <Badge variant="outline" className="text-xs shrink-0">
+                        v{item.version}
+                      </Badge>
                       {!item.isActive && (
-                        <Badge variant="outline" className="text-xs text-muted-foreground shrink-0">неактивен</Badge>
+                        <Badge variant="outline" className="text-xs text-muted-foreground shrink-0">
+                          неактивен
+                        </Badge>
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground font-mono mt-0.5">{item.slug}</p>
@@ -507,7 +546,12 @@ export function SaasStyles() {
                     {confirmDeleteId === item.id ? (
                       <div className="flex items-center gap-1">
                         <AlertTriangleIcon className="size-3.5 text-destructive shrink-0" />
-                        <Button size="sm" variant="destructive" onClick={() => handleDelete(item.id)} disabled={deletingId === item.id}>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleDelete(item.id)}
+                          disabled={deletingId === item.id}
+                        >
                           Да
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)}>

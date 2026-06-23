@@ -90,8 +90,8 @@ export class NotificationsRepo {
         and(
           eq(notificationRules.tenantId, tenantId),
           inArray(notificationRules.eventType, types),
-          eq(notificationRules.isActive, true)
-        )
+          eq(notificationRules.isActive, true),
+        ),
       );
   }
 
@@ -112,15 +112,16 @@ export class NotificationsRepo {
       .where(
         and(
           eq(operatorSettings.linkToken, token),
-          sql`${operatorSettings.linkTokenExpiresAt} > ${now}`
-        )
+          sql`${operatorSettings.linkTokenExpiresAt} > ${now}`,
+        ),
       )
       .limit(1);
     return rows[0];
   }
 
   async generateLinkToken(adminId: number, tenantId: number): Promise<string> {
-    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    const token =
+      Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1 hour
 
     await this.db
@@ -139,7 +140,7 @@ export class NotificationsRepo {
           updatedAt: Math.floor(Date.now() / 1000),
         },
       });
-    
+
     return token;
   }
 
@@ -156,10 +157,7 @@ export class NotificationsRepo {
   }
 
   async findOperatorSettingsByTenant(tenantId: number): Promise<OperatorSettings[]> {
-    return this.db
-      .select()
-      .from(operatorSettings)
-      .where(eq(operatorSettings.tenantId, tenantId));
+    return this.db.select().from(operatorSettings).where(eq(operatorSettings.tenantId, tenantId));
   }
 
   async partialUpdateSettings(
@@ -177,7 +175,9 @@ export class NotificationsRepo {
       });
   }
 
-  async upsertOperatorSettings(settings: Omit<OperatorSettings, "id" | "updatedAt">): Promise<void> {
+  async upsertOperatorSettings(
+    settings: Omit<OperatorSettings, "id" | "updatedAt">,
+  ): Promise<void> {
     await this.db
       .insert(operatorSettings)
       .values(settings)
@@ -191,20 +191,16 @@ export class NotificationsRepo {
       });
   }
 
-  async createRule(rule: Omit<NotificationRule, "id" | "createdAt" | "updatedAt">): Promise<NotificationRule> {
-    const [inserted] = await this.db
-      .insert(notificationRules)
-      .values(rule)
-      .returning();
+  async createRule(
+    rule: Omit<NotificationRule, "id" | "createdAt" | "updatedAt">,
+  ): Promise<NotificationRule> {
+    const [inserted] = await this.db.insert(notificationRules).values(rule).returning();
     if (!inserted) throw new Error("notification rule insert returned no row");
     return inserted;
   }
 
   async listRules(tenantId: number): Promise<NotificationRule[]> {
-    return this.db
-      .select()
-      .from(notificationRules)
-      .where(eq(notificationRules.tenantId, tenantId));
+    return this.db.select().from(notificationRules).where(eq(notificationRules.tenantId, tenantId));
   }
 
   async deleteRule(tenantId: number, id: number): Promise<void> {
@@ -219,7 +215,9 @@ export class NotificationsRepo {
     const rows = await this.db
       .select()
       .from(notificationTemplates)
-      .where(and(eq(notificationTemplates.tenantId, tenantId), eq(notificationTemplates.slug, slug)))
+      .where(
+        and(eq(notificationTemplates.tenantId, tenantId), eq(notificationTemplates.slug, slug)),
+      )
       .limit(1);
     return rows[0];
   }
@@ -247,11 +245,18 @@ export class NotificationsRepo {
   async deleteTemplate(tenantId: number, slug: string): Promise<void> {
     await this.db
       .delete(notificationTemplates)
-      .where(and(eq(notificationTemplates.tenantId, tenantId), eq(notificationTemplates.slug, slug)));
+      .where(
+        and(eq(notificationTemplates.tenantId, tenantId), eq(notificationTemplates.slug, slug)),
+      );
   }
 
-  async generateGroupLinkToken(tenantId: number, adminId: number, eventType: string): Promise<string> {
-    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  async generateGroupLinkToken(
+    tenantId: number,
+    adminId: number,
+    eventType: string,
+  ): Promise<string> {
+    const token =
+      Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     const expiresAt = Math.floor(Date.now() / 1000) + 3600;
     await this.db.insert(notificationGroupTokens).values({
       token,
@@ -264,12 +269,19 @@ export class NotificationsRepo {
     return token;
   }
 
-  async findGroupLinkToken(token: string): Promise<{ tenantId: number; adminId: number; eventType: string } | undefined> {
+  async findGroupLinkToken(
+    token: string,
+  ): Promise<{ tenantId: number; adminId: number; eventType: string } | undefined> {
     const now = Math.floor(Date.now() / 1000);
     const rows = await this.db
       .select()
       .from(notificationGroupTokens)
-      .where(and(eq(notificationGroupTokens.token, token), sql`${notificationGroupTokens.expiresAt} > ${now}`))
+      .where(
+        and(
+          eq(notificationGroupTokens.token, token),
+          sql`${notificationGroupTokens.expiresAt} > ${now}`,
+        ),
+      )
       .limit(1);
     return rows[0];
   }
@@ -487,11 +499,7 @@ export class NotificationsRepo {
   }
 
   /** Помечает уведомления владельца прочитанными в in-app центре. */
-  async markNotificationsRead(
-    tenantId: number,
-    adminId: number,
-    readAt: number,
-  ): Promise<void> {
+  async markNotificationsRead(tenantId: number, adminId: number, readAt: number): Promise<void> {
     await this.db
       .update(adminNotifications)
       .set({ readAt })

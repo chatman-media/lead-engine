@@ -37,7 +37,9 @@ export function TelegramMockup({
           <div key={i} className={`tg-msg from-${msg.from}`}>
             <div className="tg-bubble">{msg.text}</div>
             {msg.cta && <div className="tg-cta-bubble">{ctaLabel}</div>}
-            <div className="tg-time">{String(10 + i).padStart(2, "0")}:4{i}</div>
+            <div className="tg-time">
+              {String(10 + i).padStart(2, "0")}:4{i}
+            </div>
           </div>
         ))}
         <div className="tg-notify">{notify}</div>
@@ -81,16 +83,10 @@ export type Lang = "ru" | "en";
 export function LangToggle({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   return (
     <div className="lang-toggle">
-      <button
-        className={`lang-btn${lang === "ru" ? " active" : ""}`}
-        onClick={() => setLang("ru")}
-      >
+      <button className={`lang-btn${lang === "ru" ? " active" : ""}`} onClick={() => setLang("ru")}>
         RU
       </button>
-      <button
-        className={`lang-btn${lang === "en" ? " active" : ""}`}
-        onClick={() => setLang("en")}
-      >
+      <button className={`lang-btn${lang === "en" ? " active" : ""}`} onClick={() => setLang("en")}>
         EN
       </button>
     </div>
@@ -187,15 +183,7 @@ export function PricingSection({
   );
 }
 
-export function Footer({
-  privacy,
-  terms,
-  copy,
-}: {
-  privacy: string;
-  terms: string;
-  copy: string;
-}) {
+export function Footer({ privacy, terms, copy }: { privacy: string; terms: string; copy: string }) {
   return (
     <footer className="footer">
       <div className="container">
@@ -219,21 +207,36 @@ export const PLANS_RU: Plan[] = [
     name: "Free",
     price: "$0",
     priceUnit: "/мес",
-    features: ["100 LLM ответов в месяц", "1 канал (Telegram)", "1 база знаний", "Базовая аналитика"],
+    features: [
+      "100 LLM ответов в месяц",
+      "1 канал (Telegram)",
+      "1 база знаний",
+      "Базовая аналитика",
+    ],
     cta: "Начать бесплатно",
   },
   {
     name: "Starter",
     price: "$99",
     priceUnit: "/мес",
-    features: ["2 000 LLM ответов в месяц", "3 канала (TG + WA + Web)", "5 баз знаний", "Аналитика + история"],
+    features: [
+      "2 000 LLM ответов в месяц",
+      "3 канала (TG + WA + Web)",
+      "5 баз знаний",
+      "Аналитика + история",
+    ],
     cta: "Выбрать Starter",
   },
   {
     name: "Pro",
     price: "$199",
     priceUnit: "/мес",
-    features: ["Безлимит LLM ответов", "Все каналы", "Безлимит баз знаний", "A/B стили · Приоритетная поддержка"],
+    features: [
+      "Безлимит LLM ответов",
+      "Все каналы",
+      "Безлимит баз знаний",
+      "A/B стили · Приоритетная поддержка",
+    ],
     cta: "Выбрать Pro",
     popular: true,
   },
@@ -251,21 +254,36 @@ export const PLANS_EN: Plan[] = [
     name: "Free",
     price: "$0",
     priceUnit: "/mo",
-    features: ["100 LLM responses/month", "1 channel (Telegram)", "1 knowledge base", "Basic analytics"],
+    features: [
+      "100 LLM responses/month",
+      "1 channel (Telegram)",
+      "1 knowledge base",
+      "Basic analytics",
+    ],
     cta: "Start Free",
   },
   {
     name: "Starter",
     price: "$99",
     priceUnit: "/mo",
-    features: ["2,000 LLM responses/month", "3 channels (TG + WA + Web)", "5 knowledge bases", "Analytics + history"],
+    features: [
+      "2,000 LLM responses/month",
+      "3 channels (TG + WA + Web)",
+      "5 knowledge bases",
+      "Analytics + history",
+    ],
     cta: "Choose Starter",
   },
   {
     name: "Pro",
     price: "$199",
     priceUnit: "/mo",
-    features: ["Unlimited LLM responses", "All channels", "Unlimited knowledge bases", "A/B styles · Priority support"],
+    features: [
+      "Unlimited LLM responses",
+      "All channels",
+      "Unlimited knowledge bases",
+      "A/B styles · Priority support",
+    ],
     cta: "Choose Pro",
     popular: true,
   },
@@ -273,7 +291,12 @@ export const PLANS_EN: Plan[] = [
     name: "Enterprise",
     price: "Custom",
     isCustom: true,
-    features: ["Everything unlimited", "SLA agreement", "Dedicated onboarding", "Custom integrations"],
+    features: [
+      "Everything unlimited",
+      "SLA agreement",
+      "Dedicated onboarding",
+      "Custom integrations",
+    ],
     cta: "Contact Us",
   },
 ];

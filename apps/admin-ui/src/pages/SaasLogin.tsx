@@ -40,10 +40,7 @@ export function SaasLogin() {
   }
 
   return (
-    <AuthLayout
-      title="С возвращением"
-      subtitle="Войдите в панель управления ассистентом"
-    >
+    <AuthLayout title="С возвращением" subtitle="Войдите в панель управления ассистентом">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
@@ -62,7 +59,10 @@ export function SaasLogin() {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="password">Пароль</Label>
-            <Link to="/forgot-password" className="text-xs text-muted-foreground hover:text-primary hover:underline">
+            <Link
+              to="/forgot-password"
+              className="text-xs text-muted-foreground hover:text-primary hover:underline"
+            >
               Забыли пароль?
             </Link>
           </div>

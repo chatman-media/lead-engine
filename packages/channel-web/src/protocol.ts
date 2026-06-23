@@ -7,8 +7,7 @@
 //   Server → Client: { type: "bot_text", id, text, replyTo? }
 //   Server → Client: { type: "error", code, message }
 
-export type ClientFrame =
-  | { type: "user_text"; id: string; text: string };
+export type ClientFrame = { type: "user_text"; id: string; text: string };
 
 export type ServerFrame =
   | { type: "ready"; channelId: string; userId: string }

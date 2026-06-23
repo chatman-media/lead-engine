@@ -70,26 +70,52 @@ beforeAll(async () => {
   await withTenant(db, tenantId, async (tx) => {
     // Устаревший auto-курс (фид встал).
     await tx.insert(exchangeRates).values({
-      tenantId, asset: "USDT", quoteAsset: "THB", network: "trc20", baseRate: 31.5,
-      quoteMode: "multiply", autoUpdate: true, isActive: true,
-      createdAt: now - 7200, updatedAt: now - (THRESHOLDS.feedStaleMin + 10) * 60,
+      tenantId,
+      asset: "USDT",
+      quoteAsset: "THB",
+      network: "trc20",
+      baseRate: 31.5,
+      quoteMode: "multiply",
+      autoUpdate: true,
+      isActive: true,
+      createdAt: now - 7200,
+      updatedAt: now - (THRESHOLDS.feedStaleMin + 10) * 60,
     });
     // Зависшая заявка (оплачена, выдачи нет).
     await tx.insert(exchangeOrders).values({
-      tenantId, direction: "USDT->THB", assetFrom: "USDT", network: "trc20",
-      amountFrom: 100, rate: 31, amountToThb: 3100, status: "paid",
-      createdAt: now - 7200, updatedAt: now - (THRESHOLDS.stuckOrderMin + 5) * 60,
+      tenantId,
+      direction: "USDT->THB",
+      assetFrom: "USDT",
+      network: "trc20",
+      amountFrom: 100,
+      rate: 31,
+      amountToThb: 3100,
+      status: "paid",
+      createdAt: now - 7200,
+      updatedAt: now - (THRESHOLDS.stuckOrderMin + 5) * 60,
     });
     // Свежая завершённая заявка — для всплеска оборота.
     await tx.insert(exchangeOrders).values({
-      tenantId, direction: "USDT->THB", assetFrom: "USDT", network: "trc20",
-      amountFrom: 200, rate: 31, amountToThb: 5000, status: "completed",
-      createdAt: now - 600, updatedAt: now - 600, completedAt: now - 600,
+      tenantId,
+      direction: "USDT->THB",
+      assetFrom: "USDT",
+      network: "trc20",
+      amountFrom: 200,
+      rate: 31,
+      amountToThb: 5000,
+      status: "completed",
+      createdAt: now - 600,
+      updatedAt: now - 600,
+      completedAt: now - 600,
     });
     // Упавший канал.
     await tx.insert(channels).values({
-      tenantId, kind: "telegram_bot", externalId: "mock-tg", status: "error",
-      createdAt: now, updatedAt: now,
+      tenantId,
+      kind: "telegram_bot",
+      externalId: "mock-tg",
+      status: "error",
+      createdAt: now,
+      updatedAt: now,
     });
   });
 }, 30_000);

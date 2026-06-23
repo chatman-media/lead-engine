@@ -69,17 +69,27 @@ describe("LlmUsageWriter", () => {
   it("flush() empties buffer and writes per-tenant batch", async () => {
     writer.record(1, { purpose: "chat", provider: "openai", latencyMs: 100, success: true });
     writer.record(1, { purpose: "embed", provider: "openai", latencyMs: 50, success: true });
-    writer.record(2, { purpose: "chat", provider: "anthropic", latencyMs: 200, success: false, errorKind: "Timeout" });
+    writer.record(2, {
+      purpose: "chat",
+      provider: "anthropic",
+      latencyMs: 200,
+      success: false,
+      errorKind: "Timeout",
+    });
 
     await writer.flush();
 
     expect(writer.bufferSize()).toBe(0);
     expect(tracker.callCount).toBe(2); // одна batch INSERT per tenant
     // tenant 1 has 2 events
-    const tenant1Call = tracker.insertCalls.find((rows) => (rows as Array<{ tenantId: number }>)[0]?.tenantId === 1);
+    const tenant1Call = tracker.insertCalls.find(
+      (rows) => (rows as Array<{ tenantId: number }>)[0]?.tenantId === 1,
+    );
     expect(tenant1Call).toHaveLength(2);
     // tenant 2 has 1 event
-    const tenant2Call = tracker.insertCalls.find((rows) => (rows as Array<{ tenantId: number }>)[0]?.tenantId === 2);
+    const tenant2Call = tracker.insertCalls.find(
+      (rows) => (rows as Array<{ tenantId: number }>)[0]?.tenantId === 2,
+    );
     expect(tenant2Call).toHaveLength(1);
   });
 

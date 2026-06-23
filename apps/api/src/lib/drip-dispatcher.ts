@@ -59,9 +59,7 @@ export async function dispatchTenant(db: Db, tenantId: number, nowSec: number): 
         lastDrippedAt: outreachCampaigns.lastDrippedAt,
       })
       .from(outreachCampaigns)
-      .where(
-        and(eq(outreachCampaigns.tenantId, tenantId), eq(outreachCampaigns.status, "active")),
-      );
+      .where(and(eq(outreachCampaigns.tenantId, tenantId), eq(outreachCampaigns.status, "active")));
 
     for (const c of campaigns) {
       // Не чаще, чем раз в drip_interval_sec.
@@ -115,7 +113,13 @@ export async function dispatchTenant(db: Db, tenantId: number, nowSec: number): 
           .limit(1);
 
         if (!identity) {
-          await markLead(tx, item.campaignLeadId, "skipped", nowSec, "нет активного канала у контакта");
+          await markLead(
+            tx,
+            item.campaignLeadId,
+            "skipped",
+            nowSec,
+            "нет активного канала у контакта",
+          );
           continue;
         }
 

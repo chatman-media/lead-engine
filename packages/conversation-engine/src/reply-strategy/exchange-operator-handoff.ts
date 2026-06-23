@@ -6,274 +6,256 @@ import type { ExchangeOrderPolicyState, ExchangePolicyState } from "./exchange-p
 type ToolTelemetry = Pick<AnswerTelemetry, "toolCall" | "toolCalls"> | null | undefined;
 
 interface ExchangeOperatorHandoffInput {
-	text: string;
-	telemetry?: ToolTelemetry;
-	state?: ExchangePolicyState | null;
+  text: string;
+  telemetry?: ToolTelemetry;
+  state?: ExchangePolicyState | null;
 }
 
 function toolCalls(telemetry: ToolTelemetry) {
-	return (
-		telemetry?.toolCalls ??
-		(telemetry?.toolCall ? [{ ...telemetry.toolCall, args: {}, cycle: 0 }] : [])
-	);
+  return (
+    telemetry?.toolCalls ??
+    (telemetry?.toolCall ? [{ ...telemetry.toolCall, args: {}, cycle: 0 }] : [])
+  );
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function stringValue(value: unknown): string | null {
-	return typeof value === "string" && value.trim() ? value.trim() : null;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function numberValue(value: unknown): number | null {
-	if (typeof value === "number" && Number.isFinite(value)) return value;
-	if (typeof value !== "string" || !value.trim()) return null;
-	const parsed = Number(value);
-	return Number.isFinite(parsed) ? parsed : null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function resultObject(value: unknown): Record<string, unknown> | null {
-	return objectValue(value);
+  return objectValue(value);
 }
 
 function resultNeedsOperator(result: Record<string, unknown> | null): boolean {
-	if (!result) return false;
-	return (
-		result.needsOperator === true ||
-		result.needsVerification === true ||
-		result.ok === false ||
-		typeof result.error === "string"
-	);
+  if (!result) return false;
+  return (
+    result.needsOperator === true ||
+    result.needsVerification === true ||
+    result.ok === false ||
+    typeof result.error === "string"
+  );
 }
 
 function amountLabel(order: ExchangeOrderPolicyState | null | undefined): string {
-	if (!order) return "";
-	// Валюта — из направления заявки ("RUB->PHP"); фоллбэк — платформенный дефолт.
-	const quoteCode = order.direction?.split("->")[1] || QUOTE_CURRENCY.code;
-	const parts = [
-		order.amountFrom ? `${order.amountFrom} ${order.assetFrom ?? ""}`.trim() : "",
-		order.amountToThb ? `${order.amountToThb} ${quoteCode}` : "",
-	].filter(Boolean);
-	return parts.join(" → ");
+  if (!order) return "";
+  // Валюта — из направления заявки ("RUB->PHP"); фоллбэк — платформенный дефолт.
+  const quoteCode = order.direction?.split("->")[1] || QUOTE_CURRENCY.code;
+  const parts = [
+    order.amountFrom ? `${order.amountFrom} ${order.assetFrom ?? ""}`.trim() : "",
+    order.amountToThb ? `${order.amountToThb} ${quoteCode}` : "",
+  ].filter(Boolean);
+  return parts.join(" → ");
 }
 
 function routeLabel(order: ExchangeOrderPolicyState | null | undefined): string {
-	if (!order) return "";
-	return [
-		order.paymentRail ? `rail=${order.paymentRail}` : "",
-		order.network ? `network=${order.network}` : "",
-		order.payoutMethod ? `payout=${order.payoutMethod}` : "",
-		order.payoutLocation ? `location=${order.payoutLocation}` : "",
-	]
-		.filter(Boolean)
-		.join(", ");
+  if (!order) return "";
+  return [
+    order.paymentRail ? `rail=${order.paymentRail}` : "",
+    order.network ? `network=${order.network}` : "",
+    order.payoutMethod ? `payout=${order.payoutMethod}` : "",
+    order.payoutLocation ? `location=${order.payoutLocation}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 export function parsePickupWindow(value: string | null | undefined): string | null {
-	if (!value?.trim()) return null;
-	try {
-		const parsed = JSON.parse(value) as unknown;
-		const obj = objectValue(parsed);
-		if (!obj) return null;
-		return (
-			stringValue(obj.pickupWindow) ??
-			stringValue(obj.pickup_window) ??
-			stringValue(obj.window) ??
-			stringValue(obj.timeWindow) ??
-			stringValue(obj.time_window) ??
-			stringValue(obj.slot)
-		);
-	} catch {
-		return null;
-	}
+  if (!value?.trim()) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const obj = objectValue(parsed);
+    if (!obj) return null;
+    return (
+      stringValue(obj.pickupWindow) ??
+      stringValue(obj.pickup_window) ??
+      stringValue(obj.window) ??
+      stringValue(obj.timeWindow) ??
+      stringValue(obj.time_window) ??
+      stringValue(obj.slot)
+    );
+  } catch {
+    return null;
+  }
 }
 
-function buildKycHandoff(
-	state: ExchangePolicyState | null | undefined,
-): OperatorHandoffMeta {
-	const order = state?.order ?? null;
-	return {
-		reason: "kyc_review",
-		title: "Проверить KYC клиента",
-		action:
-			"Проверить документ/фото/видео клиента, принять решение: KYC OK, запросить материалы или отклонить.",
-		priority: "high",
-		...(order?.id ? { orderId: order.id } : {}),
-		...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
-		pending: "operator_kyc_decision",
-		reviewPath: "operator_bot: kyc_approved / kyc_request_materials / kyc_rejected",
-		context: [
-			state?.verification?.status
-				? `verification=${state.verification.status}`
-				: "",
-			amountLabel(order),
-			routeLabel(order),
-		]
-			.filter(Boolean)
-			.join("; "),
-	};
+function buildKycHandoff(state: ExchangePolicyState | null | undefined): OperatorHandoffMeta {
+  const order = state?.order ?? null;
+  return {
+    reason: "kyc_review",
+    title: "Проверить KYC клиента",
+    action:
+      "Проверить документ/фото/видео клиента, принять решение: KYC OK, запросить материалы или отклонить.",
+    priority: "high",
+    ...(order?.id ? { orderId: order.id } : {}),
+    ...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
+    pending: "operator_kyc_decision",
+    reviewPath: "operator_bot: kyc_approved / kyc_request_materials / kyc_rejected",
+    context: [
+      state?.verification?.status ? `verification=${state.verification.status}` : "",
+      amountLabel(order),
+      routeLabel(order),
+    ]
+      .filter(Boolean)
+      .join("; "),
+  };
 }
 
 function buildPaymentHandoff(
-	state: ExchangePolicyState | null | undefined,
-	toolResult: Record<string, unknown> | null,
+  state: ExchangePolicyState | null | undefined,
+  toolResult: Record<string, unknown> | null,
 ): OperatorHandoffMeta {
-	const order = state?.order ?? null;
-	const receiptAmount =
-		numberValue(toolResult?.receiptAmount) ?? numberValue(toolResult?.amount);
-	return {
-		reason: "payment_review",
-		title: "Проверить оплату по заявке",
-		action:
-			"Сверить чек/поступление, сумму, банк/rail и отправителя. После проверки подтвердить оплату или отметить проблему.",
-		priority: "high",
-		...(order?.id ? { orderId: order.id } : {}),
-		...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
-		pending: "operator_payment_review",
-		reviewPath: "operator_bot: payment_confirmed / payment_under_review / payment_problem",
-		amount: receiptAmount
-			? String(receiptAmount)
-			: amountLabel(order),
-		rail:
-			stringValue(toolResult?.sourceBank) ??
-			order?.paymentRail ??
-			order?.paymentMethod ??
-			"",
-		network: order?.network ?? "",
-		context: [amountLabel(order), routeLabel(order)].filter(Boolean).join("; "),
-	};
+  const order = state?.order ?? null;
+  const receiptAmount = numberValue(toolResult?.receiptAmount) ?? numberValue(toolResult?.amount);
+  return {
+    reason: "payment_review",
+    title: "Проверить оплату по заявке",
+    action:
+      "Сверить чек/поступление, сумму, банк/rail и отправителя. После проверки подтвердить оплату или отметить проблему.",
+    priority: "high",
+    ...(order?.id ? { orderId: order.id } : {}),
+    ...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
+    pending: "operator_payment_review",
+    reviewPath: "operator_bot: payment_confirmed / payment_under_review / payment_problem",
+    amount: receiptAmount ? String(receiptAmount) : amountLabel(order),
+    rail: stringValue(toolResult?.sourceBank) ?? order?.paymentRail ?? order?.paymentMethod ?? "",
+    network: order?.network ?? "",
+    context: [amountLabel(order), routeLabel(order)].filter(Boolean).join("; "),
+  };
 }
 
 function buildOfficeHandoff(
-	state: ExchangePolicyState | null | undefined,
-	toolResult: Record<string, unknown> | null,
+  state: ExchangePolicyState | null | undefined,
+  toolResult: Record<string, unknown> | null,
 ): OperatorHandoffMeta {
-	const order = state?.order ?? null;
-	const location =
-		stringValue(toolResult?.location) ??
-		stringValue(toolResult?.payoutLocation) ??
-		order?.payoutLocation ??
-		"";
-	const pickupWindow =
-		stringValue(toolResult?.pickupWindow) ??
-		parsePickupWindow(order?.payoutDestinationJson);
-	return {
-		reason: "office_payout",
-		title: "Подтвердить выдачу в офисе",
-		action:
-			`Подтвердить выбранный офис, окно получения, наличие ${QUOTE_CURRENCY.code}/код выдачи и отправить клиенту финальные инструкции.`,
-		priority: "high",
-		...(order?.id ? { orderId: order.id } : {}),
-		...(order?.payoutPointId != null ? { payoutPointId: order.payoutPointId } : {}),
-		...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
-		accepted: "payment_verified_or_payout_pending",
-		pending: "operator_office_confirmation",
-		reviewPath: "operator_bot: office_details / payout_ready",
-		context: [
-			location ? `office=${location}` : "",
-			pickupWindow ? `pickup_window=${pickupWindow}` : "",
-			routeLabel(order),
-		]
-			.filter(Boolean)
-			.join("; "),
-		amount: amountLabel(order),
-	};
+  const order = state?.order ?? null;
+  const location =
+    stringValue(toolResult?.location) ??
+    stringValue(toolResult?.payoutLocation) ??
+    order?.payoutLocation ??
+    "";
+  const pickupWindow =
+    stringValue(toolResult?.pickupWindow) ?? parsePickupWindow(order?.payoutDestinationJson);
+  return {
+    reason: "office_payout",
+    title: "Подтвердить выдачу в офисе",
+    action: `Подтвердить выбранный офис, окно получения, наличие ${QUOTE_CURRENCY.code}/код выдачи и отправить клиенту финальные инструкции.`,
+    priority: "high",
+    ...(order?.id ? { orderId: order.id } : {}),
+    ...(order?.payoutPointId != null ? { payoutPointId: order.payoutPointId } : {}),
+    ...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
+    accepted: "payment_verified_or_payout_pending",
+    pending: "operator_office_confirmation",
+    reviewPath: "operator_bot: office_details / payout_ready",
+    context: [
+      location ? `office=${location}` : "",
+      pickupWindow ? `pickup_window=${pickupWindow}` : "",
+      routeLabel(order),
+    ]
+      .filter(Boolean)
+      .join("; "),
+    amount: amountLabel(order),
+  };
 }
 
 function buildGenericHandoff(
-	state: ExchangePolicyState | null | undefined,
-	toolResult: Record<string, unknown> | null,
+  state: ExchangePolicyState | null | undefined,
+  toolResult: Record<string, unknown> | null,
 ): OperatorHandoffMeta {
-	const order = state?.order ?? null;
-	const issue =
-		stringValue(toolResult?.error) ??
-		stringValue(toolResult?.reason) ??
-		stringValue(toolResult?.message) ??
-		"exchange_flow_blocked";
-	return {
-		reason: "operator_request",
-		title: "Разобрать обмен вручную",
-		action:
-			"Проверить диалог, заявку и последний шаг обмена. Продолжить сценарий вручную или вернуть AI после решения.",
-		priority: "high",
-		...(order?.id ? { orderId: order.id } : {}),
-		...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
-		pending: "operator_exchange_decision",
-		reviewPath: "admin-ui: conversation takeover / exchange order patch",
-		context: [issue, amountLabel(order), routeLabel(order)]
-			.filter(Boolean)
-			.join("; "),
-	};
+  const order = state?.order ?? null;
+  const issue =
+    stringValue(toolResult?.error) ??
+    stringValue(toolResult?.reason) ??
+    stringValue(toolResult?.message) ??
+    "exchange_flow_blocked";
+  return {
+    reason: "operator_request",
+    title: "Разобрать обмен вручную",
+    action:
+      "Проверить диалог, заявку и последний шаг обмена. Продолжить сценарий вручную или вернуть AI после решения.",
+    priority: "high",
+    ...(order?.id ? { orderId: order.id } : {}),
+    ...(state?.stageSlug ? { stageSlug: state.stageSlug } : {}),
+    pending: "operator_exchange_decision",
+    reviewPath: "admin-ui: conversation takeover / exchange order patch",
+    context: [issue, amountLabel(order), routeLabel(order)].filter(Boolean).join("; "),
+  };
 }
 
 export function buildExchangeGenericOperatorHandoff(input: {
-	state?: ExchangePolicyState | null;
-	context?: string | null;
+  state?: ExchangePolicyState | null;
+  context?: string | null;
 }): OperatorHandoffMeta {
-	return buildGenericHandoff(
-		input.state,
-		input.context ? { reason: input.context } : null,
-	);
+  return buildGenericHandoff(input.state, input.context ? { reason: input.context } : null);
 }
 
 export function buildExchangeOperatorHandoff(
-	input: ExchangeOperatorHandoffInput,
+  input: ExchangeOperatorHandoffInput,
 ): OperatorHandoffMeta | null {
-	const state = input.state ?? null;
-	const order = state?.order ?? null;
-	let fallbackPaymentResult: Record<string, unknown> | null = null;
-	const fallbackOfficeResult: Record<string, unknown> | null = null;
-	let fallbackGenericResult: Record<string, unknown> | null = null;
+  const state = input.state ?? null;
+  const order = state?.order ?? null;
+  let fallbackPaymentResult: Record<string, unknown> | null = null;
+  const fallbackOfficeResult: Record<string, unknown> | null = null;
+  let fallbackGenericResult: Record<string, unknown> | null = null;
 
-	for (const call of toolCalls(input.telemetry).slice().reverse()) {
-		const result = resultObject(call.result);
-		if (!resultNeedsOperator(result)) continue;
-		fallbackGenericResult ??= result;
+  for (const call of toolCalls(input.telemetry).slice().reverse()) {
+    const result = resultObject(call.result);
+    if (!resultNeedsOperator(result)) continue;
+    fallbackGenericResult ??= result;
 
-		if (
-			call.name === "check_exchange_verification" ||
-			(call.name === "create_exchange_order" && result?.needsVerification === true)
-		) {
-			return buildKycHandoff(state);
-		}
-		if (call.name === "verify_exchange_payment") {
-			return buildPaymentHandoff(state, result);
-		}
-		if (call.name === "issue_exchange_payout") {
-			return buildOfficeHandoff(state, result);
-		}
-		if (!fallbackPaymentResult && result?.needsOperator === true) {
-			fallbackPaymentResult = result;
-		}
-	}
+    if (
+      call.name === "check_exchange_verification" ||
+      (call.name === "create_exchange_order" && result?.needsVerification === true)
+    ) {
+      return buildKycHandoff(state);
+    }
+    if (call.name === "verify_exchange_payment") {
+      return buildPaymentHandoff(state, result);
+    }
+    if (call.name === "issue_exchange_payout") {
+      return buildOfficeHandoff(state, result);
+    }
+    if (!fallbackPaymentResult && result?.needsOperator === true) {
+      fallbackPaymentResult = result;
+    }
+  }
 
-	const text = input.text.toLowerCase();
-	if (
-		order?.paymentProofReceived === true &&
-		order.paymentVerified !== true &&
-		/(?:чек|оплат|receipt|proof|плат[её]ж)/iu.test(text)
-	) {
-		return buildPaymentHandoff(state, fallbackPaymentResult);
-	}
-	if (
-		order?.payoutMethod === "office_cash" &&
-		order.payoutCodeIssued !== true &&
-		/(?:офис|выдач|получ|код|office|pickup)/iu.test(text)
-	) {
-		return buildOfficeHandoff(state, fallbackOfficeResult);
-	}
-	if (
-		state?.verification?.verified !== true &&
-		/(?:верификац|kyc|документ|паспорт|видео|кружок|селфи)/iu.test(text)
-	) {
-		return buildKycHandoff(state);
-	}
-	if (fallbackGenericResult) {
-		return buildGenericHandoff(state, fallbackGenericResult);
-	}
+  const text = input.text.toLowerCase();
+  if (
+    order?.paymentProofReceived === true &&
+    order.paymentVerified !== true &&
+    /(?:чек|оплат|receipt|proof|плат[её]ж)/iu.test(text)
+  ) {
+    return buildPaymentHandoff(state, fallbackPaymentResult);
+  }
+  if (
+    order?.payoutMethod === "office_cash" &&
+    order.payoutCodeIssued !== true &&
+    /(?:офис|выдач|получ|код|office|pickup)/iu.test(text)
+  ) {
+    return buildOfficeHandoff(state, fallbackOfficeResult);
+  }
+  if (
+    state?.verification?.verified !== true &&
+    /(?:верификац|kyc|документ|паспорт|видео|кружок|селфи)/iu.test(text)
+  ) {
+    return buildKycHandoff(state);
+  }
+  if (fallbackGenericResult) {
+    return buildGenericHandoff(state, fallbackGenericResult);
+  }
 
-	return null;
+  return null;
 }

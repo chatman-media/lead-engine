@@ -55,9 +55,7 @@ export function makeMcpRoutes(opts: McpRoutesOpts): Hono {
     const mcpServer = createMcpServer({
       db: opts.db,
       tenantId,
-      resolveEmbedder: opts.resolveEmbedder
-        ? () => opts.resolveEmbedder!(tenantId)
-        : undefined,
+      resolveEmbedder: opts.resolveEmbedder ? () => opts.resolveEmbedder!(tenantId) : undefined,
     });
 
     const transport = new WebStandardStreamableHTTPServerTransport({

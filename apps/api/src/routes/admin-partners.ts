@@ -42,7 +42,9 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
         .from(partnerServices)
         .where(eq(partnerServices.tenantId, tenantId))
         .groupBy(partnerServices.partnerId);
-      const servicesByPartner = new Map(serviceStats.map((s) => [s.partnerId, Number(s.servicesCount)]));
+      const servicesByPartner = new Map(
+        serviceStats.map((s) => [s.partnerId, Number(s.servicesCount)]),
+      );
 
       return items.map((p) => {
         const st = statByPartner.get(p.id);
@@ -70,7 +72,7 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
       settlementCurrency?: string;
       notes?: string | null;
     };
-    const body = await c.req.json<CreatePartnerBody>().catch(() => ({} as CreatePartnerBody));
+    const body = await c.req.json<CreatePartnerBody>().catch(() => ({}) as CreatePartnerBody);
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name) return c.json({ error: "name required" }, 400);
     const now = Math.floor(Date.now() / 1000);
@@ -107,15 +109,21 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
     const adminId = c.var.adminId as number | undefined;
     const id = Number(c.req.param("id"));
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
-    const body = await c.req.json<Partial<typeof partners.$inferInsert>>().catch(() => ({} as Partial<typeof partners.$inferInsert>));
-    const patch: Partial<typeof partners.$inferInsert> = { updatedAt: Math.floor(Date.now() / 1000) };
+    const body = await c.req
+      .json<Partial<typeof partners.$inferInsert>>()
+      .catch(() => ({}) as Partial<typeof partners.$inferInsert>);
+    const patch: Partial<typeof partners.$inferInsert> = {
+      updatedAt: Math.floor(Date.now() / 1000),
+    };
     if (typeof body.name === "string") patch.name = body.name.trim();
     if (typeof body.status === "string") patch.status = body.status;
     if ("contactName" in body) patch.contactName = body.contactName ?? null;
     if ("contactChannel" in body) patch.contactChannel = body.contactChannel ?? null;
     if ("contactValue" in body) patch.contactValue = body.contactValue ?? null;
-    if (typeof body.defaultCommissionPct === "number") patch.defaultCommissionPct = body.defaultCommissionPct;
-    if (typeof body.settlementCurrency === "string") patch.settlementCurrency = body.settlementCurrency;
+    if (typeof body.defaultCommissionPct === "number")
+      patch.defaultCommissionPct = body.defaultCommissionPct;
+    if (typeof body.settlementCurrency === "string")
+      patch.settlementCurrency = body.settlementCurrency;
     if ("notes" in body) patch.notes = body.notes ?? null;
     const [row] = await withTenant(opts.db, tenantId, async (tx) =>
       tx
@@ -177,8 +185,9 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
       commissionPct?: number;
       notes?: string | null;
     };
-    const body = await c.req.json<CreateServiceBody>().catch(() => ({} as CreateServiceBody));
-    if (!body.partnerId || !body.name?.trim()) return c.json({ error: "partnerId and name required" }, 400);
+    const body = await c.req.json<CreateServiceBody>().catch(() => ({}) as CreateServiceBody);
+    if (!body.partnerId || !body.name?.trim())
+      return c.json({ error: "partnerId and name required" }, 400);
     const now = Math.floor(Date.now() / 1000);
     const [row] = await withTenant(opts.db, tenantId, async (tx) =>
       tx
@@ -270,7 +279,7 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
       commissionPct?: number;
       notes?: string | null;
     };
-    const body = await c.req.json<CreateDealBody>().catch(() => ({} as CreateDealBody));
+    const body = await c.req.json<CreateDealBody>().catch(() => ({}) as CreateDealBody);
     const now = Math.floor(Date.now() / 1000);
     const gross = body.grossAmount == null ? null : Number(body.grossAmount);
     const pct = Number(body.commissionPct ?? 0);
@@ -311,13 +320,16 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
     const adminId = c.var.adminId as number | undefined;
     const id = Number(c.req.param("id"));
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
-    const body = await c.req.json<Partial<typeof partnerDeals.$inferInsert>>().catch(() => ({} as Partial<typeof partnerDeals.$inferInsert>));
+    const body = await c.req
+      .json<Partial<typeof partnerDeals.$inferInsert>>()
+      .catch(() => ({}) as Partial<typeof partnerDeals.$inferInsert>);
     const now = Math.floor(Date.now() / 1000);
     const patch: Partial<typeof partnerDeals.$inferInsert> = { updatedAt: now };
     if (typeof body.status === "string") patch.status = body.status;
     if ("partnerId" in body) patch.partnerId = body.partnerId ?? null;
     if ("serviceId" in body) patch.serviceId = body.serviceId ?? null;
-    if ("grossAmount" in body) patch.grossAmount = body.grossAmount == null ? null : Number(body.grossAmount);
+    if ("grossAmount" in body)
+      patch.grossAmount = body.grossAmount == null ? null : Number(body.grossAmount);
     if (typeof body.currency === "string") patch.currency = body.currency;
     if (typeof body.commissionPct === "number") patch.commissionPct = body.commissionPct;
     if ("notes" in body) patch.notes = body.notes ?? null;
@@ -325,7 +337,10 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
 
     const [existing] = await withTenant(opts.db, tenantId, async (tx) =>
       tx
-        .select({ grossAmount: partnerDeals.grossAmount, commissionPct: partnerDeals.commissionPct })
+        .select({
+          grossAmount: partnerDeals.grossAmount,
+          commissionPct: partnerDeals.commissionPct,
+        })
         .from(partnerDeals)
         .where(and(eq(partnerDeals.tenantId, tenantId), eq(partnerDeals.id, id))),
     );
@@ -333,7 +348,8 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
 
     const gross = patch.grossAmount ?? existing.grossAmount;
     const pct = patch.commissionPct ?? existing.commissionPct;
-    patch.commissionAmount = gross == null ? null : roundMoney((Number(gross) * Number(pct ?? 0)) / 100);
+    patch.commissionAmount =
+      gross == null ? null : roundMoney((Number(gross) * Number(pct ?? 0)) / 100);
     if (patch.status === "accepted") patch.acceptedAt = now;
     if (patch.status === "completed") patch.completedAt = now;
     if (patch.status === "cancelled" || patch.status === "rejected") patch.cancelledAt = now;
@@ -414,15 +430,22 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
       periodEnd?: number;
       notes?: string | null;
     };
-    const body = await c.req.json<CreateSettlementBody>().catch(() => ({} as CreateSettlementBody));
+    const body = await c.req.json<CreateSettlementBody>().catch(() => ({}) as CreateSettlementBody);
     const partnerId = Number(body.partnerId);
     const periodStart = Number(body.periodStart);
     const periodEnd = Number(body.periodEnd);
     if (!Number.isInteger(partnerId) || partnerId <= 0) {
       return c.json({ error: "partnerId required" }, 400);
     }
-    if (!Number.isInteger(periodStart) || !Number.isInteger(periodEnd) || periodStart >= periodEnd) {
-      return c.json({ error: "periodStart/periodEnd must be epoch seconds, periodStart < periodEnd" }, 400);
+    if (
+      !Number.isInteger(periodStart) ||
+      !Number.isInteger(periodEnd) ||
+      periodStart >= periodEnd
+    ) {
+      return c.json(
+        { error: "periodStart/periodEnd must be epoch seconds, periodStart < periodEnd" },
+        400,
+      );
     }
     const now = Math.floor(Date.now() / 1000);
 
@@ -485,7 +508,10 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
         .where(
           and(
             eq(partnerDeals.tenantId, tenantId),
-            inArray(partnerDeals.id, deals.map((d) => d.id)),
+            inArray(
+              partnerDeals.id,
+              deals.map((d) => d.id),
+            ),
           ),
         );
       return { kind: "ok" as const, row: row!, dealsCount: deals.length };
@@ -515,7 +541,7 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
     const id = Number(c.req.param("id"));
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
     type PatchSettlementBody = { status?: string; notes?: string | null };
-    const body = await c.req.json<PatchSettlementBody>().catch(() => ({} as PatchSettlementBody));
+    const body = await c.req.json<PatchSettlementBody>().catch(() => ({}) as PatchSettlementBody);
     const nextStatus = typeof body.status === "string" ? body.status : null;
     const now = Math.floor(Date.now() / 1000);
 

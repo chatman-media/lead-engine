@@ -21,8 +21,7 @@ export const CONCIERGE_INTAKE: QuestionnaireSchema = {
   fields: [
     {
       slug: "request_type",
-      question:
-        "Что вам нужно: обмен валюты, трансфер, еда, уборка, экскурсия или другая услуга?",
+      question: "Что вам нужно: обмен валюты, трансфер, еда, уборка, экскурсия или другая услуга?",
       kind: "enum",
       required: true,
       options: ["Обмен", "Трансфер", "Еда", "Уборка", "Экскурсия", "Другое"],

@@ -30,7 +30,9 @@ function settings(over: Partial<OperatorSettings> = {}): OperatorSettings {
     informerDigestHour: 9,
     informerTz: "UTC",
     informerMutedUntil: null,
-    informerLastDigestAt: null, informerQuietFrom: null, informerQuietTo: null,
+    informerLastDigestAt: null,
+    informerQuietFrom: null,
+    informerQuietTo: null,
     updatedAt: 0,
     ...over,
   };
@@ -155,7 +157,10 @@ describe("notificationEventToInformer", () => {
     expect(notificationEventToInformer(ev({ eventType: "no_such_event" }))).toBeNull();
   });
   it("url строится из leadId + appUrl", () => {
-    const e = notificationEventToInformer(ev({ eventType: "high_value_deal", leadId: 9 }), "http://x");
+    const e = notificationEventToInformer(
+      ev({ eventType: "high_value_deal", leadId: 9 }),
+      "http://x",
+    );
     expect(e?.url).toBe("http://x/leads/9");
   });
   it("exchange_rate_guard_tripped → orders/important с курсовым контекстом (раньше → null)", () => {
@@ -250,8 +255,7 @@ describe("AdminInformer (unit)", () => {
       botToken: "tok-informer",
       appUrl: "http://x",
     });
-    const telegram = (informer as unknown as { telegram: OpsTelegramSender })
-      .telegram;
+    const telegram = (informer as unknown as { telegram: OpsTelegramSender }).telegram;
     await telegram.send("100", "<b>hi</b>");
     expect(urls[0]).toContain("/bottok-informer/sendMessage");
   });

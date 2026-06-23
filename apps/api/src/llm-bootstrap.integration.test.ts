@@ -105,7 +105,9 @@ describe("makeSimChatResolver", () => {
     for (const t of tenantIds) {
       byTenant.set(
         t,
-        new Map([["chat", { provider: "openai", model: "gpt-4o-mini", apiKey: "sk-x", source: "db" }]]),
+        new Map([
+          ["chat", { provider: "openai", model: "gpt-4o-mini", apiKey: "sk-x", source: "db" }],
+        ]),
       );
     }
     return {
@@ -181,12 +183,18 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   enabled = true;
   n = Math.floor(Date.now() / 1000);
-  const [t] = await db.insert(tenants).values({ slug: `llmboot-${n}` }).returning({ id: tenants.id });
+  const [t] = await db
+    .insert(tenants)
+    .values({ slug: `llmboot-${n}` })
+    .returning({ id: tenants.id });
   tenantId = t!.id;
   const [f] = await db
     .insert(funnels)
@@ -240,7 +248,7 @@ beforeAll(async () => {
     payoutLocation: "Bang Tao",
     status: "payout",
     requisitesJson: "{}",
-    proofJson: "{\"tx\":\"abc\"}",
+    proofJson: '{"tx":"abc"}',
     payoutCode: "CODE-1",
     createdAt: n,
     updatedAt: n,
@@ -450,7 +458,15 @@ describe("makeDirectorHooksResolver", () => {
     await db.insert(directorHooks).values([
       { tenantId, name: "B", body: "b", position: 1, isActive: true, createdAt: n, updatedAt: n },
       { tenantId, name: "A", body: "a", position: 0, isActive: true, createdAt: n, updatedAt: n },
-      { tenantId, name: "Off", body: "x", position: 2, isActive: false, createdAt: n, updatedAt: n },
+      {
+        tenantId,
+        name: "Off",
+        body: "x",
+        position: 2,
+        isActive: false,
+        createdAt: n,
+        updatedAt: n,
+      },
     ]);
     const resolve = makeDirectorHooksResolver(db);
     const r = await resolve({ tenantId });
@@ -468,8 +484,18 @@ describe("makeRerankerResolver", () => {
 
   it("cohere config + secret → Reranker", async () => {
     if (!enabled) return;
-    const [t] = await db.insert(tenants).values({ slug: `rr-${n}` }).returning({ id: tenants.id });
-    await setEncryptedSecret({ db, tenantId: t!.id, key: "rr_key", value: "co-key", masterKeyHex: MASTER_KEY, nowEpoch: n });
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `rr-${n}` })
+      .returning({ id: tenants.id });
+    await setEncryptedSecret({
+      db,
+      tenantId: t!.id,
+      key: "rr_key",
+      value: "co-key",
+      masterKeyHex: MASTER_KEY,
+      nowEpoch: n,
+    });
     await db.insert(llmProviderConfigs).values({
       tenantId: t!.id,
       purpose: "reranker",
@@ -485,8 +511,18 @@ describe("makeRerankerResolver", () => {
 
   it("unsupported provider → null", async () => {
     if (!enabled) return;
-    const [t] = await db.insert(tenants).values({ slug: `rr2-${n}` }).returning({ id: tenants.id });
-    await setEncryptedSecret({ db, tenantId: t!.id, key: "rr_key", value: "k", masterKeyHex: MASTER_KEY, nowEpoch: n });
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `rr2-${n}` })
+      .returning({ id: tenants.id });
+    await setEncryptedSecret({
+      db,
+      tenantId: t!.id,
+      key: "rr_key",
+      value: "k",
+      masterKeyHex: MASTER_KEY,
+      nowEpoch: n,
+    });
     await db.insert(llmProviderConfigs).values({
       tenantId: t!.id,
       purpose: "reranker",
@@ -504,7 +540,10 @@ describe("makeRerankerResolver", () => {
 describe("makeStyleResolver", () => {
   it("default slug → активный стиль тенанта", async () => {
     if (!enabled) return;
-    const [t] = await db.insert(tenants).values({ slug: `st-${n}` }).returning({ id: tenants.id });
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `st-${n}` })
+      .returning({ id: tenants.id });
     const [styleRow] = await db
       .insert(styles)
       .values({
@@ -527,7 +566,10 @@ describe("makeStyleResolver", () => {
   it("running experiment → deterministic variant с styleId/experimentId", async () => {
     if (!enabled) return;
     const suffix = Math.random().toString(36).slice(2, 8);
-    const [t] = await db.insert(tenants).values({ slug: `st-exp-${suffix}` }).returning({ id: tenants.id });
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `st-exp-${suffix}` })
+      .returning({ id: tenants.id });
     const [styleA, styleB] = await db
       .insert(styles)
       .values([
@@ -585,7 +627,10 @@ describe("makeStyleResolver", () => {
 
   it("нет стилей → null; invalidateStyle сбрасывает кеш", async () => {
     if (!enabled) return;
-    const [t] = await db.insert(tenants).values({ slug: `st2-${n}` }).returning({ id: tenants.id });
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `st2-${n}` })
+      .returning({ id: tenants.id });
     const { resolveStyle, invalidateStyle } = makeStyleResolver(db, {
       defaultSlug: "",
       experimentSlug: "",
@@ -599,7 +644,10 @@ describe("makeStyleResolver", () => {
 describe("makeToolsResolver", () => {
   it("booking secret → booking-tool; без него → пусто; invalidate сбрасывает", async () => {
     if (!enabled) return;
-    const [t] = await db.insert(tenants).values({ slug: `tools-${n}` }).returning({ id: tenants.id });
+    const [t] = await db
+      .insert(tenants)
+      .values({ slug: `tools-${n}` })
+      .returning({ id: tenants.id });
     const [tEmpty] = await db
       .insert(tenants)
       .values({ slug: `tools-empty-${n}` })
@@ -619,6 +667,8 @@ describe("makeToolsResolver", () => {
     const none = await resolveTools({ tenantId: tEmpty!.id, conversationId: 1 });
     expect(none).toEqual([]);
     invalidateTools(t!.id); // не бросает
-    expect((await resolveTools({ tenantId: t!.id, conversationId: 1 })).length).toBeGreaterThanOrEqual(1);
+    expect(
+      (await resolveTools({ tenantId: t!.id, conversationId: 1 })).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 });

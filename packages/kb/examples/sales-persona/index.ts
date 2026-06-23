@@ -35,13 +35,17 @@ const style: Style = {
     tone: "confident, curious, conversational — like a real recruiter on Telegram",
     language: "en",
     forbid: ["certainly!", "of course!", "as an AI", "I'm an AI"],
-    stallCtaReply: "Let's hop on a quick call and I'll walk you through everything — 15 min enough?",
+    stallCtaReply:
+      "Let's hop on a quick call and I'll walk you through everything — 15 min enough?",
   },
   framework: "NEPQ",
   hooks: [
     { kind: "social_proof", text: "Most engineers we place are earning 40% more within 6 months" },
     { kind: "scarcity", text: "We have 2 slots left for this intake" },
-    { kind: "authority", text: "Our legal team handles all visa paperwork — zero stress on your end" },
+    {
+      kind: "authority",
+      text: "Our legal team handles all visa paperwork — zero stress on your end",
+    },
   ],
   stages: {
     opener: {
@@ -137,7 +141,10 @@ await ingestText(
 
 const history = [
   { role: "user" as const, content: "Hey, saw your post about tech roles in Berlin" },
-  { role: "assistant" as const, content: "Hey! Yeah, we have a few good ones open right now. What's your background?" },
+  {
+    role: "assistant" as const,
+    content: "Hey! Yeah, we have a few good ones open right now. What's your background?",
+  },
 ];
 
 const result = await answerWithRag({

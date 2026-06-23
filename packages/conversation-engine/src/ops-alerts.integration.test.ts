@@ -25,7 +25,13 @@ import {
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_ops_alerts_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "storage", "migrations");
+const migrationsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -71,20 +77,37 @@ beforeAll(async () => {
   enabled = true;
 
   const now = Math.floor(Date.now() / 1000);
-  const [t1] = await db.insert(schema.tenants).values({ slug: `ops-w-${now}` }).returning({ id: schema.tenants.id });
-  const [t2] = await db.insert(schema.tenants).values({ slug: `ops-n-${now}` }).returning({ id: schema.tenants.id });
+  const [t1] = await db
+    .insert(schema.tenants)
+    .values({ slug: `ops-w-${now}` })
+    .returning({ id: schema.tenants.id });
+  const [t2] = await db
+    .insert(schema.tenants)
+    .values({ slug: `ops-n-${now}` })
+    .returning({ id: schema.tenants.id });
   tenantWith = t1!.id;
   tenantNoTg = t2!.id;
 
   const [a1] = await db
     .insert(admins)
-    .values({ tenantId: tenantWith, email: `owner-${now}@test.io`, passwordHash: "x", role: "superadmin" })
+    .values({
+      tenantId: tenantWith,
+      email: `owner-${now}@test.io`,
+      passwordHash: "x",
+      role: "superadmin",
+    })
     .returning({ id: admins.id });
   await db.insert(admins).values({
-    tenantId: tenantNoTg, email: `owner2-${now}@test.io`, passwordHash: "x", role: "superadmin",
+    tenantId: tenantNoTg,
+    email: `owner2-${now}@test.io`,
+    passwordHash: "x",
+    role: "superadmin",
   });
   await db.insert(operatorSettings).values({
-    adminId: a1!.id, tenantId: tenantWith, telegramChatId: "555", notifyOnAssignedOnly: false,
+    adminId: a1!.id,
+    tenantId: tenantWith,
+    telegramChatId: "555",
+    notifyOnAssignedOnly: false,
   });
 }, 30_000);
 
@@ -101,7 +124,9 @@ describe("OpsAlertRouter", () => {
     if (!enabled) return;
     const tg = new FakeTelegram();
     const email = new FakeEmail();
-    await makeRouter(tg, email).emit(baseAlert(tenantWith, { severity: "critical", dedupKey: "c1" }));
+    await makeRouter(tg, email).emit(
+      baseAlert(tenantWith, { severity: "critical", dedupKey: "c1" }),
+    );
     expect(tg.sends.length).toBe(1);
     expect(email.sends.length).toBe(1);
     expect(email.sends[0]!.to).toContain("owner-");
@@ -111,7 +136,9 @@ describe("OpsAlertRouter", () => {
     if (!enabled) return;
     const tg = new FakeTelegram();
     const email = new FakeEmail();
-    await makeRouter(tg, email).emit(baseAlert(tenantWith, { severity: "warning", dedupKey: "w1" }));
+    await makeRouter(tg, email).emit(
+      baseAlert(tenantWith, { severity: "warning", dedupKey: "w1" }),
+    );
     expect(tg.sends.length).toBe(1);
     expect(email.sends.length).toBe(0);
   });
@@ -121,7 +148,9 @@ describe("OpsAlertRouter", () => {
     const tg = new FakeTelegram();
     tg.mode = "fail";
     const email = new FakeEmail();
-    await makeRouter(tg, email).emit(baseAlert(tenantWith, { severity: "warning", dedupKey: "w2" }));
+    await makeRouter(tg, email).emit(
+      baseAlert(tenantWith, { severity: "warning", dedupKey: "w2" }),
+    );
     expect(tg.sends.length).toBe(0);
     expect(email.sends.length).toBe(1);
   });
@@ -130,7 +159,9 @@ describe("OpsAlertRouter", () => {
     if (!enabled) return;
     const tg = new FakeTelegram();
     const email = new FakeEmail();
-    await makeRouter(tg, email).emit(baseAlert(tenantNoTg, { severity: "warning", dedupKey: "n1" }));
+    await makeRouter(tg, email).emit(
+      baseAlert(tenantNoTg, { severity: "warning", dedupKey: "n1" }),
+    );
     expect(tg.sends.length).toBe(0);
     expect(email.sends.length).toBe(1);
   });

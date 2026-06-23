@@ -28,7 +28,14 @@ import { makeSuperadminRoutes } from "./superadmin.ts";
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_superadmin_${Math.random().toString(36).slice(2, 10)}`;
 const migrationsDir = resolve(
-  __dirname, "..", "..", "..", "..", "packages", "storage", "migrations",
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
 );
 const SECRET = "test-secret-superadmin-12345";
 
@@ -36,75 +43,75 @@ let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
 
-let aliceToken = "";    // superadmin tenant A
-let bobToken = "";      // superadmin tenant B
-let carolToken = "";    // manager tenant A
+let aliceToken = ""; // superadmin tenant A
+let bobToken = ""; // superadmin tenant B
+let carolToken = ""; // manager tenant A
 let tenantAId = 0;
 let tenantBId = 0;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 3, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 3, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.use("/api/superadmin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminAdminsRoutes({ db, publicUrl: "https://app.test", inviteExpiresSec: 3600 }));
-    app.route("/", makeSuperadminRoutes({ db, publicUrl: "https://app.test" }));
-    app.route("/", makePublicEarlyAccessRoutes({ db }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.use("/api/superadmin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route(
+    "/",
+    makeAdminAdminsRoutes({ db, publicUrl: "https://app.test", inviteExpiresSec: 3600 }),
+  );
+  app.route("/", makeSuperadminRoutes({ db, publicUrl: "https://app.test" }));
+  app.route("/", makePublicEarlyAccessRoutes({ db }));
 
-    // Signup alice (tenant A)
-    const ra = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "alice@sa-test.io", password: "password-alice-12345" }),
-    });
-    const sa = (await ra.json()) as { token: string; admin: { tenantId: number } };
-    aliceToken = sa.token;
-    tenantAId = sa.admin.tenantId;
+  // Signup alice (tenant A)
+  const ra = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "alice@sa-test.io", password: "password-alice-12345" }),
+  });
+  const sa = (await ra.json()) as { token: string; admin: { tenantId: number } };
+  aliceToken = sa.token;
+  tenantAId = sa.admin.tenantId;
 
-    // Signup bob (tenant B)
-    const rb = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "bob@sa-test.io", password: "password-bob-12345" }),
-    });
-    const sb = (await rb.json()) as { token: string; admin: { tenantId: number } };
-    bobToken = sb.token;
-    tenantBId = sb.admin.tenantId;
+  // Signup bob (tenant B)
+  const rb = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "bob@sa-test.io", password: "password-bob-12345" }),
+  });
+  const sb = (await rb.json()) as { token: string; admin: { tenantId: number } };
+  bobToken = sb.token;
+  tenantBId = sb.admin.tenantId;
 
-    // Invite carol as manager in tenant A (alice invites)
-    const ri = await app.request("/api/admin/admins/invite", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${aliceToken}`,
-      },
-      body: JSON.stringify({ email: "carol@sa-test.io", role: "manager" }),
-    });
-    const si = (await ri.json()) as { token: string; shareUrl: string };
-    const inviteToken = new URL(si.shareUrl).searchParams.get("token") ?? "";
+  // Invite carol as manager in tenant A (alice invites)
+  const ri = await app.request("/api/admin/admins/invite", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${aliceToken}`,
+    },
+    body: JSON.stringify({ email: "carol@sa-test.io", role: "manager" }),
+  });
+  const si = (await ri.json()) as { token: string; shareUrl: string };
+  const inviteToken = new URL(si.shareUrl).searchParams.get("token") ?? "";
 
-    // Accept invite
-    const rac = await app.request("/api/auth/accept-invite", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: inviteToken, password: "password-carol-12345" }),
-    });
-    const sac = (await rac.json()) as { token: string };
-    carolToken = sac.token;
-  },
-  30_000,
-);
+  // Accept invite
+  const rac = await app.request("/api/auth/accept-invite", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: inviteToken, password: "password-carol-12345" }),
+  });
+  const sac = (await rac.json()) as { token: string };
+  carolToken = sac.token;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -130,7 +137,14 @@ describe("GET /api/superadmin/tenants", () => {
     const res = await authReq(aliceToken, "/api/superadmin/tenants");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      items: Array<{ id: number; slug: string; plan: string; status: string; leadCount: number; conversationCount: number }>;
+      items: Array<{
+        id: number;
+        slug: string;
+        plan: string;
+        status: string;
+        leadCount: number;
+        conversationCount: number;
+      }>;
     };
     expect(Array.isArray(body.items)).toBe(true);
     // Оба тенанта должны быть в списке
@@ -184,14 +198,10 @@ describe("alpha early access approve flow", () => {
     expect(item?.status).toBe("new");
     expect(item?.tenantId).toBeNull();
 
-    const approve = await authReq(
-      aliceToken,
-      `/api/superadmin/early-access/${item!.id}/approve`,
-      {
-        method: "POST",
-        body: JSON.stringify({ plan: "starter" }),
-      },
-    );
+    const approve = await authReq(aliceToken, `/api/superadmin/early-access/${item!.id}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ plan: "starter" }),
+    });
     expect(approve.status).toBe(200);
     const approved = (await approve.json()) as {
       ok: boolean;
@@ -206,14 +216,10 @@ describe("alpha early access approve flow", () => {
     expect(approved.item.inviteId).toBe(approved.invite.id);
     expect(approved.invite.shareUrl.startsWith("https://app.test/accept-invite?token=")).toBe(true);
 
-    const again = await authReq(
-      aliceToken,
-      `/api/superadmin/early-access/${item!.id}/approve`,
-      {
-        method: "POST",
-        body: JSON.stringify({ plan: "pro" }),
-      },
-    );
+    const again = await authReq(aliceToken, `/api/superadmin/early-access/${item!.id}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ plan: "pro" }),
+    });
     expect(again.status).toBe(200);
     const approvedAgain = (await again.json()) as {
       tenant: { id: number; plan: string };

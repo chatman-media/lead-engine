@@ -3,7 +3,10 @@ import { ChatApiError, type ChatMessage, type FetchLike } from "../types.ts";
 import { OllamaChatClient } from "./ollama-chat.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 function ndjsonResponse(lines: string[], status = 200): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -23,14 +26,19 @@ function capture(make: () => Response | Promise<Response>) {
   }) as unknown as FetchLike;
   return { fn, calls };
 }
-function client(fetch: FetchLike, over: Partial<ConstructorParameters<typeof OllamaChatClient>[0]> = {}) {
+function client(
+  fetch: FetchLike,
+  over: Partial<ConstructorParameters<typeof OllamaChatClient>[0]> = {},
+) {
   return new OllamaChatClient({ host: "http://ollama:11434/", model: "qwen3", fetch, ...over });
 }
 const MSGS: ChatMessage[] = [{ role: "user", content: "hi" }];
 
 describe("OllamaChatClient.complete", () => {
   it("успех: корректный body (think=false, keep_alive, options) и content", async () => {
-    const { fn, calls } = capture(() => jsonResponse({ message: { role: "assistant", content: "ответ" }, done: true }));
+    const { fn, calls } = capture(() =>
+      jsonResponse({ message: { role: "assistant", content: "ответ" }, done: true }),
+    );
     const out = await client(fn).complete(MSGS, { temperature: 0.2, numPredict: 64 });
     expect(out).toBe("ответ");
     expect(calls[0]!.url).toBe("http://ollama:11434/api/chat");
@@ -69,7 +77,9 @@ describe("OllamaChatClient.complete", () => {
     expect(got).toEqual({ promptTokens: 130, completionTokens: 25 });
   });
   it("onUsage не зовётся когда counts отсутствуют", async () => {
-    const { fn } = capture(() => jsonResponse({ message: { role: "assistant", content: "ок" }, done: true }));
+    const { fn } = capture(() =>
+      jsonResponse({ message: { role: "assistant", content: "ок" }, done: true }),
+    );
     let called = false;
     await client(fn).complete(MSGS, {
       onUsage: () => {

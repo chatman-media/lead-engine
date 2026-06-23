@@ -184,9 +184,9 @@ describe("WebChannelAdapter", () => {
     await expect(
       a.delete({ channelId: "web1", externalUserId: "u", externalMessageId: "m" }),
     ).rejects.toThrow(/delete not supported/);
-    await expect(
-      a.downloadMedia({ channelId: "web1", externalRef: "x" }),
-    ).rejects.toThrow(/downloadMedia not supported/);
+    await expect(a.downloadMedia({ channelId: "web1", externalRef: "x" })).rejects.toThrow(
+      /downloadMedia not supported/,
+    );
     await a.signalTyping("u"); // no-op, не бросает
   });
 

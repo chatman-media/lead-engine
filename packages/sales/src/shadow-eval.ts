@@ -99,10 +99,7 @@ export function shadowDecide(
  * message; partial results are NOT rolled back so the operator still sees
  * "got 4 of 8 pairs before X happened".
  */
-export async function runShadowEval(
-  deps: ShadowEvalDeps,
-  input: ShadowEvalInput,
-): Promise<void> {
+export async function runShadowEval(deps: ShadowEvalDeps, input: ShadowEvalInput): Promise<void> {
   const pairs: Array<{ persona: CandidatePersona }> = [];
   for (const persona of input.personas) {
     for (let r = 0; r < input.runs; r++) {
@@ -145,9 +142,7 @@ export async function runShadowEval(
           candidateChat: deps.candidateChat,
           judgeChat: deps.judgeChat,
           embedder: deps.embedder,
-          ...(deps.vacanciesBlock
-            ? { vacanciesBlock: deps.vacanciesBlock }
-            : {}),
+          ...(deps.vacanciesBlock ? { vacanciesBlock: deps.vacanciesBlock } : {}),
         },
         {
           styleA: input.parentStyle,

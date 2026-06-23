@@ -8,9 +8,7 @@ import { SEED_TEMPLATES } from "./admin-funnel.ts";
 describe("SEED_TEMPLATES per-stage goal/guidance", () => {
   for (const [name, stages] of Object.entries(SEED_TEMPLATES)) {
     it(`${name}: all intake/active stages have goal + guidance`, () => {
-      const conversational = stages.filter(
-        (s) => s.kind === "intake" || s.kind === "active",
-      );
+      const conversational = stages.filter((s) => s.kind === "intake" || s.kind === "active");
       expect(conversational.length).toBeGreaterThan(0);
       for (const s of conversational) {
         expect(

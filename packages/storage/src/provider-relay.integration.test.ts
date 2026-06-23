@@ -2,11 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres, { type Sql } from "postgres";
-import {
-  applyAllMigrations,
-  createIsolatedDb,
-  tryConnectToPg,
-} from "./integration-helpers.ts";
+import { applyAllMigrations, createIsolatedDb, tryConnectToPg } from "./integration-helpers.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_provider_relay_${Math.random().toString(36).slice(2, 10)}`;
@@ -41,9 +37,7 @@ async function withTenant<T>(
   }) as unknown as Promise<T>;
 }
 
-async function relayCounts(
-  sql: Sql | postgres.TransactionSql,
-): Promise<Record<string, number>> {
+async function relayCounts(sql: Sql | postgres.TransactionSql): Promise<Record<string, number>> {
   const rows = await sql<Array<{ table_name: string; count: number }>>`
     SELECT 'provider_profiles' AS table_name, COUNT(*)::int AS count FROM provider_profiles
     UNION ALL

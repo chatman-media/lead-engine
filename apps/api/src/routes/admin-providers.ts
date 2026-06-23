@@ -101,11 +101,14 @@ function jsonObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function providerMetadataText(body: {
-  metadataJson?: string | Record<string, unknown> | null;
-  whatsappOptIn?: ProviderWhatsAppOptInInput | null;
-  whatsappProviderRequestTemplate?: ProviderWhatsAppTemplateInput | null;
-}, fallback = "{}"): string {
+function providerMetadataText(
+  body: {
+    metadataJson?: string | Record<string, unknown> | null;
+    whatsappOptIn?: ProviderWhatsAppOptInInput | null;
+    whatsappProviderRequestTemplate?: ProviderWhatsAppTemplateInput | null;
+  },
+  fallback = "{}",
+): string {
   const metadata = jsonObject(body.metadataJson ?? fallback);
   const optInSource = cleanText(body.whatsappOptIn?.source);
   const optInAcceptedAt = body.whatsappOptIn?.acceptedAt;
@@ -197,7 +200,12 @@ async function loadProviderItems(db: Db, tenantId: number, providerId?: number) 
   const services = await db
     .select()
     .from(providerServices)
-    .where(and(eq(providerServices.tenantId, tenantId), inArray(providerServices.providerId, providerIds)))
+    .where(
+      and(
+        eq(providerServices.tenantId, tenantId),
+        inArray(providerServices.providerId, providerIds),
+      ),
+    )
     .orderBy(desc(providerServices.id));
 
   const orderStats = await db
@@ -206,7 +214,12 @@ async function loadProviderItems(db: Db, tenantId: number, providerId?: number) 
       activeOrdersCount: sql<number>`count(CASE WHEN ${serviceOrders.status} NOT IN ('fulfilled','cancelled','failed') THEN 1 END)`,
     })
     .from(serviceOrders)
-    .where(and(eq(serviceOrders.tenantId, tenantId), inArray(serviceOrders.assignedProviderId, providerIds)))
+    .where(
+      and(
+        eq(serviceOrders.tenantId, tenantId),
+        inArray(serviceOrders.assignedProviderId, providerIds),
+      ),
+    )
     .groupBy(serviceOrders.assignedProviderId);
 
   const identitiesByContact = new Map<number, typeof identities>();
@@ -252,7 +265,12 @@ async function requireProvider(db: Db, tenantId: number, providerId: number) {
   return provider;
 }
 
-async function attachIdentity(db: Db, tenantId: number, contactId: number, input: ProviderIdentityInput) {
+async function attachIdentity(
+  db: Db,
+  tenantId: number,
+  contactId: number,
+  input: ProviderIdentityInput,
+) {
   const channelId = Number(input.channelId);
   const externalUserId = cleanText(input.externalUserId);
   if (!Number.isInteger(channelId) || channelId <= 0 || !externalUserId) {
@@ -277,7 +295,8 @@ async function attachIdentity(db: Db, tenantId: number, contactId: number, input
     )
     .limit(1);
   if (existing) {
-    if (existing.contactId !== contactId) throw new RouteError(409, "channel identity already assigned");
+    if (existing.contactId !== contactId)
+      throw new RouteError(409, "channel identity already assigned");
     return existing;
   }
 
@@ -316,7 +335,7 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
   app.post("/api/admin/providers", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = c.var.adminId as number | undefined;
-    const body = await c.req.json<CreateProviderBody>().catch(() => ({} as CreateProviderBody));
+    const body = await c.req.json<CreateProviderBody>().catch(() => ({}) as CreateProviderBody);
     const name = cleanText(body.name);
     if (!name) return c.json({ error: "name required" }, 400);
 
@@ -399,7 +418,7 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
     if (!id) return c.json({ error: "bad id" }, 400);
     const body = await c.req
       .json<Partial<CreateProviderBody> & { status?: string }>()
-      .catch(() => ({} as Partial<CreateProviderBody> & { status?: string }));
+      .catch(() => ({}) as Partial<CreateProviderBody> & { status?: string });
 
     const patch: Partial<typeof providerProfiles.$inferInsert> = { updatedAt: nowEpoch() };
     if ("name" in body) {
@@ -409,7 +428,8 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
     }
     if ("category" in body) patch.category = cleanText(body.category);
     if ("serviceArea" in body) patch.serviceArea = cleanText(body.serviceArea);
-    if ("defaultCommissionPct" in body) patch.defaultCommissionPct = Number(body.defaultCommissionPct ?? 0);
+    if ("defaultCommissionPct" in body)
+      patch.defaultCommissionPct = Number(body.defaultCommissionPct ?? 0);
     if ("notes" in body) patch.notes = cleanText(body.notes);
     const shouldPatchMetadata =
       "metadataJson" in body ||
@@ -489,7 +509,9 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
     const adminId = c.var.adminId as number | undefined;
     const id = parsePositiveId(c.req.param("id"));
     if (!id) return c.json({ error: "bad id" }, 400);
-    const body = await c.req.json<ProviderIdentityInput>().catch(() => ({} as ProviderIdentityInput));
+    const body = await c.req
+      .json<ProviderIdentityInput>()
+      .catch(() => ({}) as ProviderIdentityInput);
 
     try {
       const item = await withTenant(opts.db, tenantId, async (tx) => {
@@ -519,7 +541,7 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
     const adminId = c.var.adminId as number | undefined;
     const id = parsePositiveId(c.req.param("id"));
     if (!id) return c.json({ error: "bad id" }, 400);
-    const body = await c.req.json<ProviderServiceInput>().catch(() => ({} as ProviderServiceInput));
+    const body = await c.req.json<ProviderServiceInput>().catch(() => ({}) as ProviderServiceInput);
     const serviceType = cleanText(body.serviceType);
     const name = cleanText(body.name);
     if (!serviceType || !name) return c.json({ error: "serviceType and name required" }, 400);
@@ -565,7 +587,9 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
     const adminId = c.var.adminId as number | undefined;
     const serviceId = parsePositiveId(c.req.param("serviceId"));
     if (!serviceId) return c.json({ error: "bad id" }, 400);
-    const body = await c.req.json<Partial<ProviderServiceInput>>().catch(() => ({} as Partial<ProviderServiceInput>));
+    const body = await c.req
+      .json<Partial<ProviderServiceInput>>()
+      .catch(() => ({}) as Partial<ProviderServiceInput>);
 
     const patch: Partial<typeof providerServices.$inferInsert> = { updatedAt: nowEpoch() };
     if ("serviceType" in body) {

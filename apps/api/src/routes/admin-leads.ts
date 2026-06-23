@@ -127,9 +127,10 @@ function objectValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function stripContactKycAttributes(
-  attributesJson: string | null | undefined,
-): { changed: boolean; attributesJson: string | null } {
+function stripContactKycAttributes(attributesJson: string | null | undefined): {
+  changed: boolean;
+  attributesJson: string | null;
+} {
   if (!attributesJson) return { changed: false, attributesJson: null };
   let attrs: Record<string, unknown>;
   try {
@@ -482,12 +483,15 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
     const quota = await canAddLead({ db: opts.db, tenantId });
     if (!quota.allowed) {
-      return c.json({
-        error: "leads_limit_reached",
-        upgradeHint: `Лимит лидов на плане ${quota.planLabel}: ${quota.limit}. Повысьте план для продолжения.`,
-        current: quota.current,
-        limit: quota.limit,
-      }, 402);
+      return c.json(
+        {
+          error: "leads_limit_reached",
+          upgradeHint: `Лимит лидов на плане ${quota.planLabel}: ${quota.limit}. Повысьте план для продолжения.`,
+          current: quota.current,
+          limit: quota.limit,
+        },
+        402,
+      );
     }
 
     const now = Math.floor(Date.now() / 1000);
@@ -657,23 +661,46 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       for (let i = 0; i < raw.length; i++) {
         const ch = raw[i];
         if (inQuote) {
-          if (ch === '"' && raw[i + 1] === '"') { field += '"'; i++; }
-          else if (ch === '"') { inQuote = false; }
-          else { field += ch; }
+          if (ch === '"' && raw[i + 1] === '"') {
+            field += '"';
+            i++;
+          } else if (ch === '"') {
+            inQuote = false;
+          } else {
+            field += ch;
+          }
         } else {
-          if (ch === '"') { inQuote = true; }
-          else if (ch === ',') { row.push(field); field = ""; }
-          else if (ch === '\r' && raw[i + 1] === '\n') { row.push(field); field = ""; result.push(row); row = []; i++; }
-          else if (ch === '\n') { row.push(field); field = ""; result.push(row); row = []; }
-          else { field += ch; }
+          if (ch === '"') {
+            inQuote = true;
+          } else if (ch === ",") {
+            row.push(field);
+            field = "";
+          } else if (ch === "\r" && raw[i + 1] === "\n") {
+            row.push(field);
+            field = "";
+            result.push(row);
+            row = [];
+            i++;
+          } else if (ch === "\n") {
+            row.push(field);
+            field = "";
+            result.push(row);
+            row = [];
+          } else {
+            field += ch;
+          }
         }
       }
-      if (field || row.length) { row.push(field); result.push(row); }
+      if (field || row.length) {
+        row.push(field);
+        result.push(row);
+      }
       return result.filter((r) => r.some((c) => c.trim()));
     }
 
     const rows = parseCsv(csvText.trim());
-    if (rows.length < 2) return c.json({ error: "CSV must have header + at least one data row" }, 400);
+    if (rows.length < 2)
+      return c.json({ error: "CSV must have header + at least one data row" }, 400);
 
     const header = (rows[0] ?? []).map((h) => h.trim().toLowerCase());
     const colName = header.indexOf("name");
@@ -685,7 +712,8 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
     // Pre-load stage definitions for slug → id lookup
     const stageDefs = await withTenant(opts.db, tenantId, async (tx) =>
-      tx.select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
+      tx
+        .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
         .from(stageDefinitions)
         .where(eq(stageDefinitions.tenantId, tenantId)),
     );
@@ -694,7 +722,10 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
     const quota = await canAddLead({ db: opts.db, tenantId });
     if (!quota.allowed) {
-      return c.json({ error: "leads_limit_reached", limit: quota.limit, current: quota.current }, 402);
+      return c.json(
+        { error: "leads_limit_reached", limit: quota.limit, current: quota.current },
+        402,
+      );
     }
 
     const dataRows = rows.slice(1);
@@ -705,10 +736,16 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
     for (let i = 0; i < dataRows.length; i++) {
       const cells = dataRows[i];
-      if (!cells) { skipped++; continue; }
+      if (!cells) {
+        skipped++;
+        continue;
+      }
 
       const name = colName >= 0 ? (cells[colName] ?? "").trim() : "";
-      if (!name) { skipped++; continue; }
+      if (!name) {
+        skipped++;
+        continue;
+      }
 
       const phone = colPhone >= 0 ? (cells[colPhone] ?? "").trim() || null : null;
       const email = colEmail >= 0 ? (cells[colEmail] ?? "").trim() || null : null;
@@ -798,7 +835,12 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
               guidance: stageDefinitions.guidance,
             })
             .from(stageDefinitions)
-            .where(and(eq(stageDefinitions.id, lead.stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)))
+            .where(
+              and(
+                eq(stageDefinitions.id, lead.stageDefinitionId),
+                eq(stageDefinitions.tenantId, tenantId),
+              ),
+            )
             .limit(1)
         : [null];
 
@@ -816,7 +858,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
             .from(stageFields)
             .where(and(eq(stageFields.tenantId, tenantId), eq(stageFields.stageId, stageDef.id)))
             .orderBy(stageFields.position)
-          : [];
+        : [];
 
       const [funnel] = stageDef
         ? await tx
@@ -960,7 +1002,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
                   stageSlug: kbDocuments.stageSlug,
                 })
                 .from(kbDocuments)
-                .where(and(eq(kbDocuments.tenantId, tenantId), inArray(kbDocuments.id, documentIds))),
+                .where(
+                  and(eq(kbDocuments.tenantId, tenantId), inArray(kbDocuments.id, documentIds)),
+                ),
             )
           : [];
       const docById = new Map(documents.map((doc) => [doc.id, doc]));
@@ -1061,22 +1105,31 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       if (!lead) return null;
 
       const [stageDef] = lead.stageDefinitionId
-        ? await tx.select().from(stageDefinitions).where(eq(stageDefinitions.id, lead.stageDefinitionId))
+        ? await tx
+            .select()
+            .from(stageDefinitions)
+            .where(eq(stageDefinitions.id, lead.stageDefinitionId))
         : [null];
 
       const fields = stageDef
         ? await tx.select().from(stageFields).where(eq(stageFields.stageId, stageDef.id))
         : [];
 
-      const fieldValues = fields.length > 0
-        ? await tx
-            .select()
-            .from(leadFieldValues)
-            .where(and(
-              eq(leadFieldValues.leadId, id),
-              inArray(leadFieldValues.fieldId, fields.map((f) => f.id)),
-            ))
-        : [];
+      const fieldValues =
+        fields.length > 0
+          ? await tx
+              .select()
+              .from(leadFieldValues)
+              .where(
+                and(
+                  eq(leadFieldValues.leadId, id),
+                  inArray(
+                    leadFieldValues.fieldId,
+                    fields.map((f) => f.id),
+                  ),
+                ),
+              )
+          : [];
 
       const events = await tx
         .select()
@@ -1093,7 +1146,11 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .limit(10);
 
       const [contact] = await tx
-        .select({ id: contacts.id, displayName: contacts.displayName, attributesJson: contacts.attributesJson })
+        .select({
+          id: contacts.id,
+          displayName: contacts.displayName,
+          attributesJson: contacts.attributesJson,
+        })
         .from(contacts)
         .where(eq(contacts.id, lead.userId));
 
@@ -1112,7 +1169,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
           completedAt: exchangeOrders.completedAt,
         })
         .from(exchangeOrders)
-        .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.contactId, lead.userId)))
+        .where(
+          and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.contactId, lead.userId)),
+        )
         .orderBy(desc(exchangeOrders.id))
         .limit(50);
       const transferredThb = orders
@@ -1648,7 +1707,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       const [newStage] = await tx
         .select({ slug: stageDefinitions.slug, displayName: stageDefinitions.displayName })
         .from(stageDefinitions)
-        .where(and(eq(stageDefinitions.id, stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)));
+        .where(
+          and(eq(stageDefinitions.id, stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)),
+        );
       if (!newStage) throw new Error("stage not found");
 
       // Validate transition against current stage's nextStages whitelist.
@@ -1656,7 +1717,11 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       let prevStage: { id: number; slug: string; displayName: string } | null = null;
       if (lead.stageDefinitionId && lead.stageDefinitionId !== stageDefinitionId && !force) {
         const [currentStage] = await tx
-          .select({ nextStages: stageDefinitions.nextStages, slug: stageDefinitions.slug, displayName: stageDefinitions.displayName })
+          .select({
+            nextStages: stageDefinitions.nextStages,
+            slug: stageDefinitions.slug,
+            displayName: stageDefinitions.displayName,
+          })
           .from(stageDefinitions)
           .where(
             and(
@@ -1665,9 +1730,16 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
             ),
           );
         if (currentStage) {
-          prevStage = { id: lead.stageDefinitionId, slug: currentStage.slug, displayName: currentStage.displayName };
+          prevStage = {
+            id: lead.stageDefinitionId,
+            slug: currentStage.slug,
+            displayName: currentStage.displayName,
+          };
           // If nextStages is non-empty, enforce whitelist.
-          if (currentStage.nextStages.length > 0 && !currentStage.nextStages.includes(newStage.slug)) {
+          if (
+            currentStage.nextStages.length > 0 &&
+            !currentStage.nextStages.includes(newStage.slug)
+          ) {
             transitionBlocked = true;
             return;
           }
@@ -1677,7 +1749,8 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
           .select({ slug: stageDefinitions.slug, displayName: stageDefinitions.displayName })
           .from(stageDefinitions)
           .where(eq(stageDefinitions.id, lead.stageDefinitionId));
-        if (cs) prevStage = { id: lead.stageDefinitionId, slug: cs.slug, displayName: cs.displayName };
+        if (cs)
+          prevStage = { id: lead.stageDefinitionId, slug: cs.slug, displayName: cs.displayName };
       }
 
       await tx
@@ -1714,10 +1787,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     });
 
     if (transitionBlocked) {
-      return c.json(
-        { error: "transition_not_allowed", hint: "pass force:true to override" },
-        422,
-      );
+      return c.json({ error: "transition_not_allowed", hint: "pass force:true to override" }, 422);
     }
 
     await recordAudit(opts.db, {
@@ -1905,9 +1975,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       const conditions = [eq(contacts.tenantId, tenantId)];
       if (q.length > 0) {
-        conditions.push(
-          ilike(contacts.displayName, `%${q}%`) as ReturnType<typeof eq>,
-        );
+        conditions.push(ilike(contacts.displayName, `%${q}%`) as ReturnType<typeof eq>);
       }
       return tx
         .select({ id: contacts.id, displayName: contacts.displayName })
@@ -1938,7 +2006,14 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     const [note] = await withTenant(opts.db, tenantId, async (tx) =>
       tx
         .insert(leadNotes)
-        .values({ tenantId, leadId: id, byAdminId: adminId, body: noteBody.trim(), source: "admin", createdAt: now })
+        .values({
+          tenantId,
+          leadId: id,
+          byAdminId: adminId,
+          body: noteBody.trim(),
+          source: "admin",
+          createdAt: now,
+        })
         .returning(),
     );
 
@@ -1967,10 +2042,8 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       return c.json({ error: "invalid json" }, 400);
     }
     const photoRef = typeof body.photoRef === "string" ? body.photoRef.trim() : "";
-    const caption =
-      typeof body.caption === "string" ? body.caption.trim().slice(0, 1024) : "";
-    if (!photoRef)
-      return c.json({ error: "photoRef required (file_id or https URL)" }, 400);
+    const caption = typeof body.caption === "string" ? body.caption.trim().slice(0, 1024) : "";
+    if (!photoRef) return c.json({ error: "photoRef required (file_id or https URL)" }, 400);
 
     const now = Math.floor(Date.now() / 1000);
     const outcome = await withTenant(opts.db, tenantId, async (tx) => {
@@ -1988,12 +2061,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         })
         .from(channelIdentities)
         .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-        .where(
-          and(
-            eq(channelIdentities.contactId, lead.userId),
-            eq(channels.status, "active"),
-          ),
-        )
+        .where(and(eq(channelIdentities.contactId, lead.userId), eq(channels.status, "active")))
         .limit(1);
       if (!identity) return { kind: "no_channel" } as const;
       if (identity.channelKind === "max") {
@@ -2003,12 +2071,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       const [conv] = await tx
         .select({ id: conversations.id })
         .from(conversations)
-        .where(
-          and(
-            eq(conversations.tenantId, tenantId),
-            eq(conversations.userId, lead.userId),
-          ),
-        )
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.userId, lead.userId)))
         .orderBy(desc(conversations.lastMessageAt))
         .limit(1);
 
@@ -2122,24 +2185,14 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         })
         .from(channelIdentities)
         .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-        .where(
-          and(
-            eq(channelIdentities.contactId, lead.userId),
-            eq(channels.status, "active"),
-          ),
-        )
+        .where(and(eq(channelIdentities.contactId, lead.userId), eq(channels.status, "active")))
         .limit(1);
       if (!identity) return { kind: "no_channel" } as const;
 
       const [conv] = await tx
         .select({ id: conversations.id })
         .from(conversations)
-        .where(
-          and(
-            eq(conversations.tenantId, tenantId),
-            eq(conversations.userId, lead.userId),
-          ),
-        )
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.userId, lead.userId)))
         .orderBy(desc(conversations.lastMessageAt))
         .limit(1);
 

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
 import {
   applyAllMigrations,
-	auditLog,
+  auditLog,
   createIsolatedDb,
   schema,
   tenantFeatureFlags,
@@ -41,43 +41,43 @@ let tenantId = 0;
 let reloadCalls: number[] = [];
 
 beforeAll(async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route(
-      "/",
-      makeAdminTenantRoutes({
-        db,
-        onStatusChange: async (tid) => {
-          reloadCalls.push(tid);
-        },
-      }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route(
+    "/",
+    makeAdminTenantRoutes({
+      db,
+      onStatusChange: async (tid) => {
+        reloadCalls.push(tid);
+      },
+    }),
+  );
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			email: "tenant-pause@demo.io",
-			password: "strong-pwd-12345",
-		}),
-    });
-	const sba = (await sa.json()) as {
-		token: string;
-		admin: { tenantId: number };
-	};
-    token = sba.token;
-    tenantId = sba.admin.tenantId;
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: "tenant-pause@demo.io",
+      password: "strong-pwd-12345",
+    }),
+  });
+  const sba = (await sa.json()) as {
+    token: string;
+    admin: { tenantId: number };
+  };
+  token = sba.token;
+  tenantId = sba.admin.tenantId;
 }, 30_000);
 
 afterAll(async () => {
@@ -87,10 +87,7 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function authReq(
-	path: string,
-	init: RequestInit = {},
-): Promise<Response> {
+async function authReq(path: string, init: RequestInit = {}): Promise<Response> {
   return await app.request(path, {
     ...init,
     headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` },
@@ -109,12 +106,12 @@ describe("admin-tenant", () => {
     const res = await authReq("/api/admin/tenant");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-			tenant: {
-				status: string;
-				plan: string;
-				llmBillingMode: string;
-				slug: string;
-			};
+      tenant: {
+        status: string;
+        plan: string;
+        llmBillingMode: string;
+        slug: string;
+      };
     };
     expect(body.tenant.status).toBe("active");
     expect(body.tenant.plan).toBe("free");
@@ -293,9 +290,9 @@ describe("admin-tenant", () => {
 
     const initial = await authReq("/api/admin/tenant/features");
     expect(initial.status).toBe(200);
-		expect(await initial.json()).toEqual({
-			features: { providerRelay: false, exchangeResponseGuard: true },
-		});
+    expect(await initial.json()).toEqual({
+      features: { providerRelay: false, exchangeResponseGuard: true },
+    });
 
     const enabled = await authReq("/api/admin/tenant/features/provider-relay", {
       method: "PUT",
@@ -309,14 +306,12 @@ describe("admin-tenant", () => {
       enabled: true,
     });
 
-		const flagsAfterProvider = await db
+    const flagsAfterProvider = await db
       .select()
       .from(tenantFeatureFlags)
       .where(eq(tenantFeatureFlags.tenantId, tenantId));
-		const providerFlag = flagsAfterProvider.find(
-			(flag) => flag.featureKey === "provider_relay",
-		);
-		expect(providerFlag?.enabled).toBe(true);
+    const providerFlag = flagsAfterProvider.find((flag) => flag.featureKey === "provider_relay");
+    expect(providerFlag?.enabled).toBe(true);
 
     const [audit] = await db
       .select()
@@ -326,39 +321,34 @@ describe("admin-tenant", () => {
 
     const after = await authReq("/api/admin/tenant/features");
     expect(after.status).toBe(200);
-		expect(await after.json()).toEqual({
-			features: { providerRelay: true, exchangeResponseGuard: true },
-		});
+    expect(await after.json()).toEqual({
+      features: { providerRelay: true, exchangeResponseGuard: true },
+    });
 
-		const disabledGuard = await authReq(
-			"/api/admin/tenant/features/exchange-response-guard",
-			{
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ enabled: false }),
-			},
-		);
-		expect(disabledGuard.status).toBe(200);
-		expect(await disabledGuard.json()).toEqual({
-			ok: true,
-			feature: "exchangeResponseGuard",
-			enabled: false,
-		});
+    const disabledGuard = await authReq("/api/admin/tenant/features/exchange-response-guard", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(disabledGuard.status).toBe(200);
+    expect(await disabledGuard.json()).toEqual({
+      ok: true,
+      feature: "exchangeResponseGuard",
+      enabled: false,
+    });
 
-		const flagsAfterGuard = await db
-			.select()
-			.from(tenantFeatureFlags)
-			.where(eq(tenantFeatureFlags.tenantId, tenantId));
-		const guardFlag = flagsAfterGuard.find(
-			(flag) => flag.featureKey === "exchange_response_guard",
-		);
-		expect(guardFlag?.enabled).toBe(false);
+    const flagsAfterGuard = await db
+      .select()
+      .from(tenantFeatureFlags)
+      .where(eq(tenantFeatureFlags.tenantId, tenantId));
+    const guardFlag = flagsAfterGuard.find((flag) => flag.featureKey === "exchange_response_guard");
+    expect(guardFlag?.enabled).toBe(false);
 
-		const afterGuard = await authReq("/api/admin/tenant/features");
-		expect(afterGuard.status).toBe(200);
-		expect(await afterGuard.json()).toEqual({
-			features: { providerRelay: true, exchangeResponseGuard: false },
-		});
+    const afterGuard = await authReq("/api/admin/tenant/features");
+    expect(afterGuard.status).toBe(200);
+    expect(await afterGuard.json()).toEqual({
+      features: { providerRelay: true, exchangeResponseGuard: false },
+    });
 
     const invalid = await authReq("/api/admin/tenant/features/provider-relay", {
       method: "PUT",

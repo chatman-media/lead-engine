@@ -76,7 +76,11 @@ class FakeAdapter implements ChannelAdapter {
     };
   }
   receive(): AsyncIterable<Inbound> {
-    return { [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ value: undefined as unknown as Inbound, done: true }) }) };
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.resolve({ value: undefined as unknown as Inbound, done: true }),
+      }),
+    };
   }
   async send(envelope: OutboundEnvelope): Promise<Sent> {
     this.sendCalls.push(envelope);
@@ -109,59 +113,53 @@ class TestRegistry extends WorkerChannelRegistry {
   }
 }
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    // FORCE ROW LEVEL SECURITY (миграция 0004) блокирует выборки без
-    // SET LOCAL app.tenant_id. Production worker получает BYPASSRLS role;
-    // в тестах SELECT/UPDATE через owner-connection, но FORCE заставляет
-    // и его respect'ать policy. ALTER FORCE OFF per-table — самый явный
-    // способ disable'ить без переписывания queries в withTenant.
-    const rlsTables = await sql<Array<{ tablename: string }>>`
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  // FORCE ROW LEVEL SECURITY (миграция 0004) блокирует выборки без
+  // SET LOCAL app.tenant_id. Production worker получает BYPASSRLS role;
+  // в тестах SELECT/UPDATE через owner-connection, но FORCE заставляет
+  // и его respect'ать policy. ALTER FORCE OFF per-table — самый явный
+  // способ disable'ить без переписывания queries в withTenant.
+  const rlsTables = await sql<Array<{ tablename: string }>>`
       SELECT tablename FROM pg_tables
       WHERE schemaname='public' AND rowsecurity=true
     `;
-    for (const { tablename } of rlsTables) {
-      await sql.unsafe(`ALTER TABLE "${tablename}" NO FORCE ROW LEVEL SECURITY`);
-    }
-    db = drizzle(sql, { schema });
+  for (const { tablename } of rlsTables) {
+    await sql.unsafe(`ALTER TABLE "${tablename}" NO FORCE ROW LEVEL SECURITY`);
+  }
+  db = drizzle(sql, { schema });
 
-    const [t] = await db
-      .insert(tenants)
-      .values({ slug: "wdt", plan: "free", status: "active", llmBillingMode: "byok" })
-      .returning();
-    if (!t) throw new Error("seed: tenants insert returned no row");
-    tenantId = t.id;
-    const [ch] = await db
-      .insert(channels)
-      .values({
-        tenantId,
-        kind: "telegram_bot",
-        externalId: "wdt_bot",
-        status: "active",
-      })
-      .returning();
-    if (!ch) throw new Error("seed: channels insert returned no row");
-    channelDbId = ch.id;
-  },
-  30_000,
-);
+  const [t] = await db
+    .insert(tenants)
+    .values({ slug: "wdt", plan: "free", status: "active", llmBillingMode: "byok" })
+    .returning();
+  if (!t) throw new Error("seed: tenants insert returned no row");
+  tenantId = t.id;
+  const [ch] = await db
+    .insert(channels)
+    .values({
+      tenantId,
+      kind: "telegram_bot",
+      externalId: "wdt_bot",
+      status: "active",
+    })
+    .returning();
+  if (!ch) throw new Error("seed: channels insert returned no row");
+  channelDbId = ch.id;
+}, 30_000);
 
-afterAll(
-  async () => {
-    if (sql) {
-      await sql.end({ timeout: 0 }).catch(() => {});
-      sql = null;
-    }
-  },
-  10_000,
-);
+afterAll(async () => {
+  if (sql) {
+    await sql.end({ timeout: 0 }).catch(() => {});
+    sql = null;
+  }
+}, 10_000);
 
 beforeEach(async () => {
   if (!sql) return;
@@ -251,10 +249,7 @@ describe("OutboundDispatcher integration", () => {
     expect(adapter.sendCalls).toHaveLength(1);
     expect(adapter.sendCalls[0]?.parts).toEqual([{ kind: "text", text: "hello" }]);
 
-    const [row] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, queueId));
+    const [row] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, queueId));
     expect(row?.status).toBe("sent");
     expect(row?.externalMessageId).toBe("fake-msg-1");
     expect(row?.sentAt).toBeGreaterThan(0);
@@ -275,10 +270,7 @@ describe("OutboundDispatcher integration", () => {
     // Прямой tick() обходит run/abort/sleep race в тестах.
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
-    const [row] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, queueId));
+    const [row] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, queueId));
     expect(row?.status).toBe("failed");
     expect(row?.lastError).toContain("fake-adapter forced failure");
     expect(metrics.registry.format()).toContain(
@@ -324,10 +316,7 @@ describe("OutboundDispatcher integration", () => {
     // Прямой tick() обходит run/abort/sleep race в тестах.
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
-    const [updated] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, row.id));
+    const [updated] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, row.id));
     expect(updated?.status).toBe("failed");
     expect(updated?.lastError).toContain("no active adapter");
     expect(metrics.registry.format()).toContain(
@@ -357,10 +346,7 @@ describe("OutboundDispatcher integration", () => {
     // Прямой tick() обходит run/abort/sleep race в тестах.
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
-    const [updated] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, row.id));
+    const [updated] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, row.id));
     expect(updated?.status).toBe("failed");
     expect(updated?.lastError).toContain("invalid payload_json");
     expect(metrics.registry.format()).toContain(
@@ -552,10 +538,7 @@ describe("OutboundDispatcher integration", () => {
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     expect(adapter.sendCalls).toHaveLength(3);
-    const rows = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.tenantId, tenantId));
+    const rows = await db.select().from(outboundQueue).where(eq(outboundQueue.tenantId, tenantId));
     expect(rows.every((r) => r.status === "sent")).toBe(true);
   });
 
@@ -625,10 +608,7 @@ describe("OutboundDispatcher integration", () => {
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     // telegram_bot row — sent.
-    const [tgRow] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, tgQueueId));
+    const [tgRow] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, tgQueueId));
     expect(tgRow?.status).toBe("sent");
     expect(adapter.sendCalls).toHaveLength(1);
 
@@ -667,10 +647,7 @@ describe("OutboundDispatcher integration", () => {
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     expect(adapter.sendCalls).toHaveLength(0);
-    const [unchanged] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, row.id));
+    const [unchanged] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, row.id));
     expect(unchanged?.status).toBe("pending");
   });
 
@@ -783,10 +760,7 @@ describe("OutboundDispatcher integration", () => {
 
       await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
-      const [updated] = await db
-        .select()
-        .from(outboundQueue)
-        .where(eq(outboundQueue.id, row.id));
+      const [updated] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, row.id));
       expect(updated?.status).toBe("failed");
       expect(updated?.lastError).toBe(c.message);
     }

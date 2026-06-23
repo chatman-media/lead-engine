@@ -26,7 +26,16 @@ import { makeWhatsAppWebhookRoutes } from "./webhook-whatsapp.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_wawh_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-wawh-12345";
 const APP_SECRET = "wa-app-secret-abcdef";
 const VERIFY_TOKEN = "wa-verify-token-xyz";
@@ -48,23 +57,29 @@ function sign(payload: string): string {
 function waPayload(text: string, fromId = FROM_NUMBER): string {
   return JSON.stringify({
     object: "whatsapp_business_account",
-    entry: [{
-      id: "biz",
-      changes: [{
-        field: "messages",
-        value: {
-          messaging_product: "whatsapp",
-          messages: [{
-            from: fromId,
-            id: `wa.${Math.random().toString(36).slice(2, 10)}`,
-            timestamp: String(Math.floor(Date.now() / 1000)),
-            type: "text",
-            text: { body: text },
-          }],
-          contacts: [{ profile: { name: "Иван Тест" }, wa_id: fromId }],
-        },
-      }],
-    }],
+    entry: [
+      {
+        id: "biz",
+        changes: [
+          {
+            field: "messages",
+            value: {
+              messaging_product: "whatsapp",
+              messages: [
+                {
+                  from: fromId,
+                  id: `wa.${Math.random().toString(36).slice(2, 10)}`,
+                  timestamp: String(Math.floor(Date.now() / 1000)),
+                  type: "text",
+                  text: { body: text },
+                },
+              ],
+              contacts: [{ profile: { name: "Иван Тест" }, wa_id: fromId }],
+            },
+          },
+        ],
+      },
+    ],
   });
 }
 
@@ -95,12 +110,15 @@ beforeAll(async () => {
   app = new Hono();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
   app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-  app.route("/", makeWhatsAppWebhookRoutes({
-    db,
-    channels: registry,
-    verifyToken: VERIFY_TOKEN,
-    appSecret: APP_SECRET,
-  }));
+  app.route(
+    "/",
+    makeWhatsAppWebhookRoutes({
+      db,
+      channels: registry,
+      verifyToken: VERIFY_TOKEN,
+      appSecret: APP_SECRET,
+    }),
+  );
 
   const signup = await app.request("/api/auth/signup", {
     method: "POST",
@@ -111,14 +129,17 @@ beforeAll(async () => {
   tenantId = signupBody.tenant.id;
 
   // Create a WhatsApp channel in DB
-  const [ch] = await db.insert(channels).values({
-    tenantId,
-    kind: "whatsapp",
-    externalId: PHONE_ID,
-    status: "active",
-    createdAt: Math.floor(Date.now() / 1000),
-    updatedAt: Math.floor(Date.now() / 1000),
-  }).returning({ id: channels.id });
+  const [ch] = await db
+    .insert(channels)
+    .values({
+      tenantId,
+      kind: "whatsapp",
+      externalId: PHONE_ID,
+      status: "active",
+      createdAt: Math.floor(Date.now() / 1000),
+      updatedAt: Math.floor(Date.now() / 1000),
+    })
+    .returning({ id: channels.id });
   channelDbId = ch!.id;
 
   const adapter = new WhatsAppCloudAdapter({
@@ -210,25 +231,32 @@ describe("webhook-whatsapp POST — rate-limit", () => {
       accessToken: "stub",
     });
     // biome-ignore lint/suspicious/noExplicitAny: inject
-    (registry as any).byTenantSlug.set(SLUG, [{
-      channelDbId,
-      tenantId,
-      tenantSlug: SLUG,
-      tenantPlan: "free",
-      kind: "whatsapp",
-      externalId: PHONE_ID,
-      adapter,
-      whatsappAppSecret: APP_SECRET,
-    }]);
+    (registry as any).byTenantSlug.set(SLUG, [
+      {
+        channelDbId,
+        tenantId,
+        tenantSlug: SLUG,
+        tenantPlan: "free",
+        kind: "whatsapp",
+        externalId: PHONE_ID,
+        adapter,
+        whatsappAppSecret: APP_SECRET,
+      },
+    ]);
 
     const appRl = new Hono();
-    appRl.route("/", makeWhatsAppWebhookRoutes({
-      db,
-      channels: registry,
-      verifyToken: VERIFY_TOKEN,
-      appSecret: APP_SECRET,
-      rateLimiter: { check: () => ({ allowed: false, reason: "per_minute", retryAfterSec: 60 }) } as never,
-    }));
+    appRl.route(
+      "/",
+      makeWhatsAppWebhookRoutes({
+        db,
+        channels: registry,
+        verifyToken: VERIFY_TOKEN,
+        appSecret: APP_SECRET,
+        rateLimiter: {
+          check: () => ({ allowed: false, reason: "per_minute", retryAfterSec: 60 }),
+        } as never,
+      }),
+    );
 
     const body = waPayload("test rate limit");
     const res = await appRl.request(`/webhook/whatsapp/${SLUG}`, {
@@ -253,7 +281,8 @@ describe("webhook-whatsapp POST — happy path", () => {
 
     // Verify message persisted
     const saved = await withTenant(db, tenantId, async (tx) =>
-      tx.select({ text: messages.text })
+      tx
+        .select({ text: messages.text })
         .from(messages)
         .where(eq(messages.tenantId, tenantId))
         .limit(10),

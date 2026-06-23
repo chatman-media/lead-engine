@@ -188,7 +188,9 @@ async function main() {
     }
     if (webChannel) {
       console.log(`  - web channel id: ${webChannel.id}`);
-      console.log(`  - WebSocket URL: ws://<HOST>/ws/${tenant.slug}?user=<USER_ID>[&auth=<WEB_WS_AUTH_SECRET>]`);
+      console.log(
+        `  - WebSocket URL: ws://<HOST>/ws/${tenant.slug}?user=<USER_ID>[&auth=<WEB_WS_AUTH_SECRET>]`,
+      );
       console.log("  - Open apps/api/demo/web-chat.html в браузере для smoke-теста");
     }
   } finally {

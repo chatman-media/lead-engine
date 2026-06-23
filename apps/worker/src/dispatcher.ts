@@ -109,9 +109,7 @@ export class OutboundDispatcher {
           });
         });
         if (released > 0) {
-          console.log(
-            `[dispatcher] released ${released} stuck processing rows for tenant=${t.id}`,
-          );
+          console.log(`[dispatcher] released ${released} stuck processing rows for tenant=${t.id}`);
         }
       }
 
@@ -220,10 +218,7 @@ export class OutboundDispatcher {
     if (meta.requiresTemplate) {
       return "whatsapp outbound requires an approved template";
     }
-    if (
-      typeof meta.freeFormWindowUntil === "number" &&
-      meta.freeFormWindowUntil < nowEpoch
-    ) {
+    if (typeof meta.freeFormWindowUntil === "number" && meta.freeFormWindowUntil < nowEpoch) {
       return "whatsapp free-form window expired; approved template required";
     }
     return null;

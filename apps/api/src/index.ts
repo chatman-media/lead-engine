@@ -1,17 +1,14 @@
 import {
-	AdminInformer,
-	checkRlsEnforcement,
-	NotificationService,
-	NotificationsRepo,
-	OperatorBotHandler,
-	OpsAlertRouter,
-	withTenant,
+  AdminInformer,
+  checkRlsEnforcement,
+  NotificationService,
+  NotificationsRepo,
+  OperatorBotHandler,
+  OpsAlertRouter,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
-import {
-	makeDefaultLogger,
-	makePlatformMetrics,
-} from "@chatman-media/observability";
+import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
 import { CONCIERGE_V1 } from "@chatman-media/vertical-concierge";
 import { EXCHANGE_V1 } from "@chatman-media/vertical-exchange";
@@ -54,20 +51,17 @@ import { WebChannelRegistry } from "./lib/web-channel-registry.ts";
 import { WebOutboundDispatcher } from "./lib/web-dispatcher.ts";
 import { startWebInboundRunner } from "./lib/web-inbound-runner.ts";
 import {
-	type LoadedRef,
-	makeEmbedderResolver,
-	makeMemoryExtractor,
-	makeReplyStrategy,
-	makeSimChatResolver,
-	makeStageClassifier,
-	makeTranscriberResolver,
-	type ReplyStrategyBundle,
+  type LoadedRef,
+  makeEmbedderResolver,
+  makeMemoryExtractor,
+  makeReplyStrategy,
+  makeSimChatResolver,
+  makeStageClassifier,
+  makeTranscriberResolver,
+  type ReplyStrategyBundle,
 } from "./llm-bootstrap.ts";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
-import {
-	makeTenantContextMiddleware,
-	requireTenant,
-} from "./middleware/tenant-context.ts";
+import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeAdminAdminsRoutes } from "./routes/admin-admins.ts";
 import { makeAdminAuditRoutes } from "./routes/admin-audit.ts";
@@ -127,1414 +121,1295 @@ import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
 /** Known vertical templates by slug. */
 const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
-	concierge_v1: CONCIERGE_V1,
-	exchange_v1: EXCHANGE_V1,
-	modeling_v1: MODELING_V1,
-	real_estate_v1: REAL_ESTATE_V1,
-	scooter_v1: SCOOTER_V1,
-	visa_v1: VISA_V1,
-	recruitment_v1: RECRUITMENT_V1,
-	saas_v1: SAAS_V1,
-	video_v1: VIDEO_V1,
+  concierge_v1: CONCIERGE_V1,
+  exchange_v1: EXCHANGE_V1,
+  modeling_v1: MODELING_V1,
+  real_estate_v1: REAL_ESTATE_V1,
+  scooter_v1: SCOOTER_V1,
+  visa_v1: VISA_V1,
+  recruitment_v1: RECRUITMENT_V1,
+  saas_v1: SAAS_V1,
+  video_v1: VIDEO_V1,
 };
 
 const TEMPLATE_PRIORITY: Record<string, number> = {
-	exchange_v1: 100,
-	concierge_v1: 90,
-	real_estate_v1: 80,
-	scooter_v1: 70,
-	visa_v1: 60,
-	modeling_v1: 50,
-	recruitment_v1: 40,
-	saas_v1: 30,
-	video_v1: 20,
+  exchange_v1: 100,
+  concierge_v1: 90,
+  real_estate_v1: 80,
+  scooter_v1: 70,
+  visa_v1: 60,
+  modeling_v1: 50,
+  recruitment_v1: 40,
+  saas_v1: 30,
+  video_v1: 20,
 };
 
 async function main() {
-	const cfg = loadApiConfig();
-	const log = makeDefaultLogger("apps/api");
-	const metrics = makePlatformMetrics();
-	const { db, close } = makeDb(cfg.databaseUrl);
-
-	// RLS-guard: миграция 0004 включает FORCE ROW LEVEL SECURITY, но
-	// если DATABASE_URL коннектится под superuser / BYPASSRLS-role'ью —
-	// policy игнорируется и tenant-isolation как defense-in-depth не
-	// работает. Surface'им это в логе на boot.
-	const rlsCheck = await checkRlsEnforcement(db);
-	if (!rlsCheck.isEnforced) {
-		log.warn("RLS not enforced — connection role bypasses row-level security", {
-			role: rlsCheck.role,
-			isSuperuser: rlsCheck.isSuperuser,
-			hasBypassRls: rlsCheck.hasBypassRls,
-			remediation:
-				"Use a NOSUPERUSER NOBYPASSRLS Postgres role for apps/api connection. See migration 0004 comments.",
-		});
-	} else {
-		log.info("RLS enforced", { role: rlsCheck.role });
-	}
-
-	// Загружаем active tenant IDs для регистрации LLM-config'а per-tenant.
-	// Single-tenant legacy путь использовал hardcoded tenantId=1; в multi-tenant
-	// need register config для каждого tenant'а иначе InMemoryLlmRouter throws
-	// "LLM config not set: tenantId=X" когда inbound приходит от не-1 tenant.
-	// Hot-reload не делаем — новый tenant onboarding требует рестарта apps/api.
-	const activeTenantRows = await db
-		.select({ id: tenants.id, slug: tenants.slug })
-		.from(tenants)
-		.where(eq(tenants.status, "active"));
-	const activeTenantIds = activeTenantRows.map((r) => r.id);
-	log.info("active tenants loaded for LLM config", {
-		count: activeTenantIds.length,
-		ids: activeTenantIds,
-	});
-
-	// Строим mapping tenantSlug → VerticalTemplate из funnels.vertical_template_id.
-	// На старте читаем один раз; новый tenant требует рестарта (acceptable trade-off).
-	const templateByTenantSlug: Record<string, VerticalTemplate> = {};
-	const templatePriorityByTenantSlug = new Map<string, number>();
-	if (activeTenantRows.length > 0) {
-		const funnelRows = await db
-			.select({
-				tenantId: funnels.tenantId,
-				verticalTemplateId: funnels.verticalTemplateId,
-			})
-			.from(funnels)
-			.where(eq(funnels.isActive, true));
-		const tenantIdToSlug = new Map(activeTenantRows.map((r) => [r.id, r.slug]));
-		for (const row of funnelRows) {
-			if (!row.verticalTemplateId) continue;
-			const slug = tenantIdToSlug.get(row.tenantId);
-			if (!slug) continue;
-			const tpl = KNOWN_TEMPLATES[row.verticalTemplateId];
-			if (!tpl) continue;
-			const priority = TEMPLATE_PRIORITY[row.verticalTemplateId] ?? 0;
-			const currentPriority = templatePriorityByTenantSlug.get(slug) ?? -1;
-			if (priority > currentPriority) {
-				templateByTenantSlug[slug] = tpl;
-				templatePriorityByTenantSlug.set(slug, priority);
-			}
-		}
-	}
-	// Hardcoded fallback for the legacy tenant if not already covered.
-	if (!templateByTenantSlug.legacy) {
-		templateByTenantSlug.legacy = RECRUITMENT_V1;
-	}
-	const resolveTemplate = (tenantSlug: string): VerticalTemplate | undefined =>
-		templateByTenantSlug[tenantSlug];
-	const tenantSlugById = new Map(activeTenantRows.map((r) => [r.id, r.slug]));
-	const resolveTemplateForTenant = (
-		tenantId: number,
-	): VerticalTemplate | undefined => {
-		const tenantSlug = tenantSlugById.get(tenantId);
-		return tenantSlug ? resolveTemplate(tenantSlug) : undefined;
-	};
-
-	// Per-tenant LLM configs: DB + env fallback. LoadedRef shared между
-	// фабриками + tenant-reloader (mutable; reload через admin API меняет
-	// .current snapshot и router.setConfig, фабрики reflect'ят через
-	// closures без рестарта).
-	const loadedLlmConfigs = await loadTenantLlmConfigs({
-		db,
-		tenantIds: activeTenantIds,
-		envFallback: cfg,
-		masterKeyHex: cfg.masterKeyHex,
-		onError: (msg, ctx) => log.warn(`llm-config-loader: ${msg}`, ctx),
-	});
-	const loadedRef: LoadedRef = {
-		current: loadedLlmConfigs,
-		router: new InMemoryLlmRouter(),
-	};
-	log.info("llm configs resolved", {
-		tenants: loadedLlmConfigs.byTenant.size,
-		anyChat: loadedLlmConfigs.anyTenantHasChat,
-		anyEmbed: loadedLlmConfigs.anyTenantHasEmbed,
-	});
-
-	const channels = new ChannelRegistry();
-	// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
-	await channels.loadFromDb(db as any, {
-		masterKeyHex: cfg.masterKeyHex,
-		onWarn: (msg, ctx) => log.warn(`channel-registry: ${msg}`, ctx),
-		...(cfg.whatsappVerifyToken
-			? { whatsappVerifyTokenFallback: cfg.whatsappVerifyToken }
-			: {}),
-		...(cfg.whatsappAppSecret
-			? { whatsappAppSecretFallback: cfg.whatsappAppSecret }
-			: {}),
-		...(cfg.facebookVerifyToken
-			? { facebookVerifyTokenFallback: cfg.facebookVerifyToken }
-			: {}),
-		...(cfg.facebookAppSecret
-			? { facebookAppSecretFallback: cfg.facebookAppSecret }
-			: {}),
-		...(cfg.vkConfirmationCode
-			? { vkConfirmationCodeFallback: cfg.vkConfirmationCode }
-			: {}),
-		...(cfg.vkSecretKey ? { vkSecretKeyFallback: cfg.vkSecretKey } : {}),
-		...(cfg.maxWebhookSecret
-			? { maxWebhookSecretFallback: cfg.maxWebhookSecret }
-			: {}),
-	});
-
-	const app = new Hono();
-
-	app.route("/", makeMetricsRoutes(metrics));
-
-	// Static: widget bundle + demo HTML. Public routes (без auth), CORS open
-	// — widget script загружается с customer-домена.
-	app.route("/", makeWidgetStaticRoutes());
-
-	// Public alpha waitlist. No tenant/auth context: requester has no account yet.
-	app.route("/", makePublicEarlyAccessRoutes({ db }));
-
-	// Mailer (Resend) — dry-run если RESEND_API_KEY не задан.
-	const mailer = new Mailer({
-		apiKey: cfg.mailer.apiKey || undefined,
-		fromAddress: cfg.mailer.fromAddress,
-	});
-	log.info("mailer initialized", { dryRun: !cfg.mailer.apiKey });
-
-	// Auth routes — public (POST /api/auth/signup, /login, /logout, GET /me).
-	// НЕ wrap'аются в tenant-middleware: signup создаёт tenant, login
-	// резолвит его из email.
-	// Throttle public auth endpoints (login/signup/forgot/reset/accept-invite)
-	// против brute-force / credential stuffing / email-bombing. Keyed by IP
-	// (+email для login). Overridable via AUTH_RATE_LIMIT_PER_MIN / _HOUR.
-	const authRateLimiter = new AuthRateLimiter({
-		perMinute: Number.parseInt(process.env.AUTH_RATE_LIMIT_PER_MIN ?? "10", 10),
-		perHour: Number.parseInt(process.env.AUTH_RATE_LIMIT_PER_HOUR ?? "60", 10),
-	});
-	app.route(
-		"/",
-		makeAuthRoutes({
-			// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-			db: db as any,
-			secret: cfg.authSecret,
-			mailer,
-			appUrl: cfg.mailer.appUrl,
-			allowSignup: process.env.ALLOW_PUBLIC_SIGNUP === "1",
-			rateLimiter: authRateLimiter,
-		}),
-	);
-	log.info("auth routes enabled", {
-		tokenSecret: cfg.authSecret ? "configured" : "missing!",
-	});
-
-	// Authenticated admin-API под /api/admin/*. Middleware requireAuth
-	// extract'ит Bearer token из Authorization header → выставляет
-	// c.var.{adminId, tenantId, role, adminEmail}. Все routes сами
-	// wrap'ятся в withTenant для RLS.
-	// requireAuth gating /api/admin/* — нужно всегда, даже если embedder
-	// не сконфигурирован: /api/admin/llm-configs позволяет настроить LLM
-	// через UI без env-vars.
-	app.use(
-		"/api/admin/*",
-		makeRequireAuth({ db: db as never, secret: cfg.authSecret }),
-	);
-	app.use(
-		"/api/superadmin/*",
-		makeRequireAuth({ db: db as never, secret: cfg.authSecret }),
-	);
-	app.route("/", makeSuperadminRoutes({ db, publicUrl: cfg.mailer.appUrl }));
-	log.info("superadmin routes enabled");
-
-	// Web channel registry — early init чтобы reloader мог его перестраивать
-	// при POST /api/admin/channels/web. WS-runner / dispatcher поднимутся ниже.
-	const webRegistry = new WebChannelRegistry();
-	// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
-	await webRegistry.loadFromDb(db as any);
-
-	// Userbot (personal-account MTProto) registry + login-store — early init
-	// чтобы reloader мог подключать/тушить userbot'ы при onboarding/delete.
-	// Runner-factory + loadFromDb выставляются ниже (нужны pipeline-deps).
-	const userbotRegistry = new UserbotChannelRegistry({
-		apiId: cfg.telegramUserbot.apiId,
-		apiHash: cfg.telegramUserbot.apiHash,
-		masterKeyHex: cfg.masterKeyHex,
-		log,
-	});
-	// Userbot-сабсистем включён всегда: api_id/api_hash резолвятся per-tenant из
-	// tenant_secrets (env TELEGRAM_API_ID/HASH — лишь общий фолбэк). Тенант вводит
-	// свои креды в кабинете → онбординг работает без env на сервере.
-	const userbotEnvFallback =
-		cfg.telegramUserbot.apiId > 0 && !!cfg.telegramUserbot.apiHash;
-	const userbotLoginStore = new UserbotLoginStore();
-
-	// Hot-reload bus: admin routes вызывают reloadLlm/reloadChannels(tenantId)
-	// после изменения, live применяя в текущем процессе. apps/worker — отдельный
-	// процесс, ему пока нужен restart.
-	const reloader = makeTenantReloader({
-		db,
-		cfg,
-		ref: loadedRef,
-		registry: channels,
-		webRegistry,
-		userbotRegistry,
-		log: (msg, ctx) => log.info(`reloader: ${msg}`, ctx ?? {}),
-	});
-
-	// LLM usage writer — batched DB writes для billing dashboard.
-	// Каждый wrapChatClient/wrapEmbeddingClient вызов append'ит event
-	// через recordUsage callback. Writer flush'ает каждые 5 сек или при
-	// overflow buffer'а (200 events).
-	const usageWriter = new LlmUsageWriter({
-		db,
-		onError: (err, dropped) =>
-			log.warn("llm-usage-writer flush failed", {
-				err: err instanceof Error ? err.message : String(err),
-				droppedEvents: dropped,
-			}),
-	});
-	const recordUsage = (
-		tenantId: number,
-		ev: Parameters<typeof usageWriter.record>[1],
-	) => usageWriter.record(tenantId, ev);
-
-	const notificationsRepo = new NotificationsRepo(db as any);
-	// Информер владельца: единый путь доставки (уровни + дайджест + лента).
-	// Mailer структурно — OpsEmailSender (email-гарантия для critical).
-	const adminInformer = new AdminInformer({
-		db: db as never,
-		botToken: cfg.operatorBotToken,
-		appUrl: cfg.mailer.appUrl,
-		email: mailer,
-		realtime: (notification) => {
-			adminEventBus.emit({
-				type: "admin_notification",
-				tenantId: notification.tenantId,
-				notification,
-			});
-		},
-		log: {
-			warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
-			info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
-		},
-	});
-	const notificationService = new NotificationService(
-		notificationsRepo,
-		cfg.operatorBotToken,
-		cfg.mailer.appUrl,
-		adminInformer,
-		async (ref) => {
-			const channelId = Number(ref.channelId);
-			if (!Number.isInteger(channelId) || channelId <= 0) return null;
-			const entry = channels.byChannelId(channelId);
-			if (!entry) return null;
-			return entry.adapter.downloadMedia({
-				channelId: ref.channelId,
-				externalRef: ref.externalRef,
-			});
-		},
-		// #651 — db для форум-топиков (operator_thread_id + least-busy ассайн).
-		db as never,
-	);
-	const operatorBotHandler = new OperatorBotHandler(
-		notificationsRepo,
-		cfg.operatorBotToken,
-		{
-			db: db as never,
-			appUrl: cfg.mailer.appUrl,
-			// #731: перевод ответа оператора (RU) на язык клиента перед отправкой.
-			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-		},
-	);
-	if (cfg.operatorBotToken) {
-		log.info("operator notification bot enabled");
-	}
-	// Роутер операционных алертов владельцу (#145): делегирует доставку информеру
-	// (уровни/дайджест/лента); Mailer остаётся email-гарантией для critical.
-	const opsAlertRouter = new OpsAlertRouter({
-		db: db as never,
-		botToken: cfg.operatorBotToken,
-		appUrl: cfg.mailer.appUrl,
-		email: mailer,
-		informer: adminInformer,
-		log: {
-			warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
-			info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
-		},
-	});
-
-	const embedderResolver = makeEmbedderResolver(loadedRef);
-	app.route(
-		"/",
-		makeAdminKbRoutes({
-			db,
-			resolveEmbedder:
-				embedderResolver ??
-				((tenantId: number) => {
-					throw new Error(`embedder is not configured for tenant ${tenantId}`);
-				}),
-		}),
-	);
-	log.info(
-		"admin-kb routes enabled (list/view; upload/search/reindex require embedder)",
-		{
-			embedderConfigured: !!embedderResolver,
-		},
-	);
-
-	// Per-tenant LLM provider config CRUD (GET/PUT/DELETE /api/admin/llm-configs).
-	// NB: изменения вступают в силу после рестарта apps/api — текущий
-	// InMemoryLlmRouter резолвится на boot из env + activeTenantIds.
-	// Hot-reload — отдельный PR.
-	app.route(
-		"/",
-		makeAdminLlmConfigsRoutes({
-			db,
-			masterKeyHex: cfg.masterKeyHex,
-			onReload: reloader.reloadLlm,
-		}),
-	);
-	log.info(
-		"admin-llm-configs routes enabled (per-tenant LLM config CRUD + hot-reload)",
-	);
-
-	// Per-tenant channel CRUD (Telegram bot onboarding по token-paste).
-	// Token validate'ится через Telegram getMe, encrypted в tenant_secrets.
-	// Если PLATFORM_PUBLIC_URL задан — auto-setWebhook на Telegram при create.
-	// Channels подхватываются ChannelRegistry на boot — restart нужен для
-	// дальнейшей обработки inbound, но webhook уже указывает сюда.
-	app.route(
-		"/",
-		makeAdminChannelsRoutes({
-			db,
-			masterKeyHex: cfg.masterKeyHex,
-			...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
-			webhookSecret: cfg.telegramWebhookSecret,
-			...(cfg.whatsappVerifyToken
-				? { whatsappVerifyToken: cfg.whatsappVerifyToken }
-				: {}),
-			...(cfg.facebookVerifyToken
-				? { facebookVerifyToken: cfg.facebookVerifyToken }
-				: {}),
-			...(cfg.vkConfirmationCode
-				? { vkConfirmationCode: cfg.vkConfirmationCode }
-				: {}),
-			...(cfg.vkSecretKey ? { vkSecretKey: cfg.vkSecretKey } : {}),
-			...(cfg.maxWebhookSecret
-				? { maxWebhookSecret: cfg.maxWebhookSecret }
-				: {}),
-			...(cfg.webWidgetScriptUrl
-				? { webWidgetScriptUrl: cfg.webWidgetScriptUrl }
-				: {}),
-			telegramApiId: cfg.telegramUserbot.apiId,
-			telegramApiHash: cfg.telegramUserbot.apiHash,
-			userbotLoginStore,
-			onReload: reloader.reloadChannels,
-		}),
-	);
-	log.info(
-		"admin-channels routes enabled (per-tenant channel CRUD + hot-reload)",
-		{
-			autoSetWebhook: !!cfg.publicUrl,
-		},
-	);
-
-	// Onboarding status aggregator (channel + LLM + KB).
-	app.route("/", makeAdminOnboardingRoutes({ db }));
-	log.info("admin-onboarding route enabled");
-
-	// Read-only conversations + messages для admin-UI inbox.
-	app.route(
-		"/",
-		makeAdminConversationsRoutes({
-			db,
-			// #731: перевод входящих клиента → RU (инбокс) и ответа оператора → язык клиента.
-			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-			notifications: notificationService,
-			partnerPing: {
-				appUrl: cfg.mailer.appUrl,
-				operatorBotToken: cfg.operatorBotToken,
-				callbackSecret: cfg.partnerCallbackSecret,
-			},
-			// Media-proxy для инбокса: качаем файл клиента адаптером канала-владельца.
-			downloadMedia: async (ref) => {
-				// Mock-медиа симуляции (self_play KYC): отдаём плейсхолдер-паспорт из
-				// assets, чтобы инбокс показывал документ, «присланный» sim-клиентом
-				// (см. buildSimKycMediaParts в routes/admin-sim). Видео-кружок не
-				// храним — у self_play нет адаптера, превью просто не отрисуется.
-				if (ref.externalRef === "__sim_kyc_passport__") {
-					const file = Bun.file(`${import.meta.dir}/../assets/bot-test/passport-demo.png`);
-					return (await file.exists())
-						? new Response(file, { headers: { "content-type": "image/png" } })
-						: null;
-				}
-				const channelId = Number(ref.channelId);
-				if (!Number.isInteger(channelId) || channelId <= 0) return null;
-				const entry = channels.byChannelId(channelId);
-				if (!entry) return null;
-				return entry.adapter.downloadMedia({
-					channelId: ref.channelId,
-					externalRef: ref.externalRef,
-				});
-			},
-		}),
-	);
-	log.info("admin-conversations routes enabled (list + thread + reply)");
-
-	// Audit log read API.
-	app.route("/", makeAdminAuditRoutes({ db }));
-	log.info("admin-audit routes enabled (read-only)");
-
-	// Multi-admin invite — token-link flow + email-delivery через Resend.
-	app.route(
-		"/",
-		makeAdminAdminsRoutes({
-			db,
-			mailer,
-			...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
-		}),
-	);
-	log.info("admin-admins routes enabled (invite / list / revoke)");
-
-	// Tenant info + pause/resume.
-	app.route(
-		"/",
-		makeAdminTenantRoutes({ db, onStatusChange: reloader.reloadChannels }),
-	);
-	log.info("admin-tenant routes enabled (pause/resume)");
-
-	// Leads pipeline (list, create, stage transition, field values).
-	app.route(
-		"/",
-		makeAdminLeadsRoutes({
-			db,
-			...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
-			notificationService,
-			partnerPing: {
-				appUrl: cfg.mailer.appUrl,
-				operatorBotToken: cfg.operatorBotToken,
-				callbackSecret: cfg.partnerCallbackSecret,
-			},
-		}),
-	);
-	app.route(
-		"/api/admin/notifications",
-		makeAdminNotificationsRoutes({
-			repo: notificationsRepo,
-			botUsername: cfg.operatorBotUsername,
-			notificationService,
-			opsRouter: opsAlertRouter,
-			opsEmailConfigured: !!cfg.mailer.apiKey,
-		}),
-	);
-	log.info("admin-leads routes enabled");
-
-	// Funnel builder (stage_definitions, stage_fields) + skills list.
-	app.route("/", makeAdminFunnelRoutes({ db }));
-	app.route("/", makeAdminReferralRoutes({ db }));
-	app.route("/", makeAdminPartnersRoutes({ db }));
-	app.route("/", makeAdminProvidersRoutes({ db }));
-	app.route("/", makeAdminProviderOrdersRoutes({ db }));
-	app.route("/", makeAdminProviderMarketplaceRoutes({ db }));
-	app.route("/", makeAdminServiceCatalogRoutes({ db }));
-	log.info("admin-funnel routes enabled");
-
-	// AI Workflow Builder — диалог с AI для генерации воронки.
-	app.route(
-		"/",
-		makeAdminWorkflowRoutes({
-			db,
-			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-		}),
-	);
-	log.info("admin-workflow routes enabled (AI funnel builder)");
-
-	// AI-ассистент админки (copilot) — чат по данным страницы + помощь с
-	// онбордингом/воронкой. BYOK через тот же resolveChat, что и workflow.
-	app.route(
-		"/",
-		makeAdminCopilotRoutes({
-			db,
-			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-		}),
-	);
-	log.info("admin-copilot routes enabled (page-aware AI assistant)");
-
-	// Dashboard aggregate stats.
-	app.route("/", makeAdminDashboardRoutes({ db }));
-	log.info("admin-dashboard route enabled");
-
-	// Vacancies CRUD.
-	app.route("/", makeAdminVacanciesRoutes({ db }));
-	log.info("admin-vacancies routes enabled");
-
-	// Director hooks (tenant-specific persuasion scripts).
-	app.route("/", makeAdminDirectorHooksRoutes({ db }));
-	log.info("admin-director-hooks routes enabled");
-	app.route("/", makeAdminExperimentsRoutes({ db }));
-	log.info("admin-experiments routes enabled");
-	// admin-styles mounted after strategyBundle (needs onReload → invalidateStyleFor).
-
-	// Real-time SSE push for admin UI.
-	app.route("/", makeAdminEventsRoutes());
-	log.info("admin SSE events enabled at GET /api/admin/events");
-
-	// Outreach campaigns — batch message sending to leads.
-	app.route("/", makeAdminOutreachRoutes({ db, notificationService }));
-	app.route("/", makeAdminOutreachCampaignsRoutes({ db }));
-	log.info("admin-outreach routes enabled");
-
-	// Message templates for outreach.
-	app.route("/", makeAdminMessageTemplatesRoutes({ db }));
-	log.info("admin-message-templates routes enabled");
-
-	// Stage-change webhooks CRUD.
-	app.route("/", makeAdminStageWebhooksRoutes({ db }));
-	log.info("admin-stage-webhooks routes enabled");
-
-	// Partner callback endpoint (public — token is the auth).
-	// GET /api/partner/cb/:token?a=confirm|cancel
-	app.route(
-		"/",
-		makePartnerCallbackRoutes({
-			db,
-			callbackSecret: cfg.partnerCallbackSecret,
-			appUrl: cfg.mailer.appUrl,
-			notificationService,
-		}),
-	);
-	log.info("partner-callback route enabled (/api/partner/cb/:token)");
-
-	// Vertical plugin install.
-	app.route(
-		"/",
-		makeAdminVerticalsRoutes({
-			db,
-			resolveEmbedder: embedderResolver ?? undefined,
-		}),
-	);
-	log.info("admin-verticals routes enabled");
-
-	// MCP (Model Context Protocol) endpoint — для Claude Desktop / Cursor / агентов.
-	app.route(
-		"/",
-		makeMcpRoutes({
-			db,
-			authSecret: cfg.authSecret,
-			resolveEmbedder: embedderResolver ?? undefined,
-		}),
-	);
-	log.info("MCP endpoint enabled at POST /mcp");
-
-	const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
-		loadedRef,
-		cfg,
-		db,
-		{
-			fallbackTemplate: RECRUITMENT_V1,
-			resolveTemplate: resolveTemplateForTenant,
-		},
-		metrics,
-		recordUsage,
-		// A4: rate-guard сработал → алерт владельцу (информер/Telegram), не «тихий» warn.
-		(alert) => {
-			void notificationService
-				.notify({
-					tenantId: alert.tenantId,
-					eventType: "exchange_rate_guard_tripped",
-					conversationId: alert.conversationId,
-					data: {
-						asset: alert.asset,
-						network: alert.network ?? "",
-						reason: alert.reason,
-						deviationPct: alert.deviationPct,
-						threshold: alert.threshold ?? null,
-					},
-				})
-				.catch(() => {});
-		},
-	);
-	const simChatResolver = makeSimChatResolver(
-		loadedRef,
-		cfg.sim.personaModel || undefined,
-		cfg.sim.personaApiKey || undefined,
-	);
-	const shadowEvalRunner = new ShadowEvalJobRunner({
-		db,
-		resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-		resolveCandidateChat: simChatResolver,
-		resolveJudgeChat: (tenantId) =>
-			loadedRef.router.resolveChat(tenantId, "chat"),
-		...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
-		log: {
-			warn: (message, ctx) => log.warn(message, ctx),
-		},
-	});
-
-	// Quality lab exports - self-play / eval artifacts for dashboards and CI.
-	app.route(
-		"/",
-		makeAdminQualityRoutes({
-			db,
-			onReload: strategyBundle
-				? (tenantId) => strategyBundle.invalidateStyleFor(tenantId)
-				: undefined,
-			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-			resolveCandidateChat: simChatResolver,
-			resolveJudgeChat: (tenantId) =>
-				loadedRef.router.resolveChat(tenantId, "chat"),
-			...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
-			shadowEvalRunner,
-		}),
-	);
-	log.info(
-		"admin-quality routes enabled (self-play JSONL export + quality runner)",
-	);
-	shadowEvalRunner.start();
-	log.info("quality shadow-eval queue enabled");
-
-	// Agentic tool configuration (booking link, etc.).
-	app.route(
-		"/",
-		makeAdminToolsRoutes({
-			db,
-			masterKeyHex: cfg.masterKeyHex,
-			onReload: strategyBundle
-				? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
-				: undefined,
-		}),
-	);
-	log.info("admin-tools routes enabled");
-
-	// Exchange (обменный пункт): курсы/формулы, CRM заявок, оборот, реквизиты.
-	app.route(
-		"/",
-		makeAdminExchangeRoutes({
-			db,
-			masterKeyHex: cfg.masterKeyHex,
-			onReload: strategyBundle
-				? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
-				: undefined,
-		}),
-	);
-	log.info("admin-exchange routes enabled");
-
-	app.route(
-		"/",
-		makeAdminConciergeRoutes({
-			db,
-			masterKeyHex: cfg.masterKeyHex,
-			onReload: strategyBundle
-				? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
-				: undefined,
-		}),
-	);
-	log.info("admin-concierge routes enabled");
-
-	// Sales styles (personas) + AI generate-full. onReload drops the cached style
-	// so a generated/edited style drives the bot without a restart (Phase 2 slice B).
-	app.route(
-		"/",
-		makeAdminStylesRoutes({
-			db,
-			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-			onReload: strategyBundle
-				? (tenantId) => strategyBundle.invalidateStyleFor(tenantId)
-				: undefined,
-		}),
-	);
-	log.info("admin-styles routes enabled");
-
-	// Diagnostics — health-check для tenant setup'а.
-	// resolveChat передаём для ?live=1 LLM smoke-test (стоит ~1 токен).
-	app.route(
-		"/",
-		makeAdminDiagnosticsRoutes({
-			db,
-			masterKeyHex: cfg.masterKeyHex,
-			resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-		}),
-	);
-	log.info("admin-diagnostics route enabled");
-
-	// Billing & plan tiers — quota gating + Stripe checkout/portal (M1b).
-	app.route(
-		"/",
-		makeAdminBillingRoutes({
-			db,
-			...(cfg.stripe.secretKey
-				? {
-						stripe: {
-							secretKey: cfg.stripe.secretKey,
-							priceMap: {
-								...(cfg.stripe.priceStarter
-									? { starter: cfg.stripe.priceStarter }
-									: {}),
-								...(cfg.stripe.pricePro ? { pro: cfg.stripe.pricePro } : {}),
-							},
-							successUrl: cfg.stripe.successUrl,
-							cancelUrl: cfg.stripe.cancelUrl,
-						},
-					}
-				: {}),
-		}),
-	);
-	log.info("admin-billing routes enabled", {
-		plansEnabled: true,
-		stripeEnabled: !!cfg.stripe.secretKey,
-	});
-
-	app.route(
-		"/",
-		makeHealthRoutes({
-			// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
-			db: db as any,
-			timeoutMs: cfg.healthCheckTimeoutMs,
-		}),
-	);
-	const replyStrategy = strategyBundle?.strategy ?? null;
-	if (replyStrategy) {
-		log.info("reply strategy configured", {
-			kind: loadedRef.current.anyTenantHasEmbed ? "RAG" : "LLM-only",
-			tenants: loadedRef.current.byTenant.size,
-			...(cfg.defaultStyleSlug ? { style: cfg.defaultStyleSlug } : {}),
-			...(cfg.experimentSlug ? { experiment: cfg.experimentSlug } : {}),
-		});
-	} else {
-		log.info(
-			"LLM not configured for any tenant — bot will persist messages but stay silent",
-		);
-	}
-
-	const photoProcessor = makePhotoProcessor(loadedRef);
-	log.info(
-		"photo processor enabled (activates per-tenant when vision LLM is configured)",
-	);
-
-	// Bot Tester — simulate inbound messages through the full pipeline.
-	app.route(
-		"/",
-		makeAdminTestRoutes({
-			db,
-			replyStrategy: replyStrategy ?? null,
-			photoProcessor,
-		}),
-	);
-	log.info("admin-test routes enabled (bot tester)");
-
-	const memoryExtractor = makeMemoryExtractor(
-		loadedRef,
-		db,
-		metrics,
-		recordUsage,
-	);
-	if (memoryExtractor) log.info("memory extractor enabled");
-
-	const stageClassifier = makeStageClassifier(
-		loadedRef,
-		cfg,
-		db,
-		metrics,
-		recordUsage,
-	);
-	if (stageClassifier) {
-		log.info("stage classifier enabled", { kind: cfg.stageClassifier });
-	}
-
-	const fieldExtractor = makeFieldExtractor(loadedRef, notificationService);
-	log.info(
-		"field extractor enabled (activates per-tenant when chat LLM is configured)",
-	);
-
-	const serviceCatalogRuntime = makeServiceCatalogRuntime({
-		resolveChat: simChatResolver,
-	});
-	log.info(
-		"service catalog runtime enabled (routes catalog matches into leads/deals)",
-	);
-
-	// Dialog Simulator — LLM «клиент» ведёт диалог, виден в живом инбоксе (self_play).
-	app.route(
-		"/",
-		makeAdminSimRoutes({
-			db,
-			replyStrategy: replyStrategy ?? null,
-			resolveSimChat: simChatResolver,
-			resolveTemplate,
-			stageClassifier,
-			fieldExtractor,
-		}),
-	);
-	log.info("admin-sim routes enabled (dialog simulator)");
-
-	const resolveTranscriber = makeTranscriberResolver(loadedRef);
-	if (resolveTranscriber) {
-		log.info(
-			"voice transcription enabled — dedicated 'transcribe' config or OpenAI/OpenRouter key (chat/embed/vision)",
-		);
-	}
-
-	const sink = makeMetricsSink(metrics);
-
-	// Per-tenant inbound rate-limit. Disabled если оба значения = 0.
-	const rateLimiter =
-		cfg.rateLimit.perMinute > 0 || cfg.rateLimit.perHour > 0
-			? new InboundRateLimiter({
-					perMinute: cfg.rateLimit.perMinute,
-					perHour: cfg.rateLimit.perHour,
-				})
-			: undefined;
-	if (rateLimiter) {
-		log.info("inbound rate-limit enabled", {
-			perMinute: cfg.rateLimit.perMinute,
-			perHour: cfg.rateLimit.perHour,
-		});
-	} else {
-		log.warn("inbound rate-limit disabled — runaway-cost protection off");
-	}
-
-	// Настройки поведения бота (эпик #623) per-tenant из tenants.bot_settings_json.
-	// Включает replyDelaySeconds (debounce), рабочие часы, стоп-слова и т.д.
-	const resolveBotSettings = makeResolveBotSettings(db);
-
-	app.route(
-		"/",
-		makeTelegramWebhookRoutes({
-			db,
-			channels,
-			webhookSecret: cfg.telegramWebhookSecret,
-			replyStrategy,
-			resolveTemplate,
-			memoryExtractor,
-			stageClassifier,
-			notificationService,
-			photoProcessor,
-			fieldExtractor,
-			serviceCatalogRuntime,
-			sink,
-			metrics,
-			resolveBotSettings,
-			...(rateLimiter ? { rateLimiter } : {}),
-			...(resolveTranscriber ? { resolveTranscriber } : {}),
-		}),
-	);
-
-	app.route(
-		"/",
-		makeOperatorBotWebhookRoutes({
-			handler: operatorBotHandler,
-			webhookSecret: cfg.telegramWebhookSecret,
-		}),
-	);
-
-	app.route(
-		"/",
-		makeWestWalletWebhookRoutes({ db, masterKeyHex: cfg.masterKeyHex }),
-	);
-	log.info("westwallet webhook enabled");
-
-	// Admin-API под /admin/*: tenant resolved из subdomain через
-	// makeTenantContextMiddleware (P), затем requireTenant guard 404'ит
-	// если запрос пришёл на apex. Auth (JWT) добавится отдельным коммитом
-	// когда apps/admin-ui начнёт wire-up'аться — сейчас все endpoints
-	// публичны.
-	if (cfg.platformBaseDomain) {
-		app.use(
-			"/admin/*",
-			makeTenantContextMiddleware({ baseDomain: cfg.platformBaseDomain }),
-		);
-		app.use("/admin/*", requireTenant);
-		// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-		app.route("/", makeAdminRoutes({ db: db as any }));
-		log.info("admin-api routes enabled", {
-			baseDomain: cfg.platformBaseDomain,
-		});
-	}
-
-	if (cfg.whatsappVerifyToken) {
-		app.route(
-			"/",
-			makeWhatsAppWebhookRoutes({
-				db,
-				channels,
-				verifyToken: cfg.whatsappVerifyToken,
-				...(cfg.whatsappAppSecret ? { appSecret: cfg.whatsappAppSecret } : {}),
-				replyStrategy,
-				resolveTemplate,
-				memoryExtractor,
-				stageClassifier,
-				notificationService,
-				photoProcessor,
-				fieldExtractor,
-				serviceCatalogRuntime,
-				sink,
-				metrics,
-				...(rateLimiter ? { rateLimiter } : {}),
-				...(resolveTranscriber ? { resolveTranscriber } : {}),
-			}),
-		);
-		if (!cfg.whatsappAppSecret) {
-			log.warn("whatsapp webhook signature verification disabled", {
-				remediation:
-					"Set WHATSAPP_APP_SECRET env (Meta dashboard → App Settings → Basic)",
-			});
-		}
-		log.info("whatsapp webhook enabled", {
-			signatureCheck: cfg.whatsappAppSecret ? "enabled" : "off (dev mode)",
-		});
-	}
-
-	app.route(
-		"/",
-		makeFacebookWebhookRoutes({
-			db,
-			channels,
-			verifyToken: cfg.facebookVerifyToken,
-			...(cfg.facebookAppSecret ? { appSecret: cfg.facebookAppSecret } : {}),
-			replyStrategy,
-			resolveTemplate,
-			memoryExtractor,
-			stageClassifier,
-			notificationService,
-			photoProcessor,
-			fieldExtractor,
-			serviceCatalogRuntime,
-			sink,
-			metrics,
-			...(rateLimiter ? { rateLimiter } : {}),
-			...(resolveTranscriber ? { resolveTranscriber } : {}),
-		}),
-	);
-	if (!cfg.facebookAppSecret) {
-		log.warn("facebook webhook app secret env fallback not set", {
-			impact:
-				"channels without a per-channel App Secret skip signature verification",
-			remediation:
-				"Set FACEBOOK_APP_SECRET env or enter App Secret in Admin → Settings → Channels → Facebook Messenger",
-		});
-	}
-	log.info("facebook webhook enabled", {
-		verifyToken: cfg.facebookVerifyToken ? "env fallback" : "per-channel only",
-		signatureCheck: cfg.facebookAppSecret
-			? "env fallback/per-channel"
-			: "per-channel only",
-	});
-
-	app.route(
-		"/",
-		makeVkWebhookRoutes({
-			db,
-			channels,
-			...(cfg.vkConfirmationCode
-				? { confirmationCode: cfg.vkConfirmationCode }
-				: {}),
-			...(cfg.vkSecretKey ? { secretKey: cfg.vkSecretKey } : {}),
-			replyStrategy,
-			resolveTemplate,
-			memoryExtractor,
-			stageClassifier,
-			notificationService,
-			photoProcessor,
-			fieldExtractor,
-			serviceCatalogRuntime,
-			sink,
-			metrics,
-			...(rateLimiter ? { rateLimiter } : {}),
-			...(resolveTranscriber ? { resolveTranscriber } : {}),
-		}),
-	);
-	log.info("vk webhook enabled", {
-		fallbackSecretCheck: cfg.vkSecretKey
-			? "enabled"
-			: "off (per-tenant or dev mode)",
-	});
-
-	app.route(
-		"/",
-		makeMaxWebhookRoutes({
-			db,
-			channels,
-			...(cfg.maxWebhookSecret ? { webhookSecret: cfg.maxWebhookSecret } : {}),
-			replyStrategy,
-			resolveTemplate,
-			memoryExtractor,
-			stageClassifier,
-			notificationService,
-			photoProcessor,
-			fieldExtractor,
-			serviceCatalogRuntime,
-			sink,
-			metrics,
-			...(rateLimiter ? { rateLimiter } : {}),
-			...(resolveTranscriber ? { resolveTranscriber } : {}),
-		}),
-	);
-	log.info("max webhook enabled", {
-		fallbackSecretCheck: cfg.maxWebhookSecret
-			? "enabled"
-			: "off (per-channel or dev mode)",
-	});
-
-	if (cfg.stripeWebhookSecret) {
-		const priceToPlan: Record<string, "starter" | "pro"> = {};
-		if (cfg.stripe.priceStarter)
-			priceToPlan[cfg.stripe.priceStarter] = "starter";
-		if (cfg.stripe.pricePro) priceToPlan[cfg.stripe.pricePro] = "pro";
-		app.route(
-			"/",
-			makeStripeWebhookRoutes({
-				// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
-				db: db as any,
-				webhookSecret: cfg.stripeWebhookSecret,
-				priceToPlan,
-				mailer,
-				appUrl: cfg.mailer.appUrl,
-			}),
-		);
-		log.info("stripe webhook enabled", {
-			knownPrices: Object.keys(priceToPlan).length,
-		});
-	}
-
-	// ---- channel-web wire-up ----
-	// WebChannelAdapter держит pinned WS-connection'ы — adapter и
-	// dispatcher для web живут в этом процессе, в отличие от
-	// telegram/whatsapp где dispatcher в apps/worker. См. комментарий
-	// в WebOutboundDispatcher для rationale.
-	// (`webRegistry` уже инициализирован выше — нужен для reloader'а.)
-	const webAbort = new AbortController();
-	const webRunners: Promise<void>[] = [];
-	for (const entry of webRegistry.entries()) {
-		const runner = startWebInboundRunner({
-			entry,
-			db,
-			signal: webAbort.signal,
-			replyStrategy: replyStrategy ?? null,
-			resolveTemplate,
-			memoryExtractor,
-			stageClassifier,
-			notifications: notificationService,
-			fieldExtractor,
-			serviceCatalogRuntime,
-			sink,
-			metrics,
-			log,
-		});
-		webRunners.push(runner);
-	}
-	const webDispatcher = new WebOutboundDispatcher(db, webRegistry, {
-		pollMs: cfg.web.dispatcherPollMs,
-		batchSize: cfg.web.dispatcherBatchSize,
-		metrics,
-		log,
-	});
-	const webDispatcherPromise = webDispatcher
-		.run(webAbort.signal)
-		.catch((err) => {
-			log.error("web dispatcher fatal", {
-				err: err instanceof Error ? err : new Error(String(err)),
-			});
-		});
-
-	// ---- Telegram userbot wire-up (personal-account MTProto) ----
-	// Та же модель, что web: pinned-соединение + inbound-runner + отдельный
-	// outbound-dispatcher живут в apps/api. Registry владеет lifecycle'ом
-	// соединений; runner-factory инжектит pipeline-deps (replyStrategy и т.д.).
-	const userbotAbort = new AbortController();
-	let userbotDispatcherPromise: Promise<void> = Promise.resolve();
-	{
-		userbotRegistry.setRunnerFactory((entry, signal) =>
-			startUserbotInboundRunner({
-				entry,
-				db,
-				signal,
-				replyStrategy: replyStrategy ?? null,
-				resolveTemplate,
-				memoryExtractor,
-				stageClassifier,
-				notifications: notificationService,
-				photoProcessor,
-				fieldExtractor,
-				serviceCatalogRuntime,
-				sink,
-				metrics,
-				log,
-				...(resolveTranscriber ? { resolveTranscriber } : {}),
-			}),
-		);
-		// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
-		await userbotRegistry.loadFromDb(db as any);
-		const userbotDispatcher = new UserbotOutboundDispatcher(
-			db,
-			userbotRegistry,
-			{
-				pollMs: cfg.telegramUserbot.dispatcherPollMs,
-				batchSize: cfg.telegramUserbot.dispatcherBatchSize,
-				metrics,
-				log,
-			},
-		);
-		userbotDispatcherPromise = userbotDispatcher
-			.run(userbotAbort.signal)
-			.catch((err) => {
-				log.error("userbot dispatcher fatal", {
-					err: err instanceof Error ? err : new Error(String(err)),
-				});
-			});
-		log.info("channel-userbot enabled (per-tenant MTProto creds)", {
-			connected: userbotRegistry.size(),
-			envFallback: userbotEnvFallback,
-		});
-	}
-	const wsRoutes = makeWebSocketRoutes({
-		registry: webRegistry,
-		log,
-		metrics,
-		// Per-visitor identity binding — всегда включено, подписываем тем же
-		// strong-секретом, что и admin-токены (PLATFORM_AUTH_SECRET / MASTER_KEY).
-		signingSecret: cfg.authSecret,
-	});
-	if (webRegistry.size() > 0) {
-		log.info("channel-web enabled", {
-			channels: webRegistry.size(),
-			identityBinding: "per-visitor hmac token",
-		});
-	}
-
-	const server = Bun.serve({
-		port: cfg.port,
-		// idleTimeout: 0 — отключаем закрытие idle-соединений.
-		// По умолчанию Bun закрывает idle TCP через 10 с, что рвёт SSE-стримы
-		// (GET /api/admin/events) до первого пинга.
-		idleTimeout: 0,
-		// Кастомный fetch: сначала пытаемся upgrade'нуть WS, иначе — Hono app.
-		// Bun.serve.upgrade требует `server` reference, поэтому Hono mount'нуть
-		// как простой `fetch: app.fetch` нельзя.
-		fetch(req, srv) {
-			const upgradeFailure = wsRoutes.tryUpgrade(req, srv);
-			if (upgradeFailure) return upgradeFailure;
-			// tryUpgrade вернул undefined либо потому что upgrade прошёл (Bun
-			// ответит сам), либо потому что URL не /ws/* — отдаём Hono.
-			if (new URL(req.url).pathname.startsWith("/ws/")) {
-				// upgrade успешен — Bun сам ответит 101. Возвращать здесь нечего,
-				// но fetch обязан вернуть Response. Возвращаем заглушку, Bun её
-				// не отдаст клиенту т.к. socket уже hijacked.
-				return new Response(null, { status: 101 });
-			}
-			return app.fetch(req, srv);
-		},
-		websocket: wsRoutes.websocket,
-	});
-
-	log.info("listening", {
-		port: server.port,
-		url: `http://localhost:${server.port}`,
-	});
-
-	// Graceful shutdown: дренируем channels, закрываем DB-пул.
-	const shutdown = async () => {
-		log.info("shutting down");
-		clearInterval(usageAlertInterval);
-		clearTimeout(usageAlertFirstRun);
-		if (rateFeedInterval) clearInterval(rateFeedInterval);
-		if (dripDispatchInterval) clearInterval(dripDispatchInterval);
-		if (replyDebounceInterval) clearInterval(replyDebounceInterval);
-		if (autoCloseInterval) clearInterval(autoCloseInterval);
-		shadowEvalRunner.stop();
-		server.stop();
-		webAbort.abort();
-		webDispatcher.stop();
-		userbotAbort.abort();
-		await Promise.allSettled([
-			webDispatcherPromise,
-			...webRunners,
-			userbotDispatcherPromise,
-		]);
-		webRegistry.closeAll();
-		await userbotRegistry.closeAll();
-		if (userbotLoginStore) await userbotLoginStore.stop();
-		channels.closeAll();
-		// Flush buffered usage events перед close DB.
-		await usageWriter.stop();
-		await close();
-		process.exit(0);
-	};
-	// Usage alerts — проверяем каждый час все активные тенанты.
-	// Отправляет email при 80% / 100% LLM-квоты (дедупликация in-memory по месяцу).
-	const usageAlertInterval = setInterval(
-		() => {
-			checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
-				log.warn("usage-alerts check failed", { err: e }),
-			);
-		},
-		60 * 60 * 1000,
-	); // каждый час
-	// Первый запуск через 5 минут после старта (не сразу — дать DB прогреться).
-	const usageAlertFirstRun = setTimeout(
-		() => {
-			checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
-				log.warn("usage-alerts initial check failed", { err: e }),
-			);
-		},
-		5 * 60 * 1000,
-	);
-
-	// Exchange rate-feed: тик-планировщик с per-tenant частотой (exchange_settings).
-	// RATE_FEED_MS (default 180000 = 3 мин) — дефолт per-tenant; 0 — отключить.
-	// Тик = min(RATE_FEED_MS, 60с): на каждом тике рефрешим тенантов, у кого подошёл
-	// их интервал. last-refresh держим в памяти (на рестарте рефрешим всех).
-	const rateFeedMs = Number.parseInt(process.env.RATE_FEED_MS ?? "180000", 10);
-	let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
-	let dripDispatchInterval: ReturnType<typeof setInterval> | null = null;
-	let replyDebounceInterval: ReturnType<typeof setInterval> | null = null;
-	let autoCloseInterval: ReturnType<typeof setInterval> | null = null;
-	if (rateFeedMs > 0) {
-		const defaultRefreshSec = Math.max(60, Math.floor(rateFeedMs / 1000));
-		const tickMs = Math.min(rateFeedMs, 60_000);
-		const lastRefreshByTenant = new Map<number, number>();
-		const runFeed = () =>
-			refreshDueTenants(db, {
-				defaultRefreshSec,
-				lastRefreshByTenant,
-				nowSec: Math.floor(Date.now() / 1000),
-				log: {
-					warn: (m) => log.warn(m),
-					info: (m) => log.info(m),
-				},
-				// Резкое колебание курса (sanity-guard отклонил фид) → алерт владельцу.
-				onAnomaly: (a) => {
-					const dev = Number.isFinite(a.deviationPct)
-						? Math.round(a.deviationPct)
-						: null;
-					log.warn("rate-feed anomaly: резкое колебание курса", {
-						tenantId: a.tenantId,
-						asset: a.asset,
-						prev: a.prev,
-						next: a.next,
-						deviationPct: dev,
-					});
-					void opsAlertRouter
-						.emit({
-							tenantId: a.tenantId,
-							kind: "rate_anomaly",
-							severity: "critical",
-							title: "Резкое колебание курса",
-							detail:
-								`Фид по ${a.asset} дал ${a.next} при текущем ${a.prev}` +
-								`${dev !== null ? ` (${dev > 0 ? "+" : ""}${dev}%)` : ""} — отклонено sanity-guard'ом. ` +
-								"Курс заморожен на прежнем значении, бот может котировать устаревший курс. Проверьте фид/курс.",
-							dedupKey: `rate_anomaly:${a.asset}`,
-						})
-						.catch((e) =>
-							log.warn("ops-alert emit failed", { err: String(e) }),
-						);
-				},
-				// Pending-предложение от фида (soft/hard) → info-уведомление владельцу.
-				// partial-unique на (asset, quote_asset, network) WHERE status='pending'
-				// уже схлопывает повторные сэмплы; dedupKey даёт ops-anti-storm cooldown.
-				onProposal: (pn) => {
-					const dev = Number.isFinite(pn.deviationPct)
-						? Math.round(pn.deviationPct)
-						: null;
-					void opsAlertRouter
-						.emit({
-							tenantId: pn.tenantId,
-							kind: "rate_proposal_pending",
-							severity: "info",
-							title: "Курс ждёт подтверждения",
-							detail:
-								`Фид по ${pn.asset}→${pn.quoteAsset}` +
-								(pn.network ? `/${pn.network}` : "") +
-								` предложил ${pn.next} при текущем ${pn.prev}` +
-								`${dev !== null ? ` (${dev > 0 ? "+" : ""}${dev}%)` : ""}. ` +
-								"Подтвердите или отклоните в админке.",
-							dedupKey: `rate_proposal:${pn.asset}:${pn.quoteAsset}:${pn.network}`,
-						})
-						.catch((e) =>
-							log.warn("ops-alert emit failed", { err: String(e) }),
-						);
-				},
-			}).catch((e) => log.warn("rate-feed tick failed", { err: e }));
-		rateFeedInterval = setInterval(runFeed, tickMs);
-		setTimeout(runFeed, 15_000); // первый прогон через 15с после старта
-		log.info("exchange rate-feed enabled (per-tenant)", {
-			defaultRefreshSec,
-			tickMs,
-		});
-	}
-
-	// Дрип-диспетчер кампаний: «капает» лидов в outbound_queue с заданной скоростью.
-	// DRIP_DISPATCH_MS=0 отключает. Тик частый (10с), сама скорость — в кампании.
-	const dripDispatchMs = Number.parseInt(
-		process.env.DRIP_DISPATCH_MS ?? "10000",
-		10,
-	);
-	if (dripDispatchMs > 0) {
-		const runDrip = () =>
-			dripDispatchTick(db, {
-				nowSec: Math.floor(Date.now() / 1000),
-				log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
-			}).catch((e) =>
-				log.warn("drip-dispatcher tick failed", {
-					err: e instanceof Error ? e.message : String(e),
-				}),
-			);
-		dripDispatchInterval = setInterval(runDrip, dripDispatchMs);
-		setTimeout(runDrip, 12_000);
-		log.info("outreach drip-dispatcher enabled", { dripDispatchMs });
-	}
-
-	// Debounce-поллер ответов: добивает «подошедшие» отложенные ответы
-	// (conversations.reply_due_at <= now). REPLY_DEBOUNCE_MS=0 отключает.
-	// Активен только если есть replyStrategy (иначе отвечать нечем).
-	const replyDebounceMs = Number.parseInt(
-		process.env.REPLY_DEBOUNCE_MS ?? "1000",
-		10,
-	);
-	if (replyDebounceMs > 0 && replyStrategy) {
-		const runReplyDebounce = () =>
-			replyDebounceTick(db, {
-				nowSec: Math.floor(Date.now() / 1000),
-				replyStrategy,
-				notifications: notificationService,
-				sink,
-				resolveBotSettings,
-				signalTyping: async (channelDbId, externalUserId) => {
-					await channels.byChannelId(channelDbId)?.adapter.signalTyping(externalUserId);
-				},
-				log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
-			}).catch((e) =>
-				log.warn("reply-debounce tick failed", {
-					err: e instanceof Error ? e.message : String(e),
-				}),
-			);
-		replyDebounceInterval = setInterval(runReplyDebounce, replyDebounceMs);
-		setTimeout(runReplyDebounce, 10_000);
-		log.info("reply-debounce poller enabled", { replyDebounceMs });
-	}
-
-	// #632 — авто-закрытие диалогов после N часов тишины (botSettings.autocloseHours).
-	// Тик редкий (раз в 10 мин). AUTO_CLOSE_MS=0 отключает.
-	const autoCloseMs = Number.parseInt(
-		process.env.AUTO_CLOSE_MS ?? "600000",
-		10,
-	);
-	if (autoCloseMs > 0) {
-		const runAutoClose = () =>
-			autoCloseTick(db, {
-				nowSec: Math.floor(Date.now() / 1000),
-				resolveBotSettings,
-				log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
-			}).catch((e) =>
-				log.warn("auto-close tick failed", {
-					err: e instanceof Error ? e.message : String(e),
-				}),
-			);
-		autoCloseInterval = setInterval(runAutoClose, autoCloseMs);
-		setTimeout(runAutoClose, 20_000);
-		log.info("auto-close poller enabled", { autoCloseMs });
-	}
-
-	process.on("SIGTERM", () => void shutdown());
-	process.on("SIGINT", () => void shutdown());
+  const cfg = loadApiConfig();
+  const log = makeDefaultLogger("apps/api");
+  const metrics = makePlatformMetrics();
+  const { db, close } = makeDb(cfg.databaseUrl);
+
+  // RLS-guard: миграция 0004 включает FORCE ROW LEVEL SECURITY, но
+  // если DATABASE_URL коннектится под superuser / BYPASSRLS-role'ью —
+  // policy игнорируется и tenant-isolation как defense-in-depth не
+  // работает. Surface'им это в логе на boot.
+  const rlsCheck = await checkRlsEnforcement(db);
+  if (!rlsCheck.isEnforced) {
+    log.warn("RLS not enforced — connection role bypasses row-level security", {
+      role: rlsCheck.role,
+      isSuperuser: rlsCheck.isSuperuser,
+      hasBypassRls: rlsCheck.hasBypassRls,
+      remediation:
+        "Use a NOSUPERUSER NOBYPASSRLS Postgres role for apps/api connection. See migration 0004 comments.",
+    });
+  } else {
+    log.info("RLS enforced", { role: rlsCheck.role });
+  }
+
+  // Загружаем active tenant IDs для регистрации LLM-config'а per-tenant.
+  // Single-tenant legacy путь использовал hardcoded tenantId=1; в multi-tenant
+  // need register config для каждого tenant'а иначе InMemoryLlmRouter throws
+  // "LLM config not set: tenantId=X" когда inbound приходит от не-1 tenant.
+  // Hot-reload не делаем — новый tenant onboarding требует рестарта apps/api.
+  const activeTenantRows = await db
+    .select({ id: tenants.id, slug: tenants.slug })
+    .from(tenants)
+    .where(eq(tenants.status, "active"));
+  const activeTenantIds = activeTenantRows.map((r) => r.id);
+  log.info("active tenants loaded for LLM config", {
+    count: activeTenantIds.length,
+    ids: activeTenantIds,
+  });
+
+  // Строим mapping tenantSlug → VerticalTemplate из funnels.vertical_template_id.
+  // На старте читаем один раз; новый tenant требует рестарта (acceptable trade-off).
+  const templateByTenantSlug: Record<string, VerticalTemplate> = {};
+  const templatePriorityByTenantSlug = new Map<string, number>();
+  if (activeTenantRows.length > 0) {
+    const funnelRows = await db
+      .select({
+        tenantId: funnels.tenantId,
+        verticalTemplateId: funnels.verticalTemplateId,
+      })
+      .from(funnels)
+      .where(eq(funnels.isActive, true));
+    const tenantIdToSlug = new Map(activeTenantRows.map((r) => [r.id, r.slug]));
+    for (const row of funnelRows) {
+      if (!row.verticalTemplateId) continue;
+      const slug = tenantIdToSlug.get(row.tenantId);
+      if (!slug) continue;
+      const tpl = KNOWN_TEMPLATES[row.verticalTemplateId];
+      if (!tpl) continue;
+      const priority = TEMPLATE_PRIORITY[row.verticalTemplateId] ?? 0;
+      const currentPriority = templatePriorityByTenantSlug.get(slug) ?? -1;
+      if (priority > currentPriority) {
+        templateByTenantSlug[slug] = tpl;
+        templatePriorityByTenantSlug.set(slug, priority);
+      }
+    }
+  }
+  // Hardcoded fallback for the legacy tenant if not already covered.
+  if (!templateByTenantSlug.legacy) {
+    templateByTenantSlug.legacy = RECRUITMENT_V1;
+  }
+  const resolveTemplate = (tenantSlug: string): VerticalTemplate | undefined =>
+    templateByTenantSlug[tenantSlug];
+  const tenantSlugById = new Map(activeTenantRows.map((r) => [r.id, r.slug]));
+  const resolveTemplateForTenant = (tenantId: number): VerticalTemplate | undefined => {
+    const tenantSlug = tenantSlugById.get(tenantId);
+    return tenantSlug ? resolveTemplate(tenantSlug) : undefined;
+  };
+
+  // Per-tenant LLM configs: DB + env fallback. LoadedRef shared между
+  // фабриками + tenant-reloader (mutable; reload через admin API меняет
+  // .current snapshot и router.setConfig, фабрики reflect'ят через
+  // closures без рестарта).
+  const loadedLlmConfigs = await loadTenantLlmConfigs({
+    db,
+    tenantIds: activeTenantIds,
+    envFallback: cfg,
+    masterKeyHex: cfg.masterKeyHex,
+    onError: (msg, ctx) => log.warn(`llm-config-loader: ${msg}`, ctx),
+  });
+  const loadedRef: LoadedRef = {
+    current: loadedLlmConfigs,
+    router: new InMemoryLlmRouter(),
+  };
+  log.info("llm configs resolved", {
+    tenants: loadedLlmConfigs.byTenant.size,
+    anyChat: loadedLlmConfigs.anyTenantHasChat,
+    anyEmbed: loadedLlmConfigs.anyTenantHasEmbed,
+  });
+
+  const channels = new ChannelRegistry();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+  await channels.loadFromDb(db as any, {
+    masterKeyHex: cfg.masterKeyHex,
+    onWarn: (msg, ctx) => log.warn(`channel-registry: ${msg}`, ctx),
+    ...(cfg.whatsappVerifyToken ? { whatsappVerifyTokenFallback: cfg.whatsappVerifyToken } : {}),
+    ...(cfg.whatsappAppSecret ? { whatsappAppSecretFallback: cfg.whatsappAppSecret } : {}),
+    ...(cfg.facebookVerifyToken ? { facebookVerifyTokenFallback: cfg.facebookVerifyToken } : {}),
+    ...(cfg.facebookAppSecret ? { facebookAppSecretFallback: cfg.facebookAppSecret } : {}),
+    ...(cfg.vkConfirmationCode ? { vkConfirmationCodeFallback: cfg.vkConfirmationCode } : {}),
+    ...(cfg.vkSecretKey ? { vkSecretKeyFallback: cfg.vkSecretKey } : {}),
+    ...(cfg.maxWebhookSecret ? { maxWebhookSecretFallback: cfg.maxWebhookSecret } : {}),
+  });
+
+  const app = new Hono();
+
+  app.route("/", makeMetricsRoutes(metrics));
+
+  // Static: widget bundle + demo HTML. Public routes (без auth), CORS open
+  // — widget script загружается с customer-домена.
+  app.route("/", makeWidgetStaticRoutes());
+
+  // Public alpha waitlist. No tenant/auth context: requester has no account yet.
+  app.route("/", makePublicEarlyAccessRoutes({ db }));
+
+  // Mailer (Resend) — dry-run если RESEND_API_KEY не задан.
+  const mailer = new Mailer({
+    apiKey: cfg.mailer.apiKey || undefined,
+    fromAddress: cfg.mailer.fromAddress,
+  });
+  log.info("mailer initialized", { dryRun: !cfg.mailer.apiKey });
+
+  // Auth routes — public (POST /api/auth/signup, /login, /logout, GET /me).
+  // НЕ wrap'аются в tenant-middleware: signup создаёт tenant, login
+  // резолвит его из email.
+  // Throttle public auth endpoints (login/signup/forgot/reset/accept-invite)
+  // против brute-force / credential stuffing / email-bombing. Keyed by IP
+  // (+email для login). Overridable via AUTH_RATE_LIMIT_PER_MIN / _HOUR.
+  const authRateLimiter = new AuthRateLimiter({
+    perMinute: Number.parseInt(process.env.AUTH_RATE_LIMIT_PER_MIN ?? "10", 10),
+    perHour: Number.parseInt(process.env.AUTH_RATE_LIMIT_PER_HOUR ?? "60", 10),
+  });
+  app.route(
+    "/",
+    makeAuthRoutes({
+      // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+      db: db as any,
+      secret: cfg.authSecret,
+      mailer,
+      appUrl: cfg.mailer.appUrl,
+      allowSignup: process.env.ALLOW_PUBLIC_SIGNUP === "1",
+      rateLimiter: authRateLimiter,
+    }),
+  );
+  log.info("auth routes enabled", {
+    tokenSecret: cfg.authSecret ? "configured" : "missing!",
+  });
+
+  // Authenticated admin-API под /api/admin/*. Middleware requireAuth
+  // extract'ит Bearer token из Authorization header → выставляет
+  // c.var.{adminId, tenantId, role, adminEmail}. Все routes сами
+  // wrap'ятся в withTenant для RLS.
+  // requireAuth gating /api/admin/* — нужно всегда, даже если embedder
+  // не сконфигурирован: /api/admin/llm-configs позволяет настроить LLM
+  // через UI без env-vars.
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
+  app.use("/api/superadmin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
+  app.route("/", makeSuperadminRoutes({ db, publicUrl: cfg.mailer.appUrl }));
+  log.info("superadmin routes enabled");
+
+  // Web channel registry — early init чтобы reloader мог его перестраивать
+  // при POST /api/admin/channels/web. WS-runner / dispatcher поднимутся ниже.
+  const webRegistry = new WebChannelRegistry();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+  await webRegistry.loadFromDb(db as any);
+
+  // Userbot (personal-account MTProto) registry + login-store — early init
+  // чтобы reloader мог подключать/тушить userbot'ы при onboarding/delete.
+  // Runner-factory + loadFromDb выставляются ниже (нужны pipeline-deps).
+  const userbotRegistry = new UserbotChannelRegistry({
+    apiId: cfg.telegramUserbot.apiId,
+    apiHash: cfg.telegramUserbot.apiHash,
+    masterKeyHex: cfg.masterKeyHex,
+    log,
+  });
+  // Userbot-сабсистем включён всегда: api_id/api_hash резолвятся per-tenant из
+  // tenant_secrets (env TELEGRAM_API_ID/HASH — лишь общий фолбэк). Тенант вводит
+  // свои креды в кабинете → онбординг работает без env на сервере.
+  const userbotEnvFallback = cfg.telegramUserbot.apiId > 0 && !!cfg.telegramUserbot.apiHash;
+  const userbotLoginStore = new UserbotLoginStore();
+
+  // Hot-reload bus: admin routes вызывают reloadLlm/reloadChannels(tenantId)
+  // после изменения, live применяя в текущем процессе. apps/worker — отдельный
+  // процесс, ему пока нужен restart.
+  const reloader = makeTenantReloader({
+    db,
+    cfg,
+    ref: loadedRef,
+    registry: channels,
+    webRegistry,
+    userbotRegistry,
+    log: (msg, ctx) => log.info(`reloader: ${msg}`, ctx ?? {}),
+  });
+
+  // LLM usage writer — batched DB writes для billing dashboard.
+  // Каждый wrapChatClient/wrapEmbeddingClient вызов append'ит event
+  // через recordUsage callback. Writer flush'ает каждые 5 сек или при
+  // overflow buffer'а (200 events).
+  const usageWriter = new LlmUsageWriter({
+    db,
+    onError: (err, dropped) =>
+      log.warn("llm-usage-writer flush failed", {
+        err: err instanceof Error ? err.message : String(err),
+        droppedEvents: dropped,
+      }),
+  });
+  const recordUsage = (tenantId: number, ev: Parameters<typeof usageWriter.record>[1]) =>
+    usageWriter.record(tenantId, ev);
+
+  const notificationsRepo = new NotificationsRepo(db as any);
+  // Информер владельца: единый путь доставки (уровни + дайджест + лента).
+  // Mailer структурно — OpsEmailSender (email-гарантия для critical).
+  const adminInformer = new AdminInformer({
+    db: db as never,
+    botToken: cfg.operatorBotToken,
+    appUrl: cfg.mailer.appUrl,
+    email: mailer,
+    realtime: (notification) => {
+      adminEventBus.emit({
+        type: "admin_notification",
+        tenantId: notification.tenantId,
+        notification,
+      });
+    },
+    log: {
+      warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
+      info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
+    },
+  });
+  const notificationService = new NotificationService(
+    notificationsRepo,
+    cfg.operatorBotToken,
+    cfg.mailer.appUrl,
+    adminInformer,
+    async (ref) => {
+      const channelId = Number(ref.channelId);
+      if (!Number.isInteger(channelId) || channelId <= 0) return null;
+      const entry = channels.byChannelId(channelId);
+      if (!entry) return null;
+      return entry.adapter.downloadMedia({
+        channelId: ref.channelId,
+        externalRef: ref.externalRef,
+      });
+    },
+    // #651 — db для форум-топиков (operator_thread_id + least-busy ассайн).
+    db as never,
+  );
+  const operatorBotHandler = new OperatorBotHandler(notificationsRepo, cfg.operatorBotToken, {
+    db: db as never,
+    appUrl: cfg.mailer.appUrl,
+    // #731: перевод ответа оператора (RU) на язык клиента перед отправкой.
+    resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+  });
+  if (cfg.operatorBotToken) {
+    log.info("operator notification bot enabled");
+  }
+  // Роутер операционных алертов владельцу (#145): делегирует доставку информеру
+  // (уровни/дайджест/лента); Mailer остаётся email-гарантией для critical.
+  const opsAlertRouter = new OpsAlertRouter({
+    db: db as never,
+    botToken: cfg.operatorBotToken,
+    appUrl: cfg.mailer.appUrl,
+    email: mailer,
+    informer: adminInformer,
+    log: {
+      warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
+      info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
+    },
+  });
+
+  const embedderResolver = makeEmbedderResolver(loadedRef);
+  app.route(
+    "/",
+    makeAdminKbRoutes({
+      db,
+      resolveEmbedder:
+        embedderResolver ??
+        ((tenantId: number) => {
+          throw new Error(`embedder is not configured for tenant ${tenantId}`);
+        }),
+    }),
+  );
+  log.info("admin-kb routes enabled (list/view; upload/search/reindex require embedder)", {
+    embedderConfigured: !!embedderResolver,
+  });
+
+  // Per-tenant LLM provider config CRUD (GET/PUT/DELETE /api/admin/llm-configs).
+  // NB: изменения вступают в силу после рестарта apps/api — текущий
+  // InMemoryLlmRouter резолвится на boot из env + activeTenantIds.
+  // Hot-reload — отдельный PR.
+  app.route(
+    "/",
+    makeAdminLlmConfigsRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      onReload: reloader.reloadLlm,
+    }),
+  );
+  log.info("admin-llm-configs routes enabled (per-tenant LLM config CRUD + hot-reload)");
+
+  // Per-tenant channel CRUD (Telegram bot onboarding по token-paste).
+  // Token validate'ится через Telegram getMe, encrypted в tenant_secrets.
+  // Если PLATFORM_PUBLIC_URL задан — auto-setWebhook на Telegram при create.
+  // Channels подхватываются ChannelRegistry на boot — restart нужен для
+  // дальнейшей обработки inbound, но webhook уже указывает сюда.
+  app.route(
+    "/",
+    makeAdminChannelsRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
+      webhookSecret: cfg.telegramWebhookSecret,
+      ...(cfg.whatsappVerifyToken ? { whatsappVerifyToken: cfg.whatsappVerifyToken } : {}),
+      ...(cfg.facebookVerifyToken ? { facebookVerifyToken: cfg.facebookVerifyToken } : {}),
+      ...(cfg.vkConfirmationCode ? { vkConfirmationCode: cfg.vkConfirmationCode } : {}),
+      ...(cfg.vkSecretKey ? { vkSecretKey: cfg.vkSecretKey } : {}),
+      ...(cfg.maxWebhookSecret ? { maxWebhookSecret: cfg.maxWebhookSecret } : {}),
+      ...(cfg.webWidgetScriptUrl ? { webWidgetScriptUrl: cfg.webWidgetScriptUrl } : {}),
+      telegramApiId: cfg.telegramUserbot.apiId,
+      telegramApiHash: cfg.telegramUserbot.apiHash,
+      userbotLoginStore,
+      onReload: reloader.reloadChannels,
+    }),
+  );
+  log.info("admin-channels routes enabled (per-tenant channel CRUD + hot-reload)", {
+    autoSetWebhook: !!cfg.publicUrl,
+  });
+
+  // Onboarding status aggregator (channel + LLM + KB).
+  app.route("/", makeAdminOnboardingRoutes({ db }));
+  log.info("admin-onboarding route enabled");
+
+  // Read-only conversations + messages для admin-UI inbox.
+  app.route(
+    "/",
+    makeAdminConversationsRoutes({
+      db,
+      // #731: перевод входящих клиента → RU (инбокс) и ответа оператора → язык клиента.
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+      notifications: notificationService,
+      partnerPing: {
+        appUrl: cfg.mailer.appUrl,
+        operatorBotToken: cfg.operatorBotToken,
+        callbackSecret: cfg.partnerCallbackSecret,
+      },
+      // Media-proxy для инбокса: качаем файл клиента адаптером канала-владельца.
+      downloadMedia: async (ref) => {
+        // Mock-медиа симуляции (self_play KYC): отдаём плейсхолдер-паспорт из
+        // assets, чтобы инбокс показывал документ, «присланный» sim-клиентом
+        // (см. buildSimKycMediaParts в routes/admin-sim). Видео-кружок не
+        // храним — у self_play нет адаптера, превью просто не отрисуется.
+        if (ref.externalRef === "__sim_kyc_passport__") {
+          const file = Bun.file(`${import.meta.dir}/../assets/bot-test/passport-demo.png`);
+          return (await file.exists())
+            ? new Response(file, { headers: { "content-type": "image/png" } })
+            : null;
+        }
+        const channelId = Number(ref.channelId);
+        if (!Number.isInteger(channelId) || channelId <= 0) return null;
+        const entry = channels.byChannelId(channelId);
+        if (!entry) return null;
+        return entry.adapter.downloadMedia({
+          channelId: ref.channelId,
+          externalRef: ref.externalRef,
+        });
+      },
+    }),
+  );
+  log.info("admin-conversations routes enabled (list + thread + reply)");
+
+  // Audit log read API.
+  app.route("/", makeAdminAuditRoutes({ db }));
+  log.info("admin-audit routes enabled (read-only)");
+
+  // Multi-admin invite — token-link flow + email-delivery через Resend.
+  app.route(
+    "/",
+    makeAdminAdminsRoutes({
+      db,
+      mailer,
+      ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
+    }),
+  );
+  log.info("admin-admins routes enabled (invite / list / revoke)");
+
+  // Tenant info + pause/resume.
+  app.route("/", makeAdminTenantRoutes({ db, onStatusChange: reloader.reloadChannels }));
+  log.info("admin-tenant routes enabled (pause/resume)");
+
+  // Leads pipeline (list, create, stage transition, field values).
+  app.route(
+    "/",
+    makeAdminLeadsRoutes({
+      db,
+      ...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
+      notificationService,
+      partnerPing: {
+        appUrl: cfg.mailer.appUrl,
+        operatorBotToken: cfg.operatorBotToken,
+        callbackSecret: cfg.partnerCallbackSecret,
+      },
+    }),
+  );
+  app.route(
+    "/api/admin/notifications",
+    makeAdminNotificationsRoutes({
+      repo: notificationsRepo,
+      botUsername: cfg.operatorBotUsername,
+      notificationService,
+      opsRouter: opsAlertRouter,
+      opsEmailConfigured: !!cfg.mailer.apiKey,
+    }),
+  );
+  log.info("admin-leads routes enabled");
+
+  // Funnel builder (stage_definitions, stage_fields) + skills list.
+  app.route("/", makeAdminFunnelRoutes({ db }));
+  app.route("/", makeAdminReferralRoutes({ db }));
+  app.route("/", makeAdminPartnersRoutes({ db }));
+  app.route("/", makeAdminProvidersRoutes({ db }));
+  app.route("/", makeAdminProviderOrdersRoutes({ db }));
+  app.route("/", makeAdminProviderMarketplaceRoutes({ db }));
+  app.route("/", makeAdminServiceCatalogRoutes({ db }));
+  log.info("admin-funnel routes enabled");
+
+  // AI Workflow Builder — диалог с AI для генерации воронки.
+  app.route(
+    "/",
+    makeAdminWorkflowRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
+  log.info("admin-workflow routes enabled (AI funnel builder)");
+
+  // AI-ассистент админки (copilot) — чат по данным страницы + помощь с
+  // онбордингом/воронкой. BYOK через тот же resolveChat, что и workflow.
+  app.route(
+    "/",
+    makeAdminCopilotRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
+  log.info("admin-copilot routes enabled (page-aware AI assistant)");
+
+  // Dashboard aggregate stats.
+  app.route("/", makeAdminDashboardRoutes({ db }));
+  log.info("admin-dashboard route enabled");
+
+  // Vacancies CRUD.
+  app.route("/", makeAdminVacanciesRoutes({ db }));
+  log.info("admin-vacancies routes enabled");
+
+  // Director hooks (tenant-specific persuasion scripts).
+  app.route("/", makeAdminDirectorHooksRoutes({ db }));
+  log.info("admin-director-hooks routes enabled");
+  app.route("/", makeAdminExperimentsRoutes({ db }));
+  log.info("admin-experiments routes enabled");
+  // admin-styles mounted after strategyBundle (needs onReload → invalidateStyleFor).
+
+  // Real-time SSE push for admin UI.
+  app.route("/", makeAdminEventsRoutes());
+  log.info("admin SSE events enabled at GET /api/admin/events");
+
+  // Outreach campaigns — batch message sending to leads.
+  app.route("/", makeAdminOutreachRoutes({ db, notificationService }));
+  app.route("/", makeAdminOutreachCampaignsRoutes({ db }));
+  log.info("admin-outreach routes enabled");
+
+  // Message templates for outreach.
+  app.route("/", makeAdminMessageTemplatesRoutes({ db }));
+  log.info("admin-message-templates routes enabled");
+
+  // Stage-change webhooks CRUD.
+  app.route("/", makeAdminStageWebhooksRoutes({ db }));
+  log.info("admin-stage-webhooks routes enabled");
+
+  // Partner callback endpoint (public — token is the auth).
+  // GET /api/partner/cb/:token?a=confirm|cancel
+  app.route(
+    "/",
+    makePartnerCallbackRoutes({
+      db,
+      callbackSecret: cfg.partnerCallbackSecret,
+      appUrl: cfg.mailer.appUrl,
+      notificationService,
+    }),
+  );
+  log.info("partner-callback route enabled (/api/partner/cb/:token)");
+
+  // Vertical plugin install.
+  app.route(
+    "/",
+    makeAdminVerticalsRoutes({
+      db,
+      resolveEmbedder: embedderResolver ?? undefined,
+    }),
+  );
+  log.info("admin-verticals routes enabled");
+
+  // MCP (Model Context Protocol) endpoint — для Claude Desktop / Cursor / агентов.
+  app.route(
+    "/",
+    makeMcpRoutes({
+      db,
+      authSecret: cfg.authSecret,
+      resolveEmbedder: embedderResolver ?? undefined,
+    }),
+  );
+  log.info("MCP endpoint enabled at POST /mcp");
+
+  const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
+    loadedRef,
+    cfg,
+    db,
+    {
+      fallbackTemplate: RECRUITMENT_V1,
+      resolveTemplate: resolveTemplateForTenant,
+    },
+    metrics,
+    recordUsage,
+    // A4: rate-guard сработал → алерт владельцу (информер/Telegram), не «тихий» warn.
+    (alert) => {
+      void notificationService
+        .notify({
+          tenantId: alert.tenantId,
+          eventType: "exchange_rate_guard_tripped",
+          conversationId: alert.conversationId,
+          data: {
+            asset: alert.asset,
+            network: alert.network ?? "",
+            reason: alert.reason,
+            deviationPct: alert.deviationPct,
+            threshold: alert.threshold ?? null,
+          },
+        })
+        .catch(() => {});
+    },
+  );
+  const simChatResolver = makeSimChatResolver(
+    loadedRef,
+    cfg.sim.personaModel || undefined,
+    cfg.sim.personaApiKey || undefined,
+  );
+  const shadowEvalRunner = new ShadowEvalJobRunner({
+    db,
+    resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    resolveCandidateChat: simChatResolver,
+    resolveJudgeChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    ...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
+    log: {
+      warn: (message, ctx) => log.warn(message, ctx),
+    },
+  });
+
+  // Quality lab exports - self-play / eval artifacts for dashboards and CI.
+  app.route(
+    "/",
+    makeAdminQualityRoutes({
+      db,
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateStyleFor(tenantId)
+        : undefined,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+      resolveCandidateChat: simChatResolver,
+      resolveJudgeChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+      ...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
+      shadowEvalRunner,
+    }),
+  );
+  log.info("admin-quality routes enabled (self-play JSONL export + quality runner)");
+  shadowEvalRunner.start();
+  log.info("quality shadow-eval queue enabled");
+
+  // Agentic tool configuration (booking link, etc.).
+  app.route(
+    "/",
+    makeAdminToolsRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-tools routes enabled");
+
+  // Exchange (обменный пункт): курсы/формулы, CRM заявок, оборот, реквизиты.
+  app.route(
+    "/",
+    makeAdminExchangeRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-exchange routes enabled");
+
+  app.route(
+    "/",
+    makeAdminConciergeRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-concierge routes enabled");
+
+  // Sales styles (personas) + AI generate-full. onReload drops the cached style
+  // so a generated/edited style drives the bot without a restart (Phase 2 slice B).
+  app.route(
+    "/",
+    makeAdminStylesRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateStyleFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-styles routes enabled");
+
+  // Diagnostics — health-check для tenant setup'а.
+  // resolveChat передаём для ?live=1 LLM smoke-test (стоит ~1 токен).
+  app.route(
+    "/",
+    makeAdminDiagnosticsRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
+  log.info("admin-diagnostics route enabled");
+
+  // Billing & plan tiers — quota gating + Stripe checkout/portal (M1b).
+  app.route(
+    "/",
+    makeAdminBillingRoutes({
+      db,
+      ...(cfg.stripe.secretKey
+        ? {
+            stripe: {
+              secretKey: cfg.stripe.secretKey,
+              priceMap: {
+                ...(cfg.stripe.priceStarter ? { starter: cfg.stripe.priceStarter } : {}),
+                ...(cfg.stripe.pricePro ? { pro: cfg.stripe.pricePro } : {}),
+              },
+              successUrl: cfg.stripe.successUrl,
+              cancelUrl: cfg.stripe.cancelUrl,
+            },
+          }
+        : {}),
+    }),
+  );
+  log.info("admin-billing routes enabled", {
+    plansEnabled: true,
+    stripeEnabled: !!cfg.stripe.secretKey,
+  });
+
+  app.route(
+    "/",
+    makeHealthRoutes({
+      // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+      db: db as any,
+      timeoutMs: cfg.healthCheckTimeoutMs,
+    }),
+  );
+  const replyStrategy = strategyBundle?.strategy ?? null;
+  if (replyStrategy) {
+    log.info("reply strategy configured", {
+      kind: loadedRef.current.anyTenantHasEmbed ? "RAG" : "LLM-only",
+      tenants: loadedRef.current.byTenant.size,
+      ...(cfg.defaultStyleSlug ? { style: cfg.defaultStyleSlug } : {}),
+      ...(cfg.experimentSlug ? { experiment: cfg.experimentSlug } : {}),
+    });
+  } else {
+    log.info("LLM not configured for any tenant — bot will persist messages but stay silent");
+  }
+
+  const photoProcessor = makePhotoProcessor(loadedRef);
+  log.info("photo processor enabled (activates per-tenant when vision LLM is configured)");
+
+  // Bot Tester — simulate inbound messages through the full pipeline.
+  app.route(
+    "/",
+    makeAdminTestRoutes({
+      db,
+      replyStrategy: replyStrategy ?? null,
+      photoProcessor,
+    }),
+  );
+  log.info("admin-test routes enabled (bot tester)");
+
+  const memoryExtractor = makeMemoryExtractor(loadedRef, db, metrics, recordUsage);
+  if (memoryExtractor) log.info("memory extractor enabled");
+
+  const stageClassifier = makeStageClassifier(loadedRef, cfg, db, metrics, recordUsage);
+  if (stageClassifier) {
+    log.info("stage classifier enabled", { kind: cfg.stageClassifier });
+  }
+
+  const fieldExtractor = makeFieldExtractor(loadedRef, notificationService);
+  log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");
+
+  const serviceCatalogRuntime = makeServiceCatalogRuntime({
+    resolveChat: simChatResolver,
+  });
+  log.info("service catalog runtime enabled (routes catalog matches into leads/deals)");
+
+  // Dialog Simulator — LLM «клиент» ведёт диалог, виден в живом инбоксе (self_play).
+  app.route(
+    "/",
+    makeAdminSimRoutes({
+      db,
+      replyStrategy: replyStrategy ?? null,
+      resolveSimChat: simChatResolver,
+      resolveTemplate,
+      stageClassifier,
+      fieldExtractor,
+    }),
+  );
+  log.info("admin-sim routes enabled (dialog simulator)");
+
+  const resolveTranscriber = makeTranscriberResolver(loadedRef);
+  if (resolveTranscriber) {
+    log.info(
+      "voice transcription enabled — dedicated 'transcribe' config or OpenAI/OpenRouter key (chat/embed/vision)",
+    );
+  }
+
+  const sink = makeMetricsSink(metrics);
+
+  // Per-tenant inbound rate-limit. Disabled если оба значения = 0.
+  const rateLimiter =
+    cfg.rateLimit.perMinute > 0 || cfg.rateLimit.perHour > 0
+      ? new InboundRateLimiter({
+          perMinute: cfg.rateLimit.perMinute,
+          perHour: cfg.rateLimit.perHour,
+        })
+      : undefined;
+  if (rateLimiter) {
+    log.info("inbound rate-limit enabled", {
+      perMinute: cfg.rateLimit.perMinute,
+      perHour: cfg.rateLimit.perHour,
+    });
+  } else {
+    log.warn("inbound rate-limit disabled — runaway-cost protection off");
+  }
+
+  // Настройки поведения бота (эпик #623) per-tenant из tenants.bot_settings_json.
+  // Включает replyDelaySeconds (debounce), рабочие часы, стоп-слова и т.д.
+  const resolveBotSettings = makeResolveBotSettings(db);
+
+  app.route(
+    "/",
+    makeTelegramWebhookRoutes({
+      db,
+      channels,
+      webhookSecret: cfg.telegramWebhookSecret,
+      replyStrategy,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      notificationService,
+      photoProcessor,
+      fieldExtractor,
+      serviceCatalogRuntime,
+      sink,
+      metrics,
+      resolveBotSettings,
+      ...(rateLimiter ? { rateLimiter } : {}),
+      ...(resolveTranscriber ? { resolveTranscriber } : {}),
+    }),
+  );
+
+  app.route(
+    "/",
+    makeOperatorBotWebhookRoutes({
+      handler: operatorBotHandler,
+      webhookSecret: cfg.telegramWebhookSecret,
+    }),
+  );
+
+  app.route("/", makeWestWalletWebhookRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
+  log.info("westwallet webhook enabled");
+
+  // Admin-API под /admin/*: tenant resolved из subdomain через
+  // makeTenantContextMiddleware (P), затем requireTenant guard 404'ит
+  // если запрос пришёл на apex. Auth (JWT) добавится отдельным коммитом
+  // когда apps/admin-ui начнёт wire-up'аться — сейчас все endpoints
+  // публичны.
+  if (cfg.platformBaseDomain) {
+    app.use("/admin/*", makeTenantContextMiddleware({ baseDomain: cfg.platformBaseDomain }));
+    app.use("/admin/*", requireTenant);
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+    app.route("/", makeAdminRoutes({ db: db as any }));
+    log.info("admin-api routes enabled", {
+      baseDomain: cfg.platformBaseDomain,
+    });
+  }
+
+  if (cfg.whatsappVerifyToken) {
+    app.route(
+      "/",
+      makeWhatsAppWebhookRoutes({
+        db,
+        channels,
+        verifyToken: cfg.whatsappVerifyToken,
+        ...(cfg.whatsappAppSecret ? { appSecret: cfg.whatsappAppSecret } : {}),
+        replyStrategy,
+        resolveTemplate,
+        memoryExtractor,
+        stageClassifier,
+        notificationService,
+        photoProcessor,
+        fieldExtractor,
+        serviceCatalogRuntime,
+        sink,
+        metrics,
+        ...(rateLimiter ? { rateLimiter } : {}),
+        ...(resolveTranscriber ? { resolveTranscriber } : {}),
+      }),
+    );
+    if (!cfg.whatsappAppSecret) {
+      log.warn("whatsapp webhook signature verification disabled", {
+        remediation: "Set WHATSAPP_APP_SECRET env (Meta dashboard → App Settings → Basic)",
+      });
+    }
+    log.info("whatsapp webhook enabled", {
+      signatureCheck: cfg.whatsappAppSecret ? "enabled" : "off (dev mode)",
+    });
+  }
+
+  app.route(
+    "/",
+    makeFacebookWebhookRoutes({
+      db,
+      channels,
+      verifyToken: cfg.facebookVerifyToken,
+      ...(cfg.facebookAppSecret ? { appSecret: cfg.facebookAppSecret } : {}),
+      replyStrategy,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      notificationService,
+      photoProcessor,
+      fieldExtractor,
+      serviceCatalogRuntime,
+      sink,
+      metrics,
+      ...(rateLimiter ? { rateLimiter } : {}),
+      ...(resolveTranscriber ? { resolveTranscriber } : {}),
+    }),
+  );
+  if (!cfg.facebookAppSecret) {
+    log.warn("facebook webhook app secret env fallback not set", {
+      impact: "channels without a per-channel App Secret skip signature verification",
+      remediation:
+        "Set FACEBOOK_APP_SECRET env or enter App Secret in Admin → Settings → Channels → Facebook Messenger",
+    });
+  }
+  log.info("facebook webhook enabled", {
+    verifyToken: cfg.facebookVerifyToken ? "env fallback" : "per-channel only",
+    signatureCheck: cfg.facebookAppSecret ? "env fallback/per-channel" : "per-channel only",
+  });
+
+  app.route(
+    "/",
+    makeVkWebhookRoutes({
+      db,
+      channels,
+      ...(cfg.vkConfirmationCode ? { confirmationCode: cfg.vkConfirmationCode } : {}),
+      ...(cfg.vkSecretKey ? { secretKey: cfg.vkSecretKey } : {}),
+      replyStrategy,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      notificationService,
+      photoProcessor,
+      fieldExtractor,
+      serviceCatalogRuntime,
+      sink,
+      metrics,
+      ...(rateLimiter ? { rateLimiter } : {}),
+      ...(resolveTranscriber ? { resolveTranscriber } : {}),
+    }),
+  );
+  log.info("vk webhook enabled", {
+    fallbackSecretCheck: cfg.vkSecretKey ? "enabled" : "off (per-tenant or dev mode)",
+  });
+
+  app.route(
+    "/",
+    makeMaxWebhookRoutes({
+      db,
+      channels,
+      ...(cfg.maxWebhookSecret ? { webhookSecret: cfg.maxWebhookSecret } : {}),
+      replyStrategy,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      notificationService,
+      photoProcessor,
+      fieldExtractor,
+      serviceCatalogRuntime,
+      sink,
+      metrics,
+      ...(rateLimiter ? { rateLimiter } : {}),
+      ...(resolveTranscriber ? { resolveTranscriber } : {}),
+    }),
+  );
+  log.info("max webhook enabled", {
+    fallbackSecretCheck: cfg.maxWebhookSecret ? "enabled" : "off (per-channel or dev mode)",
+  });
+
+  if (cfg.stripeWebhookSecret) {
+    const priceToPlan: Record<string, "starter" | "pro"> = {};
+    if (cfg.stripe.priceStarter) priceToPlan[cfg.stripe.priceStarter] = "starter";
+    if (cfg.stripe.pricePro) priceToPlan[cfg.stripe.pricePro] = "pro";
+    app.route(
+      "/",
+      makeStripeWebhookRoutes({
+        // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+        db: db as any,
+        webhookSecret: cfg.stripeWebhookSecret,
+        priceToPlan,
+        mailer,
+        appUrl: cfg.mailer.appUrl,
+      }),
+    );
+    log.info("stripe webhook enabled", {
+      knownPrices: Object.keys(priceToPlan).length,
+    });
+  }
+
+  // ---- channel-web wire-up ----
+  // WebChannelAdapter держит pinned WS-connection'ы — adapter и
+  // dispatcher для web живут в этом процессе, в отличие от
+  // telegram/whatsapp где dispatcher в apps/worker. См. комментарий
+  // в WebOutboundDispatcher для rationale.
+  // (`webRegistry` уже инициализирован выше — нужен для reloader'а.)
+  const webAbort = new AbortController();
+  const webRunners: Promise<void>[] = [];
+  for (const entry of webRegistry.entries()) {
+    const runner = startWebInboundRunner({
+      entry,
+      db,
+      signal: webAbort.signal,
+      replyStrategy: replyStrategy ?? null,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      notifications: notificationService,
+      fieldExtractor,
+      serviceCatalogRuntime,
+      sink,
+      metrics,
+      log,
+    });
+    webRunners.push(runner);
+  }
+  const webDispatcher = new WebOutboundDispatcher(db, webRegistry, {
+    pollMs: cfg.web.dispatcherPollMs,
+    batchSize: cfg.web.dispatcherBatchSize,
+    metrics,
+    log,
+  });
+  const webDispatcherPromise = webDispatcher.run(webAbort.signal).catch((err) => {
+    log.error("web dispatcher fatal", {
+      err: err instanceof Error ? err : new Error(String(err)),
+    });
+  });
+
+  // ---- Telegram userbot wire-up (personal-account MTProto) ----
+  // Та же модель, что web: pinned-соединение + inbound-runner + отдельный
+  // outbound-dispatcher живут в apps/api. Registry владеет lifecycle'ом
+  // соединений; runner-factory инжектит pipeline-deps (replyStrategy и т.д.).
+  const userbotAbort = new AbortController();
+  let userbotDispatcherPromise: Promise<void> = Promise.resolve();
+  {
+    userbotRegistry.setRunnerFactory((entry, signal) =>
+      startUserbotInboundRunner({
+        entry,
+        db,
+        signal,
+        replyStrategy: replyStrategy ?? null,
+        resolveTemplate,
+        memoryExtractor,
+        stageClassifier,
+        notifications: notificationService,
+        photoProcessor,
+        fieldExtractor,
+        serviceCatalogRuntime,
+        sink,
+        metrics,
+        log,
+        ...(resolveTranscriber ? { resolveTranscriber } : {}),
+      }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+    await userbotRegistry.loadFromDb(db as any);
+    const userbotDispatcher = new UserbotOutboundDispatcher(db, userbotRegistry, {
+      pollMs: cfg.telegramUserbot.dispatcherPollMs,
+      batchSize: cfg.telegramUserbot.dispatcherBatchSize,
+      metrics,
+      log,
+    });
+    userbotDispatcherPromise = userbotDispatcher.run(userbotAbort.signal).catch((err) => {
+      log.error("userbot dispatcher fatal", {
+        err: err instanceof Error ? err : new Error(String(err)),
+      });
+    });
+    log.info("channel-userbot enabled (per-tenant MTProto creds)", {
+      connected: userbotRegistry.size(),
+      envFallback: userbotEnvFallback,
+    });
+  }
+  const wsRoutes = makeWebSocketRoutes({
+    registry: webRegistry,
+    log,
+    metrics,
+    // Per-visitor identity binding — всегда включено, подписываем тем же
+    // strong-секретом, что и admin-токены (PLATFORM_AUTH_SECRET / MASTER_KEY).
+    signingSecret: cfg.authSecret,
+  });
+  if (webRegistry.size() > 0) {
+    log.info("channel-web enabled", {
+      channels: webRegistry.size(),
+      identityBinding: "per-visitor hmac token",
+    });
+  }
+
+  const server = Bun.serve({
+    port: cfg.port,
+    // idleTimeout: 0 — отключаем закрытие idle-соединений.
+    // По умолчанию Bun закрывает idle TCP через 10 с, что рвёт SSE-стримы
+    // (GET /api/admin/events) до первого пинга.
+    idleTimeout: 0,
+    // Кастомный fetch: сначала пытаемся upgrade'нуть WS, иначе — Hono app.
+    // Bun.serve.upgrade требует `server` reference, поэтому Hono mount'нуть
+    // как простой `fetch: app.fetch` нельзя.
+    fetch(req, srv) {
+      const upgradeFailure = wsRoutes.tryUpgrade(req, srv);
+      if (upgradeFailure) return upgradeFailure;
+      // tryUpgrade вернул undefined либо потому что upgrade прошёл (Bun
+      // ответит сам), либо потому что URL не /ws/* — отдаём Hono.
+      if (new URL(req.url).pathname.startsWith("/ws/")) {
+        // upgrade успешен — Bun сам ответит 101. Возвращать здесь нечего,
+        // но fetch обязан вернуть Response. Возвращаем заглушку, Bun её
+        // не отдаст клиенту т.к. socket уже hijacked.
+        return new Response(null, { status: 101 });
+      }
+      return app.fetch(req, srv);
+    },
+    websocket: wsRoutes.websocket,
+  });
+
+  log.info("listening", {
+    port: server.port,
+    url: `http://localhost:${server.port}`,
+  });
+
+  // Graceful shutdown: дренируем channels, закрываем DB-пул.
+  const shutdown = async () => {
+    log.info("shutting down");
+    clearInterval(usageAlertInterval);
+    clearTimeout(usageAlertFirstRun);
+    if (rateFeedInterval) clearInterval(rateFeedInterval);
+    if (dripDispatchInterval) clearInterval(dripDispatchInterval);
+    if (replyDebounceInterval) clearInterval(replyDebounceInterval);
+    if (autoCloseInterval) clearInterval(autoCloseInterval);
+    shadowEvalRunner.stop();
+    server.stop();
+    webAbort.abort();
+    webDispatcher.stop();
+    userbotAbort.abort();
+    await Promise.allSettled([webDispatcherPromise, ...webRunners, userbotDispatcherPromise]);
+    webRegistry.closeAll();
+    await userbotRegistry.closeAll();
+    if (userbotLoginStore) await userbotLoginStore.stop();
+    channels.closeAll();
+    // Flush buffered usage events перед close DB.
+    await usageWriter.stop();
+    await close();
+    process.exit(0);
+  };
+  // Usage alerts — проверяем каждый час все активные тенанты.
+  // Отправляет email при 80% / 100% LLM-квоты (дедупликация in-memory по месяцу).
+  const usageAlertInterval = setInterval(
+    () => {
+      checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
+        log.warn("usage-alerts check failed", { err: e }),
+      );
+    },
+    60 * 60 * 1000,
+  ); // каждый час
+  // Первый запуск через 5 минут после старта (не сразу — дать DB прогреться).
+  const usageAlertFirstRun = setTimeout(
+    () => {
+      checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
+        log.warn("usage-alerts initial check failed", { err: e }),
+      );
+    },
+    5 * 60 * 1000,
+  );
+
+  // Exchange rate-feed: тик-планировщик с per-tenant частотой (exchange_settings).
+  // RATE_FEED_MS (default 180000 = 3 мин) — дефолт per-tenant; 0 — отключить.
+  // Тик = min(RATE_FEED_MS, 60с): на каждом тике рефрешим тенантов, у кого подошёл
+  // их интервал. last-refresh держим в памяти (на рестарте рефрешим всех).
+  const rateFeedMs = Number.parseInt(process.env.RATE_FEED_MS ?? "180000", 10);
+  let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
+  let dripDispatchInterval: ReturnType<typeof setInterval> | null = null;
+  let replyDebounceInterval: ReturnType<typeof setInterval> | null = null;
+  let autoCloseInterval: ReturnType<typeof setInterval> | null = null;
+  if (rateFeedMs > 0) {
+    const defaultRefreshSec = Math.max(60, Math.floor(rateFeedMs / 1000));
+    const tickMs = Math.min(rateFeedMs, 60_000);
+    const lastRefreshByTenant = new Map<number, number>();
+    const runFeed = () =>
+      refreshDueTenants(db, {
+        defaultRefreshSec,
+        lastRefreshByTenant,
+        nowSec: Math.floor(Date.now() / 1000),
+        log: {
+          warn: (m) => log.warn(m),
+          info: (m) => log.info(m),
+        },
+        // Резкое колебание курса (sanity-guard отклонил фид) → алерт владельцу.
+        onAnomaly: (a) => {
+          const dev = Number.isFinite(a.deviationPct) ? Math.round(a.deviationPct) : null;
+          log.warn("rate-feed anomaly: резкое колебание курса", {
+            tenantId: a.tenantId,
+            asset: a.asset,
+            prev: a.prev,
+            next: a.next,
+            deviationPct: dev,
+          });
+          void opsAlertRouter
+            .emit({
+              tenantId: a.tenantId,
+              kind: "rate_anomaly",
+              severity: "critical",
+              title: "Резкое колебание курса",
+              detail:
+                `Фид по ${a.asset} дал ${a.next} при текущем ${a.prev}` +
+                `${dev !== null ? ` (${dev > 0 ? "+" : ""}${dev}%)` : ""} — отклонено sanity-guard'ом. ` +
+                "Курс заморожен на прежнем значении, бот может котировать устаревший курс. Проверьте фид/курс.",
+              dedupKey: `rate_anomaly:${a.asset}`,
+            })
+            .catch((e) => log.warn("ops-alert emit failed", { err: String(e) }));
+        },
+        // Pending-предложение от фида (soft/hard) → info-уведомление владельцу.
+        // partial-unique на (asset, quote_asset, network) WHERE status='pending'
+        // уже схлопывает повторные сэмплы; dedupKey даёт ops-anti-storm cooldown.
+        onProposal: (pn) => {
+          const dev = Number.isFinite(pn.deviationPct) ? Math.round(pn.deviationPct) : null;
+          void opsAlertRouter
+            .emit({
+              tenantId: pn.tenantId,
+              kind: "rate_proposal_pending",
+              severity: "info",
+              title: "Курс ждёт подтверждения",
+              detail:
+                `Фид по ${pn.asset}→${pn.quoteAsset}` +
+                (pn.network ? `/${pn.network}` : "") +
+                ` предложил ${pn.next} при текущем ${pn.prev}` +
+                `${dev !== null ? ` (${dev > 0 ? "+" : ""}${dev}%)` : ""}. ` +
+                "Подтвердите или отклоните в админке.",
+              dedupKey: `rate_proposal:${pn.asset}:${pn.quoteAsset}:${pn.network}`,
+            })
+            .catch((e) => log.warn("ops-alert emit failed", { err: String(e) }));
+        },
+      }).catch((e) => log.warn("rate-feed tick failed", { err: e }));
+    rateFeedInterval = setInterval(runFeed, tickMs);
+    setTimeout(runFeed, 15_000); // первый прогон через 15с после старта
+    log.info("exchange rate-feed enabled (per-tenant)", {
+      defaultRefreshSec,
+      tickMs,
+    });
+  }
+
+  // Дрип-диспетчер кампаний: «капает» лидов в outbound_queue с заданной скоростью.
+  // DRIP_DISPATCH_MS=0 отключает. Тик частый (10с), сама скорость — в кампании.
+  const dripDispatchMs = Number.parseInt(process.env.DRIP_DISPATCH_MS ?? "10000", 10);
+  if (dripDispatchMs > 0) {
+    const runDrip = () =>
+      dripDispatchTick(db, {
+        nowSec: Math.floor(Date.now() / 1000),
+        log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
+      }).catch((e) =>
+        log.warn("drip-dispatcher tick failed", {
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    dripDispatchInterval = setInterval(runDrip, dripDispatchMs);
+    setTimeout(runDrip, 12_000);
+    log.info("outreach drip-dispatcher enabled", { dripDispatchMs });
+  }
+
+  // Debounce-поллер ответов: добивает «подошедшие» отложенные ответы
+  // (conversations.reply_due_at <= now). REPLY_DEBOUNCE_MS=0 отключает.
+  // Активен только если есть replyStrategy (иначе отвечать нечем).
+  const replyDebounceMs = Number.parseInt(process.env.REPLY_DEBOUNCE_MS ?? "1000", 10);
+  if (replyDebounceMs > 0 && replyStrategy) {
+    const runReplyDebounce = () =>
+      replyDebounceTick(db, {
+        nowSec: Math.floor(Date.now() / 1000),
+        replyStrategy,
+        notifications: notificationService,
+        sink,
+        resolveBotSettings,
+        signalTyping: async (channelDbId, externalUserId) => {
+          await channels.byChannelId(channelDbId)?.adapter.signalTyping(externalUserId);
+        },
+        log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
+      }).catch((e) =>
+        log.warn("reply-debounce tick failed", {
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    replyDebounceInterval = setInterval(runReplyDebounce, replyDebounceMs);
+    setTimeout(runReplyDebounce, 10_000);
+    log.info("reply-debounce poller enabled", { replyDebounceMs });
+  }
+
+  // #632 — авто-закрытие диалогов после N часов тишины (botSettings.autocloseHours).
+  // Тик редкий (раз в 10 мин). AUTO_CLOSE_MS=0 отключает.
+  const autoCloseMs = Number.parseInt(process.env.AUTO_CLOSE_MS ?? "600000", 10);
+  if (autoCloseMs > 0) {
+    const runAutoClose = () =>
+      autoCloseTick(db, {
+        nowSec: Math.floor(Date.now() / 1000),
+        resolveBotSettings,
+        log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
+      }).catch((e) =>
+        log.warn("auto-close tick failed", {
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    autoCloseInterval = setInterval(runAutoClose, autoCloseMs);
+    setTimeout(runAutoClose, 20_000);
+    log.info("auto-close poller enabled", { autoCloseMs });
+  }
+
+  process.on("SIGTERM", () => void shutdown());
+  process.on("SIGINT", () => void shutdown());
 }
 
 main().catch((err) => {
-	const log = makeDefaultLogger("apps/api");
-	log.error("fatal", {
-		err: err instanceof Error ? err : new Error(String(err)),
-	});
-	process.exit(1);
+  const log = makeDefaultLogger("apps/api");
+  log.error("fatal", {
+    err: err instanceof Error ? err : new Error(String(err)),
+  });
+  process.exit(1);
 });

@@ -38,7 +38,9 @@ describe("MessengerClient constructor", () => {
 describe("sendText", () => {
   it("POST /me/messages с RESPONSE + auth → messageId", async () => {
     const calls: MockCall[] = [];
-    const c = new MessengerClient(opts(mockFetch(() => ({ body: { message_id: "mid.1" } }), calls)));
+    const c = new MessengerClient(
+      opts(mockFetch(() => ({ body: { message_id: "mid.1" } }), calls)),
+    );
     const r = await c.sendText({ to: "PSID1", text: "привет" });
     expect(r.messageId).toBe("mid.1");
     expect(calls[0]?.url).toBe("https://graph.facebook.com/v18.0/me/messages");
@@ -63,7 +65,9 @@ describe("sendText", () => {
 describe("sendAttachment", () => {
   it("image payload.url + is_reusable:false → messageId", async () => {
     const calls: MockCall[] = [];
-    const c = new MessengerClient(opts(mockFetch(() => ({ body: { message_id: "mid.2" } }), calls)));
+    const c = new MessengerClient(
+      opts(mockFetch(() => ({ body: { message_id: "mid.2" } }), calls)),
+    );
     const r = await c.sendAttachment({ to: "P", kind: "image", url: "https://cdn/x.jpg" });
     expect(r.messageId).toBe("mid.2");
     const body = JSON.parse(calls[0]?.init?.body as string);

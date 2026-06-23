@@ -34,9 +34,23 @@ async function main() {
   await withTenant(db, TENANT, async (tx) => {
     await tx
       .insert(exchangeRates)
-      .values({ tenantId: TENANT, asset: "USDT", quoteAsset: "THB", network: "trc20", baseRate: 31.0448, quoteMode: "multiply", createdAt: now, updatedAt: now })
+      .values({
+        tenantId: TENANT,
+        asset: "USDT",
+        quoteAsset: "THB",
+        network: "trc20",
+        baseRate: 31.0448,
+        quoteMode: "multiply",
+        createdAt: now,
+        updatedAt: now,
+      })
       .onConflictDoUpdate({
-        target: [exchangeRates.tenantId, exchangeRates.asset, exchangeRates.quoteAsset, exchangeRates.network],
+        target: [
+          exchangeRates.tenantId,
+          exchangeRates.asset,
+          exchangeRates.quoteAsset,
+          exchangeRates.network,
+        ],
         set: { baseRate: 31.0448, isActive: true, updatedAt: now },
       });
   });
@@ -48,7 +62,9 @@ async function main() {
       .values({
         tenantId: TENANT,
         displayName: "SMOKE Exchange",
-        attributesJson: JSON.stringify({ exchangeKyc: { status: "verified", verificationId: "smoke-kyc" } }),
+        attributesJson: JSON.stringify({
+          exchangeKyc: { status: "verified", verificationId: "smoke-kyc" },
+        }),
         createdAt: now,
         updatedAt: now,
       })
@@ -60,11 +76,19 @@ async function main() {
     return cv!.id;
   });
 
-  const tools = makeExchangeTools({ db, tenantId: TENANT, conversationId: convId, masterKeyHex: MASTER });
+  const tools = makeExchangeTools({
+    db,
+    tenantId: TENANT,
+    conversationId: convId,
+    masterKeyHex: MASTER,
+  });
   const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
 
   // 1. quote
-  const q = (await byName.compute_exchange_quote!.execute({ asset: "USDT", amount: 335 })) as Record<string, unknown>;
+  const q = (await byName.compute_exchange_quote!.execute({
+    asset: "USDT",
+    amount: 335,
+  })) as Record<string, unknown>;
   check("quote 335 USDT → 10400 THB", q.amountToThb === 10400, q.display);
 
   const rq = (await byName.compute_exchange_quote!.execute({
@@ -75,12 +99,19 @@ async function main() {
   check("reverse quote 10400 THB → 335 USDT", rq.amountFrom === 335, rq);
 
   // 2. create order
-  const o1 = (await byName.create_exchange_order!.execute({ asset: "USDT", amount: 335, payoutMethod: "office" })) as Record<string, unknown>;
+  const o1 = (await byName.create_exchange_order!.execute({
+    asset: "USDT",
+    amount: 335,
+    payoutMethod: "office",
+  })) as Record<string, unknown>;
   check("order created (awaiting_payment)", o1.status === "awaiting_payment", o1);
   const orderId = o1.orderId;
 
   // 2b. idempotent re-call → same order
-  const o2 = (await byName.create_exchange_order!.execute({ asset: "USDT", amount: 335 })) as Record<string, unknown>;
+  const o2 = (await byName.create_exchange_order!.execute({
+    asset: "USDT",
+    amount: 335,
+  })) as Record<string, unknown>;
   check("createOrder idempotent (same id)", o2.orderId === orderId && o2.idempotent === true, o2);
 
   // 3. requisites (no wallet configured → needsOperator)
@@ -92,14 +123,23 @@ async function main() {
   check("verify w/o proof → not ok", v.ok === false, v);
 
   // 5. payout before paid → blocked
-  const p = (await byName.issue_exchange_payout!.execute({ payoutMethod: "office", location: "Бангтао" })) as Record<string, unknown>;
+  const p = (await byName.issue_exchange_payout!.execute({
+    payoutMethod: "office",
+    location: "Бангтао",
+  })) as Record<string, unknown>;
   check("payout blocked before paid", typeof p.error === "string", p);
 
   // cleanup
   await withTenant(db, TENANT, async (tx) => {
-    await tx.delete(exchangeOrders).where(and(eq(exchangeOrders.tenantId, TENANT), eq(exchangeOrders.conversationId, convId)));
-    await tx.delete(conversations).where(and(eq(conversations.tenantId, TENANT), eq(conversations.id, convId)));
-    await tx.delete(exchangeRates).where(and(eq(exchangeRates.tenantId, TENANT), eq(exchangeRates.asset, "USDT")));
+    await tx
+      .delete(exchangeOrders)
+      .where(and(eq(exchangeOrders.tenantId, TENANT), eq(exchangeOrders.conversationId, convId)));
+    await tx
+      .delete(conversations)
+      .where(and(eq(conversations.tenantId, TENANT), eq(conversations.id, convId)));
+    await tx
+      .delete(exchangeRates)
+      .where(and(eq(exchangeRates.tenantId, TENANT), eq(exchangeRates.asset, "USDT")));
   });
 
   await client.end({ timeout: 0 });

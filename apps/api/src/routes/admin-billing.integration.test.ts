@@ -44,40 +44,34 @@ let app: Hono;
 let token = "";
 let tenantId = 0;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminBillingRoutes({ db }));
-    // KB route — для quota test'а на upload
-    const embedder = new NullEmbeddingClient(1536);
-    app.route(
-      "/",
-      makeAdminKbRoutes({ db, resolveEmbedder: () => embedder }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminBillingRoutes({ db }));
+  // KB route — для quota test'а на upload
+  const embedder = new NullEmbeddingClient(1536);
+  app.route("/", makeAdminKbRoutes({ db, resolveEmbedder: () => embedder }));
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "bill@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    token = sba.token;
-    tenantId = sba.admin.tenantId;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "bill@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  token = sba.token;
+  tenantId = sba.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -133,10 +127,7 @@ describe("admin-billing", () => {
 
   it("upgrade tenant to starter via DB → /billing/plan reflects new tier", async () => {
     if (!sql) return;
-    await db
-      .update(tenants)
-      .set({ plan: "starter" })
-      .where(eq(tenants.id, tenantId));
+    await db.update(tenants).set({ plan: "starter" }).where(eq(tenants.id, tenantId));
     const res = await authReq("/api/admin/billing/plan");
     const body = (await res.json()) as {
       plan: { kind: string; maxChannels: number; priceUsd: number };
@@ -186,10 +177,7 @@ describe("admin-billing", () => {
         updatedAt: now,
       },
     ]);
-    await db
-      .update(tenants)
-      .set({ plan: "starter" })
-      .where(eq(tenants.id, tenantId));
+    await db.update(tenants).set({ plan: "starter" }).where(eq(tenants.id, tenantId));
 
     const res = await authReq("/api/admin/billing/plan");
     const body = (await res.json()) as { usage: { channels: number }; status: string };
@@ -205,10 +193,7 @@ describe("admin-billing", () => {
     // Starter limit = 500. Симулируем insert 500 docs прямо в БД (быстрее
     // upload x500). Free теперь без практического лимита (обменка без
     // SaaS-биллинга), поэтому quota-enforcement проверяем на Starter.
-    await db
-      .update(tenants)
-      .set({ plan: "starter" })
-      .where(eq(tenants.id, tenantId));
+    await db.update(tenants).set({ plan: "starter" }).where(eq(tenants.id, tenantId));
     const now = Math.floor(Date.now() / 1000);
     const rows = Array.from({ length: 500 }, (_, i) => ({
       tenantId,
@@ -245,10 +230,7 @@ describe("admin-billing", () => {
 
   it("upgrade в pro → previously-blocked upload должен пройти", async () => {
     if (!sql) return;
-    await db
-      .update(tenants)
-      .set({ plan: "pro" })
-      .where(eq(tenants.id, tenantId));
+    await db.update(tenants).set({ plan: "pro" }).where(eq(tenants.id, tenantId));
     const res = await authReq("/api/admin/kb/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -398,8 +380,7 @@ const fakeStripeFetch = (async (
   input: string | URL | Request,
   init?: RequestInit,
 ): Promise<Response> => {
-  const url =
-    typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const bodyStr = init?.body ? String(init.body) : "";
   stripeCalls.push({ url, body: bodyStr });
 
@@ -421,17 +402,17 @@ const fakeStripeFetch = (async (
   }
   if (url.includes("/v1/checkout/sessions")) {
     const id = `cs_test_${Math.random().toString(36).slice(2, 12)}`;
-    return new Response(
-      JSON.stringify({ id, url: `https://checkout.stripe.com/c/pay/${id}` }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
+    return new Response(JSON.stringify({ id, url: `https://checkout.stripe.com/c/pay/${id}` }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }
   if (url.includes("/v1/billing_portal/sessions")) {
     const id = `bps_${Math.random().toString(36).slice(2, 12)}`;
-    return new Response(
-      JSON.stringify({ id, url: `https://billing.stripe.com/p/session/${id}` }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
+    return new Response(JSON.stringify({ id, url: `https://billing.stripe.com/p/session/${id}` }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }
   return new Response("{}", { status: 200 });
 }) as unknown as typeof fetch;
@@ -456,10 +437,7 @@ beforeAll(async () => {
   appWithStripe = new Hono();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
   appWithStripe.route("/", makeAuthRoutes({ db: dbStripe as any, secret: SECRET }));
-  appWithStripe.use(
-    "/api/admin/*",
-    makeRequireAuth({ db: dbStripe as never, secret: SECRET }),
-  );
+  appWithStripe.use("/api/admin/*", makeRequireAuth({ db: dbStripe as never, secret: SECRET }));
   appWithStripe.route(
     "/",
     makeAdminBillingRoutes({
@@ -624,10 +602,7 @@ describe("admin-billing /checkout + /portal", () => {
     const appNoStripe = new Hono();
     // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
     appNoStripe.route("/", makeAuthRoutes({ db: dbStripe as any, secret: SECRET }));
-    appNoStripe.use(
-      "/api/admin/*",
-      makeRequireAuth({ db: dbStripe as never, secret: SECRET }),
-    );
+    appNoStripe.use("/api/admin/*", makeRequireAuth({ db: dbStripe as never, secret: SECRET }));
     appNoStripe.route("/", makeAdminBillingRoutes({ db: dbStripe }));
 
     const res = await appNoStripe.request("/api/admin/billing/checkout", {

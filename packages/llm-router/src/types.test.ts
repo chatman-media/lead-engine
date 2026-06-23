@@ -38,20 +38,31 @@ describe("parseOpenAiSseStream", () => {
   it("останавливается на [DONE]", async () => {
     const out = await collect(
       parseOpenAiSseStream(
-        sse('data: {"choices":[{"delta":{"content":"a"}}]}\n', "data: [DONE]\n", 'data: {"choices":[{"delta":{"content":"b"}}]}\n'),
+        sse(
+          'data: {"choices":[{"delta":{"content":"a"}}]}\n',
+          "data: [DONE]\n",
+          'data: {"choices":[{"delta":{"content":"b"}}]}\n',
+        ),
       ),
     );
     expect(out).toEqual(["a"]);
   });
   it("пропускает битые JSON и не-data строки", async () => {
     const out = await collect(
-      parseOpenAiSseStream(sse(": comment\n", "data: {broken\n", 'data: {"choices":[{"delta":{"content":"ok"}}]}\n')),
+      parseOpenAiSseStream(
+        sse(": comment\n", "data: {broken\n", 'data: {"choices":[{"delta":{"content":"ok"}}]}\n'),
+      ),
     );
     expect(out).toEqual(["ok"]);
   });
   it("пропускает дельты без content", async () => {
     const out = await collect(
-      parseOpenAiSseStream(sse('data: {"choices":[{"delta":{}}]}\n', 'data: {"choices":[{"delta":{"content":"x"}}]}\n')),
+      parseOpenAiSseStream(
+        sse(
+          'data: {"choices":[{"delta":{}}]}\n',
+          'data: {"choices":[{"delta":{"content":"x"}}]}\n',
+        ),
+      ),
     );
     expect(out).toEqual(["x"]);
   });

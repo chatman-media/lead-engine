@@ -24,7 +24,14 @@ import { NotificationsRepo, OPERATOR_ALL_EVENT } from "./notifications.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_notif_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "storage", "migrations");
+const migrationsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -42,13 +49,19 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   repo = new NotificationsRepo(db as never);
   enabled = true;
   const now = Math.floor(Date.now() / 1000);
-  const [t] = await db.insert(schema.tenants).values({ slug: `notif-${now}` }).returning({ id: schema.tenants.id });
+  const [t] = await db
+    .insert(schema.tenants)
+    .values({ slug: `notif-${now}` })
+    .returning({ id: schema.tenants.id });
   tenantId = t!.id;
   const [otherTenant] = await db
     .insert(schema.tenants)
@@ -100,12 +113,24 @@ describe("NotificationsRepo: rules", () => {
   it("createRule + findRulesByEvent (только активные) + listRules + deleteRule", async () => {
     if (!enabled) return;
     const active = await repo.createRule({
-      tenantId, eventType: "stage_changed", conditionJson: "{}",
-      channelType: "telegram_group", targetId: "g1", targetIsForum: false, priority: "normal", isActive: true,
+      tenantId,
+      eventType: "stage_changed",
+      conditionJson: "{}",
+      channelType: "telegram_group",
+      targetId: "g1",
+      targetIsForum: false,
+      priority: "normal",
+      isActive: true,
     });
     await repo.createRule({
-      tenantId, eventType: "stage_changed", conditionJson: "{}",
-      channelType: "telegram_group", targetId: "g2", targetIsForum: false, priority: "normal", isActive: false,
+      tenantId,
+      eventType: "stage_changed",
+      conditionJson: "{}",
+      channelType: "telegram_group",
+      targetId: "g2",
+      targetIsForum: false,
+      priority: "normal",
+      isActive: false,
     });
     const byEvent = await repo.findRulesByEvent(tenantId, "stage_changed");
     expect(byEvent.map((r) => r.targetId)).toEqual(["g1"]); // inactive отфильтрован
@@ -117,8 +142,14 @@ describe("NotificationsRepo: rules", () => {
   it("OPERATOR_ALL_EVENT-правило ловит операторские эскалации, но не stage_changed", async () => {
     if (!enabled) return;
     const umbrella = await repo.createRule({
-      tenantId, eventType: OPERATOR_ALL_EVENT, conditionJson: "{}",
-      channelType: "telegram_group", targetId: "forum", targetIsForum: true, priority: "normal", isActive: true,
+      tenantId,
+      eventType: OPERATOR_ALL_EVENT,
+      conditionJson: "{}",
+      channelType: "telegram_group",
+      targetId: "forum",
+      targetIsForum: true,
+      priority: "normal",
+      isActive: true,
     });
     for (const ev of ["operator_handoff_required", "verification_requested", "human_takeover"]) {
       const rules = await repo.findRulesByEvent(tenantId, ev);
@@ -164,7 +195,9 @@ describe("NotificationsRepo: operator settings", () => {
     expect(s?.telegramChatId).toBe("chat-777");
     expect(s?.linkToken).toBeNull();
     expect((await repo.findOperatorSettingsByChatId("chat-777"))?.adminId).toBe(adminId);
-    expect((await repo.findOperatorSettingsByTenant(tenantId)).some((x) => x.adminId === adminId)).toBe(true);
+    expect(
+      (await repo.findOperatorSettingsByTenant(tenantId)).some((x) => x.adminId === adminId),
+    ).toBe(true);
   });
 
   it("partialUpdateSettings и updateInformerPrefs (plain + upsert)", async () => {
@@ -181,10 +214,21 @@ describe("NotificationsRepo: operator settings", () => {
   it("upsertOperatorSettings обновляет chatId/флаг по конфликту adminId", async () => {
     if (!enabled) return;
     await repo.upsertOperatorSettings({
-      adminId: admin2, tenantId, telegramChatId: "chat-upsert", notifyOnAssignedOnly: true,
-      linkToken: null, linkTokenExpiresAt: null,
-      informerLevel: "important", informerTopics: null, informerDigest: "daily",
-      informerDigestHour: 9, informerTz: "UTC", informerMutedUntil: null, informerLastDigestAt: null, informerQuietFrom: null, informerQuietTo: null,
+      adminId: admin2,
+      tenantId,
+      telegramChatId: "chat-upsert",
+      notifyOnAssignedOnly: true,
+      linkToken: null,
+      linkTokenExpiresAt: null,
+      informerLevel: "important",
+      informerTopics: null,
+      informerDigest: "daily",
+      informerDigestHour: 9,
+      informerTz: "UTC",
+      informerMutedUntil: null,
+      informerLastDigestAt: null,
+      informerQuietFrom: null,
+      informerQuietTo: null,
     });
     expect((await repo.findOperatorSettings(admin2))?.telegramChatId).toBe("chat-upsert");
   });
@@ -277,30 +321,52 @@ describe("NotificationsRepo: ledger + resolveOwnerSettings", () => {
   it("insert → dedup → list → pending → delivered/digested", async () => {
     if (!enabled) return;
     const id = await repo.insertAdminNotification({
-      tenantId, adminId, topic: "leads", severity: "info", kind: "stage_changed",
-      title: "T", body: "", dedupKey: "led-1",
+      tenantId,
+      adminId,
+      topic: "leads",
+      severity: "info",
+      kind: "stage_changed",
+      title: "T",
+      body: "",
+      dedupKey: "led-1",
     });
     expect(id).toBeGreaterThan(0);
     const since = Math.floor(Date.now() / 1000) - 60;
     expect((await repo.findRecentByDedup(tenantId, "led-1", since))?.id).toBe(id);
     // окно в будущем → не находим
-    expect(await repo.findRecentByDedup(tenantId, "led-1", Math.floor(Date.now() / 1000) + 60)).toBeUndefined();
-    expect((await repo.listRecentNotifications(tenantId, adminId, 10)).some((r) => r.id === id)).toBe(true);
+    expect(
+      await repo.findRecentByDedup(tenantId, "led-1", Math.floor(Date.now() / 1000) + 60),
+    ).toBeUndefined();
+    expect(
+      (await repo.listRecentNotifications(tenantId, adminId, 10)).some((r) => r.id === id),
+    ).toBe(true);
     expect((await repo.listPendingDigest(tenantId, adminId)).some((r) => r.id === id)).toBe(true);
 
     await repo.markNotificationDelivered(id, Math.floor(Date.now() / 1000));
     expect((await repo.listPendingDigest(tenantId, adminId)).some((r) => r.id === id)).toBe(false);
 
     const id2 = await repo.insertAdminNotification({
-      tenantId, adminId, topic: "system", severity: "critical", kind: "channel_down",
-      title: "down", body: "", dedupKey: "led-2",
+      tenantId,
+      adminId,
+      topic: "system",
+      severity: "critical",
+      kind: "channel_down",
+      title: "down",
+      body: "",
+      dedupKey: "led-2",
     });
     await repo.markDigested([id2], 12345);
     expect((await repo.listPendingDigest(tenantId, adminId)).some((r) => r.id === id2)).toBe(false);
 
     const id3 = await repo.insertAdminNotification({
-      tenantId, adminId, topic: "escalation", severity: "important", kind: "verification_requested",
-      title: "kyc", body: "", dedupKey: "led-3",
+      tenantId,
+      adminId,
+      topic: "escalation",
+      severity: "important",
+      kind: "verification_requested",
+      title: "kyc",
+      body: "",
+      dedupKey: "led-3",
     });
     expect((await repo.listPendingDigest(tenantId, adminId)).some((r) => r.id === id3)).toBe(true);
     await repo.markNotificationsRead(tenantId, adminId, Math.floor(Date.now() / 1000));

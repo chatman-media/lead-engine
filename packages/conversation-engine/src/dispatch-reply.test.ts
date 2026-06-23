@@ -611,7 +611,12 @@ describe("generateReplyAndEnqueue", () => {
       update: () => ({
         set: (patch: Record<string, unknown>) => {
           for (const [k, v] of Object.entries(patch)) {
-            if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+            if (
+              v === null ||
+              typeof v === "string" ||
+              typeof v === "number" ||
+              typeof v === "boolean"
+            ) {
               (conversation as Record<string, unknown>)[k] = v;
             }
           }
@@ -622,7 +627,9 @@ describe("generateReplyAndEnqueue", () => {
         values: (row: Record<string, unknown>) => {
           if ("action" in row) auditRows.push(row);
           else if ("payloadJson" in row) outboundRows.push(row);
-          return { returning: async () => [{ id: auditRows.length + outboundRows.length, ...row }] };
+          return {
+            returning: async () => [{ id: auditRows.length + outboundRows.length, ...row }],
+          };
         },
       }),
     };
@@ -734,7 +741,6 @@ describe("generateReplyAndEnqueue", () => {
     expect(notifyCalls).toHaveLength(1);
   });
 
-
   it("splitReplies: текст без двойного переноса → один envelope не разбивается (lines 105-106)", async () => {
     const { db, outbound } = makeAutoHandoffDb();
     const out = await generateReplyAndEnqueue({
@@ -809,5 +815,4 @@ describe("generateReplyAndEnqueue", () => {
     expect(payload.parts[0].text).toBe("Кастом");
     expect(payload.parts[1].text).toBe("Дополнительная инструкция.");
   });
-
 });

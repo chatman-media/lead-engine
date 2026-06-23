@@ -137,8 +137,7 @@ export async function ensureAndAdvanceLeadByPhase(opts: {
   const advanceStages =
     leadFunnelId != null ? stages.filter((s) => s.funnelId === leadFunnelId) : scopedStages;
 
-  const curStage =
-    curStageId != null ? advanceStages.find((s) => s.id === curStageId) : undefined;
+  const curStage = curStageId != null ? advanceStages.find((s) => s.id === curStageId) : undefined;
   const curPos = curStage?.position ?? -1;
 
   // Эскалация до WON: если клиент закрывается (close) и лид уже в фазе

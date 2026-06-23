@@ -42,21 +42,24 @@ export function makeAdminStageWebhooksRoutes(opts: { db: Db }): Hono {
     if (!url || !isValidHttpUrl(url)) {
       return c.json({ error: "url required and must be http(s)" }, 400);
     }
-    const secret = typeof body.secret === "string" && body.secret.trim()
-      ? body.secret.trim()
-      : null;
+    const secret =
+      typeof body.secret === "string" && body.secret.trim() ? body.secret.trim() : null;
     const isActive = body.isActive !== false;
     const nowEpoch = Math.floor(Date.now() / 1000);
 
     const [row] = await withTenant(opts.db, tenantId, async (tx) =>
-      tx.insert(stageWebhooks)
+      tx
+        .insert(stageWebhooks)
         .values({ tenantId, url, secret, isActive, createdAt: nowEpoch, updatedAt: nowEpoch })
         .returning(),
     );
 
     await recordAudit(opts.db, {
-      tenantId, adminId, action: "stage_webhook.create",
-      targetKind: "stage_webhook", targetId: row!.id,
+      tenantId,
+      adminId,
+      action: "stage_webhook.create",
+      targetKind: "stage_webhook",
+      targetId: row!.id,
       details: { url },
     });
 
@@ -76,23 +79,28 @@ export function makeAdminStageWebhooksRoutes(opts: { db: Db }): Hono {
       return c.json({ error: "invalid json" }, 400);
     }
 
-    const patch: Partial<{ url: string; secret: string | null; isActive: boolean; updatedAt: number }> = {};
+    const patch: Partial<{
+      url: string;
+      secret: string | null;
+      isActive: boolean;
+      updatedAt: number;
+    }> = {};
     if (typeof body.url === "string") {
       const u = body.url.trim();
       if (!isValidHttpUrl(u)) return c.json({ error: "url must be http(s)" }, 400);
       patch.url = u;
     }
     if ("secret" in body) {
-      patch.secret = typeof body.secret === "string" && body.secret.trim()
-        ? body.secret.trim()
-        : null;
+      patch.secret =
+        typeof body.secret === "string" && body.secret.trim() ? body.secret.trim() : null;
     }
     if (typeof body.isActive === "boolean") patch.isActive = body.isActive;
     if (Object.keys(patch).length === 0) return c.json({ error: "nothing to update" }, 400);
     patch.updatedAt = Math.floor(Date.now() / 1000);
 
     const [updated] = await withTenant(opts.db, tenantId, async (tx) =>
-      tx.update(stageWebhooks)
+      tx
+        .update(stageWebhooks)
         .set(patch)
         .where(and(eq(stageWebhooks.id, id), eq(stageWebhooks.tenantId, tenantId)))
         .returning(),
@@ -100,8 +108,11 @@ export function makeAdminStageWebhooksRoutes(opts: { db: Db }): Hono {
     if (!updated) return c.json({ error: "webhook not found" }, 404);
 
     await recordAudit(opts.db, {
-      tenantId, adminId, action: "stage_webhook.update",
-      targetKind: "stage_webhook", targetId: id,
+      tenantId,
+      adminId,
+      action: "stage_webhook.update",
+      targetKind: "stage_webhook",
+      targetId: id,
       details: { ...patch, secret: patch.secret !== undefined ? "***" : undefined },
     });
 
@@ -115,15 +126,20 @@ export function makeAdminStageWebhooksRoutes(opts: { db: Db }): Hono {
     if (!Number.isFinite(id) || id <= 0) return c.json({ error: "invalid id" }, 400);
 
     const [deleted] = await withTenant(opts.db, tenantId, async (tx) =>
-      tx.delete(stageWebhooks)
+      tx
+        .delete(stageWebhooks)
         .where(and(eq(stageWebhooks.id, id), eq(stageWebhooks.tenantId, tenantId)))
         .returning({ id: stageWebhooks.id }),
     );
     if (!deleted) return c.json({ error: "webhook not found" }, 404);
 
     await recordAudit(opts.db, {
-      tenantId, adminId, action: "stage_webhook.delete",
-      targetKind: "stage_webhook", targetId: id, details: {},
+      tenantId,
+      adminId,
+      action: "stage_webhook.delete",
+      targetKind: "stage_webhook",
+      targetId: id,
+      details: {},
     });
 
     return c.json({ ok: true });
@@ -140,7 +156,9 @@ export function makeAdminStageWebhooksRoutes(opts: { db: Db }): Hono {
     if (!Number.isFinite(id) || id <= 0) return c.json({ error: "invalid id" }, 400);
 
     const [hook] = await withTenant(opts.db, tenantId, async (tx) =>
-      tx.select().from(stageWebhooks)
+      tx
+        .select()
+        .from(stageWebhooks)
         .where(and(eq(stageWebhooks.id, id), eq(stageWebhooks.tenantId, tenantId))),
     );
     if (!hook) return c.json({ error: "webhook not found" }, 404);
@@ -210,7 +228,12 @@ async function fireWebhook(
 
   let res: Response;
   try {
-    res = await safeFetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
+    res = await safeFetch(url, {
+      method: "POST",
+      headers,
+      body,
+      signal: AbortSignal.timeout(10_000),
+    });
   } catch (err) {
     if (err instanceof SsrfError) {
       return { ok: false, status: 0, body: `blocked: ${err.message}` };
@@ -221,7 +244,9 @@ async function fireWebhook(
   return { ok: res.ok, status: res.status, body: text.slice(0, 500) };
 }
 
-function maskSecret<T extends { secret?: string | null }>(row: T): Omit<T, "secret"> & { hasSecret: boolean } {
+function maskSecret<T extends { secret?: string | null }>(
+  row: T,
+): Omit<T, "secret"> & { hasSecret: boolean } {
   const { secret, ...rest } = row;
   return { ...rest, hasSecret: Boolean(secret) };
 }

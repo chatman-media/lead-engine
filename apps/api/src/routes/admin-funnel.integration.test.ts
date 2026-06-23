@@ -44,45 +44,42 @@ let funnelId = 0;
 let customStageId = 0;
 let customFieldId = 0;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminFunnelRoutes({ db }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminFunnelRoutes({ db }));
 
-    // Tenant A
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "funnel-a@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    tokenA = sba.token;
-    tenantA = sba.admin.tenantId;
+  // Tenant A
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "funnel-a@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  tokenA = sba.token;
+  tenantA = sba.admin.tenantId;
 
-    // Tenant B
-    const sb = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "funnel-b@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
-    tokenB = sbb.token;
-    tenantB = sbb.admin.tenantId;
-  },
-  30_000,
-);
+  // Tenant B
+  const sb = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "funnel-b@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
+  tokenB = sbb.token;
+  tenantB = sbb.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -91,11 +88,7 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function authReq(
-  token: string,
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
+async function authReq(token: string, path: string, init: RequestInit = {}): Promise<Response> {
   return await app.request(path, {
     ...init,
     headers: {
@@ -279,7 +272,10 @@ describe("POST /api/admin/funnel/seed", () => {
     expect(listBody.items[0]?.stageCount).toBe(7);
 
     const versionId = listBody.items[0]!.id;
-    const previewRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}/versions/${versionId}`);
+    const previewRes = await authReq(
+      tokenA,
+      `/api/admin/funnels/${funnelId}/versions/${versionId}`,
+    );
     expect(previewRes.status).toBe(200);
     const preview = (await previewRes.json()) as {
       snapshot: {
@@ -311,14 +307,23 @@ describe("POST /api/admin/funnel/seed", () => {
     const edited = (await editedRes.json()) as {
       stages: Array<{ slug: string; displayName: string }>;
     };
-    expect(edited.stages.find((item) => item.slug === "qualification")?.displayName).toBe(editedName);
+    expect(edited.stages.find((item) => item.slug === "qualification")?.displayName).toBe(
+      editedName,
+    );
 
-    const tenantBPreview = await authReq(tokenB, `/api/admin/funnels/${funnelId}/versions/${versionId}`);
+    const tenantBPreview = await authReq(
+      tokenB,
+      `/api/admin/funnels/${funnelId}/versions/${versionId}`,
+    );
     expect(tenantBPreview.status).toBe(404);
 
-    const rollbackRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}/versions/${versionId}/rollback`, {
-      method: "POST",
-    });
+    const rollbackRes = await authReq(
+      tokenA,
+      `/api/admin/funnels/${funnelId}/versions/${versionId}/rollback`,
+      {
+        method: "POST",
+      },
+    );
     expect(rollbackRes.status).toBe(200);
     const rollback = (await rollbackRes.json()) as { ok: boolean; stagesCreated: number };
     expect(rollback.ok).toBe(true);
@@ -351,7 +356,9 @@ describe("POST /api/admin/funnel/seed", () => {
     expect(body.stagesCreated).toBe(11);
 
     const listRes = await authReq(tokenA, "/api/admin/funnels");
-    const listBody = (await listRes.json()) as { items: Array<{ slug: string; stagesCount: number }> };
+    const listBody = (await listRes.json()) as {
+      items: Array<{ slug: string; stagesCount: number }>;
+    };
     expect(listBody.items.map((item) => item.slug)).toContain("visa");
     expect(listBody.items.map((item) => item.slug)).toContain("exchange");
 
@@ -375,8 +382,7 @@ describe("POST /api/admin/funnel/seed", () => {
       "cancelled",
     ]);
     expect(
-      getBody.stages.find((stage) => stage.slug === "payment_proof_waiting")
-        ?.supportMode,
+      getBody.stages.find((stage) => stage.slug === "payment_proof_waiting")?.supportMode,
     ).toBe(true);
 
     const activeRes = await authReq(tokenA, "/api/admin/funnel?primary=1");
@@ -669,7 +675,10 @@ describe("PATCH /api/admin/funnel/stages/:stageId/fields/:fieldId — update fie
     // Verify via GET
     const getRes = await authReq(tokenA, "/api/admin/funnel");
     const getBody = (await getRes.json()) as {
-      stages: Array<{ id: number; fields: Array<{ id: number; displayName: string; required: boolean }> }>;
+      stages: Array<{
+        id: number;
+        fields: Array<{ id: number; displayName: string; required: boolean }>;
+      }>;
     };
     const stage = getBody.stages.find((s) => s.id === customStageId);
     const field = stage!.fields.find((f) => f.id === customFieldId);

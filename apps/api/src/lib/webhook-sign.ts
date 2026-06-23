@@ -8,5 +8,7 @@ export async function signWebhookPayload(body: string, secret: string): Promise<
     ["sign"],
   );
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode(body));
-  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }

@@ -71,7 +71,13 @@ export async function canAddAdmin(opts: QuotaCheckOpts): Promise<QuotaCheckResul
   const limits = resolvePlan(planStr);
 
   if (limits.maxAdmins === -1) {
-    return { allowed: true, limit: -1, current: 0, plan: planStr as PlanKind, planLabel: limits.label };
+    return {
+      allowed: true,
+      limit: -1,
+      current: 0,
+      plan: planStr as PlanKind,
+      planLabel: limits.label,
+    };
   }
 
   const rows = await opts.db
@@ -102,7 +108,13 @@ export async function canAddLead(opts: QuotaCheckOpts): Promise<QuotaCheckResult
   const limits = resolvePlan(planStr);
 
   if (limits.maxLeads === -1) {
-    return { allowed: true, limit: -1, current: 0, plan: planStr as PlanKind, planLabel: limits.label };
+    return {
+      allowed: true,
+      limit: -1,
+      current: 0,
+      plan: planStr as PlanKind,
+      planLabel: limits.label,
+    };
   }
 
   const rows = await opts.db
@@ -139,9 +151,10 @@ async function loadPlanAndCount(
     .where(eq(table.tenantId, opts.tenantId));
 
   return {
-    plan: (planStr as PlanKind) in { free: 1, starter: 1, pro: 1, enterprise: 1 }
-      ? (planStr as PlanKind)
-      : "free",
+    plan:
+      (planStr as PlanKind) in { free: 1, starter: 1, pro: 1, enterprise: 1 }
+        ? (planStr as PlanKind)
+        : "free",
     limits,
     currentCount: Number(rows[0]?.value ?? 0),
   };

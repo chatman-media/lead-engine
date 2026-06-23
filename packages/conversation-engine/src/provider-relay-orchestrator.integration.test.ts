@@ -2,10 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-	applyAllMigrations,
-	createIsolatedDb,
-	schema,
-	tryConnectToPg,
+  applyAllMigrations,
+  createIsolatedDb,
+  schema,
+  tryConnectToPg,
 } from "@chatman-media/storage";
 import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -16,11 +16,11 @@ import { ProviderRelayOrchestrator } from "./provider-relay-orchestrator.ts";
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_provider_orch_${Math.random().toString(36).slice(2, 10)}`;
 const migrationsDir = join(
-	dirname(fileURLToPath(import.meta.url)),
-	"..",
-	"..",
-	"storage",
-	"migrations",
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "storage",
+  "migrations",
 );
 
 let sql: Sql | null = null;
@@ -38,478 +38,472 @@ const orchestrator = () => new ProviderRelayOrchestrator({ db, tenantId });
 const relayRepo = () => new ProviderRelayRepo({ db, tenantId });
 
 async function createContact(displayName: string): Promise<number> {
-	const [contact] = await db
-		.insert(schema.contacts)
-		.values({
-			tenantId,
-			displayName,
-			createdAt: now,
-			updatedAt: now,
-		})
-		.returning({ id: schema.contacts.id });
-	if (!contact) throw new Error("contact insert returned no row");
-	return contact.id;
+  const [contact] = await db
+    .insert(schema.contacts)
+    .values({
+      tenantId,
+      displayName,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: schema.contacts.id });
+  if (!contact) throw new Error("contact insert returned no row");
+  return contact.id;
 }
 
 async function createProvider(opts: {
-	name: string;
-	contactId: number;
-	serviceType: string;
-	serviceArea?: string | null;
-	metadata?: Record<string, unknown>;
+  name: string;
+  contactId: number;
+  serviceType: string;
+  serviceArea?: string | null;
+  metadata?: Record<string, unknown>;
 }): Promise<number> {
-	const [provider] = await db
-		.insert(schema.providerProfiles)
-		.values({
-			tenantId,
-			contactId: opts.contactId,
-			name: opts.name,
-			category: opts.serviceType,
-			status: "active",
-			serviceArea: opts.serviceArea ?? null,
-			defaultCommissionPct: 15,
-			createdAt: now,
-			updatedAt: now,
-			...(opts.metadata ? { metadataJson: JSON.stringify(opts.metadata) } : {}),
-		})
-		.returning({ id: schema.providerProfiles.id });
-	if (!provider) throw new Error("provider insert returned no row");
+  const [provider] = await db
+    .insert(schema.providerProfiles)
+    .values({
+      tenantId,
+      contactId: opts.contactId,
+      name: opts.name,
+      category: opts.serviceType,
+      status: "active",
+      serviceArea: opts.serviceArea ?? null,
+      defaultCommissionPct: 15,
+      createdAt: now,
+      updatedAt: now,
+      ...(opts.metadata ? { metadataJson: JSON.stringify(opts.metadata) } : {}),
+    })
+    .returning({ id: schema.providerProfiles.id });
+  if (!provider) throw new Error("provider insert returned no row");
 
-	await db.insert(schema.providerServices).values({
-		tenantId,
-		providerId: provider.id,
-		serviceType: opts.serviceType,
-		name: `${opts.name} service`,
-		serviceArea: opts.serviceArea ?? null,
-		isActive: true,
-		createdAt: now,
-		updatedAt: now,
-	});
+  await db.insert(schema.providerServices).values({
+    tenantId,
+    providerId: provider.id,
+    serviceType: opts.serviceType,
+    name: `${opts.name} service`,
+    serviceArea: opts.serviceArea ?? null,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  });
 
-	return provider.id;
+  return provider.id;
 }
 
 async function tableCount(tableName: string): Promise<number> {
-	if (!sql) throw new Error("sql not initialized");
-	const rows = await sql.unsafe<Array<{ count: number }>>(
-		`SELECT COUNT(*)::int AS count FROM ${tableName} WHERE tenant_id = $1`,
-		[tenantId],
-	);
-	return rows[0]?.count ?? 0;
+  if (!sql) throw new Error("sql not initialized");
+  const rows = await sql.unsafe<Array<{ count: number }>>(
+    `SELECT COUNT(*)::int AS count FROM ${tableName} WHERE tenant_id = $1`,
+    [tenantId],
+  );
+  return rows[0]?.count ?? 0;
 }
 
 beforeAll(async () => {
-	if (!ownerUrl) return;
-	const probe = await tryConnectToPg(ownerUrl);
-	if (!probe) return;
-	await probe.end({ timeout: 0 }).catch(() => {});
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 }).catch(() => {});
 
-	sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
-		max: 3,
-		onnotice: () => {},
-	});
-	await applyAllMigrations(sql, migrationsDir);
-	db = drizzle(sql, { schema });
-	enabled = true;
-	now = Math.floor(Date.parse("2026-06-09T02:00:00Z") / 1000);
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
+  enabled = true;
+  now = Math.floor(Date.parse("2026-06-09T02:00:00Z") / 1000);
 
-	const [tenant] = await db
-		.insert(schema.tenants)
-		.values({ slug: `provider-orchestrator-${now}`, status: "active" })
-		.returning({ id: schema.tenants.id });
-	if (!tenant) throw new Error("tenant insert returned no row");
-	tenantId = tenant.id;
-	await db.insert(schema.tenantFeatureFlags).values({
-		tenantId,
-		featureKey: "provider_relay",
-		enabled: true,
-		createdAt: now,
-		updatedAt: now,
-	});
+  const [tenant] = await db
+    .insert(schema.tenants)
+    .values({ slug: `provider-orchestrator-${now}`, status: "active" })
+    .returning({ id: schema.tenants.id });
+  if (!tenant) throw new Error("tenant insert returned no row");
+  tenantId = tenant.id;
+  await db.insert(schema.tenantFeatureFlags).values({
+    tenantId,
+    featureKey: "provider_relay",
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  });
 
-	customerContactId = await createContact("Relay customer");
-	providerContactId = await createContact("WhatsApp provider contact");
-	const noChannelContactId = await createContact("No channel provider contact");
+  customerContactId = await createContact("Relay customer");
+  providerContactId = await createContact("WhatsApp provider contact");
+  const noChannelContactId = await createContact("No channel provider contact");
 
-	providerId = await createProvider({
-		name: "WhatsApp Massage",
-		contactId: providerContactId,
-		serviceType: "massage",
-		serviceArea: "Chaweng",
-		metadata: {
-			whatsappOptIn: {
-				source: "admin_import",
-				acceptedAt: now - 60,
-				categories: ["utility"],
-			},
-			whatsappProviderRequestTemplate: {
-				name: "provider_request_v1",
-				languageCode: "en_US",
-				category: "utility",
-				approved: true,
-			},
-		},
-	});
-	providerWithoutChannelId = await createProvider({
-		name: "No Channel Spa",
-		contactId: noChannelContactId,
-		serviceType: "spa_package",
-		serviceArea: "Chaweng",
-	});
+  providerId = await createProvider({
+    name: "WhatsApp Massage",
+    contactId: providerContactId,
+    serviceType: "massage",
+    serviceArea: "Chaweng",
+    metadata: {
+      whatsappOptIn: {
+        source: "admin_import",
+        acceptedAt: now - 60,
+        categories: ["utility"],
+      },
+      whatsappProviderRequestTemplate: {
+        name: "provider_request_v1",
+        languageCode: "en_US",
+        category: "utility",
+        approved: true,
+      },
+    },
+  });
+  providerWithoutChannelId = await createProvider({
+    name: "No Channel Spa",
+    contactId: noChannelContactId,
+    serviceType: "spa_package",
+    serviceArea: "Chaweng",
+  });
 
-	const [channel] = await db
-		.insert(schema.channels)
-		.values({
-			tenantId,
-			kind: "whatsapp",
-			externalId: "phone-number-id-1",
-			status: "active",
-			createdAt: now,
-			updatedAt: now,
-		})
-		.returning({ id: schema.channels.id });
-	if (!channel) throw new Error("channel insert returned no row");
-	whatsappChannelId = channel.id;
+  const [channel] = await db
+    .insert(schema.channels)
+    .values({
+      tenantId,
+      kind: "whatsapp",
+      externalId: "phone-number-id-1",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: schema.channels.id });
+  if (!channel) throw new Error("channel insert returned no row");
+  whatsappChannelId = channel.id;
 
-	await db.insert(schema.channelIdentities).values({
-		contactId: providerContactId,
-		channelId: whatsappChannelId,
-		externalUserId: "66999999999",
-		createdAt: now,
-	});
+  await db.insert(schema.channelIdentities).values({
+    contactId: providerContactId,
+    channelId: whatsappChannelId,
+    externalUserId: "66999999999",
+    createdAt: now,
+  });
 }, 30_000);
 
 afterAll(async () => {
-	if (sql) await sql.end({ timeout: 0 }).catch(() => {});
+  if (sql) await sql.end({ timeout: 0 }).catch(() => {});
 }, 10_000);
 
 describe("ProviderRelayOrchestrator", () => {
-	it("fails closed when tenant provider relay flag is disabled", async () => {
-		if (!enabled) return;
-		await db
-			.update(schema.tenantFeatureFlags)
-			.set({ enabled: false, updatedAt: now + 1 })
-			.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
-		const ordersBefore = await tableCount("service_orders");
-		const outboundBefore = await tableCount("outbound_queue");
+  it("fails closed when tenant provider relay flag is disabled", async () => {
+    if (!enabled) return;
+    await db
+      .update(schema.tenantFeatureFlags)
+      .set({ enabled: false, updatedAt: now + 1 })
+      .where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+    const ordersBefore = await tableCount("service_orders");
+    const outboundBefore = await tableCount("outbound_queue");
 
-		try {
-			const result = await orchestrator().startProviderOutreach({
-				customerContactId,
-				requestType: "massage",
-				serviceArea: "Chaweng",
-				summary: "Should not reach provider",
-				orderIdempotencyKey: "orch-disabled-order",
-				nowEpoch: now + 2,
-			});
+    try {
+      const result = await orchestrator().startProviderOutreach({
+        customerContactId,
+        requestType: "massage",
+        serviceArea: "Chaweng",
+        summary: "Should not reach provider",
+        orderIdempotencyKey: "orch-disabled-order",
+        nowEpoch: now + 2,
+      });
 
-			expect(result).toEqual({ ok: false, reason: "provider_relay_disabled" });
-			expect(await tableCount("service_orders")).toBe(ordersBefore);
-			expect(await tableCount("outbound_queue")).toBe(outboundBefore);
-		} finally {
-			await db
-				.update(schema.tenantFeatureFlags)
-				.set({ enabled: true, updatedAt: now + 3 })
-				.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
-		}
-	});
+      expect(result).toEqual({ ok: false, reason: "provider_relay_disabled" });
+      expect(await tableCount("service_orders")).toBe(ordersBefore);
+      expect(await tableCount("outbound_queue")).toBe(outboundBefore);
+    } finally {
+      await db
+        .update(schema.tenantFeatureFlags)
+        .set({ enabled: true, updatedAt: now + 3 })
+        .where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+    }
+  });
 
-	it("fails closed for manual provider request when tenant flag is disabled", async () => {
-		if (!enabled) return;
-		const existing = await relayRepo().createServiceOrder({
-			customerContactId,
-			requestType: "massage",
-			status: "provider_declined",
-			summary: "Manual retry should stay gated",
-			metadata: { serviceArea: "Chaweng" },
-			nowEpoch: now + 4,
-		});
-		await db
-			.update(schema.tenantFeatureFlags)
-			.set({ enabled: false, updatedAt: now + 5 })
-			.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
-		const requestsBefore = await tableCount("provider_requests");
-		const outboundBefore = await tableCount("outbound_queue");
+  it("fails closed for manual provider request when tenant flag is disabled", async () => {
+    if (!enabled) return;
+    const existing = await relayRepo().createServiceOrder({
+      customerContactId,
+      requestType: "massage",
+      status: "provider_declined",
+      summary: "Manual retry should stay gated",
+      metadata: { serviceArea: "Chaweng" },
+      nowEpoch: now + 4,
+    });
+    await db
+      .update(schema.tenantFeatureFlags)
+      .set({ enabled: false, updatedAt: now + 5 })
+      .where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+    const requestsBefore = await tableCount("provider_requests");
+    const outboundBefore = await tableCount("outbound_queue");
 
-		try {
-			const result = await orchestrator().sendProviderRequestForOrder({
-				orderId: existing.id,
-				providerIdOverride: providerId,
-				nowEpoch: now + 6,
-			});
+    try {
+      const result = await orchestrator().sendProviderRequestForOrder({
+        orderId: existing.id,
+        providerIdOverride: providerId,
+        nowEpoch: now + 6,
+      });
 
-			expect(result).toEqual({ ok: false, reason: "provider_relay_disabled" });
-			expect(await tableCount("provider_requests")).toBe(requestsBefore);
-			expect(await tableCount("outbound_queue")).toBe(outboundBefore);
-		} finally {
-			await db
-				.update(schema.tenantFeatureFlags)
-				.set({ enabled: true, updatedAt: now + 7 })
-				.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
-		}
-	});
+      expect(result).toEqual({ ok: false, reason: "provider_relay_disabled" });
+      expect(await tableCount("provider_requests")).toBe(requestsBefore);
+      expect(await tableCount("outbound_queue")).toBe(outboundBefore);
+    } finally {
+      await db
+        .update(schema.tenantFeatureFlags)
+        .set({ enabled: true, updatedAt: now + 7 })
+        .where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+    }
+  });
 
-	it("creates order/request, enqueues provider outbound, and records sent events", async () => {
-		if (!enabled) return;
-		const result = await orchestrator().startProviderOutreach({
-			customerContactId,
-			requestType: "massage",
-			serviceArea: "Chaweng",
-			summary: "Massage today around 18:00",
-			orderIdempotencyKey: "orch-order-1",
-			nowEpoch: now + 10,
-		});
+  it("creates order/request, enqueues provider outbound, and records sent events", async () => {
+    if (!enabled) return;
+    const result = await orchestrator().startProviderOutreach({
+      customerContactId,
+      requestType: "massage",
+      serviceArea: "Chaweng",
+      summary: "Massage today around 18:00",
+      orderIdempotencyKey: "orch-order-1",
+      nowEpoch: now + 10,
+    });
 
-		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected successful provider outreach");
-		expect(result.candidate.providerId).toBe(providerId);
-		expect(result.identity.channelDbId).toBe(whatsappChannelId);
-		expect(result.envelope).toMatchObject({
-			channelId: String(whatsappChannelId),
-			externalUserId: "66999999999",
-			idempotencyKey: `provider-relay:${result.order.id}:${providerId}:${whatsappChannelId}:initial`,
-		});
-		expect(result.providerRequest).toMatchObject({
-			orderId: result.order.id,
-			providerId,
-			channelId: whatsappChannelId,
-			outboundQueueId: result.outbound.id,
-			status: "sent",
-			sentAt: now + 10,
-		});
-		expect(result.order.assignedProviderId).toBe(providerId);
-		expect(result.outbound.status).toBe("pending");
-		expect(result.outbound.externalMessageId).toBeNull();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected successful provider outreach");
+    expect(result.candidate.providerId).toBe(providerId);
+    expect(result.identity.channelDbId).toBe(whatsappChannelId);
+    expect(result.envelope).toMatchObject({
+      channelId: String(whatsappChannelId),
+      externalUserId: "66999999999",
+      idempotencyKey: `provider-relay:${result.order.id}:${providerId}:${whatsappChannelId}:initial`,
+    });
+    expect(result.providerRequest).toMatchObject({
+      orderId: result.order.id,
+      providerId,
+      channelId: whatsappChannelId,
+      outboundQueueId: result.outbound.id,
+      status: "sent",
+      sentAt: now + 10,
+    });
+    expect(result.order.assignedProviderId).toBe(providerId);
+    expect(result.outbound.status).toBe("pending");
+    expect(result.outbound.externalMessageId).toBeNull();
 
-		const payload = JSON.parse(result.outbound.payloadJson);
-		expect(payload.parts[0].text).toContain("Massage today around 18:00");
-		expect(payload.transport.whatsapp).toMatchObject({
-			requiresTemplate: true,
-			optIn: {
-				source: "admin_import",
-				acceptedAt: now - 60,
-				categories: ["utility"],
-			},
-			template: {
-				name: "provider_request_v1",
-				languageCode: "en_US",
-				category: "utility",
-				approved: true,
-			},
-		});
-		expect(payload.transport.whatsapp.template.components[0].parameters).toEqual([
-			{ type: "text", text: "massage" },
-			{ type: "text", text: "Chaweng" },
-			{ type: "text", text: "Massage today around 18:00" },
-		]);
+    const payload = JSON.parse(result.outbound.payloadJson);
+    expect(payload.parts[0].text).toContain("Massage today around 18:00");
+    expect(payload.transport.whatsapp).toMatchObject({
+      requiresTemplate: true,
+      optIn: {
+        source: "admin_import",
+        acceptedAt: now - 60,
+        categories: ["utility"],
+      },
+      template: {
+        name: "provider_request_v1",
+        languageCode: "en_US",
+        category: "utility",
+        approved: true,
+      },
+    });
+    expect(payload.transport.whatsapp.template.components[0].parameters).toEqual([
+      { type: "text", text: "massage" },
+      { type: "text", text: "Chaweng" },
+      { type: "text", text: "Massage today around 18:00" },
+    ]);
 
-		const events = await relayRepo().eventsForOrder(result.order.id);
-		expect(new Set(events.map((event) => event.eventType))).toEqual(
-			new Set(["provider_request_created", "provider_request_sent"]),
-		);
-	});
+    const events = await relayRepo().eventsForOrder(result.order.id);
+    expect(new Set(events.map((event) => event.eventType))).toEqual(
+      new Set(["provider_request_created", "provider_request_sent"]),
+    );
+  });
 
-	it("is idempotent for order, outbound queue, provider request, and sent event", async () => {
-		if (!enabled) return;
-		const first = await orchestrator().startProviderOutreach({
-			customerContactId,
-			requestType: "massage",
-			serviceArea: "Chaweng",
-			summary: "Repeat request",
-			orderIdempotencyKey: "orch-order-idem",
-			providerRequestIdempotencyKey: "orch-provider-request-idem",
-			outboundIdempotencyKey: "orch-outbound-idem",
-			nowEpoch: now + 20,
-		});
-		const second = await orchestrator().startProviderOutreach({
-			customerContactId,
-			requestType: "massage",
-			serviceArea: "Chaweng",
-			summary: "Repeat request should not duplicate",
-			orderIdempotencyKey: "orch-order-idem",
-			providerRequestIdempotencyKey: "orch-provider-request-idem",
-			outboundIdempotencyKey: "orch-outbound-idem",
-			nowEpoch: now + 21,
-		});
+  it("is idempotent for order, outbound queue, provider request, and sent event", async () => {
+    if (!enabled) return;
+    const first = await orchestrator().startProviderOutreach({
+      customerContactId,
+      requestType: "massage",
+      serviceArea: "Chaweng",
+      summary: "Repeat request",
+      orderIdempotencyKey: "orch-order-idem",
+      providerRequestIdempotencyKey: "orch-provider-request-idem",
+      outboundIdempotencyKey: "orch-outbound-idem",
+      nowEpoch: now + 20,
+    });
+    const second = await orchestrator().startProviderOutreach({
+      customerContactId,
+      requestType: "massage",
+      serviceArea: "Chaweng",
+      summary: "Repeat request should not duplicate",
+      orderIdempotencyKey: "orch-order-idem",
+      providerRequestIdempotencyKey: "orch-provider-request-idem",
+      outboundIdempotencyKey: "orch-outbound-idem",
+      nowEpoch: now + 21,
+    });
 
-		expect(first.ok).toBe(true);
-		expect(second.ok).toBe(true);
-		if (!first.ok || !second.ok) throw new Error("expected success");
-		expect(second.order.id).toBe(first.order.id);
-		expect(second.outbound.id).toBe(first.outbound.id);
-		expect(second.providerRequest.id).toBe(first.providerRequest.id);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) throw new Error("expected success");
+    expect(second.order.id).toBe(first.order.id);
+    expect(second.outbound.id).toBe(first.outbound.id);
+    expect(second.providerRequest.id).toBe(first.providerRequest.id);
 
-		const events = await relayRepo().eventsForOrder(first.order.id);
-		expect(
-			events.filter((event) => event.eventType === "provider_request_sent"),
-		).toHaveLength(1);
-	});
+    const events = await relayRepo().eventsForOrder(first.order.id);
+    expect(events.filter((event) => event.eventType === "provider_request_sent")).toHaveLength(1);
+  });
 
-	it("sends a provider request for an existing declined order", async () => {
-		if (!enabled) return;
-		const existing = await relayRepo().createServiceOrder({
-			customerContactId,
-			requestType: "massage",
-			status: "provider_declined",
-			summary: "Manual retry after first provider declined",
-			metadata: { serviceArea: "Chaweng" },
-			nowEpoch: now + 25,
-		});
+  it("sends a provider request for an existing declined order", async () => {
+    if (!enabled) return;
+    const existing = await relayRepo().createServiceOrder({
+      customerContactId,
+      requestType: "massage",
+      status: "provider_declined",
+      summary: "Manual retry after first provider declined",
+      metadata: { serviceArea: "Chaweng" },
+      nowEpoch: now + 25,
+    });
 
-		const result = await orchestrator().sendProviderRequestForOrder({
-			orderId: existing.id,
-			providerIdOverride: providerId,
-			providerRequestIdempotencyKey: "orch-existing-request",
-			outboundIdempotencyKey: "orch-existing-outbound",
-			nowEpoch: now + 26,
-		});
+    const result = await orchestrator().sendProviderRequestForOrder({
+      orderId: existing.id,
+      providerIdOverride: providerId,
+      providerRequestIdempotencyKey: "orch-existing-request",
+      outboundIdempotencyKey: "orch-existing-outbound",
+      nowEpoch: now + 26,
+    });
 
-		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected successful provider request");
-		expect(result.order.id).toBe(existing.id);
-		expect(result.order.status).toBe("awaiting_provider");
-		expect(result.providerRequest).toMatchObject({
-			orderId: existing.id,
-			providerId,
-			channelId: whatsappChannelId,
-			status: "sent",
-		});
-		expect(result.envelope.idempotencyKey).toBe("orch-existing-outbound");
-		const payload = JSON.parse(result.outbound.payloadJson);
-		expect(payload.transport.whatsapp).toMatchObject({
-			requiresTemplate: true,
-			template: {
-				name: "provider_request_v1",
-				languageCode: "en_US",
-				approved: true,
-			},
-		});
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected successful provider request");
+    expect(result.order.id).toBe(existing.id);
+    expect(result.order.status).toBe("awaiting_provider");
+    expect(result.providerRequest).toMatchObject({
+      orderId: existing.id,
+      providerId,
+      channelId: whatsappChannelId,
+      status: "sent",
+    });
+    expect(result.envelope.idempotencyKey).toBe("orch-existing-outbound");
+    const payload = JSON.parse(result.outbound.payloadJson);
+    expect(payload.transport.whatsapp).toMatchObject({
+      requiresTemplate: true,
+      template: {
+        name: "provider_request_v1",
+        languageCode: "en_US",
+        approved: true,
+      },
+    });
 
-		const events = await relayRepo().eventsForOrder(existing.id);
-		expect(new Set(events.map((event) => event.eventType))).toEqual(
-			new Set(["provider_request_created", "provider_request_sent"]),
-		);
-	});
+    const events = await relayRepo().eventsForOrder(existing.id);
+    expect(new Set(events.map((event) => event.eventType))).toEqual(
+      new Set(["provider_request_created", "provider_request_sent"]),
+    );
+  });
 
-	it("records route failure without creating provider request or outbound rows", async () => {
-		if (!enabled) return;
-		const beforeRequests = await tableCount("provider_requests");
-		const beforeOutbound = await tableCount("outbound_queue");
+  it("records route failure without creating provider request or outbound rows", async () => {
+    if (!enabled) return;
+    const beforeRequests = await tableCount("provider_requests");
+    const beforeOutbound = await tableCount("outbound_queue");
 
-		const result = await orchestrator().startProviderOutreach({
-			customerContactId,
-			requestType: "missing_service",
-			serviceArea: "Chaweng",
-			orderIdempotencyKey: "orch-route-failure",
-			nowEpoch: now + 30,
-		});
+    const result = await orchestrator().startProviderOutreach({
+      customerContactId,
+      requestType: "missing_service",
+      serviceArea: "Chaweng",
+      orderIdempotencyKey: "orch-route-failure",
+      nowEpoch: now + 30,
+    });
 
-		expect(result).toMatchObject({
-			ok: false,
-			reason: "routing_failed",
-			routingReason: "no_provider_available",
-		});
-		if (result.ok || result.reason === "provider_relay_disabled") {
-			throw new Error("expected routing failure with order");
-		}
-		expect(await tableCount("provider_requests")).toBe(beforeRequests);
-		expect(await tableCount("outbound_queue")).toBe(beforeOutbound);
-		const events = await relayRepo().eventsForOrder(result.order.id);
-		expect(events.map((event) => event.eventType)).toEqual([
-			"provider_route_failed",
-		]);
-	});
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "routing_failed",
+      routingReason: "no_provider_available",
+    });
+    if (result.ok || result.reason === "provider_relay_disabled") {
+      throw new Error("expected routing failure with order");
+    }
+    expect(await tableCount("provider_requests")).toBe(beforeRequests);
+    expect(await tableCount("outbound_queue")).toBe(beforeOutbound);
+    const events = await relayRepo().eventsForOrder(result.order.id);
+    expect(events.map((event) => event.eventType)).toEqual(["provider_route_failed"]);
+  });
 
-	it("records missing provider channel without creating provider request or outbound rows", async () => {
-		if (!enabled) return;
-		const beforeRequests = await tableCount("provider_requests");
-		const beforeOutbound = await tableCount("outbound_queue");
+  it("records missing provider channel without creating provider request or outbound rows", async () => {
+    if (!enabled) return;
+    const beforeRequests = await tableCount("provider_requests");
+    const beforeOutbound = await tableCount("outbound_queue");
 
-		const result = await orchestrator().startProviderOutreach({
-			customerContactId,
-			requestType: "spa_package",
-			serviceArea: "Chaweng",
-			providerIdOverride: providerWithoutChannelId,
-			orderIdempotencyKey: "orch-no-channel",
-			nowEpoch: now + 40,
-		});
+    const result = await orchestrator().startProviderOutreach({
+      customerContactId,
+      requestType: "spa_package",
+      serviceArea: "Chaweng",
+      providerIdOverride: providerWithoutChannelId,
+      orderIdempotencyKey: "orch-no-channel",
+      nowEpoch: now + 40,
+    });
 
-		expect(result).toMatchObject({
-			ok: false,
-			reason: "provider_channel_missing",
-			providerId: providerWithoutChannelId,
-		});
-		if (result.ok || result.reason === "provider_relay_disabled") {
-			throw new Error("expected provider channel failure with order");
-		}
-		expect(await tableCount("provider_requests")).toBe(beforeRequests);
-		expect(await tableCount("outbound_queue")).toBe(beforeOutbound);
-		const events = await relayRepo().eventsForOrder(result.order.id);
-		expect(events.map((event) => event.eventType)).toEqual([
-			"provider_request_failed",
-		]);
-	});
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "provider_channel_missing",
+      providerId: providerWithoutChannelId,
+    });
+    if (result.ok || result.reason === "provider_relay_disabled") {
+      throw new Error("expected provider channel failure with order");
+    }
+    expect(await tableCount("provider_requests")).toBe(beforeRequests);
+    expect(await tableCount("outbound_queue")).toBe(beforeOutbound);
+    const events = await relayRepo().eventsForOrder(result.order.id);
+    expect(events.map((event) => event.eventType)).toEqual(["provider_request_failed"]);
+  });
 
-	it("records retry and failed dispatch events", async () => {
-		if (!enabled) return;
-		const result = await orchestrator().startProviderOutreach({
-			customerContactId,
-			requestType: "massage",
-			serviceArea: "Chaweng",
-			orderIdempotencyKey: "orch-dispatch-events",
-			nowEpoch: now + 50,
-		});
-		if (!result.ok) throw new Error("expected successful provider outreach");
+  it("records retry and failed dispatch events", async () => {
+    if (!enabled) return;
+    const result = await orchestrator().startProviderOutreach({
+      customerContactId,
+      requestType: "massage",
+      serviceArea: "Chaweng",
+      orderIdempotencyKey: "orch-dispatch-events",
+      nowEpoch: now + 50,
+    });
+    if (!result.ok) throw new Error("expected successful provider outreach");
 
-		await orchestrator().recordDispatchRetry({
-			providerRequestId: result.providerRequest.id,
-			error: "rate limit",
-			nowEpoch: now + 51,
-		});
-		await orchestrator().recordDispatchFailed({
-			providerRequestId: result.providerRequest.id,
-			error: "template rejected",
-			nowEpoch: now + 52,
-		});
+    await orchestrator().recordDispatchRetry({
+      providerRequestId: result.providerRequest.id,
+      error: "rate limit",
+      nowEpoch: now + 51,
+    });
+    await orchestrator().recordDispatchFailed({
+      providerRequestId: result.providerRequest.id,
+      error: "template rejected",
+      nowEpoch: now + 52,
+    });
 
-		const events = await relayRepo().eventsForOrder(result.order.id);
-		expect(events.map((event) => event.eventType)).toEqual([
-			"provider_request_send_failed",
-			"provider_request_retry",
-			"provider_request_sent",
-			"provider_request_created",
-		]);
+    const events = await relayRepo().eventsForOrder(result.order.id);
+    expect(events.map((event) => event.eventType)).toEqual([
+      "provider_request_send_failed",
+      "provider_request_retry",
+      "provider_request_sent",
+      "provider_request_created",
+    ]);
 
-		const [stored] = await db
-			.select({ status: schema.providerRequests.status })
-			.from(schema.providerRequests)
-			.where(eq(schema.providerRequests.id, result.providerRequest.id));
-		expect(stored?.status).toBe("failed");
-	});
+    const [stored] = await db
+      .select({ status: schema.providerRequests.status })
+      .from(schema.providerRequests)
+      .where(eq(schema.providerRequests.id, result.providerRequest.id));
+    expect(stored?.status).toBe("failed");
+  });
 
-	it("records cancelled dispatch event", async () => {
-		if (!enabled) return;
-		const result = await orchestrator().startProviderOutreach({
-			customerContactId,
-			requestType: "massage",
-			serviceArea: "Chaweng",
-			orderIdempotencyKey: "orch-cancel-events",
-			nowEpoch: now + 60,
-		});
-		if (!result.ok) throw new Error("expected successful provider outreach");
+  it("records cancelled dispatch event", async () => {
+    if (!enabled) return;
+    const result = await orchestrator().startProviderOutreach({
+      customerContactId,
+      requestType: "massage",
+      serviceArea: "Chaweng",
+      orderIdempotencyKey: "orch-cancel-events",
+      nowEpoch: now + 60,
+    });
+    if (!result.ok) throw new Error("expected successful provider outreach");
 
-		const cancelled = await orchestrator().cancelProviderOutreach({
-			providerRequestId: result.providerRequest.id,
-			reason: "operator cancelled",
-			nowEpoch: now + 61,
-		});
+    const cancelled = await orchestrator().cancelProviderOutreach({
+      providerRequestId: result.providerRequest.id,
+      reason: "operator cancelled",
+      nowEpoch: now + 61,
+    });
 
-		expect(cancelled.status).toBe("cancelled");
-		const events = await relayRepo().eventsForOrder(result.order.id);
-		expect(events.map((event) => event.eventType)).toEqual([
-			"provider_request_cancelled",
-			"provider_request_sent",
-			"provider_request_created",
-		]);
-	});
+    expect(cancelled.status).toBe("cancelled");
+    const events = await relayRepo().eventsForOrder(result.order.id);
+    expect(events.map((event) => event.eventType)).toEqual([
+      "provider_request_cancelled",
+      "provider_request_sent",
+      "provider_request_created",
+    ]);
+  });
 });

@@ -62,7 +62,7 @@ export function makeAdminAuditRoutes(opts: AdminAuditRoutesOpts): Hono {
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor =
-      hasMore && items.length > 0 ? items[items.length - 1]?.createdAt ?? null : null;
+      hasMore && items.length > 0 ? (items[items.length - 1]?.createdAt ?? null) : null;
 
     return c.json({
       items: items.map((r) => ({

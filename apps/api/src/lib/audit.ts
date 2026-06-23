@@ -40,9 +40,7 @@ export async function recordAudit(
       action: entry.action,
       ...(entry.targetKind ? { targetKind: entry.targetKind } : {}),
       ...(entry.targetId !== undefined ? { targetId: String(entry.targetId) } : {}),
-      ...(entry.details
-        ? { detailsJson: JSON.stringify(entry.details) }
-        : {}),
+      ...(entry.details ? { detailsJson: JSON.stringify(entry.details) } : {}),
       createdAt: Math.floor(Date.now() / 1000),
     });
   } catch (err) {

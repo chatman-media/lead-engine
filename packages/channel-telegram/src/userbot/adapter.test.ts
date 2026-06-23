@@ -44,10 +44,20 @@ describe("eventToInbound", () => {
   });
   it("video / voice / document", () => {
     const a = priv(make());
-    expect(a.eventToInbound(event({ message: "", video: { duration: 3 }, photo: undefined })).parts[0].kind).toBe("video");
-    expect(a.eventToInbound(event({ message: "", voice: { duration: 2 } })).parts[0]).toMatchObject({ kind: "voice", durationSec: 2 });
     expect(
-      a.eventToInbound(event({ message: "", document: { mimeType: "application/pdf", attributes: [{ fileName: "x.pdf" }] } })).parts[0],
+      a.eventToInbound(event({ message: "", video: { duration: 3 }, photo: undefined })).parts[0]
+        .kind,
+    ).toBe("video");
+    expect(a.eventToInbound(event({ message: "", voice: { duration: 2 } })).parts[0]).toMatchObject(
+      { kind: "voice", durationSec: 2 },
+    );
+    expect(
+      a.eventToInbound(
+        event({
+          message: "",
+          document: { mimeType: "application/pdf", attributes: [{ fileName: "x.pdf" }] },
+        }),
+      ).parts[0],
     ).toMatchObject({ kind: "document", mimeType: "application/pdf", fileName: "x.pdf" });
   });
   it("не-private peer → null", () => {
@@ -74,7 +84,13 @@ describe("cacheMessage LRU", () => {
 describe("receive() очередь", () => {
   it("отдаёт заэнкью'енные inbound, затем done после close", async () => {
     const a = make();
-    priv(a).enqueue({ channelId: "ub1", externalMessageId: "1", externalUserId: "123", parts: [], receivedAt: 0 } as unknown as Inbound);
+    priv(a).enqueue({
+      channelId: "ub1",
+      externalMessageId: "1",
+      externalUserId: "123",
+      parts: [],
+      receivedAt: 0,
+    } as unknown as Inbound);
     const it = a.receive()[Symbol.asyncIterator]();
     expect((await it.next()).value.externalMessageId).toBe("1");
     await a.close();
@@ -103,7 +119,9 @@ describe("send / delete / downloadMedia / signalTyping", () => {
   });
 
   it("send до connect → throws", async () => {
-    await expect(make().send({ externalUserId: "1", parts: [{ kind: "text", text: "x" }] } as never)).rejects.toThrow("before connect");
+    await expect(
+      make().send({ externalUserId: "1", parts: [{ kind: "text", text: "x" }] } as never),
+    ).rejects.toThrow("before connect");
   });
   it("send пустые parts → throws", async () => {
     const a = make();
@@ -113,32 +131,53 @@ describe("send / delete / downloadMedia / signalTyping", () => {
   it("send текст → Sent с id", async () => {
     const a = make();
     priv(a).client = fakeClient();
-    const sent = await a.send({ externalUserId: "999", parts: [{ kind: "text", text: "hi" }] } as never);
+    const sent = await a.send({
+      externalUserId: "999",
+      parts: [{ kind: "text", text: "hi" }],
+    } as never);
     expect(sent.externalMessageId).toBe("42");
     expect(sent.channelId).toBe("ub1");
   });
   it("send неподдержанный part.kind → throws", async () => {
     const a = make();
     priv(a).client = fakeClient();
-    await expect(a.send({ externalUserId: "1", parts: [{ kind: "photo", mediaRef: { channelId: "ub1", externalRef: "r" } }] } as never)).rejects.toThrow("unsupported");
+    await expect(
+      a.send({
+        externalUserId: "1",
+        parts: [{ kind: "photo", mediaRef: { channelId: "ub1", externalRef: "r" } }],
+      } as never),
+    ).rejects.toThrow("unsupported");
   });
 
   it("delete до connect → throws; NaN id → throws; ok с клиентом", async () => {
-    await expect(make().delete({ externalUserId: "1", externalMessageId: "2" } as never)).rejects.toThrow("before connect");
+    await expect(
+      make().delete({ externalUserId: "1", externalMessageId: "2" } as never),
+    ).rejects.toThrow("before connect");
     const a = make();
     priv(a).client = fakeClient();
-    await expect(a.delete({ externalUserId: "1", externalMessageId: "nope" } as never)).rejects.toThrow("numeric");
+    await expect(
+      a.delete({ externalUserId: "1", externalMessageId: "nope" } as never),
+    ).rejects.toThrow("numeric");
     await a.delete({ externalUserId: "1", externalMessageId: "2" } as never); // не бросает
   });
 
   it("downloadMedia: guards + успех из кэша", async () => {
-    await expect(make().downloadMedia({ channelId: "ub1", externalRef: "7" })).rejects.toThrow("before connect");
+    await expect(make().downloadMedia({ channelId: "ub1", externalRef: "7" })).rejects.toThrow(
+      "before connect",
+    );
     const a = make();
     priv(a).client = fakeClient();
-    await expect(a.downloadMedia({ channelId: "ub1", externalRef: "7" })).rejects.toThrow("externalUserId");
-    await expect(a.downloadMedia({ channelId: "ub1", externalRef: "7" }, { externalUserId: "123" })).rejects.toThrow("evicted");
+    await expect(a.downloadMedia({ channelId: "ub1", externalRef: "7" })).rejects.toThrow(
+      "externalUserId",
+    );
+    await expect(
+      a.downloadMedia({ channelId: "ub1", externalRef: "7" }, { externalUserId: "123" }),
+    ).rejects.toThrow("evicted");
     priv(a).recentMessages.set("123:7", { msg: true });
-    const res = await a.downloadMedia({ channelId: "ub1", externalRef: "7" }, { externalUserId: "123" });
+    const res = await a.downloadMedia(
+      { channelId: "ub1", externalRef: "7" },
+      { externalUserId: "123" },
+    );
     expect(await res.text()).toBe("MEDIA");
   });
 
@@ -146,7 +185,12 @@ describe("send / delete / downloadMedia / signalTyping", () => {
     await make().signalTyping("1"); // no-op, не бросает
     const a = make();
     let invoked = false;
-    priv(a).client = { ...fakeClient(), invoke: async () => { invoked = true; } };
+    priv(a).client = {
+      ...fakeClient(),
+      invoke: async () => {
+        invoked = true;
+      },
+    };
     await a.signalTyping("123");
     expect(invoked).toBe(true);
   });
@@ -166,7 +210,11 @@ describe("registerHandler + receive abort", () => {
   it("registerHandler ставит обработчик, эмитит connected, входящее → inbox+cache", async () => {
     const a = make();
     let handler: ((e: unknown) => Promise<void>) | null = null;
-    priv(a).registerHandler({ addEventHandler: (h: (e: unknown) => Promise<void>) => { handler = h; } });
+    priv(a).registerHandler({
+      addEventHandler: (h: (e: unknown) => Promise<void>) => {
+        handler = h;
+      },
+    });
     // эмит "connected"
     const hIt = a.healthEvents()[Symbol.asyncIterator]();
     expect((await hIt.next()).value.status).toBe("connected");
@@ -181,8 +229,20 @@ describe("registerHandler + receive abort", () => {
   it("registerHandler пропускает свои исходящие (out)", async () => {
     const a = make();
     let handler: ((e: unknown) => Promise<void>) | null = null;
-    priv(a).registerHandler({ addEventHandler: (h: (e: unknown) => Promise<void>) => { handler = h; } });
-    await handler!({ message: { out: true, senderId: { toString: () => "1" }, peerId: { className: "PeerUser" }, message: "x", id: 1 } });
+    priv(a).registerHandler({
+      addEventHandler: (h: (e: unknown) => Promise<void>) => {
+        handler = h;
+      },
+    });
+    await handler!({
+      message: {
+        out: true,
+        senderId: { toString: () => "1" },
+        peerId: { className: "PeerUser" },
+        message: "x",
+        id: 1,
+      },
+    });
     expect(priv(a).inbox.length).toBe(0);
   });
 
@@ -226,15 +286,31 @@ describe("connect() (через clientFactory)", () => {
   });
 
   it("AUTH_KEY_DUPLICATED → health auth_key_duplicated + throw", async () => {
-    const a = withFactory(fakeGramjs({ connect: async () => { throw new Error("AUTH_KEY_DUPLICATED"); } }));
+    const a = withFactory(
+      fakeGramjs({
+        connect: async () => {
+          throw new Error("AUTH_KEY_DUPLICATED");
+        },
+      }),
+    );
     await expect(a.connect()).rejects.toThrow("auth key revoked");
-    expect((await a.healthEvents()[Symbol.asyncIterator]().next()).value.status).toBe("auth_key_duplicated");
+    expect((await a.healthEvents()[Symbol.asyncIterator]().next()).value.status).toBe(
+      "auth_key_duplicated",
+    );
   });
 
   it("connect бросает (non-auth) на всех попытках → connection_failed + throw", async () => {
-    const a = withFactory(fakeGramjs({ connect: async () => { throw new Error("network blip"); } }));
+    const a = withFactory(
+      fakeGramjs({
+        connect: async () => {
+          throw new Error("network blip");
+        },
+      }),
+    );
     await expect(a.connect()).rejects.toThrow("connect failed");
-    expect((await a.healthEvents()[Symbol.asyncIterator]().next()).value.status).toBe("connection_failed");
+    expect((await a.healthEvents()[Symbol.asyncIterator]().next()).value.status).toBe(
+      "connection_failed",
+    );
   });
 
   it("connect возвращает false → connection_failed", async () => {
@@ -268,8 +344,13 @@ describe("connect() (через clientFactory)", () => {
 
   it("идемпотентность: уже connected → фабрика не зовётся", async () => {
     const a = new TelegramUserbotAdapter({
-      id: "ub1", apiId: 1, apiHash: "h", sessionString: "",
-      clientFactory: (() => { throw new Error("должен быть no-op"); }) as never,
+      id: "ub1",
+      apiId: 1,
+      apiHash: "h",
+      sessionString: "",
+      clientFactory: (() => {
+        throw new Error("должен быть no-op");
+      }) as never,
     });
     priv(a).client = { connected: true };
     await a.connect(); // не бросает → фабрика не вызвана

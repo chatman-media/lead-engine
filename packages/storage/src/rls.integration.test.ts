@@ -18,11 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres, { type Sql } from "postgres";
-import {
-  applyAllMigrations,
-  createIsolatedDb,
-  tryConnectToPg,
-} from "./integration-helpers.ts";
+import { applyAllMigrations, createIsolatedDb, tryConnectToPg } from "./integration-helpers.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_rls_${Math.random().toString(36).slice(2, 10)}`;
@@ -41,43 +37,42 @@ let tenantAId = 0;
 let tenantBId = 0;
 const nowEpoch = Math.floor(Date.now() / 1000);
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 }).catch(() => {});
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 }).catch(() => {});
 
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    ownerSql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(ownerSql, migrationsDir);
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  ownerSql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(ownerSql, migrationsDir);
 
-    // Создаём non-superuser, NOBYPASSRLS role для actual RLS-теста.
-    // На локалке default user — superuser с BYPASSRLS=t, у него policy
-    // тупо не работает. Production apps ДОЛЖНЫ коннектиться под такую
-    // role; миграция 0004 это explicit'но описывает в comment'ах.
-    await ownerSql.unsafe(`
+  // Создаём non-superuser, NOBYPASSRLS role для actual RLS-теста.
+  // На локалке default user — superuser с BYPASSRLS=t, у него policy
+  // тупо не работает. Production apps ДОЛЖНЫ коннектиться под такую
+  // role; миграция 0004 это explicit'но описывает в comment'ах.
+  await ownerSql.unsafe(`
       CREATE ROLE "${appRoleName}" LOGIN PASSWORD '${appRolePass}' NOSUPERUSER NOBYPASSRLS;
       GRANT USAGE ON SCHEMA public TO "${appRoleName}";
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${appRoleName}";
       GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${appRoleName}";
     `);
 
-    // Seed-данные под owner — он bypass'ит RLS, поэтому INSERT'ы в
-    // tenant-scoped таблицы проходят без SET LOCAL. Это симметрично
-    // тому как drizzle-kit / prod-migration-runner делает backfill'ы.
-    const seeded = await ownerSql<Array<{ id: number }>>`
+  // Seed-данные под owner — он bypass'ит RLS, поэтому INSERT'ы в
+  // tenant-scoped таблицы проходят без SET LOCAL. Это симметрично
+  // тому как drizzle-kit / prod-migration-runner делает backfill'ы.
+  const seeded = await ownerSql<Array<{ id: number }>>`
       INSERT INTO tenants (slug, plan, status, llm_billing_mode, created_at, updated_at)
       VALUES
         ('alpha', 'free', 'active', 'byok', ${nowEpoch}, ${nowEpoch}),
         ('beta',  'free', 'active', 'byok', ${nowEpoch}, ${nowEpoch})
       RETURNING id
     `;
-    if (seeded.length !== 2) throw new Error("seed tenants failed");
-    tenantAId = seeded[0]!.id;
-    tenantBId = seeded[1]!.id;
+  if (seeded.length !== 2) throw new Error("seed tenants failed");
+  tenantAId = seeded[0]!.id;
+  tenantBId = seeded[1]!.id;
 
-    await ownerSql`
+  await ownerSql`
       INSERT INTO contacts (tenant_id, display_name, created_at, updated_at)
       VALUES
         (${tenantAId}, ${`contact-1 for ${tenantAId}`}, ${nowEpoch}, ${nowEpoch}),
@@ -86,40 +81,35 @@ beforeAll(
         (${tenantBId}, ${`contact-2 for ${tenantBId}`}, ${nowEpoch}, ${nowEpoch})
     `;
 
-    // App-connection как role'а без BYPASSRLS — для RLS-проверок.
-    const parsed = new URL(testUrl);
-    parsed.username = appRoleName;
-    parsed.password = appRolePass;
-    appSql = postgres(parsed.toString(), { max: 4, onnotice: () => {} });
-    // Sanity: убедимся что app-роль действительно NOBYPASSRLS.
-    const roleInfo = await appSql<Array<{ bypass: boolean; sup: boolean }>>`
+  // App-connection как role'а без BYPASSRLS — для RLS-проверок.
+  const parsed = new URL(testUrl);
+  parsed.username = appRoleName;
+  parsed.password = appRolePass;
+  appSql = postgres(parsed.toString(), { max: 4, onnotice: () => {} });
+  // Sanity: убедимся что app-роль действительно NOBYPASSRLS.
+  const roleInfo = await appSql<Array<{ bypass: boolean; sup: boolean }>>`
       SELECT rolbypassrls as bypass, rolsuper as sup FROM pg_roles WHERE rolname = current_user
     `;
-    if (roleInfo[0]?.bypass || roleInfo[0]?.sup) {
-      throw new Error("test setup: app role unexpectedly bypasses RLS");
-    }
-  },
-  30_000,
-);
+  if (roleInfo[0]?.bypass || roleInfo[0]?.sup) {
+    throw new Error("test setup: app role unexpectedly bypasses RLS");
+  }
+}, 30_000);
 
-afterAll(
-  async () => {
-    if (appSql) {
-      await appSql.end({ timeout: 0 }).catch(() => {});
-      appSql = null;
-    }
-    if (ownerSql) {
-      // DROP роль до закрытия owner-connection'а (иначе DROP оставит
-      // database с ownership'ом на удаляемую роль).
-      await ownerSql
-        .unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
-        .catch(() => {});
-      await ownerSql.end({ timeout: 0 }).catch(() => {});
-      ownerSql = null;
-    }
-  },
-  10_000,
-);
+afterAll(async () => {
+  if (appSql) {
+    await appSql.end({ timeout: 0 }).catch(() => {});
+    appSql = null;
+  }
+  if (ownerSql) {
+    // DROP роль до закрытия owner-connection'а (иначе DROP оставит
+    // database с ownership'ом на удаляемую роль).
+    await ownerSql
+      .unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
+      .catch(() => {});
+    await ownerSql.end({ timeout: 0 }).catch(() => {});
+    ownerSql = null;
+  }
+}, 10_000);
 
 /**
  * Помощник: открывает транзакцию с явным `SET LOCAL app.tenant_id`
@@ -147,7 +137,9 @@ describe("RLS tenant_isolation policy", () => {
     // Fresh app-connection вне транзакции: app.tenant_id не set'ится →
     // current_setting('app.tenant_id', true) returns NULL → policy
     // condition `tenant_id = NULL::int` → NULL → false → 0 rows.
-    const rows = await appSql<Array<{ count: string }>>`SELECT COUNT(*)::text as count FROM contacts`;
+    const rows = await appSql<
+      Array<{ count: string }>
+    >`SELECT COUNT(*)::text as count FROM contacts`;
     expect(rows[0]?.count).toBe("0");
   });
 

@@ -67,7 +67,9 @@ class FakeLeadsRepo {
 
 class FakeNotificationService {
   events: NotificationEvent[] = [];
-  async notify(event: NotificationEvent) { this.events.push(event); }
+  async notify(event: NotificationEvent) {
+    this.events.push(event);
+  }
 }
 
 describe("ensureLead", () => {
@@ -86,7 +88,12 @@ describe("ensureLead", () => {
 
   it("переиспользует существующий Lead", async () => {
     const repo = new FakeLeadsRepo(1);
-    await ensureLead({ contactId: 42, template: TEMPLATE, leads: repo as unknown as LeadsRepo, nowEpoch: 1 });
+    await ensureLead({
+      contactId: 42,
+      template: TEMPLATE,
+      leads: repo as unknown as LeadsRepo,
+      nowEpoch: 1,
+    });
     const { lead, created } = await ensureLead({
       contactId: 42,
       template: TEMPLATE,

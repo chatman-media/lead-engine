@@ -4,7 +4,10 @@ import type { WaWebhookPayload } from "./types.ts";
 
 const CH = "wa-1";
 
-function envelope(messages: WaWebhookPayload["entry"][0]["changes"][0]["value"]["messages"], contacts?: WaWebhookPayload["entry"][0]["changes"][0]["value"]["contacts"]): WaWebhookPayload {
+function envelope(
+  messages: WaWebhookPayload["entry"][0]["changes"][0]["value"]["messages"],
+  contacts?: WaWebhookPayload["entry"][0]["changes"][0]["value"]["contacts"],
+): WaWebhookPayload {
   return {
     object: "whatsapp_business_account",
     entry: [
@@ -30,7 +33,13 @@ describe("parseWebhookPayload", () => {
     const out = parseWebhookPayload(
       CH,
       envelope([
-        { from: "79161234567", id: "wa.M1", timestamp: "1700000000", type: "text", text: { body: "hi" } },
+        {
+          from: "79161234567",
+          id: "wa.M1",
+          timestamp: "1700000000",
+          type: "text",
+          text: { body: "hi" },
+        },
       ]),
     );
     expect(out).toHaveLength(1);
@@ -48,7 +57,13 @@ describe("parseWebhookPayload", () => {
       CH,
       envelope(
         [
-          { from: "79161234567", id: "wa.M1", timestamp: "1700000000", type: "text", text: { body: "ok" } },
+          {
+            from: "79161234567",
+            id: "wa.M1",
+            timestamp: "1700000000",
+            type: "text",
+            text: { body: "ok" },
+          },
         ],
         [{ wa_id: "79161234567", profile: { name: "Alina" } }],
       ),
@@ -178,9 +193,7 @@ describe("parseWebhookPayload", () => {
   });
 
   it("payload без entry → пусто", () => {
-    expect(
-      parseWebhookPayload(CH, { object: "whatsapp_business_account" } as never),
-    ).toEqual([]);
+    expect(parseWebhookPayload(CH, { object: "whatsapp_business_account" } as never)).toEqual([]);
     expect(
       parseWebhookPayload(CH, {
         object: "whatsapp_business_account",
@@ -211,8 +224,20 @@ describe("parseWebhookPayload", () => {
     const out = parseWebhookPayload(
       CH,
       envelope([
-        { from: "79161234567", id: "wa.A", timestamp: "1700000000", type: "text", text: { body: "a" } },
-        { from: "79161234567", id: "wa.B", timestamp: "1700000001", type: "text", text: { body: "b" } },
+        {
+          from: "79161234567",
+          id: "wa.A",
+          timestamp: "1700000000",
+          type: "text",
+          text: { body: "a" },
+        },
+        {
+          from: "79161234567",
+          id: "wa.B",
+          timestamp: "1700000001",
+          type: "text",
+          text: { body: "b" },
+        },
       ]),
     );
     expect(out).toHaveLength(2);
@@ -235,9 +260,7 @@ describe("parseWebhookPayload", () => {
   it("неизвестный type без media → skip (parts.length=0)", () => {
     const out = parseWebhookPayload(
       CH,
-      envelope([
-        { from: "79161234567", id: "wa.X", timestamp: "1700000000", type: "interactive" },
-      ]),
+      envelope([{ from: "79161234567", id: "wa.X", timestamp: "1700000000", type: "interactive" }]),
     );
     expect(out).toEqual([]);
   });
@@ -247,7 +270,13 @@ describe("parseWebhookPayload", () => {
     const out = parseWebhookPayload(
       CH,
       envelope([
-        { from: "79161234567", id: "wa.M1", timestamp: "garbage", type: "text", text: { body: "hi" } },
+        {
+          from: "79161234567",
+          id: "wa.M1",
+          timestamp: "garbage",
+          type: "text",
+          text: { body: "hi" },
+        },
       ]),
     );
     const after = Math.floor(Date.now() / 1000);

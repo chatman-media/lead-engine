@@ -92,9 +92,7 @@ export class WebChannelAdapter implements ChannelAdapter {
       }
     }
     this.connections.set(externalUserId, ws);
-    ws.send(
-      encodeServerFrame({ type: "ready", channelId: this.id, userId: externalUserId }),
-    );
+    ws.send(encodeServerFrame({ type: "ready", channelId: this.id, userId: externalUserId }));
   }
 
   /**
@@ -106,9 +104,7 @@ export class WebChannelAdapter implements ChannelAdapter {
     if (!frame) {
       const ws = this.connections.get(externalUserId);
       if (ws && ws.readyState === WS_OPEN) {
-        ws.send(
-          encodeServerFrame({ type: "error", code: "bad_frame", message: "frame invalid" }),
-        );
+        ws.send(encodeServerFrame({ type: "error", code: "bad_frame", message: "frame invalid" }));
       }
       return;
     }

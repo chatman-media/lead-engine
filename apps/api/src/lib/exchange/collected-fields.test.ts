@@ -30,26 +30,19 @@ describe("mapExchangeCollectedValues", () => {
   });
 
   it("payment_method card_transfer проходит как есть", () => {
-    expect(
-      mapExchangeCollectedValues({ payment_method: "card_transfer" })
-        .paymentMethod,
-    ).toBe("card_transfer");
+    expect(mapExchangeCollectedValues({ payment_method: "card_transfer" }).paymentMethod).toBe(
+      "card_transfer",
+    );
   });
 
   it("amount из строки с пробелами/запятой → число", () => {
-    expect(mapExchangeCollectedValues({ amount_from: "20 000" }).amount).toBe(
-      20000,
-    );
-    expect(mapExchangeCollectedValues({ amount_from: "1500,5" }).amount).toBe(
-      1500.5,
-    );
+    expect(mapExchangeCollectedValues({ amount_from: "20 000" }).amount).toBe(20000);
+    expect(mapExchangeCollectedValues({ amount_from: "1500,5" }).amount).toBe(1500.5);
   });
 
   it("пустые/невалидные значения опускаются", () => {
     expect(mapExchangeCollectedValues({})).toEqual({});
-    expect(mapExchangeCollectedValues({ asset_from: "", amount_from: 0 })).toEqual(
-      {},
-    );
+    expect(mapExchangeCollectedValues({ asset_from: "", amount_from: 0 })).toEqual({});
     expect(mapExchangeCollectedValues({ amount_from: "abc" })).toEqual({});
   });
 

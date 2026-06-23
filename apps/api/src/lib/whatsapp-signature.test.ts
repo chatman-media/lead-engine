@@ -41,9 +41,7 @@ describe("parseWhatsAppSignatureHeader", () => {
   });
 
   it("неполный hex (короче 64) → reject", () => {
-    expect(() => parseWhatsAppSignatureHeader("sha256=deadbeef")).toThrow(
-      /malformed hex digest/,
-    );
+    expect(() => parseWhatsAppSignatureHeader("sha256=deadbeef")).toThrow(/malformed hex digest/);
   });
 
   it("не-hex символы → reject", () => {
@@ -111,9 +109,9 @@ describe("verifyWhatsAppSignature", () => {
     const a = '{"x":1}';
     const b = '{"x": 1}';
     const headerA = makeHeader(a);
-    expect(() =>
-      verifyWhatsAppSignature({ secret: SECRET, payload: b, header: headerA }),
-    ).toThrow(/signature mismatch/);
+    expect(() => verifyWhatsAppSignature({ secret: SECRET, payload: b, header: headerA })).toThrow(
+      /signature mismatch/,
+    );
   });
 
   it("error.reason поле программно доступно", () => {

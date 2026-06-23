@@ -78,14 +78,30 @@ export interface ProcessInboundResult {
  * ничего и pipeline всё равно работает.
  */
 export interface PipelineSink {
-  log?: (level: "debug" | "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) => void;
+  log?: (
+    level: "debug" | "info" | "warn" | "error",
+    msg: string,
+    meta?: Record<string, unknown>,
+  ) => void;
   emit?: (event: PipelineEvent) => void;
 }
 
 export type PipelineEvent =
   | { type: "inbound-received"; tenantId: number; conversationId: number; inbound: Inbound }
-  | { type: "message-persisted"; tenantId: number; conversationId: number; messageId: number; role: "user" | "assistant" }
-  | { type: "outbound-enqueued"; tenantId: number; conversationId: number; queueItemId: number; envelope: OutboundEnvelope }
+  | {
+      type: "message-persisted";
+      tenantId: number;
+      conversationId: number;
+      messageId: number;
+      role: "user" | "assistant";
+    }
+  | {
+      type: "outbound-enqueued";
+      tenantId: number;
+      conversationId: number;
+      queueItemId: number;
+      envelope: OutboundEnvelope;
+    }
   | { type: "conversation-escalated"; tenantId: number; conversationId: number; reason: string };
 
 /**

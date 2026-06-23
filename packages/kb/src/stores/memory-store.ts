@@ -51,9 +51,8 @@ export class InMemoryKbStore implements IKbStore {
   // ── Search ────────────────────────────────────────────────────────────────
 
   async search(embedding: number[], k: number, topic?: string | null): Promise<KbSearchHit[]> {
-    const pool = (topic
-      ? this.chunks.filter((c) => this.topicOf(c.documentId) === topic)
-      : this.chunks
+    const pool = (
+      topic ? this.chunks.filter((c) => this.topicOf(c.documentId) === topic) : this.chunks
     ).filter((c) => c.embedding !== null);
     return pool
       .map((c) => ({ chunk: c, distance: cosineDistance(embedding, c.embedding ?? []) }))

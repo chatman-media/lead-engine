@@ -22,7 +22,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_xeval_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-xeval-12345";
 
 let sql: Sql | null = null;
@@ -72,7 +81,9 @@ beforeAll(async () => {
   db = drizzle(sql, { schema });
 
   appGood = mount(
-    reply("Курс 33.2 THB за 1 USDT, итого 16 600 THB. Реквизиты для перевода: адрес TRC20 TJ9k…q4Fq2Xb."),
+    reply(
+      "Курс 33.2 THB за 1 USDT, итого 16 600 THB. Реквизиты для перевода: адрес TRC20 TJ9k…q4Fq2Xb.",
+    ),
   );
   appBail = mount(reply("Секунду, уточню у оператора — менеджер свяжется с вами."));
 
@@ -86,7 +97,9 @@ beforeAll(async () => {
   tenantId = sba.admin.tenantId;
 
   await withTenant(db, tenantId, (tx) =>
-    tx.insert(channels).values({ tenantId, kind: "telegram_bot", externalId: "@xevalbot", status: "active" }),
+    tx
+      .insert(channels)
+      .values({ tenantId, kind: "telegram_bot", externalId: "@xevalbot", status: "active" }),
   );
 }, 30_000);
 
@@ -112,7 +125,11 @@ describe("exchange-eval harness", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       summary: { passed: number; total: number };
-      report: Array<{ id: string; passed: boolean; signals: { reachedQuote: boolean; requisitesIssued: boolean; prematureOperator: boolean } }>;
+      report: Array<{
+        id: string;
+        passed: boolean;
+        signals: { reachedQuote: boolean; requisitesIssued: boolean; prematureOperator: boolean };
+      }>;
     };
     expect(body.summary.total).toBe(1);
     expect(body.summary.passed).toBe(1);
@@ -129,7 +146,11 @@ describe("exchange-eval harness", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       summary: { passed: number; total: number };
-      report: Array<{ passed: boolean; reasons: string[]; signals: { prematureOperator: boolean } }>;
+      report: Array<{
+        passed: boolean;
+        reasons: string[];
+        signals: { prematureOperator: boolean };
+      }>;
     };
     expect(body.summary.passed).toBe(0);
     const r = body.report[0]!;

@@ -76,9 +76,7 @@ export interface SelfPlayMatchRecord extends SelfPlayMatchSummary {
 
 export interface ISelfPlayMatchesRepo {
   /** Insert a completed match and return its id. */
-  insert(
-    match: Omit<SelfPlayMatchRecord, "id"> & { judge_reason: string },
-  ): Promise<number>;
+  insert(match: Omit<SelfPlayMatchRecord, "id"> & { judge_reason: string }): Promise<number>;
   /** Fetch full match with transcript (null if not found). */
   byId(id: number): Promise<SelfPlayMatchRecord | null>;
   /** List recent matches, optionally filtered. */
@@ -123,10 +121,7 @@ export interface IShadowEvaluationsRepo {
 // ─── Conversation / lead plumbing needed by orchestrator ────────────────────
 
 export interface IUsersRepo {
-  upsert(opts: {
-    telegramId: number;
-    username?: string;
-  }): Promise<{ id: number }>;
+  upsert(opts: { telegramId: number; username?: string }): Promise<{ id: number }>;
 }
 
 export interface IConversationsRepo {

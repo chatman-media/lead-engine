@@ -87,7 +87,8 @@ let tenantId = 0;
 let contactId = 0;
 let enabled = false;
 
-const runSweep = (s: ExchangePaymentSweeper) => (s as unknown as { sweep: () => Promise<void> }).sweep();
+const runSweep = (s: ExchangePaymentSweeper) =>
+  (s as unknown as { sweep: () => Promise<void> }).sweep();
 
 async function makeOrder(over: Partial<typeof exchangeOrders.$inferInsert>): Promise<number> {
   const [o] = await db
@@ -112,12 +113,18 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   enabled = true;
   const now = Math.floor(Date.now() / 1000);
-  const [t] = await db.insert(tenants).values({ slug: `exch-${now}` }).returning({ id: tenants.id });
+  const [t] = await db
+    .insert(tenants)
+    .values({ slug: `exch-${now}` })
+    .returning({ id: tenants.id });
   tenantId = t!.id;
   const [c] = await db.insert(contacts).values({ tenantId }).returning({ id: contacts.id });
   contactId = c!.id;
@@ -125,7 +132,9 @@ beforeAll(async () => {
     .insert(channels)
     .values({ tenantId, kind: "telegram_bot", externalId: `bot-${now}`, status: "active" })
     .returning({ id: channels.id });
-  await db.insert(channelIdentities).values({ contactId, channelId: ch!.id, externalUserId: "tg-1" });
+  await db
+    .insert(channelIdentities)
+    .values({ contactId, channelId: ch!.id, externalUserId: "tg-1" });
 }, 30_000);
 
 afterAll(async () => {

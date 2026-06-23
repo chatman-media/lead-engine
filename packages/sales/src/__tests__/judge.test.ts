@@ -34,8 +34,7 @@ describe("parseVerdict — code-fenced JSON", () => {
 
 describe("parseVerdict — <think> block stripped", () => {
   test("think block before JSON", () => {
-    const raw =
-      '<think>Hmm, let me think…</think>\n{"outcome":"draw","reason":"ambiguous"}';
+    const raw = '<think>Hmm, let me think…</think>\n{"outcome":"draw","reason":"ambiguous"}';
     expect(parseVerdict(raw).outcome).toBe("draw");
   });
 });

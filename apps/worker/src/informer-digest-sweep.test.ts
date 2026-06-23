@@ -1,6 +1,11 @@
 import type { AdminNotificationRow, Db } from "@chatman-media/conversation-engine";
 import { describe, expect, it, spyOn } from "bun:test";
-import { type InformerDigestSender, InformerDigestSweeper, isDigestDue, renderDigest } from "./informer-digest-sweep.ts";
+import {
+  type InformerDigestSender,
+  InformerDigestSweeper,
+  isDigestDue,
+  renderDigest,
+} from "./informer-digest-sweep.ts";
 
 const ep = (h: number, day = 5) => Math.floor(Date.UTC(2026, 5, day, h, 0, 0) / 1000); // июнь
 

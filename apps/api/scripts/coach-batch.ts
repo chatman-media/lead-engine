@@ -102,11 +102,9 @@ async function main() {
     throw new Error("LLM_PROVIDER + LLM_MODEL + LLM_API_KEY env required");
   }
 
-  const availableSlugs = (
-    process.env.COACH_AVAILABLE_SKILLS?.split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0) ?? DEFAULT_SKILLS
-  ) as readonly string[];
+  const availableSlugs = (process.env.COACH_AVAILABLE_SKILLS?.split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0) ?? DEFAULT_SKILLS) as readonly string[];
 
   const client = postgres(databaseUrl, { max: 4 });
   const db = drizzle(client, { schema });
@@ -148,9 +146,7 @@ async function main() {
     const analyzer = new CoachAnalyzer({
       availableSlugs,
       resolveChat: (tid: number) => router.resolveChat(tid, "chat"),
-      ...(process.env.COACH_GRADING_MODEL
-        ? { gradingModel: process.env.COACH_GRADING_MODEL }
-        : {}),
+      ...(process.env.COACH_GRADING_MODEL ? { gradingModel: process.env.COACH_GRADING_MODEL } : {}),
     });
 
     let totalPairs = 0;

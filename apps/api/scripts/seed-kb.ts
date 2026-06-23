@@ -73,10 +73,7 @@ async function main() {
   const db = drizzle(client, { schema });
 
   try {
-    const [tenant] = await db
-      .select()
-      .from(tenants)
-      .where(eq(tenants.slug, args.tenantSlug));
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.slug, args.tenantSlug));
     if (!tenant) throw new Error(`tenant slug=${args.tenantSlug} not found`);
 
     const router = new InMemoryLlmRouter();

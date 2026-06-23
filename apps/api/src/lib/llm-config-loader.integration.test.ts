@@ -20,11 +20,7 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
 import type { ApiConfig } from "../config.ts";
-import {
-  getConfig,
-  loadTenantLlmConfigs,
-  tenantsWithPurpose,
-} from "./llm-config-loader.ts";
+import { getConfig, loadTenantLlmConfigs, tenantsWithPurpose } from "./llm-config-loader.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_llmload_${Math.random().toString(36).slice(2, 10)}`;
@@ -46,72 +42,69 @@ let db: PostgresJsDatabase<typeof schema>;
 let tenantA = 0; // has DB chat config
 let tenantB = 0; // no DB config → env fallback
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    // Create two tenants.
-    const [a] = await db
-      .insert(tenants)
-      .values({ slug: "tenant-a-load", plan: "free", status: "active" })
-      .returning({ id: tenants.id });
-    tenantA = a!.id;
-    const [b] = await db
-      .insert(tenants)
-      .values({ slug: "tenant-b-load", plan: "free", status: "active" })
-      .returning({ id: tenants.id });
-    tenantB = b!.id;
+  // Create two tenants.
+  const [a] = await db
+    .insert(tenants)
+    .values({ slug: "tenant-a-load", plan: "free", status: "active" })
+    .returning({ id: tenants.id });
+  tenantA = a!.id;
+  const [b] = await db
+    .insert(tenants)
+    .values({ slug: "tenant-b-load", plan: "free", status: "active" })
+    .returning({ id: tenants.id });
+  tenantB = b!.id;
 
-    const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000);
 
-    // Tenant A: DB chat config + encrypted secret.
-    await setEncryptedSecret({
-      db,
-      tenantId: tenantA,
-      key: "llm_chat_apikey",
-      value: "sk-tenant-a-chat-key",
-      masterKeyHex: MASTER_KEY,
-      nowEpoch: now,
-    });
-    await db.insert(llmProviderConfigs).values({
-      tenantId: tenantA,
-      purpose: "chat",
-      provider: "openai",
-      model: "gpt-4o-mini",
-      secretRef: "llm_chat_apikey",
-      createdAt: now,
-      updatedAt: now,
-    });
+  // Tenant A: DB chat config + encrypted secret.
+  await setEncryptedSecret({
+    db,
+    tenantId: tenantA,
+    key: "llm_chat_apikey",
+    value: "sk-tenant-a-chat-key",
+    masterKeyHex: MASTER_KEY,
+    nowEpoch: now,
+  });
+  await db.insert(llmProviderConfigs).values({
+    tenantId: tenantA,
+    purpose: "chat",
+    provider: "openai",
+    model: "gpt-4o-mini",
+    secretRef: "llm_chat_apikey",
+    createdAt: now,
+    updatedAt: now,
+  });
 
-    // Tenant A: DB embed config + encrypted secret.
-    await setEncryptedSecret({
-      db,
-      tenantId: tenantA,
-      key: "llm_embed_apikey",
-      value: "sk-tenant-a-embed-key",
-      masterKeyHex: MASTER_KEY,
-      nowEpoch: now,
-    });
-    await db.insert(llmProviderConfigs).values({
-      tenantId: tenantA,
-      purpose: "embed",
-      provider: "openai",
-      model: "text-embedding-3-small",
-      secretRef: "llm_embed_apikey",
-      embedDim: 1536,
-      createdAt: now,
-      updatedAt: now,
-    });
-  },
-  30_000,
-);
+  // Tenant A: DB embed config + encrypted secret.
+  await setEncryptedSecret({
+    db,
+    tenantId: tenantA,
+    key: "llm_embed_apikey",
+    value: "sk-tenant-a-embed-key",
+    masterKeyHex: MASTER_KEY,
+    nowEpoch: now,
+  });
+  await db.insert(llmProviderConfigs).values({
+    tenantId: tenantA,
+    purpose: "embed",
+    provider: "openai",
+    model: "text-embedding-3-small",
+    secretRef: "llm_embed_apikey",
+    embedDim: 1536,
+    createdAt: now,
+    updatedAt: now,
+  });
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -332,9 +325,7 @@ describe("loadTenantLlmConfigs", () => {
 
     expect(tenantsWithPurpose(loaded, "vision")).toEqual([tenantA]);
     expect(tenantsWithPurpose(loaded, "judge")).toEqual([tenantA]);
-    expect(tenantsWithPurpose(loaded, "chat").sort()).toEqual(
-      [tenantA, tenantB].sort(),
-    );
+    expect(tenantsWithPurpose(loaded, "chat").sort()).toEqual([tenantA, tenantB].sort());
     expect(tenantsWithPurpose(loaded, "transcribe")).toEqual([]);
 
     expect(getConfig(loaded, tenantA, "vision")).toMatchObject({

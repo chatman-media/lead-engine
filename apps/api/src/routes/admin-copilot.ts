@@ -200,7 +200,8 @@ export function makeAdminCopilotRoutes(opts: AdminCopilotRoutesOpts): Hono {
       return c.json({ reply: raw.trim(), action: null });
     }
 
-    const reply = typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply : raw.trim();
+    const reply =
+      typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply : raw.trim();
     const action = validateAction(parsed.action);
     return c.json({ reply, action });
   });

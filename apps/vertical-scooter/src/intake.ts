@@ -24,7 +24,15 @@ export const SCOOTER_INTAKE: QuestionnaireSchema = {
       question: "Тип байка / модель",
       kind: "enum",
       required: true,
-      options: ["Honda Click 125", "Honda PCX 150", "Yamaha NMAX 155", "Honda CB500", "Kawasaki Z400", "Любой автомат", "Любой механика"],
+      options: [
+        "Honda Click 125",
+        "Honda PCX 150",
+        "Yamaha NMAX 155",
+        "Honda CB500",
+        "Kawasaki Z400",
+        "Любой автомат",
+        "Любой механика",
+      ],
       hint: "автомат или механика, мощность, бренд",
     },
     {

@@ -26,12 +26,7 @@ export class ExperimentsRepo {
     const [row] = await this.ctx.db
       .select()
       .from(experimentsTable)
-      .where(
-        and(
-          eq(experimentsTable.id, id),
-          eq(experimentsTable.tenantId, this.ctx.tenantId),
-        ),
-      );
+      .where(and(eq(experimentsTable.id, id), eq(experimentsTable.tenantId, this.ctx.tenantId)));
     return (row as ExperimentRow) ?? null;
   }
 

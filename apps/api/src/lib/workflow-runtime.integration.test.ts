@@ -20,7 +20,16 @@ import { autoAdvanceLead, WorkflowRuntime } from "./workflow-runtime.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_workflow_rt_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -62,7 +71,11 @@ afterAll(async () => {
 async function leadAtStage(stageId: number, state: string): Promise<number> {
   const [contact] = await db
     .insert(contacts)
-    .values({ tenantId, displayName: `rt-${Math.random().toString(36).slice(2, 8)}`, createdAt: now })
+    .values({
+      tenantId,
+      displayName: `rt-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: now,
+    })
     .returning({ id: contacts.id });
   const [lead] = await db
     .insert(leads)

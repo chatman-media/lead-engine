@@ -45,7 +45,11 @@ function fmtAmount(cents: number, currency: string): string {
 }
 
 function fmtInvoiceDate(epoch: number): string {
-  return new Date(epoch * 1000).toLocaleDateString("ru", { day: "2-digit", month: "short", year: "numeric" });
+  return new Date(epoch * 1000).toLocaleDateString("ru", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 const INVOICE_STATUS_LABELS: Record<string, string> = {
@@ -88,9 +92,12 @@ export function SaasBilling() {
 
   useEffect(() => {
     setInvoicesLoading(true);
-    saas.listInvoices()
+    saas
+      .listInvoices()
       .then((res) => setInvoices(res.invoices))
-      .catch(() => {/* Stripe не настроен — тихо игнорируем */})
+      .catch(() => {
+        /* Stripe не настроен — тихо игнорируем */
+      })
       .finally(() => setInvoicesLoading(false));
   }, []);
 
@@ -203,7 +210,9 @@ export function SaasBilling() {
                       return (
                         <div key={row.provider} className="py-2">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-medium">{PROVIDER_LABEL[row.provider] ?? row.provider}</span>
+                            <span className="text-sm font-medium">
+                              {PROVIDER_LABEL[row.provider] ?? row.provider}
+                            </span>
                             <span className="text-xs text-muted-foreground font-mono">
                               {fmtNum(row.calls)} · {pct}%
                             </span>
@@ -234,7 +243,9 @@ export function SaasBilling() {
           <CardContent className="p-0">
             {invoicesLoading ? (
               <div className="p-4 space-y-2">
-                {[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-full rounded" />)}
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} className="h-10 w-full rounded" />
+                ))}
               </div>
             ) : (
               <table className="w-full text-sm">
@@ -260,7 +271,10 @@ export function SaasBilling() {
                         {fmtAmount(inv.amount_paid || inv.amount_due, inv.currency)}
                       </td>
                       <td className="px-4 py-2">
-                        <Badge variant={inv.status === "paid" ? "default" : "destructive"} className="text-xs">
+                        <Badge
+                          variant={inv.status === "paid" ? "default" : "destructive"}
+                          className="text-xs"
+                        >
                           {INVOICE_STATUS_LABELS[inv.status] ?? inv.status}
                         </Badge>
                       </td>

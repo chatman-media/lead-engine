@@ -45,8 +45,7 @@ let adminId = 0;
 
 // Fake fetch для Telegram (см. admin-channels test).
 const fakeTelegramFetch = (async (input: string | URL | Request): Promise<Response> => {
-  const url =
-    typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const m = url.match(/\/bot([^/]+)\/getMe/);
   const tokenStr = m?.[1] ?? "";
   void TelegramApiError; // suppress unused
@@ -59,56 +58,55 @@ const fakeTelegramFetch = (async (input: string | URL | Request): Promise<Respon
   return new Response(
     JSON.stringify({
       ok: true,
-      result: { id: 1, is_bot: true, first_name: "Audit Bot", username: `auditbot_${tokenStr.slice(-4)}` },
+      result: {
+        id: 1,
+        is_bot: true,
+        first_name: "Audit Bot",
+        username: `auditbot_${tokenStr.slice(-4)}`,
+      },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
 }) as unknown as typeof fetch;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminAuditRoutes({ db }));
-    app.route(
-      "/",
-      makeAdminLlmConfigsRoutes({ db, masterKeyHex: MASTER_KEY }),
-    );
-    app.route(
-      "/",
-      makeAdminChannelsRoutes({
-        db,
-        masterKeyHex: MASTER_KEY,
-        fetchImpl: fakeTelegramFetch,
-      }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminAuditRoutes({ db }));
+  app.route("/", makeAdminLlmConfigsRoutes({ db, masterKeyHex: MASTER_KEY }));
+  app.route(
+    "/",
+    makeAdminChannelsRoutes({
+      db,
+      masterKeyHex: MASTER_KEY,
+      fetchImpl: fakeTelegramFetch,
+    }),
+  );
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "audit@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as {
-      token: string;
-      admin: { id: number; tenantId: number };
-    };
-    token = sba.token;
-    tenantId = sba.admin.tenantId;
-    adminId = sba.admin.id;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "audit@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as {
+    token: string;
+    admin: { id: number; tenantId: number };
+  };
+  token = sba.token;
+  tenantId = sba.admin.tenantId;
+  adminId = sba.admin.id;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -155,10 +153,7 @@ describe("admin-audit", () => {
     expect(res.status).toBe(200);
 
     // Verify audit row.
-    const rows = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.tenantId, tenantId));
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tenantId, tenantId));
     const llmAudit = rows.find((r) => r.action === "llm_config.create");
     expect(llmAudit).toBeDefined();
     expect(llmAudit!.targetKind).toBe("llm_provider_config");
@@ -186,10 +181,7 @@ describe("admin-audit", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.tenantId, tenantId));
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tenantId, tenantId));
     expect(rows.find((r) => r.action === "llm_config.update")).toBeDefined();
   });
 
@@ -203,10 +195,7 @@ describe("admin-audit", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.tenantId, tenantId));
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tenantId, tenantId));
     const chanAudit = rows.find((r) => r.action === "channel.create");
     expect(chanAudit).toBeDefined();
     expect(chanAudit!.targetKind).toBe("channel");
@@ -258,7 +247,9 @@ describe("admin-audit", () => {
     if (!sql) return;
     const list = await (await authReq("/api/admin/audit-log")).json();
     // biome-ignore lint/suspicious/noExplicitAny: test
-    const chanCreate = (list as any).items.find((i: { action: string }) => i.action === "channel.create");
+    const chanCreate = (list as any).items.find(
+      (i: { action: string }) => i.action === "channel.create",
+    );
     const chanId = chanCreate?.targetId;
     if (!chanId) return;
     const res = await authReq(`/api/admin/channels/${chanId}`, {
@@ -266,10 +257,7 @@ describe("admin-audit", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.tenantId, tenantId));
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tenantId, tenantId));
     expect(rows.find((r) => r.action === "channel.delete")).toBeDefined();
   });
 
@@ -277,10 +265,7 @@ describe("admin-audit", () => {
     if (!sql) return;
     const res = await authReq("/api/admin/llm-configs/chat", { method: "DELETE" });
     expect(res.status).toBe(200);
-    const rows = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.tenantId, tenantId));
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tenantId, tenantId));
     expect(rows.find((r) => r.action === "llm_config.delete")).toBeDefined();
   });
 

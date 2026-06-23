@@ -1,18 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
-import {
-  applyEditsToStyle,
-  parseProposal,
-  proposeStyleEdits,
-} from "./coach.ts";
+import { applyEditsToStyle, parseProposal, proposeStyleEdits } from "./coach.ts";
 import type { ISelfPlayMatchesRepo } from "./store.ts";
 import { STYLES } from "./styles/index.ts";
 import { StyleSchema } from "./types.ts";
 
 const baseStyle = STYLES[0]; // marina-prime
 if (!baseStyle) throw new Error("missing base style fixture");
-const chat = (t: string): ChatClient =>
-  ({ complete: async () => t }) as unknown as ChatClient;
+const chat = (t: string): ChatClient => ({ complete: async () => t }) as unknown as ChatClient;
 const chatCapture = (t: string, calls: ChatMessage[][]): ChatClient =>
   ({
     complete: async (messages: ChatMessage[]) => {
@@ -72,9 +67,7 @@ describe("parseProposal", () => {
     const p = parseProposal(
       '{"summary":"S","edits":{"fewshot_add":[{"user":"u","assistant":"a","stage":"close"},{"user":"u2","assistant":2}],"skills_detach":["mirroring",7]},"rationale":[]}',
     );
-    expect(p.edits.fewshot_add).toEqual([
-      { user: "u", assistant: "a", stage: "close" },
-    ]);
+    expect(p.edits.fewshot_add).toEqual([{ user: "u", assistant: "a", stage: "close" }]);
     expect(p.edits.skills_detach).toEqual(["mirroring"]);
   });
 });
@@ -159,9 +152,7 @@ describe("proposeStyleEdits", () => {
     const p = await proposeStyleEdits({
       style: baseStyle,
       matchesRepo: fakeMatches([{ id: 1 }]),
-      chat: chat(
-        '{"summary":"diag","edits":{"voice_tone":"x"},"rationale":[]}',
-      ),
+      chat: chat('{"summary":"diag","edits":{"voice_tone":"x"},"rationale":[]}'),
     });
     expect(p.summary).toBe("diag");
   });

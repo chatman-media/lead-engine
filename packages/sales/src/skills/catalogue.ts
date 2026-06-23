@@ -23,13 +23,7 @@ import { FUNNEL_STAGES, type FunnelStage } from "../types.ts";
  * is immutable — it's referenced from style_skills join.
  */
 
-export const SKILL_FAMILIES = [
-  "cialdini",
-  "voss",
-  "nlp",
-  "sales",
-  "custom",
-] as const;
+export const SKILL_FAMILIES = ["cialdini", "voss", "nlp", "sales", "custom"] as const;
 export type SkillFamily = (typeof SKILL_FAMILIES)[number];
 
 export const SKILL_INTENTS = [
@@ -47,10 +41,7 @@ export type SkillIntent = (typeof SKILL_INTENTS)[number];
 export const SkillSchema = z.object({
   slug: z
     .string()
-    .regex(
-      /^[a-z][a-z0-9-]*$/,
-      "slug must be lowercase kebab-case starting with a letter",
-    ),
+    .regex(/^[a-z][a-z0-9-]*$/, "slug must be lowercase kebab-case starting with a letter"),
   family: z.enum(SKILL_FAMILIES),
   displayName: z.string().min(1),
   description: z.string().min(1),
@@ -160,8 +151,7 @@ export const SKILL_CATALOGUE: readonly Skill[] = [
     slug: "tactical-empathy",
     family: "voss",
     displayName: "Tactical empathy — label emotion",
-    description:
-      "'Звучит, что ты переживаешь о...' — называние эмоции снижает её на 30-40%.",
+    description: "'Звучит, что ты переживаешь о...' — называние эмоции снижает её на 30-40%.",
     promptFragment:
       "Если кандидат тревожится / сомневается — назови эмоцию вслух ('звучит, что ты переживаешь о безопасности' / 'кажется, тебе важна стабильность'). НЕ преувеличивай и НЕ объясняй её — просто констатируй.",
     applicableStages: stages("objection"),
@@ -309,8 +299,7 @@ export const SKILL_CATALOGUE: readonly Skill[] = [
     slug: "humor-disarm",
     family: "custom",
     displayName: "Humor — light disarm",
-    description:
-      "Лёгкая самоирония / шутка снимает напряжение, особенно при тяжёлом возражении.",
+    description: "Лёгкая самоирония / шутка снимает напряжение, особенно при тяжёлом возражении.",
     promptFragment:
       "Когда диалог стал тяжёлым (страхи, сомнения, тяжёлые вопросы) — лёгкая самоирония помогает разрядить ('ну да, звучит как спам в директе 😄'). Не через раз, не сарказм — мягкое признание абсурда ситуации.",
     applicableStages: stages("opener", "objection"),

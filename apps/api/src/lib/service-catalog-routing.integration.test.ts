@@ -155,12 +155,24 @@ beforeAll(async () => {
   const body = (await res.json()) as { admin: { tenantId: number } };
   tenantId = body.admin.tenantId;
 
-  const exchange = await applyFunnelStages(db as Db, tenantId, SEED_TEMPLATES.exchange!, "exchange", {
-    targetSlug: "exchange",
-  });
-  const realEstate = await applyFunnelStages(db as Db, tenantId, SEED_TEMPLATES.real_estate!, "real_estate", {
-    targetSlug: "real_estate",
-  });
+  const exchange = await applyFunnelStages(
+    db as Db,
+    tenantId,
+    SEED_TEMPLATES.exchange!,
+    "exchange",
+    {
+      targetSlug: "exchange",
+    },
+  );
+  const realEstate = await applyFunnelStages(
+    db as Db,
+    tenantId,
+    SEED_TEMPLATES.real_estate!,
+    "real_estate",
+    {
+      targetSlug: "real_estate",
+    },
+  );
   exchangeFunnelId = exchange.funnelId;
   realEstateFunnelId = realEstate.funnelId;
 }, 30_000);
@@ -255,8 +267,12 @@ describe("field-extractor service catalog routing", () => {
 
     const rows = await allLeads(contactId);
     expect(rows.length).toBe(2);
-    expect(rows.map((row) => row.stageDefinitionId)).toContain(await firstStageId(exchangeFunnelId));
-    expect(rows.map((row) => row.stageDefinitionId)).toContain(await firstStageId(realEstateFunnelId));
+    expect(rows.map((row) => row.stageDefinitionId)).toContain(
+      await firstStageId(exchangeFunnelId),
+    );
+    expect(rows.map((row) => row.stageDefinitionId)).toContain(
+      await firstStageId(realEstateFunnelId),
+    );
   });
 
   it("manual catalog route creates a default-funnel lead with auditable route context", async () => {

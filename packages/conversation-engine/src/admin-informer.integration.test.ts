@@ -24,7 +24,13 @@ import type { OpsEmailSender, OpsTelegramSender } from "./ops-alerts.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_informer_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "storage", "migrations");
+const migrationsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -51,7 +57,15 @@ function makeInformer(
   email: OpsEmailSender,
   realtime?: ConstructorParameters<typeof AdminInformer>[0]["realtime"],
 ) {
-  return new AdminInformer({ db, botToken: "", appUrl: "http://x", telegram: tg, email, cooldownSec: 3600, realtime });
+  return new AdminInformer({
+    db,
+    botToken: "",
+    appUrl: "http://x",
+    telegram: tg,
+    email,
+    cooldownSec: 3600,
+    realtime,
+  });
 }
 
 const ev = (tenantId: number, over: Partial<InformerEvent>): InformerEvent => ({
@@ -76,7 +90,9 @@ async function lastRow(tenantId: number, dedupKey: string) {
   const rows = await db
     .select()
     .from(adminNotifications)
-    .where(and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.dedupKey, dedupKey)))
+    .where(
+      and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.dedupKey, dedupKey)),
+    )
     .orderBy(desc(adminNotifications.id))
     .limit(1);
   return rows[0];
@@ -86,7 +102,9 @@ async function rowCount(tenantId: number, dedupKey: string): Promise<number> {
   const rows = await db
     .select()
     .from(adminNotifications)
-    .where(and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.dedupKey, dedupKey)));
+    .where(
+      and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.dedupKey, dedupKey)),
+    );
   return rows.length;
 }
 
@@ -103,21 +121,38 @@ beforeAll(async () => {
   enabled = true;
 
   const now = Math.floor(Date.now() / 1000);
-  const [t1] = await db.insert(schema.tenants).values({ slug: `inf-w-${now}` }).returning({ id: schema.tenants.id });
-  const [t2] = await db.insert(schema.tenants).values({ slug: `inf-n-${now}` }).returning({ id: schema.tenants.id });
+  const [t1] = await db
+    .insert(schema.tenants)
+    .values({ slug: `inf-w-${now}` })
+    .returning({ id: schema.tenants.id });
+  const [t2] = await db
+    .insert(schema.tenants)
+    .values({ slug: `inf-n-${now}` })
+    .returning({ id: schema.tenants.id });
   tenantWith = t1!.id;
   tenantNoTg = t2!.id;
 
   const [a1] = await db
     .insert(admins)
-    .values({ tenantId: tenantWith, email: `owner-${now}@test.io`, passwordHash: "x", role: "superadmin" })
+    .values({
+      tenantId: tenantWith,
+      email: `owner-${now}@test.io`,
+      passwordHash: "x",
+      role: "superadmin",
+    })
     .returning({ id: admins.id });
   ownerAdminId = a1!.id;
   await db.insert(admins).values({
-    tenantId: tenantNoTg, email: `owner2-${now}@test.io`, passwordHash: "x", role: "superadmin",
+    tenantId: tenantNoTg,
+    email: `owner2-${now}@test.io`,
+    passwordHash: "x",
+    role: "superadmin",
   });
   await db.insert(operatorSettings).values({
-    adminId: ownerAdminId, tenantId: tenantWith, telegramChatId: "555", notifyOnAssignedOnly: false,
+    adminId: ownerAdminId,
+    tenantId: tenantWith,
+    telegramChatId: "555",
+    notifyOnAssignedOnly: false,
   });
 }, 30_000);
 
@@ -141,7 +176,9 @@ describe("AdminInformer.emit", () => {
     if (!enabled) return;
     await setOwner(tenantWith, { informerLevel: "important" });
     const tg = new FakeTelegram();
-    await makeInformer(tg, new FakeEmail()).emit(ev(tenantWith, { severity: "info", dedupKey: "inf" }));
+    await makeInformer(tg, new FakeEmail()).emit(
+      ev(tenantWith, { severity: "info", dedupKey: "inf" }),
+    );
     expect(tg.sends.length).toBe(0);
     const row = await lastRow(tenantWith, "inf");
     expect(row).toBeDefined();
@@ -152,7 +189,9 @@ describe("AdminInformer.emit", () => {
     if (!enabled) return;
     await setOwner(tenantWith, { informerLevel: "all" });
     const tg = new FakeTelegram();
-    await makeInformer(tg, new FakeEmail()).emit(ev(tenantWith, { severity: "info", dedupKey: "all1" }));
+    await makeInformer(tg, new FakeEmail()).emit(
+      ev(tenantWith, { severity: "info", dedupKey: "all1" }),
+    );
     expect(tg.sends.length).toBe(1);
   });
 
@@ -172,7 +211,9 @@ describe("AdminInformer.emit", () => {
     if (!enabled) return;
     await setOwner(tenantWith, { informerLevel: "all", informerTopics: '{"orders":false}' });
     const tg = new FakeTelegram();
-    await makeInformer(tg, new FakeEmail()).emit(ev(tenantWith, { topic: "orders", dedupKey: "topoff" }));
+    await makeInformer(tg, new FakeEmail()).emit(
+      ev(tenantWith, { topic: "orders", dedupKey: "topoff" }),
+    );
     expect(tg.sends.length).toBe(0);
     expect(await rowCount(tenantWith, "topoff")).toBe(0);
   });
@@ -182,7 +223,9 @@ describe("AdminInformer.emit", () => {
     const future = Math.floor(Date.now() / 1000) + 3600;
     await setOwner(tenantWith, { informerLevel: "important", informerMutedUntil: future });
     const tg = new FakeTelegram();
-    await makeInformer(tg, new FakeEmail()).emit(ev(tenantWith, { severity: "important", dedupKey: "muted" }));
+    await makeInformer(tg, new FakeEmail()).emit(
+      ev(tenantWith, { severity: "important", dedupKey: "muted" }),
+    );
     expect(tg.sends.length).toBe(0);
     const row = await lastRow(tenantWith, "muted");
     expect(row?.deliveredAt).toBeNull();
@@ -218,7 +261,9 @@ describe("AdminInformer.emit", () => {
     if (!enabled) return;
     const tg = new FakeTelegram();
     const email = new FakeEmail();
-    await makeInformer(tg, email).emit(ev(tenantNoTg, { severity: "critical", dedupKey: "n-crit" }));
+    await makeInformer(tg, email).emit(
+      ev(tenantNoTg, { severity: "critical", dedupKey: "n-crit" }),
+    );
     expect(tg.sends.length).toBe(0);
     expect(email.sends.length).toBe(1);
     expect(await rowCount(tenantNoTg, "n-crit")).toBe(1);

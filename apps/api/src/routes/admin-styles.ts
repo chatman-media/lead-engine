@@ -74,10 +74,7 @@ ${samples}`;
 
     let raw: string;
     try {
-      raw = await client.complete(
-        [{ role: "user", content: prompt }],
-        { numPredict: 300 },
-      );
+      raw = await client.complete([{ role: "user", content: prompt }], { numPredict: 300 });
     } catch (err) {
       return c.json(
         { error: `LLM error: ${err instanceof Error ? err.message : String(err)}` },
@@ -206,7 +203,10 @@ ${description}`;
     const result = StyleSchema.safeParse(parsedJson);
     if (!result.success) {
       return c.json(
-        { error: "generated style failed schema validation", issues: result.error.issues.slice(0, 5) },
+        {
+          error: "generated style failed schema validation",
+          issues: result.error.issues.slice(0, 5),
+        },
         502,
       );
     }

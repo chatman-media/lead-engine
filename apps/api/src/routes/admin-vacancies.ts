@@ -125,9 +125,7 @@ export function makeAdminVacanciesRoutes(opts: AdminVacanciesRoutesOpts): Hono {
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
 
     await withTenant(opts.db, tenantId, async (tx) =>
-      tx
-        .delete(vacancies)
-        .where(and(eq(vacancies.id, id), eq(vacancies.tenantId, tenantId))),
+      tx.delete(vacancies).where(and(eq(vacancies.id, id), eq(vacancies.tenantId, tenantId))),
     );
 
     await recordAudit(opts.db, {
