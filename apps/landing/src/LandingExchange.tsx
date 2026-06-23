@@ -25,9 +25,16 @@ const CONTENT = {
         { from: "user" as const, text: "Хочу обменять 500 USDT на THB" },
         { from: "bot" as const, text: "Отлично! Какая сеть? TRC20, ERC20 или BEP20?" },
         { from: "user" as const, text: "TRC20" },
-        { from: "bot" as const, text: "Курс сегодня: 1 USDT = 33.2 THB. Итого 16 600 THB. Подтверждаете?" },
+        {
+          from: "bot" as const,
+          text: "Курс сегодня: 1 USDT = 33.2 THB. Итого 16 600 THB. Подтверждаете?",
+        },
         { from: "user" as const, text: "Да, подтверждаю" },
-        { from: "bot" as const, text: "Переводите 500 USDT на адрес: TXxxxxx...xxxx 👇", cta: true },
+        {
+          from: "bot" as const,
+          text: "Переводите 500 USDT на адрес: TXxxxxx...xxxx 👇",
+          cta: true,
+        },
       ],
       notify: "🔔 Оплата подтверждена — оператор отправляет QR для ATM",
       ctaLabel: "📋 Реквизиты для перевода →",
@@ -57,38 +64,80 @@ const CONTENT = {
         title: "Понимание",
         accent: "#6366f1",
         steps: [
-          { title: "Telegram с менеджер-аккаунта", desc: "Бот отвечает клиентам от лица менеджера — мгновенно, 24/7." },
-          { title: "Распознаёт запрос", desc: "Обмен, вопрос про курс, трансфер или зелёный коридор — каждый интент уходит в свою воронку." },
-          { title: "Направление и сумма", desc: "Уточняет актив, сеть (TRC20/ERC20) и сумму обмена по одному вопросу." },
+          {
+            title: "Telegram с менеджер-аккаунта",
+            desc: "Бот отвечает клиентам от лица менеджера — мгновенно, 24/7.",
+          },
+          {
+            title: "Распознаёт запрос",
+            desc: "Обмен, вопрос про курс, трансфер или зелёный коридор — каждый интент уходит в свою воронку.",
+          },
+          {
+            title: "Направление и сумма",
+            desc: "Уточняет актив, сеть (TRC20/ERC20) и сумму обмена по одному вопросу.",
+          },
         ],
       },
       {
         title: "Курс и проверка",
         accent: "#f59e0b",
         steps: [
-          { title: "Курс по вашей формуле", desc: "Считает от базового рыночного курса с вашими девиациями по диапазонам сумм — и показывает итог к получению." },
-          { title: "Верификация", desc: "Проверяет KYC-статус; новых клиентов отправляет на быструю верификацию и возвращает к обмену." },
-          { title: "Риск-чек", desc: "Перед созданием заявки оценивает риск; сомнительное — оператору." },
+          {
+            title: "Курс по вашей формуле",
+            desc: "Считает от базового рыночного курса с вашими девиациями по диапазонам сумм — и показывает итог к получению.",
+          },
+          {
+            title: "Верификация",
+            desc: "Проверяет KYC-статус; новых клиентов отправляет на быструю верификацию и возвращает к обмену.",
+          },
+          {
+            title: "Риск-чек",
+            desc: "Перед созданием заявки оценивает риск; сомнительное — оператору.",
+          },
         ],
       },
       {
         title: "Сделка",
         accent: "#10b981",
         steps: [
-          { title: "Заявка с фиксацией курса", desc: "Создаёт заявку, фиксирует котировку с ограниченным сроком действия." },
-          { title: "Реквизиты по API", desc: "Получает реквизиты от партнёров по API и отправляет клиенту с TTL." },
-          { title: "Квитанция и банк", desc: "Просит чек, проверяет его и автоопределяет банк-отправитель." },
-          { title: "Выдача", desc: "После подтверждения оплаты — наличные в офисе, банкомат без карты или перевод на местный банк." },
+          {
+            title: "Заявка с фиксацией курса",
+            desc: "Создаёт заявку, фиксирует котировку с ограниченным сроком действия.",
+          },
+          {
+            title: "Реквизиты по API",
+            desc: "Получает реквизиты от партнёров по API и отправляет клиенту с TTL.",
+          },
+          {
+            title: "Квитанция и банк",
+            desc: "Просит чек, проверяет его и автоопределяет банк-отправитель.",
+          },
+          {
+            title: "Выдача",
+            desc: "После подтверждения оплаты — наличные в офисе, банкомат без карты или перевод на местный банк.",
+          },
         ],
       },
       {
         title: "Контроль и рост",
         accent: "#06b6d4",
         steps: [
-          { title: "CRM оборотов", desc: "Сколько всего поменяно — по дням, направлениям и клиентам." },
-          { title: "CRM каждого обмена", desc: "Кто менял, Telegram ID, ID верификации, время, сумма, направление, данные квитанции." },
-          { title: "Напоминания", desc: "Начал обмен и пропал — бот напомнит сам, до автозакрытия заявки." },
-          { title: "Кросс-сейл по прилёту", desc: "«Прилетаю 15-го» — бот предложит трансфер и зелёный коридор." },
+          {
+            title: "CRM оборотов",
+            desc: "Сколько всего поменяно — по дням, направлениям и клиентам.",
+          },
+          {
+            title: "CRM каждого обмена",
+            desc: "Кто менял, Telegram ID, ID верификации, время, сумма, направление, данные квитанции.",
+          },
+          {
+            title: "Напоминания",
+            desc: "Начал обмен и пропал — бот напомнит сам, до автозакрытия заявки.",
+          },
+          {
+            title: "Кросс-сейл по прилёту",
+            desc: "«Прилетаю 15-го» — бот предложит трансфер и зелёный коридор.",
+          },
         ],
       },
     ],
@@ -179,7 +228,11 @@ const CONTENT = {
       },
     ],
     faqDemoBtn: "Записаться на демо →",
-    footer: { privacy: "Политика конфиденциальности", terms: "Условия использования", copy: "© 2026 exchanges·agency" },
+    footer: {
+      privacy: "Политика конфиденциальности",
+      terms: "Условия использования",
+      copy: "© 2026 exchanges·agency",
+    },
   },
   en: {
     nav: { cta: "Try Free" },
@@ -196,7 +249,10 @@ const CONTENT = {
         { from: "user" as const, text: "I want to exchange 500 USDT to THB" },
         { from: "bot" as const, text: "Great! Which network? TRC20, ERC20 or BEP20?" },
         { from: "user" as const, text: "TRC20" },
-        { from: "bot" as const, text: "Today's rate: 1 USDT = 33.2 THB. Total: 16,600 THB. Confirm?" },
+        {
+          from: "bot" as const,
+          text: "Today's rate: 1 USDT = 33.2 THB. Total: 16,600 THB. Confirm?",
+        },
         { from: "user" as const, text: "Yes, confirmed" },
         { from: "bot" as const, text: "Send 500 USDT to address: TXxxxxx...xxxx 👇", cta: true },
       ],
@@ -228,28 +284,58 @@ const CONTENT = {
         title: "Understanding",
         accent: "#6366f1",
         steps: [
-          { title: "Telegram manager account", desc: "The bot replies on behalf of your manager — instantly, 24/7." },
-          { title: "Detects the intent", desc: "Exchange, rate question, airport transfer or green corridor — each intent lands in its own funnel." },
-          { title: "Direction & amount", desc: "Clarifies asset, network (TRC20/ERC20) and amount, one question at a time." },
+          {
+            title: "Telegram manager account",
+            desc: "The bot replies on behalf of your manager — instantly, 24/7.",
+          },
+          {
+            title: "Detects the intent",
+            desc: "Exchange, rate question, airport transfer or green corridor — each intent lands in its own funnel.",
+          },
+          {
+            title: "Direction & amount",
+            desc: "Clarifies asset, network (TRC20/ERC20) and amount, one question at a time.",
+          },
         ],
       },
       {
         title: "Quote & checks",
         accent: "#f59e0b",
         steps: [
-          { title: "Rate by your formula", desc: "Computed from the live market base rate with your tiered deviations — final payout shown to the client." },
-          { title: "Verification", desc: "Checks KYC status; first-timers are routed through quick verification and back to the exchange." },
-          { title: "Risk screening", desc: "Every order is risk-checked before creation; anything suspicious goes to the operator." },
+          {
+            title: "Rate by your formula",
+            desc: "Computed from the live market base rate with your tiered deviations — final payout shown to the client.",
+          },
+          {
+            title: "Verification",
+            desc: "Checks KYC status; first-timers are routed through quick verification and back to the exchange.",
+          },
+          {
+            title: "Risk screening",
+            desc: "Every order is risk-checked before creation; anything suspicious goes to the operator.",
+          },
         ],
       },
       {
         title: "The deal",
         accent: "#10b981",
         steps: [
-          { title: "Order with locked rate", desc: "Creates the order and locks the quote with a TTL." },
-          { title: "Requisites via API", desc: "Fetches payment details from partners via API and sends them with an expiry." },
-          { title: "Receipt & bank", desc: "Asks for the receipt, verifies it and auto-detects the sending bank." },
-          { title: "Payout", desc: "After payment confirmation — office cash, cardless ATM or local bank transfer." },
+          {
+            title: "Order with locked rate",
+            desc: "Creates the order and locks the quote with a TTL.",
+          },
+          {
+            title: "Requisites via API",
+            desc: "Fetches payment details from partners via API and sends them with an expiry.",
+          },
+          {
+            title: "Receipt & bank",
+            desc: "Asks for the receipt, verifies it and auto-detects the sending bank.",
+          },
+          {
+            title: "Payout",
+            desc: "After payment confirmation — office cash, cardless ATM or local bank transfer.",
+          },
         ],
       },
       {
@@ -257,9 +343,18 @@ const CONTENT = {
         accent: "#06b6d4",
         steps: [
           { title: "Turnover CRM", desc: "Total exchanged — by day, direction and client." },
-          { title: "Per-deal CRM", desc: "Who exchanged, Telegram ID, verification ID, time, amount, direction, receipt data." },
-          { title: "Reminders", desc: "Started an exchange and went quiet? The bot follows up before the order auto-closes." },
-          { title: "Arrival cross-sell", desc: "“Landing on the 15th” — the bot offers a transfer and the green corridor." },
+          {
+            title: "Per-deal CRM",
+            desc: "Who exchanged, Telegram ID, verification ID, time, amount, direction, receipt data.",
+          },
+          {
+            title: "Reminders",
+            desc: "Started an exchange and went quiet? The bot follows up before the order auto-closes.",
+          },
+          {
+            title: "Arrival cross-sell",
+            desc: "“Landing on the 15th” — the bot offers a transfer and the green corridor.",
+          },
         ],
       },
     ],
@@ -374,8 +469,12 @@ export default function LandingExchange() {
               </h1>
               <p className="hero-sub">{c.hero.sub}</p>
               <div className="hero-actions">
-                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">{c.hero.ctaPrimary}</a>
-                <a href="/demo" className="btn btn-secondary btn-lg">{c.hero.ctaSecondary}</a>
+                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">
+                  {c.hero.ctaPrimary}
+                </a>
+                <a href="/demo" className="btn btn-secondary btn-lg">
+                  {c.hero.ctaSecondary}
+                </a>
               </div>
               <div className="hero-trust">{c.hero.trust}</div>
             </div>
@@ -428,9 +527,7 @@ export default function LandingExchange() {
                   >
                     <div className="demo-card-top">
                       <span className="demo-card-who">
-                        {c.workflowPhases
-                          .slice(0, pIdx)
-                          .reduce((n, p) => n + p.steps.length, 0) +
+                        {c.workflowPhases.slice(0, pIdx).reduce((n, p) => n + p.steps.length, 0) +
                           sIdx +
                           1}
                         . {step.title}

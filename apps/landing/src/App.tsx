@@ -42,7 +42,10 @@ const CONTENT = {
         { from: "user" as const, text: "Здравствуйте, интересует работа в Дубае" },
         { from: "bot" as const, text: "Привет! Расскажите — какую специальность рассматриваете?" },
         { from: "user" as const, text: "Строитель, есть 5 лет опыта" },
-        { from: "bot" as const, text: "Отлично! Зарплата от $1 200/мес. Готовы к переезду в течение 2 месяцев?" },
+        {
+          from: "bot" as const,
+          text: "Отлично! Зарплата от $1 200/мес. Готовы к переезду в течение 2 месяцев?",
+        },
         { from: "user" as const, text: "Да, готов" },
         { from: "bot" as const, text: "Заполните анкету — займёт 5 минут 👇", cta: true },
       ],
@@ -95,7 +98,8 @@ const CONTENT = {
     ],
     pricingLabel: "Тарифы",
     pricingTitle: "Прозрачные цены без скрытых платежей",
-    pricingNote: "Все тарифы включают: BYOK (ваш OpenAI ключ) · Operator handoff · Telegram + WhatsApp + Web chat",
+    pricingNote:
+      "Все тарифы включают: BYOK (ваш OpenAI ключ) · Operator handoff · Telegram + WhatsApp + Web chat",
     faqLabel: "Частые вопросы",
     faqTitle: "Ответы на главные вопросы",
     faq: [
@@ -122,7 +126,11 @@ const CONTENT = {
       },
     ],
     faqDemoBtn: "Записаться на демо →",
-    footer: { privacy: "Политика конфиденциальности", terms: "Условия использования", copy: "© 2026 Lead Engine" },
+    footer: {
+      privacy: "Политика конфиденциальности",
+      terms: "Условия использования",
+      copy: "© 2026 Lead Engine",
+    },
   },
   en: {
     nav: { cta: "Try Free" },
@@ -139,7 +147,10 @@ const CONTENT = {
         { from: "user" as const, text: "Hi, I'm interested in work in Dubai" },
         { from: "bot" as const, text: "Hello! What position are you considering?" },
         { from: "user" as const, text: "Construction worker, 5 years experience" },
-        { from: "bot" as const, text: "Great! Salary from $1,200/mo. Can you relocate within 2 months?" },
+        {
+          from: "bot" as const,
+          text: "Great! Salary from $1,200/mo. Can you relocate within 2 months?",
+        },
         { from: "user" as const, text: "Yes, I can" },
         { from: "bot" as const, text: "Fill in the intake form — takes 5 minutes 👇", cta: true },
       ],
@@ -192,7 +203,8 @@ const CONTENT = {
     ],
     pricingLabel: "Pricing",
     pricingTitle: "Transparent pricing, no hidden fees",
-    pricingNote: "All plans include: BYOK (your OpenAI key) · Operator handoff · Telegram + WhatsApp + Web chat",
+    pricingNote:
+      "All plans include: BYOK (your OpenAI key) · Operator handoff · Telegram + WhatsApp + Web chat",
     faqLabel: "FAQ",
     faqTitle: "Common questions, straight answers",
     faq: [
@@ -244,8 +256,12 @@ function LandingRecruit() {
               </h1>
               <p className="hero-sub">{c.hero.sub}</p>
               <div className="hero-actions">
-                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">{c.hero.ctaPrimary}</a>
-                <a href={DEMO_URL} className="btn btn-secondary btn-lg">{c.hero.ctaSecondary}</a>
+                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">
+                  {c.hero.ctaPrimary}
+                </a>
+                <a href={DEMO_URL} className="btn btn-secondary btn-lg">
+                  {c.hero.ctaSecondary}
+                </a>
               </div>
               <div className="hero-trust">{c.hero.trust}</div>
             </div>
@@ -343,22 +359,46 @@ export default function App() {
         path="/demo/workflows/exchange/operator-handoff"
         element={<DemoExchangeWorkflow scenarioKey="operator-handoff" />}
       />
-      <Route path="/demo/workflows/transfer" element={<DemoServiceWorkflow workflowKey="transfer" />} />
-      <Route path="/demo/workflows/cleaning" element={<DemoServiceWorkflow workflowKey="cleaning" />} />
-      <Route path="/demo/workflows/massage" element={<DemoServiceWorkflow workflowKey="massage" />} />
+      <Route
+        path="/demo/workflows/transfer"
+        element={<DemoServiceWorkflow workflowKey="transfer" />}
+      />
+      <Route
+        path="/demo/workflows/cleaning"
+        element={<DemoServiceWorkflow workflowKey="cleaning" />}
+      />
+      <Route
+        path="/demo/workflows/massage"
+        element={<DemoServiceWorkflow workflowKey="massage" />}
+      />
       <Route path="/demo/workflows/beauty" element={<DemoServiceWorkflow workflowKey="beauty" />} />
-      <Route path="/demo/workflows/housing" element={<DemoServiceWorkflow workflowKey="housing" />} />
+      <Route
+        path="/demo/workflows/housing"
+        element={<DemoServiceWorkflow workflowKey="housing" />}
+      />
       <Route path="/demo/workflows/custom" element={<DemoServiceWorkflow workflowKey="custom" />} />
       <Route path="/demo/verticals" element={<DemoVerticals />} />
-      <Route path="/demo/verticals/recruitment" element={<DemoVerticals verticalKey="recruitment" />} />
-      <Route path="/demo/verticals/real-estate" element={<DemoVerticals verticalKey="real-estate" />} />
+      <Route
+        path="/demo/verticals/recruitment"
+        element={<DemoVerticals verticalKey="recruitment" />}
+      />
+      <Route
+        path="/demo/verticals/real-estate"
+        element={<DemoVerticals verticalKey="real-estate" />}
+      />
       <Route path="/demo/verticals/visa" element={<DemoVerticals verticalKey="visa" />} />
       <Route path="/demo/verticals/scooter" element={<DemoVerticals verticalKey="scooter" />} />
       <Route path="/demo/verticals/modeling" element={<DemoVerticals verticalKey="modeling" />} />
       <Route path="/demo/verticals/video" element={<DemoVerticals verticalKey="video" />} />
       <Route path="/demo/verticals/dental" element={<DemoVerticals verticalKey="dental" />} />
-      <Route path="/demo/verticals/auto-service" element={<DemoVerticals verticalKey="auto-service" />} />
-      <Route path="/demo/verticals/online-school" element={<DemoVerticals verticalKey="online-school" />} />
+      <Route
+        path="/demo/verticals/auto-service"
+        element={<DemoVerticals verticalKey="auto-service" />}
+      />
+      <Route
+        path="/demo/verticals/online-school"
+        element={<DemoVerticals verticalKey="online-school" />}
+      />
       <Route path="/demo/services" element={<DemoConcierge />} />
       <Route path="/demo/concierge" element={<DemoConcierge />} />
       <Route path="/demo/visa" element={<DemoVisa />} />

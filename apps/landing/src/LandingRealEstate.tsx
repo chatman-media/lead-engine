@@ -26,11 +26,21 @@ const CONTENT = {
     tg: {
       messages: [
         { from: "user" as const, text: "Интересует квартира в Москве, бюджет 10–15 млн" },
-        { from: "bot" as const, text: "Отлично! Какой район предпочитаете — центр, ЗАО, или рассматриваете любой?" },
+        {
+          from: "bot" as const,
+          text: "Отлично! Какой район предпочитаете — центр, ЗАО, или рассматриваете любой?",
+        },
         { from: "user" as const, text: "Ближе к центру, 2-3 комнаты" },
-        { from: "bot" as const, text: "У нас есть 3 варианта под ваш запрос. Когда удобно посмотреть — в будни или выходные?" },
+        {
+          from: "bot" as const,
+          text: "У нас есть 3 варианта под ваш запрос. Когда удобно посмотреть — в будни или выходные?",
+        },
         { from: "user" as const, text: "В субботу после 13:00" },
-        { from: "bot" as const, text: "Записал на субботу, 14:00. Агент подтвердит детали 👇", cta: true },
+        {
+          from: "bot" as const,
+          text: "Записал на субботу, 14:00. Агент подтвердит детали 👇",
+          cta: true,
+        },
       ],
       notify: "🔔 Горячий покупатель передан агенту с полным брифом",
       ctaLabel: "📋 Подтвердить просмотр →",
@@ -109,7 +119,11 @@ const CONTENT = {
       },
     ],
     faqDemoBtn: "Записаться на демо →",
-    footer: { privacy: "Политика конфиденциальности", terms: "Условия использования", copy: "© 2026 Lead Engine" },
+    footer: {
+      privacy: "Политика конфиденциальности",
+      terms: "Условия использования",
+      copy: "© 2026 Lead Engine",
+    },
   },
   en: {
     nav: { cta: "Try Free" },
@@ -126,9 +140,16 @@ const CONTENT = {
         { from: "user" as const, text: "Looking for an apartment in Dubai, budget $300–400K" },
         { from: "bot" as const, text: "Great! Which area? Downtown, Marina, JBR, or open to any?" },
         { from: "user" as const, text: "Marina, 2 bedrooms" },
-        { from: "bot" as const, text: "We have 4 listings matching your request. When's a good time to view — weekday or weekend?" },
+        {
+          from: "bot" as const,
+          text: "We have 4 listings matching your request. When's a good time to view — weekday or weekend?",
+        },
         { from: "user" as const, text: "Saturday afternoon" },
-        { from: "bot" as const, text: "Booked for Saturday at 2 PM. Agent will confirm details 👇", cta: true },
+        {
+          from: "bot" as const,
+          text: "Booked for Saturday at 2 PM. Agent will confirm details 👇",
+          cta: true,
+        },
       ],
       notify: "🔔 Warm buyer handed to agent with full brief",
       ctaLabel: "📋 Confirm viewing →",
@@ -232,8 +253,12 @@ export default function LandingRealEstate() {
               </h1>
               <p className="hero-sub">{c.hero.sub}</p>
               <div className="hero-actions">
-                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">{c.hero.ctaPrimary}</a>
-                <a href={DEMO_URL} className="btn btn-secondary btn-lg">{c.hero.ctaSecondary}</a>
+                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">
+                  {c.hero.ctaPrimary}
+                </a>
+                <a href={DEMO_URL} className="btn btn-secondary btn-lg">
+                  {c.hero.ctaSecondary}
+                </a>
               </div>
               <div className="hero-trust">{c.hero.trust}</div>
             </div>

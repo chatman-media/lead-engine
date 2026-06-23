@@ -46,7 +46,10 @@ export class WsClient {
   }
 
   connect(): void {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
     this.wantClose = false;
@@ -114,10 +117,10 @@ export class WsClient {
     if (this.reconnectTimer !== null) return;
     const delay = this.retryMs;
     this.retryMs = Math.min(this.retryMs * 2, MAX_RETRY_MS);
-    this.reconnectTimer = (setTimeout(() => {
+    this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, delay) as unknown) as number;
+    }, delay) as unknown as number;
   }
 
   private genMsgId(): string {
