@@ -36,7 +36,10 @@ function fakeFetch(responses: Array<{ status: number; body: unknown }>): {
 describe("WhatsAppCloudAdapter", () => {
   it("send text envelope → POST /messages с правильным payload", async () => {
     const { fetch, calls } = fakeFetch([
-      { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.OUT.1" }] } },
+      {
+        status: 200,
+        body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.OUT.1" }] },
+      },
     ]);
     const a = new WhatsAppCloudAdapter({
       id: "wa1",
@@ -65,7 +68,10 @@ describe("WhatsAppCloudAdapter", () => {
 
   it("send template envelope → POST /messages type=template", async () => {
     const { fetch, calls } = fakeFetch([
-      { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.TPL" }] } },
+      {
+        status: 200,
+        body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.TPL" }] },
+      },
     ]);
     const a = new WhatsAppCloudAdapter({
       id: "wa1",
@@ -103,7 +109,10 @@ describe("WhatsAppCloudAdapter", () => {
 
   it("send photo с caption — image type + id+caption", async () => {
     const { fetch, calls } = fakeFetch([
-      { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.PHOTO" }] } },
+      {
+        status: 200,
+        body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.PHOTO" }] },
+      },
     ]);
     const a = new WhatsAppCloudAdapter({
       id: "wa1",
@@ -115,7 +124,11 @@ describe("WhatsAppCloudAdapter", () => {
       channelId: "wa1",
       externalUserId: "79161234567",
       parts: [
-        { kind: "photo", mediaRef: { channelId: "wa1", externalRef: "media-IMG" }, caption: "look" },
+        {
+          kind: "photo",
+          mediaRef: { channelId: "wa1", externalRef: "media-IMG" },
+          caption: "look",
+        },
       ],
     });
     expect(calls[0]?.body).toMatchObject({
@@ -126,8 +139,14 @@ describe("WhatsAppCloudAdapter", () => {
 
   it("send нескольких parts — first messageId в результате", async () => {
     const { fetch, calls } = fakeFetch([
-      { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.A" }] } },
-      { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.B" }] } },
+      {
+        status: 200,
+        body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.A" }] },
+      },
+      {
+        status: 200,
+        body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.B" }] },
+      },
     ]);
     const a = new WhatsAppCloudAdapter({
       id: "wa1",
@@ -149,25 +168,46 @@ describe("WhatsAppCloudAdapter", () => {
 
   it("rawClient отдаёт нижележащий WhatsAppClient", () => {
     const { fetch } = fakeFetch([]);
-    const a = new WhatsAppCloudAdapter({ id: "wa1", phoneNumberId: "PNID", accessToken: "TOK", fetch });
+    const a = new WhatsAppCloudAdapter({
+      id: "wa1",
+      phoneNumberId: "PNID",
+      accessToken: "TOK",
+      fetch,
+    });
     expect(a.rawClient).toBeDefined();
     expect(typeof a.rawClient.sendText).toBe("function");
   });
 
   it("send: пустые parts без template → throws", async () => {
     const { fetch } = fakeFetch([]);
-    const a = new WhatsAppCloudAdapter({ id: "wa1", phoneNumberId: "PNID", accessToken: "TOK", fetch });
-    await expect(
-      a.send({ channelId: "wa1", externalUserId: "7916", parts: [] }),
-    ).rejects.toThrow(/non-empty/);
+    const a = new WhatsAppCloudAdapter({
+      id: "wa1",
+      phoneNumberId: "PNID",
+      accessToken: "TOK",
+      fetch,
+    });
+    await expect(a.send({ channelId: "wa1", externalUserId: "7916", parts: [] })).rejects.toThrow(
+      /non-empty/,
+    );
   });
 
   it("send video и document parts → правильные media-типы", async () => {
     const { fetch, calls } = fakeFetch([
-      { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.V" }] } },
-      { status: 200, body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.D" }] } },
+      {
+        status: 200,
+        body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.V" }] },
+      },
+      {
+        status: 200,
+        body: { messaging_product: "whatsapp", contacts: [], messages: [{ id: "wa.D" }] },
+      },
     ]);
-    const a = new WhatsAppCloudAdapter({ id: "wa1", phoneNumberId: "PNID", accessToken: "TOK", fetch });
+    const a = new WhatsAppCloudAdapter({
+      id: "wa1",
+      phoneNumberId: "PNID",
+      accessToken: "TOK",
+      fetch,
+    });
     const sent = await a.send({
       channelId: "wa1",
       externalUserId: "7916",
@@ -177,13 +217,21 @@ describe("WhatsAppCloudAdapter", () => {
       ],
     });
     expect(sent.externalMessageId).toBe("wa.V");
-    expect(calls[0]?.body).toMatchObject({ type: "video", video: { id: "media-VID", caption: "v" } });
+    expect(calls[0]?.body).toMatchObject({
+      type: "video",
+      video: { id: "media-VID", caption: "v" },
+    });
     expect(calls[1]?.body).toMatchObject({ type: "document", document: { id: "media-DOC" } });
   });
 
   it("edit/delete → not supported", async () => {
     const { fetch } = fakeFetch([]);
-    const a = new WhatsAppCloudAdapter({ id: "wa1", phoneNumberId: "PNID", accessToken: "TOK", fetch });
+    const a = new WhatsAppCloudAdapter({
+      id: "wa1",
+      phoneNumberId: "PNID",
+      accessToken: "TOK",
+      fetch,
+    });
     await expect(
       a.edit({ channelId: "wa1", externalUserId: "1", externalMessageId: "2", text: "x" }),
     ).rejects.toThrow(/edit not supported/);
@@ -204,7 +252,12 @@ describe("WhatsAppCloudAdapter", () => {
       }
       return new Response("BYTES", { status: 200 });
     }) as unknown as typeof fetch;
-    const a = new WhatsAppCloudAdapter({ id: "wa1", phoneNumberId: "PNID", accessToken: "TOK", fetch: fn });
+    const a = new WhatsAppCloudAdapter({
+      id: "wa1",
+      phoneNumberId: "PNID",
+      accessToken: "TOK",
+      fetch: fn,
+    });
     const res = await a.downloadMedia({ channelId: "wa1", externalRef: "media-IMG-1" });
     expect(await res.text()).toBe("BYTES");
     expect(urls[0]).toContain("/media-IMG-1");
@@ -213,7 +266,12 @@ describe("WhatsAppCloudAdapter", () => {
 
   it("signalTyping — no-op, не бросает", async () => {
     const { fetch, calls } = fakeFetch([]);
-    const a = new WhatsAppCloudAdapter({ id: "wa1", phoneNumberId: "PNID", accessToken: "TOK", fetch });
+    const a = new WhatsAppCloudAdapter({
+      id: "wa1",
+      phoneNumberId: "PNID",
+      accessToken: "TOK",
+      fetch,
+    });
     await a.signalTyping("7916");
     expect(calls).toHaveLength(0);
   });
@@ -223,7 +281,7 @@ describe("WhatsAppCloudAdapter", () => {
       id: "wa1",
       phoneNumberId: "PNID",
       accessToken: "TOK",
-      fetch: ((async () => new Response("{}", { status: 200 })) as unknown as typeof fetch),
+      fetch: (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
     });
     const iter = a.receive()[Symbol.asyncIterator]();
     const pending = iter.next();
@@ -238,7 +296,13 @@ describe("WhatsAppCloudAdapter", () => {
               value: {
                 messaging_product: "whatsapp",
                 messages: [
-                  { from: "7916", id: "wa.W1", timestamp: "1700000000", type: "text", text: { body: "ждали" } },
+                  {
+                    from: "7916",
+                    id: "wa.W1",
+                    timestamp: "1700000000",
+                    type: "text",
+                    text: { body: "ждали" },
+                  },
                 ],
               },
             },
@@ -256,7 +320,7 @@ describe("WhatsAppCloudAdapter", () => {
       id: "wa1",
       phoneNumberId: "PNID",
       accessToken: "TOK",
-      fetch: ((async () => new Response("{}", { status: 200 })) as unknown as typeof fetch),
+      fetch: (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
     });
     const aborted = new AbortController();
     aborted.abort();
@@ -274,7 +338,7 @@ describe("WhatsAppCloudAdapter", () => {
       id: "wa1",
       phoneNumberId: "PNID",
       accessToken: "TOK",
-      fetch: ((async () => new Response("{}", { status: 200 })) as unknown as typeof fetch),
+      fetch: (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
     });
     const iter = a.receive()[Symbol.asyncIterator]();
     const pending = iter.next();
@@ -288,7 +352,7 @@ describe("WhatsAppCloudAdapter", () => {
       id: "wa1",
       phoneNumberId: "PNID",
       accessToken: "TOK",
-      fetch: ((async () => new Response("{}", { status: 200 })) as unknown as typeof fetch),
+      fetch: (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
     });
     const payload: WaWebhookPayload = {
       object: "whatsapp_business_account",
@@ -301,7 +365,13 @@ describe("WhatsAppCloudAdapter", () => {
               value: {
                 messaging_product: "whatsapp",
                 messages: [
-                  { from: "79161234567", id: "wa.M1", timestamp: "1700000000", type: "text", text: { body: "hi" } },
+                  {
+                    from: "79161234567",
+                    id: "wa.M1",
+                    timestamp: "1700000000",
+                    type: "text",
+                    text: { body: "hi" },
+                  },
                 ],
               },
             },

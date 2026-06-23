@@ -127,13 +127,25 @@ export class MessengerAdapter implements ChannelAdapter {
         const r = await this.client.sendText({ to, text: part.text });
         sentId = r.messageId;
       } else if (part.kind === "photo") {
-        const r = await this.client.sendAttachment({ to, kind: "image", url: part.mediaRef.externalRef });
+        const r = await this.client.sendAttachment({
+          to,
+          kind: "image",
+          url: part.mediaRef.externalRef,
+        });
         sentId = r.messageId;
       } else if (part.kind === "video") {
-        const r = await this.client.sendAttachment({ to, kind: "video", url: part.mediaRef.externalRef });
+        const r = await this.client.sendAttachment({
+          to,
+          kind: "video",
+          url: part.mediaRef.externalRef,
+        });
         sentId = r.messageId;
       } else {
-        const r = await this.client.sendAttachment({ to, kind: "file", url: part.mediaRef.externalRef });
+        const r = await this.client.sendAttachment({
+          to,
+          kind: "file",
+          url: part.mediaRef.externalRef,
+        });
         sentId = r.messageId;
       }
       if (firstMessageId === undefined) firstMessageId = sentId;

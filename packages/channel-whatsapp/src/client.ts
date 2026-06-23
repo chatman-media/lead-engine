@@ -57,9 +57,7 @@ function toTemplateComponent(component: WhatsAppTemplateComponent): Record<strin
     type: component.type,
     ...(component.subType ? { sub_type: component.subType } : {}),
     ...(component.index ? { index: component.index } : {}),
-    ...(component.parameters
-      ? { parameters: component.parameters.map(toTemplateParameter) }
-      : {}),
+    ...(component.parameters ? { parameters: component.parameters.map(toTemplateParameter) } : {}),
   };
 }
 
@@ -104,11 +102,7 @@ export class WhatsAppClient {
       }),
     });
     if (!res.ok) {
-      throw new WhatsAppApiError(
-        "sendText",
-        res.status,
-        await res.text().catch(() => "no body"),
-      );
+      throw new WhatsAppApiError("sendText", res.status, await res.text().catch(() => "no body"));
     }
     const body = (await res.json()) as WhatsAppMessageResponse;
     const id = body.messages?.[0]?.id;
@@ -195,7 +189,10 @@ export class WhatsAppClient {
     caption?: string;
   }): Promise<{ messageId: string }> {
     const mediaBody: Record<string, unknown> = { id: input.mediaId };
-    if (input.caption && (input.kind === "image" || input.kind === "video" || input.kind === "document")) {
+    if (
+      input.caption &&
+      (input.kind === "image" || input.kind === "video" || input.kind === "document")
+    ) {
       mediaBody.caption = input.caption;
     }
     const res = await this.fetchImpl(this.url(`/${this.phoneNumberId}/messages`), {
@@ -209,11 +206,7 @@ export class WhatsAppClient {
       }),
     });
     if (!res.ok) {
-      throw new WhatsAppApiError(
-        "sendMedia",
-        res.status,
-        await res.text().catch(() => "no body"),
-      );
+      throw new WhatsAppApiError("sendMedia", res.status, await res.text().catch(() => "no body"));
     }
     const body = (await res.json()) as WhatsAppMessageResponse;
     const id = body.messages?.[0]?.id;
