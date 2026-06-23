@@ -22,8 +22,51 @@ export interface BankConfig {
   codeTtlSec: number;
 }
 
-// Cardless limits: PHP step=100, per-txn 10k. Source: reference_atm_cardless_limits.
+// Cardless limits: PHP step=100, per-txn 10k; THB step=500/1000, per-txn 20k.
+// Source: reference_atm_cardless_limits.
 const BANK_MAP: Array<{ pattern: RegExp; config: BankConfig }> = [
+  // ── Thai banks (THB) ──────────────────────────────────────────────────────
+  {
+    pattern: /\bscb\b|siam commercial/i,
+    config: { bankName: "SCB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /kasikorn|kbank|k\s*bank/i,
+    config: { bankName: "KBANK", denomination: 1000, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\bktb\b|krungthai|krung thai/i,
+    config: { bankName: "KTB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\bbbl\b|bangkok bank/i,
+    config: { bankName: "BBL", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\bbay\b|krungsri|bank of ayudhya/i,
+    config: { bankName: "BAY", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\bttb\b|tmb|thanachart/i,
+    config: { bankName: "TTB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\buob\b|united overseas/i,
+    config: { bankName: "UOB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\bgsb\b|government savings bank|ออมสิน/i,
+    config: { bankName: "GSB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\bcimb\b/i,
+    config: { bankName: "CIMB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\btisco\b/i,
+    config: { bankName: "TISCO", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  // ── Philippine banks (PHP) ────────────────────────────────────────────────
   {
     pattern: /\bbdo\b|banco de oro|bdo unibank/i,
     config: { bankName: "BDO", denomination: 100, perWithdrawalMax: 10_000, codeTtlSec: 1800 },
@@ -268,6 +311,10 @@ export interface OsmSyncResult {
 
 /** Default bbox: Metro Manila metro area. */
 export const DEFAULT_PH_BBOX = "14.35,120.90,14.80,121.15";
+/** Phuket island (full). */
+export const DEFAULT_TH_PHUKET_BBOX = "7.75,98.20,8.20,98.45";
+/** Greater Bangkok (BTS corridor + inner suburbs). */
+export const DEFAULT_TH_BANGKOK_BBOX = "13.60,100.40,13.90,100.80";
 
 export async function syncOsmAtms(
   db: Db,

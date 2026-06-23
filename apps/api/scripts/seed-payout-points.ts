@@ -37,8 +37,8 @@ const keepExisting = process.env.KEEP_EXISTING === "1";
 const sql = postgres(ownerUrl, { max: 2, onnotice: () => {} });
 const db = drizzle(sql, { schema });
 
-// ── Thai Baht ATMs (SCB, Kasikorn, BBL) ─────────────────────────────────────
-const THB_POINTS = [
+// ── Thai Baht ATMs — Bangkok ─────────────────────────────────────────────────
+const BKK_POINTS = [
   {
     kind: "atm" as const,
     code: "scb_asok",
@@ -48,6 +48,7 @@ const THB_POINTS = [
     denomination: 500,
     perWithdrawalMax: 20_000,
     codeTtlSec: 900,
+    area: "Bangkok",
     city: "Bangkok",
     address: "Sukhumvit Soi 21 (Asok BTS)",
     feeFixed: 0,
@@ -63,6 +64,7 @@ const THB_POINTS = [
     denomination: 1000,
     perWithdrawalMax: 20_000,
     codeTtlSec: 900,
+    area: "Bangkok",
     city: "Bangkok",
     address: "Sukhumvit Soi 39 (Phrom Phong)",
     feeFixed: 0,
@@ -78,6 +80,7 @@ const THB_POINTS = [
     denomination: 500,
     perWithdrawalMax: 20_000,
     codeTtlSec: 900,
+    area: "Bangkok",
     city: "Bangkok",
     address: "Silom Road",
     feeFixed: 0,
@@ -93,6 +96,7 @@ const THB_POINTS = [
     denomination: null,
     perWithdrawalMax: null,
     codeTtlSec: null,
+    area: "Bangkok",
     city: "Bangkok",
     address: "Sukhumvit Soi 11",
     feeFixed: 0,
@@ -108,6 +112,7 @@ const THB_POINTS = [
     denomination: null,
     perWithdrawalMax: null,
     codeTtlSec: null,
+    area: "Bangkok",
     city: "Bangkok",
     address: null,
     feeFixed: 300,
@@ -115,6 +120,140 @@ const THB_POINTS = [
     isActive: true,
   },
 ];
+
+// ── Thai Baht ATMs — Phuket ──────────────────────────────────────────────────
+const PHUKET_POINTS = [
+  {
+    kind: "atm" as const,
+    code: "scb_phuket_patong",
+    label: "SCB Patong Beach",
+    bankName: "SCB",
+    quoteAsset: "THB",
+    denomination: 500,
+    perWithdrawalMax: 20_000,
+    codeTtlSec: 900,
+    area: "Phuket",
+    city: "Patong",
+    address: "Bangla Road",
+    feeFixed: 0,
+    feePct: 0,
+    isActive: true,
+  },
+  {
+    kind: "atm" as const,
+    code: "kbank_phuket_jungceylon",
+    label: "Kasikorn Jungceylon Mall",
+    bankName: "KBANK",
+    quoteAsset: "THB",
+    denomination: 1000,
+    perWithdrawalMax: 20_000,
+    codeTtlSec: 900,
+    area: "Phuket",
+    city: "Patong",
+    address: "Jungceylon Shopping Centre",
+    feeFixed: 0,
+    feePct: 0,
+    isActive: true,
+  },
+  {
+    kind: "atm" as const,
+    code: "ktb_phuket_patong",
+    label: "Krungthai Patong Beach",
+    bankName: "KTB",
+    quoteAsset: "THB",
+    denomination: 500,
+    perWithdrawalMax: 20_000,
+    codeTtlSec: 900,
+    area: "Phuket",
+    city: "Patong",
+    address: "Rat-U-Thit Road",
+    feeFixed: 0,
+    feePct: 0,
+    isActive: true,
+  },
+  {
+    kind: "atm" as const,
+    code: "bbl_phuket_town",
+    label: "Bangkok Bank Phuket Town",
+    bankName: "BBL",
+    quoteAsset: "THB",
+    denomination: 500,
+    perWithdrawalMax: 20_000,
+    codeTtlSec: 900,
+    area: "Phuket",
+    city: "Phuket Town",
+    address: "Phang Nga Road",
+    feeFixed: 0,
+    feePct: 0,
+    isActive: true,
+  },
+  {
+    kind: "atm" as const,
+    code: "kbank_phuket_central",
+    label: "Kasikorn Central Festival Phuket",
+    bankName: "KBANK",
+    quoteAsset: "THB",
+    denomination: 1000,
+    perWithdrawalMax: 20_000,
+    codeTtlSec: 900,
+    area: "Phuket",
+    city: "Phuket",
+    address: "Central Festival Phuket",
+    feeFixed: 0,
+    feePct: 0,
+    isActive: true,
+  },
+  {
+    kind: "atm" as const,
+    code: "bay_phuket_town",
+    label: "Krungsri Phuket Town",
+    bankName: "BAY",
+    quoteAsset: "THB",
+    denomination: 500,
+    perWithdrawalMax: 20_000,
+    codeTtlSec: 900,
+    area: "Phuket",
+    city: "Phuket Town",
+    address: "Ranong Road",
+    feeFixed: 0,
+    feePct: 0,
+    isActive: true,
+  },
+  {
+    kind: "office" as const,
+    code: "office_phuket_patong",
+    label: "Офис Патонг",
+    bankName: null,
+    quoteAsset: "THB",
+    denomination: null,
+    perWithdrawalMax: null,
+    codeTtlSec: null,
+    area: "Phuket",
+    city: "Patong",
+    address: "Bangla Road, Soi 1",
+    feeFixed: 0,
+    feePct: 0,
+    isActive: true,
+  },
+  {
+    kind: "courier_zone" as const,
+    code: "courier_phuket",
+    label: "Доставка — Пхукет",
+    bankName: null,
+    quoteAsset: "THB",
+    denomination: null,
+    perWithdrawalMax: null,
+    codeTtlSec: null,
+    area: "Phuket",
+    city: "Phuket",
+    address: null,
+    feeFixed: 500,
+    feePct: 0,
+    isActive: true,
+  },
+];
+
+const THB_POINTS = [...BKK_POINTS, ...PHUKET_POINTS];
 
 // ── Philippine Peso ATMs (BDO, BPI, Metrobank, GCash) ───────────────────────
 const PHP_POINTS = [
@@ -235,6 +374,7 @@ async function run() {
             per_withdrawal_max = ${p.perWithdrawalMax ?? null},
             code_ttl_sec = ${p.codeTtlSec ?? null},
             fee_fixed = ${p.feeFixed}, fee_pct = ${p.feePct},
+            area = ${"area" in p ? (p.area ?? null) : null},
             city = ${p.city ?? null}, address = ${p.address ?? null},
             is_active = ${p.isActive}, updated_at = ${now}
         WHERE tenant_id = ${tenantId} AND code = ${p.code}
@@ -246,11 +386,12 @@ async function run() {
         INSERT INTO exchange_payout_points
           (tenant_id, kind, code, label, bank_name, quote_asset,
            denomination, per_withdrawal_max, code_ttl_sec,
-           fee_fixed, fee_pct, city, address, is_active, created_at, updated_at)
+           fee_fixed, fee_pct, area, city, address, is_active, created_at, updated_at)
         VALUES (
           ${tenantId}, ${p.kind}, ${p.code}, ${p.label}, ${p.bankName ?? null},
           ${p.quoteAsset}, ${p.denomination ?? null}, ${p.perWithdrawalMax ?? null},
           ${p.codeTtlSec ?? null}, ${p.feeFixed}, ${p.feePct},
+          ${"area" in p ? (p.area ?? null) : null},
           ${p.city ?? null}, ${p.address ?? null}, ${p.isActive}, ${now}, ${now}
         )
       `;
