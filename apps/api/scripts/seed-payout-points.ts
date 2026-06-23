@@ -347,7 +347,9 @@ async function run() {
   const tenantId = tenant.id;
   console.log(`Seeding payout points for tenant #${tenantId} (${tenantSlug})`);
 
-  const quoteAsset = tenantSlug === "phdemo" || tenantSlug.includes("ph") ? "PHP" : "THB";
+  const quoteAsset =
+    process.env.QUOTE_ASSET ??
+    (tenantSlug === "phdemo" || tenantSlug.includes("ph") ? "PHP" : "THB");
   const points = quoteAsset === "PHP" ? PHP_POINTS : THB_POINTS;
 
   const now = Math.floor(Date.now() / 1000);
