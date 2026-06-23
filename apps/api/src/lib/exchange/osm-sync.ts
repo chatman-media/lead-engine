@@ -25,33 +25,33 @@ export interface BankConfig {
 // Cardless limits: PHP step=100, per-txn 10k; THB step=500/1000, per-txn 20k.
 // Source: reference_atm_cardless_limits.
 const BANK_MAP: Array<{ pattern: RegExp; config: BankConfig }> = [
-  // ── Thai banks (THB) ──────────────────────────────────────────────────────
+  // ── Thai banks (THB) — Latin + Thai script ───────────────────────────────
   {
-    pattern: /\bscb\b|siam commercial/i,
+    pattern: /\bscb\b|siam commercial|ไทยพาณิชย์/i,
     config: { bankName: "SCB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
-    pattern: /kasikorn|kbank|k\s*bank/i,
+    pattern: /kasikorn|kbank|k\s*bank|กสิกรไทย/i,
     config: { bankName: "KBANK", denomination: 1000, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
-    pattern: /\bktb\b|krungthai|krung thai/i,
+    pattern: /\bktb\b|krungthai|krung thai|กรุงไทย/i,
     config: { bankName: "KTB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
-    pattern: /\bbbl\b|bangkok bank/i,
+    pattern: /\bbbl\b|bangkok bank|กรุงเทพ/i,
     config: { bankName: "BBL", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
-    pattern: /\bbay\b|krungsri|bank of ayudhya/i,
+    pattern: /\bbay\b|krungsri|bank of ayudhya|กรุงศรีอยุธยา/i,
     config: { bankName: "BAY", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
-    pattern: /\bttb\b|tmb|thanachart/i,
+    pattern: /\bttb\b|tmb|thanachart|ทหารไทยธนชาต/i,
     config: { bankName: "TTB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
-    pattern: /\buob\b|united overseas/i,
+    pattern: /\buob\b|united overseas|ยูโอบี/i,
     config: { bankName: "UOB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
@@ -59,11 +59,19 @@ const BANK_MAP: Array<{ pattern: RegExp; config: BankConfig }> = [
     config: { bankName: "GSB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
-    pattern: /\bcimb\b/i,
+    pattern: /\bghb\b|government housing bank|อาคารสงเคราะห์/i,
+    config: { bankName: "GHB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\bbaac\b|เพื่อการเกษตร/i,
+    config: { bankName: "BAAC", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
+  },
+  {
+    pattern: /\bcimb\b|ซีไอเอ็มบี/i,
     config: { bankName: "CIMB", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   {
-    pattern: /\btisco\b/i,
+    pattern: /\btisco\b|ทิสโก้/i,
     config: { bankName: "TISCO", denomination: 500, perWithdrawalMax: 20_000, codeTtlSec: 900 },
   },
   // ── Philippine banks (PHP) ────────────────────────────────────────────────

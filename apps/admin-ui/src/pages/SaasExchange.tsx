@@ -2169,6 +2169,31 @@ function PayoutPointsTab() {
     }
   };
 
+  const syncOsmAll = async () => {
+    setSyncing(true);
+    let totalUpserted = 0;
+    let totalFetched = 0;
+    let failed = 0;
+    try {
+      for (const region of Object.values(OSM_REGIONS)) {
+        try {
+          const r = await saas.syncOsmAtms({ bbox: region.bbox, quoteAsset: region.quoteAsset });
+          totalUpserted += r.upserted;
+          totalFetched += r.fetched;
+        } catch {
+          failed++;
+          toast.error(`Ошибка синка: ${region.label}`);
+        }
+      }
+      toast.success(
+        `OSM все регионы: ${totalUpserted} из ${totalFetched}${failed ? ` (${failed} ошибок)` : ""}`,
+      );
+      load(true);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <>
       <Card>
@@ -2256,6 +2281,9 @@ function PayoutPointsTab() {
             </Select>
             <Button size="sm" variant="outline" onClick={syncOsm} disabled={syncing}>
               {syncing ? "Синхронизация…" : "Синк OSM"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={syncOsmAll} disabled={syncing}>
+              Синк всех
             </Button>
             <Button size="sm" onClick={openNew}>
               <PlusIcon className="mr-1 h-4 w-4" />
