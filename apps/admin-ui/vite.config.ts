@@ -33,7 +33,9 @@ export default defineConfig(({ command }) => ({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:3000",
+        // E2E_API_PROXY позволяет e2e-прогону (Playwright) направить /api на
+        // изолированный apps/api (другой порт). Без env — прежний дефолт :3000.
+        target: process.env.E2E_API_PROXY ?? "http://localhost:3000",
         changeOrigin: true,
         timeout: 0,
         proxyTimeout: 0,
