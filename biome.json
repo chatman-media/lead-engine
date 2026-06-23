@@ -1,5 +1,8 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "files": {
+    "includes": ["**", "!.claude", "!.design-sync", "!**/.ds-*", "!**/*.css"]
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",

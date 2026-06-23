@@ -31,29 +31,104 @@ export const CONCIERGE_FUNNEL_STAGES: readonly FunnelStageDef[] = [
   },
 
   // ── Обмен валюты ──
-  { slug: "exchange_request", kind: "lead", displayName: "Обмен: детали", next: ["exchange_offer", "cancelled"] },
-  { slug: "exchange_offer", kind: "lead", displayName: "Обмен: котировка", next: ["exchange_fulfill", "cancelled"] },
-  { slug: "exchange_fulfill", kind: "lead", displayName: "Обмен: выдача", next: ["completed", "cancelled"] },
+  {
+    slug: "exchange_request",
+    kind: "lead",
+    displayName: "Обмен: детали",
+    next: ["exchange_offer", "cancelled"],
+  },
+  {
+    slug: "exchange_offer",
+    kind: "lead",
+    displayName: "Обмен: котировка",
+    next: ["exchange_fulfill", "cancelled"],
+  },
+  {
+    slug: "exchange_fulfill",
+    kind: "lead",
+    displayName: "Обмен: выдача",
+    next: ["completed", "cancelled"],
+  },
 
   // ── Трансфер ──
-  { slug: "transfer_request", kind: "lead", displayName: "Трансфер: детали", next: ["transfer_offer", "cancelled"] },
-  { slug: "transfer_offer", kind: "lead", displayName: "Трансфер: предложение", next: ["transfer_fulfill", "cancelled"] },
-  { slug: "transfer_fulfill", kind: "lead", displayName: "Трансфер: подача", next: ["completed", "cancelled"] },
+  {
+    slug: "transfer_request",
+    kind: "lead",
+    displayName: "Трансфер: детали",
+    next: ["transfer_offer", "cancelled"],
+  },
+  {
+    slug: "transfer_offer",
+    kind: "lead",
+    displayName: "Трансфер: предложение",
+    next: ["transfer_fulfill", "cancelled"],
+  },
+  {
+    slug: "transfer_fulfill",
+    kind: "lead",
+    displayName: "Трансфер: подача",
+    next: ["completed", "cancelled"],
+  },
 
   // ── Еда ──
-  { slug: "food_request", kind: "lead", displayName: "Еда: заказ", next: ["food_offer", "cancelled"] },
-  { slug: "food_offer", kind: "lead", displayName: "Еда: подтверждение", next: ["food_fulfill", "cancelled"] },
-  { slug: "food_fulfill", kind: "lead", displayName: "Еда: доставка", next: ["completed", "cancelled"] },
+  {
+    slug: "food_request",
+    kind: "lead",
+    displayName: "Еда: заказ",
+    next: ["food_offer", "cancelled"],
+  },
+  {
+    slug: "food_offer",
+    kind: "lead",
+    displayName: "Еда: подтверждение",
+    next: ["food_fulfill", "cancelled"],
+  },
+  {
+    slug: "food_fulfill",
+    kind: "lead",
+    displayName: "Еда: доставка",
+    next: ["completed", "cancelled"],
+  },
 
   // ── Уборка ──
-  { slug: "housekeeping_request", kind: "lead", displayName: "Уборка: детали", next: ["housekeeping_offer", "cancelled"] },
-  { slug: "housekeeping_offer", kind: "lead", displayName: "Уборка: подтверждение", next: ["housekeeping_fulfill", "cancelled"] },
-  { slug: "housekeeping_fulfill", kind: "lead", displayName: "Уборка: выполнение", next: ["completed", "cancelled"] },
+  {
+    slug: "housekeeping_request",
+    kind: "lead",
+    displayName: "Уборка: детали",
+    next: ["housekeeping_offer", "cancelled"],
+  },
+  {
+    slug: "housekeeping_offer",
+    kind: "lead",
+    displayName: "Уборка: подтверждение",
+    next: ["housekeeping_fulfill", "cancelled"],
+  },
+  {
+    slug: "housekeeping_fulfill",
+    kind: "lead",
+    displayName: "Уборка: выполнение",
+    next: ["completed", "cancelled"],
+  },
 
   // ── Экскурсия / тур ──
-  { slug: "tour_request", kind: "lead", displayName: "Тур: детали", next: ["tour_offer", "cancelled"] },
-  { slug: "tour_offer", kind: "lead", displayName: "Тур: предложение", next: ["tour_fulfill", "cancelled"] },
-  { slug: "tour_fulfill", kind: "lead", displayName: "Тур: бронь", next: ["completed", "cancelled"] },
+  {
+    slug: "tour_request",
+    kind: "lead",
+    displayName: "Тур: детали",
+    next: ["tour_offer", "cancelled"],
+  },
+  {
+    slug: "tour_offer",
+    kind: "lead",
+    displayName: "Тур: предложение",
+    next: ["tour_fulfill", "cancelled"],
+  },
+  {
+    slug: "tour_fulfill",
+    kind: "lead",
+    displayName: "Тур: бронь",
+    next: ["completed", "cancelled"],
+  },
 
   // ── Общие терминалы ──
   { slug: "completed", kind: "terminal", displayName: "Выполнено" },

@@ -25,7 +25,8 @@ export const INTAKE_INTRO_RU = `Замечательно, а теперь при
 
 Просьба заполнить и отправить одним сообщением, спасибо 🙌🌞`;
 
-export const INTAKE_COMPLETION = "Спасибо, анкета принята! Передаём дальше — скоро вернёмся с ответом.";
+export const INTAKE_COMPLETION =
+  "Спасибо, анкета принята! Передаём дальше — скоро вернёмся с ответом.";
 
 /**
  * QuestionnaireSchema для intake. Хук extractFields в conversation-engine
@@ -50,11 +51,31 @@ export const RECRUITMENT_INTAKE: QuestionnaireSchema = {
       required: true,
       options: ["не замужем", "замужем", "разведена", "вдова"],
     },
-    { slug: "children", question: "Дети (нет / есть — укажите сколько)", kind: "text", required: true },
+    {
+      slug: "children",
+      question: "Дети (нет / есть — укажите сколько)",
+      kind: "text",
+      required: true,
+    },
     { slug: "languages", question: "Языки и уровень", kind: "longText", required: true },
-    { slug: "work_experience", question: "Опыт работы за последние 2 года", kind: "longText", required: false },
-    { slug: "passport_expiry", question: "Дата окончания загранпаспорта (дд.мм.гггг)", kind: "date", required: true },
-    { slug: "city", question: "В каком городе сейчас и когда готовы выезжать", kind: "longText", required: true },
+    {
+      slug: "work_experience",
+      question: "Опыт работы за последние 2 года",
+      kind: "longText",
+      required: false,
+    },
+    {
+      slug: "passport_expiry",
+      question: "Дата окончания загранпаспорта (дд.мм.гггг)",
+      kind: "date",
+      required: true,
+    },
+    {
+      slug: "city",
+      question: "В каком городе сейчас и когда готовы выезжать",
+      kind: "longText",
+      required: true,
+    },
     {
       slug: "photos_count",
       question: "Фотографии 6-8 обычных (в полный рост 2-3)",

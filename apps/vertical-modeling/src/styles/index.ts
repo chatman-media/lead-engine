@@ -9,10 +9,6 @@ import { warmScout } from "./warm-scout.ts";
  *   - proDirector: кастинг-директор, PAS, прямой и быстрый
  *   - friendRecruiter: NEPQ, эмоциональный, как подруга из индустрии
  */
-export const MODELING_STYLES: readonly Style[] = [
-  warmScout,
-  proDirector,
-  friendRecruiter,
-];
+export const MODELING_STYLES: readonly Style[] = [warmScout, proDirector, friendRecruiter];
 
 export { friendRecruiter, proDirector, warmScout };

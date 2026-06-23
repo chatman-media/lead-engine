@@ -5,8 +5,7 @@ export const SAAS_INTAKE: QuestionnaireSchema = {
   introMessage:
     "Привет! Расскажите немного о вашем бизнесе — это займёт 2-3 минуты " +
     "и поможет мне понять, подойдёт ли Lead Engine для ваших задач.",
-  completionMessage:
-    "Отлично, всё понял! Подготовлю информацию под ваши задачи и скоро напишу.",
+  completionMessage: "Отлично, всё понял! Подготовлю информацию под ваши задачи и скоро напишу.",
   fields: [
     {
       slug: "company_name",

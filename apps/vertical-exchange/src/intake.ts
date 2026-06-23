@@ -6,49 +6,48 @@ import { QUOTE_CURRENCY, type QuestionnaireSchema } from "@chatman-media/vertica
  * параметры сделки.
  */
 export const EXCHANGE_INTAKE: QuestionnaireSchema = {
-	stageSlug: "exchange_request",
-	introMessage: `Здравствуйте! Я менеджер обменного пункта. Скажите, что хотите обменять и на какую сумму, — или спросите, какие направления доступны, и я покажу актуальный список и как удобнее получить ${QUOTE_CURRENCY.code}.`,
-	completionMessage: "Понял параметры обмена. Сейчас рассчитаю курс и сумму к получению.",
-	fields: [
-		{
-			slug: "asset_from",
-			question: "Что отдаёте? Если не уверены в направлении — покажу актуальный список доступных.",
-			kind: "enum",
-			required: true,
-			options: ["USDT", "BTC", "ETH", "RUB", "EUR", "USD"],
-			hint: "Актив/валюта, которую отдаёт клиент. Реальный список направлений — из list_exchange_directions, не из этого перечня.",
-		},
-		{
-			slug: "network",
-			question: "Если это крипта, в какой сети будете отправлять? Для USDT принимаем TRC20.",
-			kind: "enum",
-			required: false,
-			options: ["TRC20", "ERC20", "BEP20"],
-			hint: "Сеть нужна для криптовалюты, особенно для USDT.",
-		},
-		{
-			slug: "amount_from",
-			question: "Какую сумму хотите обменять?",
-			kind: "number",
-			required: true,
-			hint: "Сумма в активе-источнике, например 335 USDT или 150000 RUB.",
-		},
-		{
-			slug: "payout_method",
-			question: `Как хотите получить ${QUOTE_CURRENCY.tabloWord.toLowerCase()}: наличными в офисе, через банкомат или переводом на ${QUOTE_CURRENCY.bankLabel}?`,
-			kind: "enum",
-			required: false,
-			options: ["Офис", "Банкомат", "Банковский перевод", "Курьер"],
-			hint: `Предпочтительный способ выдачи ${QUOTE_CURRENCY.code}.`,
-		},
-		{
-			slug: "payment_method",
-			question:
-				"Если отдаёте рубли — как удобнее внести: по СБП/QR или картой/переводом?",
-			kind: "enum",
-			required: false,
-			options: ["СБП / QR", "Карта / перевод"],
-			hint: "Способ внесения рублей (только для RUB).",
-		},
-	],
+  stageSlug: "exchange_request",
+  introMessage: `Здравствуйте! Я менеджер обменного пункта. Скажите, что хотите обменять и на какую сумму, — или спросите, какие направления доступны, и я покажу актуальный список и как удобнее получить ${QUOTE_CURRENCY.code}.`,
+  completionMessage: "Понял параметры обмена. Сейчас рассчитаю курс и сумму к получению.",
+  fields: [
+    {
+      slug: "asset_from",
+      question: "Что отдаёте? Если не уверены в направлении — покажу актуальный список доступных.",
+      kind: "enum",
+      required: true,
+      options: ["USDT", "BTC", "ETH", "RUB", "EUR", "USD"],
+      hint: "Актив/валюта, которую отдаёт клиент. Реальный список направлений — из list_exchange_directions, не из этого перечня.",
+    },
+    {
+      slug: "network",
+      question: "Если это крипта, в какой сети будете отправлять? Для USDT принимаем TRC20.",
+      kind: "enum",
+      required: false,
+      options: ["TRC20", "ERC20", "BEP20"],
+      hint: "Сеть нужна для криптовалюты, особенно для USDT.",
+    },
+    {
+      slug: "amount_from",
+      question: "Какую сумму хотите обменять?",
+      kind: "number",
+      required: true,
+      hint: "Сумма в активе-источнике, например 335 USDT или 150000 RUB.",
+    },
+    {
+      slug: "payout_method",
+      question: `Как хотите получить ${QUOTE_CURRENCY.tabloWord.toLowerCase()}: наличными в офисе, через банкомат или переводом на ${QUOTE_CURRENCY.bankLabel}?`,
+      kind: "enum",
+      required: false,
+      options: ["Офис", "Банкомат", "Банковский перевод", "Курьер"],
+      hint: `Предпочтительный способ выдачи ${QUOTE_CURRENCY.code}.`,
+    },
+    {
+      slug: "payment_method",
+      question: "Если отдаёте рубли — как удобнее внести: по СБП/QR или картой/переводом?",
+      kind: "enum",
+      required: false,
+      options: ["СБП / QR", "Карта / перевод"],
+      hint: "Способ внесения рублей (только для RUB).",
+    },
+  ],
 };

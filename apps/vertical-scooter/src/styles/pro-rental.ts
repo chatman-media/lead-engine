@@ -20,11 +20,7 @@ export const proRental: Style = StyleSchema.parse({
   voice: {
     tone: "профессиональный, чёткий, дружелюбный, без затяжек",
     language: "ru",
-    forbid: [
-      "нечёткие ответы",
-      "слово «Здравствуйте»",
-      "лишние вопросы",
-    ],
+    forbid: ["нечёткие ответы", "слово «Здравствуйте»", "лишние вопросы"],
   },
   framework: "SPIN",
   hooks: [

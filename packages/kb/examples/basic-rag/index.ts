@@ -35,7 +35,10 @@ interface StoredChunk {
 }
 
 class InMemoryKbStore implements IKbStore {
-  private docs: Map<number, { id: number; source: string; title: string; contentHash: string; topic: string | null }> = new Map();
+  private docs: Map<
+    number,
+    { id: number; source: string; title: string; contentHash: string; topic: string | null }
+  > = new Map();
   private chunks: StoredChunk[] = [];
   private nextDocId = 1;
   private nextChunkId = 1;
@@ -55,11 +58,19 @@ class InMemoryKbStore implements IKbStore {
       .slice(0, k);
   }
 
-  async hybridSearch(input: { embedding: number[]; query: string; k?: number }): Promise<KbSearchHit[]> {
+  async hybridSearch(input: {
+    embedding: number[];
+    query: string;
+    k?: number;
+  }): Promise<KbSearchHit[]> {
     return this.search(input.embedding, input.k ?? 5);
   }
 
-  async prioritySearch(input: { embedding: number[]; query: string; k?: number }): Promise<KbSearchHit[]> {
+  async prioritySearch(input: {
+    embedding: number[];
+    query: string;
+    k?: number;
+  }): Promise<KbSearchHit[]> {
     return this.search(input.embedding, input.k ?? 5);
   }
 
@@ -81,15 +92,30 @@ class InMemoryKbStore implements IKbStore {
     return this.chunks.length < before;
   }
 
-  async upsertDocument(input: { source: string; title: string; contentHash: string; topic?: string | null }) {
+  async upsertDocument(input: {
+    source: string;
+    title: string;
+    contentHash: string;
+    topic?: string | null;
+  }) {
     const id = this.nextDocId++;
-    const doc = { id, source: input.source, title: input.title, contentHash: input.contentHash, topic: input.topic ?? null };
+    const doc = {
+      id,
+      source: input.source,
+      title: input.title,
+      contentHash: input.contentHash,
+      topic: input.topic ?? null,
+    };
     this.docs.set(id, doc);
     return { id };
   }
 
   async insertChunkWithEmbedding(input: {
-    documentId: number; chunkIndex: number; text: string; tokenCount: number; embedding: number[] | null;
+    documentId: number;
+    chunkIndex: number;
+    text: string;
+    tokenCount: number;
+    embedding: number[] | null;
   }) {
     const doc = this.docs.get(input.documentId);
     this.chunks.push({
@@ -106,7 +132,9 @@ class InMemoryKbStore implements IKbStore {
 }
 
 function cosineDist(a: number[], b: number[]): number {
-  let dot = 0, na = 0, nb = 0;
+  let dot = 0,
+    na = 0,
+    nb = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i]! * b[i]!;
     na += a[i]! ** 2;
@@ -126,15 +154,28 @@ let embedder: EmbeddingClient;
 if (useOllama) {
   console.log("Using Ollama (local)…");
   chat = new OllamaChatClient({ host: "http://localhost:11434", model: "qwen3:latest" });
-  embedder = new OllamaEmbeddingClient({ host: "http://localhost:11434", model: "bge-m3", dim: 1024 });
+  embedder = new OllamaEmbeddingClient({
+    host: "http://localhost:11434",
+    model: "bge-m3",
+    dim: 1024,
+  });
 } else {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.error("Set OPENAI_API_KEY or pass --ollama");
     process.exit(1);
   }
-  chat = new OpenAIChatClient({ apiKey, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" });
-  embedder = new OpenAIEmbeddingClient({ apiKey, baseUrl: "https://api.openai.com/v1", model: "text-embedding-3-small", dim: 1536 });
+  chat = new OpenAIChatClient({
+    apiKey,
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+  });
+  embedder = new OpenAIEmbeddingClient({
+    apiKey,
+    baseUrl: "https://api.openai.com/v1",
+    model: "text-embedding-3-small",
+    dim: 1536,
+  });
 }
 
 // ── Load knowledge base ─────────────────────────────────────────────────────

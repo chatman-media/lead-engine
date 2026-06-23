@@ -21,7 +21,10 @@ export const productEvangelistSpin: Style = StyleSchema.parse({
   },
   framework: "SPIN",
   hooks: [
-    { kind: "authority", text: "автоматизируем входящие лиды для 50+ бизнесов в найме и недвижимости" },
+    {
+      kind: "authority",
+      text: "автоматизируем входящие лиды для 50+ бизнесов в найме и недвижимости",
+    },
     { kind: "social_proof", text: "конверсия лида в встречу растёт в 2-3x после подключения" },
   ],
   stages: {

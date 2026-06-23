@@ -8,11 +8,7 @@
     "root": "../.."
   },
   "files": {
-    "includes": [
-      "src/**/*.{ts,tsx}",
-      "!**/dist/**",
-      "!**/node_modules/**"
-    ]
+    "includes": ["src/**/*.{ts,tsx}", "!**/dist/**", "!**/node_modules/**"]
   },
   "javascript": {
     "formatter": {

@@ -15,10 +15,6 @@ import { flirtyBelfort } from "./flirty-belfort.ts";
  * Seed-script читает этот массив и пишет каждый стиль в styles таблицу
  * как config_json: JSON.stringify(style).
  */
-export const RECRUITMENT_STYLES: readonly Style[] = [
-  flirtyBelfort,
-  empatheticNepq,
-  coldDirectPas,
-];
+export const RECRUITMENT_STYLES: readonly Style[] = [flirtyBelfort, empatheticNepq, coldDirectPas];
 
 export { coldDirectPas, empatheticNepq, flirtyBelfort };
