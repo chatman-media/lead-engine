@@ -21,11 +21,8 @@ export const FRAMEWORK_BLURB: Record<Style["framework"], string> = {
     "Belfort Straight Line: веди prospect к 10/10 уверенности по продукту, продавцу и компании. Тон уверенный и заразительный.",
 };
 
-export function kbGroundingReminder(
-  personaRole: Style["persona"]["role"],
-): string {
-  const base =
-    "Никогда не выдумывай цифры, суммы, сроки, условия. Если фактов нет в KB CONTEXT — ";
+export function kbGroundingReminder(personaRole: Style["persona"]["role"]): string {
+  const base = "Никогда не выдумывай цифры, суммы, сроки, условия. Если фактов нет в KB CONTEXT — ";
   return personaRole === "human"
     ? base +
         "напиши по-человечески, что сейчас уточнишь детали (без официоза вроде «обращусь к руководству»), если этих фактов нет в контексте."

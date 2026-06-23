@@ -11,12 +11,7 @@ export interface SkillOutcomeRow {
   styleSlug: string | null;
   skillSlug: string;
   outcome: "won" | "lost" | "draw";
-  source:
-    | "lead_submitted"
-    | "lead_rejected"
-    | "lead_ghosted"
-    | "manual"
-    | "self_play";
+  source: "lead_submitted" | "lead_rejected" | "lead_ghosted" | "manual" | "self_play";
   createdAt: number;
 }
 

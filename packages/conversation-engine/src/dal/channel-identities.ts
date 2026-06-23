@@ -43,10 +43,7 @@ export class ChannelIdentitiesRepo {
       .select()
       .from(channelIdentities)
       .where(
-        and(
-          eq(channelIdentities.contactId, contactId),
-          eq(channelIdentities.channelId, channelId),
-        ),
+        and(eq(channelIdentities.contactId, contactId), eq(channelIdentities.channelId, channelId)),
       );
     return row ?? null;
   }

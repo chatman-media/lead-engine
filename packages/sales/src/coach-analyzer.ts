@@ -42,12 +42,7 @@ export interface AnalyzeLeadOpts {
    */
   outcome: "won" | "lost" | "draw";
   /** Источник outcome'а: lead_submitted/lead_rejected/lead_ghosted/manual. */
-  source:
-    | "lead_submitted"
-    | "lead_rejected"
-    | "lead_ghosted"
-    | "manual"
-    | "self_play";
+  source: "lead_submitted" | "lead_rejected" | "lead_ghosted" | "manual" | "self_play";
   nowEpoch: number;
 }
 
@@ -112,7 +107,11 @@ export class CoachAnalyzer {
         else duplicate += 1;
       }
     }
-    return { pairsAnalyzed: pairs.length, outcomesRecorded: recorded, outcomesDuplicate: duplicate };
+    return {
+      pairsAnalyzed: pairs.length,
+      outcomesRecorded: recorded,
+      outcomesDuplicate: duplicate,
+    };
   }
 }
 

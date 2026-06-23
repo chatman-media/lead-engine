@@ -7,7 +7,10 @@ const inbound = (over: Record<string, unknown> = {}): Inbound =>
   ({ externalUserId: "u1", externalUsername: "Alice", ...over }) as unknown as Inbound;
 
 function repos(opts: { identity?: unknown; contactById?: unknown } = {}) {
-  const created = { contacts: [] as Array<Record<string, unknown>>, identities: [] as Array<Record<string, unknown>> };
+  const created = {
+    contacts: [] as Array<Record<string, unknown>>,
+    identities: [] as Array<Record<string, unknown>>,
+  };
   const contacts = {
     byId: async () => opts.contactById,
     create: async (data: Record<string, unknown>) => {
@@ -28,13 +31,19 @@ function repos(opts: { identity?: unknown; contactById?: unknown } = {}) {
 
 describe("resolveContact", () => {
   it("существующая identity → возвращает существующий contact", async () => {
-    const { contacts, identities } = repos({ identity: { id: 9, contactId: 5 }, contactById: { id: 5, displayName: "X" } });
+    const { contacts, identities } = repos({
+      identity: { id: 9, contactId: 5 },
+      contactById: { id: 5, displayName: "X" },
+    });
     const c = await resolveContact({ inbound: inbound(), channelDbId: 1, contacts, identities });
     expect(c.id).toBe(5);
   });
 
   it("identity указывает на пропавший contact → ошибка", async () => {
-    const { contacts, identities } = repos({ identity: { id: 9, contactId: 7 }, contactById: undefined });
+    const { contacts, identities } = repos({
+      identity: { id: 9, contactId: 7 },
+      contactById: undefined,
+    });
     await expect(
       resolveContact({ inbound: inbound(), channelDbId: 1, contacts, identities }),
     ).rejects.toThrow("missing contact");
@@ -45,12 +54,21 @@ describe("resolveContact", () => {
     const c = await resolveContact({ inbound: inbound(), channelDbId: 3, contacts, identities });
     expect(c.id).toBe(42);
     expect(created.contacts[0]!.displayName).toBe("Alice");
-    expect(created.identities[0]).toMatchObject({ contactId: 42, channelId: 3, externalUserId: "u1" });
+    expect(created.identities[0]).toMatchObject({
+      contactId: 42,
+      channelId: 3,
+      externalUserId: "u1",
+    });
   });
 
   it("нет username → contact без displayName", async () => {
     const { contacts, identities, created } = repos({ identity: undefined });
-    await resolveContact({ inbound: inbound({ externalUsername: undefined }), channelDbId: 3, contacts, identities });
+    await resolveContact({
+      inbound: inbound({ externalUsername: undefined }),
+      channelDbId: 3,
+      contacts,
+      identities,
+    });
     expect(created.contacts[0]!.displayName).toBeNull();
   });
 });

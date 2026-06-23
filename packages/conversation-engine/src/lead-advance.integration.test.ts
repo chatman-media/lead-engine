@@ -3,7 +3,12 @@
  * продвижение вперёд по фазе под текущую sales-стадию диалога. Требует
  * DATABASE_URL; без него — graceful-skip.
  */
-import { applyAllMigrations, createIsolatedDb, schema, tryConnectToPg } from "@chatman-media/storage";
+import {
+  applyAllMigrations,
+  createIsolatedDb,
+  schema,
+  tryConnectToPg,
+} from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -14,7 +19,13 @@ import { ensureAndAdvanceLeadByPhase } from "./lead-advance.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_ladv_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "storage", "migrations");
+const migrationsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -31,19 +42,22 @@ async function makeStage(
   phase: string | null,
   position: number,
 ) {
-  const [row] = await db.insert(schema.stageDefinitions).values({
-    tenantId,
-    funnelId,
-    slug,
-    displayName: slug,
-    kind,
-    stageType: "form_fill",
-    ...(phase ? { phase } : {}),
-    position,
-    nextStages: [],
-    createdAt: n,
-    updatedAt: n,
-  }).returning({ id: schema.stageDefinitions.id });
+  const [row] = await db
+    .insert(schema.stageDefinitions)
+    .values({
+      tenantId,
+      funnelId,
+      slug,
+      displayName: slug,
+      kind,
+      stageType: "form_fill",
+      ...(phase ? { phase } : {}),
+      position,
+      nextStages: [],
+      createdAt: n,
+      updatedAt: n,
+    })
+    .returning({ id: schema.stageDefinitions.id });
   if (!row) throw new Error("makeStage: insert returned no row");
   return row.id;
 }
@@ -53,7 +67,10 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   enabled = true;
@@ -72,7 +89,13 @@ beforeAll(async () => {
 
   const [f] = await db
     .insert(schema.funnels)
-    .values({ tenantId: tenantWithFunnel, slug: "main", isActive: true, createdAt: n, updatedAt: n })
+    .values({
+      tenantId: tenantWithFunnel,
+      slug: "main",
+      isActive: true,
+      createdAt: n,
+      updatedAt: n,
+    })
     .returning({ id: schema.funnels.id });
   const fid = f!.id;
   await makeStage(tenantWithFunnel, fid, "intake", "intake", null, 0);
@@ -207,9 +230,10 @@ describe("ensureAndAdvanceLeadByPhase", () => {
       )
       .where(and(eq(schema.leads.tenantId, tenantId), eq(schema.leads.userId, contactId)));
     expect(rows).toHaveLength(2);
-    expect(
-      rows.find((row) => row.requestType === "green_corridor"),
-    ).toMatchObject({ state: "gc_request", funnelId: greenFunnel.id });
+    expect(rows.find((row) => row.requestType === "green_corridor")).toMatchObject({
+      state: "gc_request",
+      funnelId: greenFunnel.id,
+    });
     expect(rows.find((row) => row.requestType === "exchange")).toMatchObject({
       state: "exchange_request",
       funnelId: exchangeFunnel.id,

@@ -5,9 +5,7 @@ import { marinaPrime } from "../styles/marina-prime.ts";
 
 describe("composeSystemPrompt — core sections", () => {
   test("includes the persona name", () => {
-    expect(composeSystemPrompt(marinaPrime, "qualify")).toContain(
-      "Тебя зовут Марина",
-    );
+    expect(composeSystemPrompt(marinaPrime, "qualify")).toContain("Тебя зовут Марина");
   });
 
   test("includes the framework blurb", () => {
@@ -21,9 +19,7 @@ describe("composeSystemPrompt — core sections", () => {
 
 describe("composeSystemPrompt — few-shot toggle", () => {
   test("included by default", () => {
-    expect(composeSystemPrompt(marinaPrime, "qualify")).toContain(
-      "ПРИМЕРЫ ДИАЛОГА",
-    );
+    expect(composeSystemPrompt(marinaPrime, "qualify")).toContain("ПРИМЕРЫ ДИАЛОГА");
   });
 
   test("omitted when includeFewShot is false", () => {
@@ -51,9 +47,7 @@ describe("composeSystemPrompt — KB context", () => {
 
 describe("composeSystemPrompt — human persona disclosure branch", () => {
   test("evasive answer when botDisclosureOnDirectQuestion is false", () => {
-    expect(composeSystemPrompt(marinaPrime, "qualify")).toContain(
-      "отвечай уклончиво",
-    );
+    expect(composeSystemPrompt(marinaPrime, "qualify")).toContain("отвечай уклончиво");
   });
 
   test("honest answer when botDisclosureOnDirectQuestion is true", () => {
@@ -67,9 +61,7 @@ describe("composeSystemPrompt — human persona disclosure branch", () => {
 
 describe("composeSystemPrompt — persona facts", () => {
   test("no facts section when persona has no facts", () => {
-    expect(composeSystemPrompt(marinaPrime, "qualify")).not.toContain(
-      "ЛИЧНЫЕ ФАКТЫ",
-    );
+    expect(composeSystemPrompt(marinaPrime, "qualify")).not.toContain("ЛИЧНЫЕ ФАКТЫ");
   });
 
   test("facts section rendered when persona facts are present", () => {

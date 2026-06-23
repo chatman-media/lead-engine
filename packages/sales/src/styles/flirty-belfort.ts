@@ -65,13 +65,11 @@ export const flirtyBelfort: Style = StyleSchema.parse({
     },
     objection: {
       goal: "снять страхи (мошенничество, виза, контракт)",
-      guidance:
-        "Признай страх → дай proof из KB CONTEXT → верни к выгоде. Не споря.",
+      guidance: "Признай страх → дай proof из KB CONTEXT → верни к выгоде. Не споря.",
     },
     close: {
       goal: "договориться на созвон/zoom",
-      guidance:
-        "Прямой CTA: 'удобно завтра в 18 на 15 минут?'. Не уговаривай — спроси один раз.",
+      guidance: "Прямой CTA: 'удобно завтра в 18 на 15 минут?'. Не уговаривай — спроси один раз.",
     },
   },
   fewShot: [
@@ -91,11 +89,7 @@ export const flirtyBelfort: Style = StyleSchema.parse({
   guardrails: {
     noMinors: true,
     botDisclosureOnDirectQuestion: false,
-    forbiddenTopics: [
-      "sexual_explicit",
-      "promises_of_specific_money_amount",
-      "minors",
-    ],
+    forbiddenTopics: ["sexual_explicit", "promises_of_specific_money_amount", "minors"],
   },
   model: {
     id: "qwen3:latest",

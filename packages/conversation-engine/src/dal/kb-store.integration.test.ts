@@ -4,7 +4,12 @@
  * priority). Требует DATABASE_URL (+ pgvector); без него — graceful-skip.
  */
 import type { IKbStore, KbScope, KbSearchHit } from "@chatman-media/kb";
-import { applyAllMigrations, createIsolatedDb, schema, tryConnectToPg } from "@chatman-media/storage";
+import {
+  applyAllMigrations,
+  createIsolatedDb,
+  schema,
+  tryConnectToPg,
+} from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { dirname, join } from "node:path";
@@ -14,7 +19,14 @@ import { DrizzleKbStore, ScopedKbStore } from "./kb-store.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_kbstore_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "storage", "migrations");
+const migrationsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -92,7 +104,10 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   enabled = true;
@@ -238,9 +253,7 @@ describe("ScopedKbStore — hybrid/priority/delegates", () => {
       funnelId: 7,
     });
 
-    expect(
-      await store.hybridSearch({ embedding: vec(0), query: "q" }),
-    ).toBe(funnelHits);
+    expect(await store.hybridSearch({ embedding: vec(0), query: "q" })).toBe(funnelHits);
     expect(inner.hybridCalls).toEqual(["funnel:7:"]);
   });
 
@@ -316,13 +329,7 @@ describe("ScopedKbStore — hybrid/priority/delegates", () => {
       embedding: null,
     });
 
-    expect(inner.delegated).toEqual([
-      "doc:src.md",
-      "count:5",
-      "del:5",
-      "upsert:src.md",
-      "chunk:0",
-    ]);
+    expect(inner.delegated).toEqual(["doc:src.md", "count:5", "del:5", "upsert:src.md", "chunk:0"]);
   });
 });
 
@@ -461,7 +468,12 @@ describe("DrizzleKbStore — search", () => {
 
   it("prioritySearch vectorOnly fallback", async () => {
     if (!enabled) return;
-    const hits = await store.prioritySearch({ embedding: vec(0), query: "обмен", k: 5, vectorOnly: true });
+    const hits = await store.prioritySearch({
+      embedding: vec(0),
+      query: "обмен",
+      k: 5,
+      vectorOnly: true,
+    });
     expect(hits.length).toBeGreaterThan(0);
   });
 });

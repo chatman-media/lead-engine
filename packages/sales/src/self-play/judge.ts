@@ -39,10 +39,7 @@ export interface JudgeVerdict {
 
 function transcriptToString(t: JudgeInput["transcript"]): string {
   return t
-    .map(
-      (m, i) =>
-        `[${i + 1}] ${m.role === "candidate" ? "candidate" : "salesperson"}: ${m.text}`,
-    )
+    .map((m, i) => `[${i + 1}] ${m.role === "candidate" ? "candidate" : "salesperson"}: ${m.text}`)
     .join("\n");
 }
 
@@ -80,8 +77,7 @@ export function parseVerdict(raw: string): JudgeVerdict {
   const parsed = extractJsonObject(raw);
   if (parsed) {
     const outcome = pickOutcome(parsed.outcome);
-    const reason =
-      typeof parsed.reason === "string" ? parsed.reason : "(no reason)";
+    const reason = typeof parsed.reason === "string" ? parsed.reason : "(no reason)";
     if (outcome) return { outcome, reason };
   }
   // Regex fallback — find an "outcome": "..." pair anywhere.
@@ -94,10 +90,7 @@ export function parseVerdict(raw: string): JudgeVerdict {
       reason: reasonMatch?.[1] ?? "(no reason)",
     };
   }
-  console.warn(
-    "[judge] unparseable output (first 300 chars):",
-    raw.slice(0, 300),
-  );
+  console.warn("[judge] unparseable output (first 300 chars):", raw.slice(0, 300));
   return { outcome: "draw", reason: "judge output unparseable", raw };
 }
 

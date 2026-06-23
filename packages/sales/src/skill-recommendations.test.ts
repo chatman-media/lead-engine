@@ -41,15 +41,22 @@ describe("rankSkillRecommendations", () => {
   });
 
   it("count < minSamples → confidence 0 и recommended=false", () => {
-    const [r] = rankSkillRecommendations([skill({ slug: "s" })], [agg({ skill_slug: "s", wins: 2, count: 2 })], {
-      minSamples: 5,
-    });
+    const [r] = rankSkillRecommendations(
+      [skill({ slug: "s" })],
+      [agg({ skill_slug: "s", wins: 2, count: 2 })],
+      {
+        minSamples: 5,
+      },
+    );
     expect(r?.confidence_lower).toBe(0);
     expect(r?.recommended).toBe(false);
   });
 
   it("draws считаются как пол-победы (observed_rate)", () => {
-    const [r] = rankSkillRecommendations([skill({ slug: "s" })], [agg({ skill_slug: "s", wins: 4, draws: 2, count: 6 })]);
+    const [r] = rankSkillRecommendations(
+      [skill({ slug: "s" })],
+      [agg({ skill_slug: "s", wins: 4, draws: 2, count: 6 })],
+    );
     expect(r?.observed_rate).toBeCloseTo((4 + 1) / 6, 6);
   });
 

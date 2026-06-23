@@ -71,7 +71,9 @@ describe("summarizeConversation", () => {
 
   test("returns previousSummary when LLM throws", async () => {
     const errorChat = {
-      complete: async () => { throw new Error("llm down"); },
+      complete: async () => {
+        throw new Error("llm down");
+      },
     } as unknown as ChatClient;
     const result = await summarizeConversation({
       messagesToSummarize: [{ role: "user", content: "hello" }],

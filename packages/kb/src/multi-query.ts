@@ -36,7 +36,8 @@ export async function expandQueries(input: ExpandQueriesInput): Promise<string[]
   if (!original) return [original];
 
   const tail = (input.history ?? []).slice(-4);
-  const historySnippet = tail.length > 0 ? tail.map((m) => `${m.role}: ${m.content}`).join("\n") + "\n\n" : "";
+  const historySnippet =
+    tail.length > 0 ? tail.map((m) => `${m.role}: ${m.content}`).join("\n") + "\n\n" : "";
   const userPrompt = `${historySnippet}запрос: ${original}\nответ (${count} строки):`;
 
   let raw: string;

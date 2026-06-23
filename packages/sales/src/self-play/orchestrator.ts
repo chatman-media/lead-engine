@@ -10,12 +10,7 @@
  * persona-prompt loop (no KB, no skills).
  */
 import type { ChatClient, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
-import {
-  answerWithRag,
-  gradeSkills,
-  type IKbStore,
-  NO_CONTEXT_MARKER,
-} from "@chatman-media/kb";
+import { answerWithRag, gradeSkills, type IKbStore, NO_CONTEXT_MARKER } from "@chatman-media/kb";
 import type { EloOutcome } from "../elo.ts";
 import { eloUpdate } from "../elo.ts";
 import type { SkillForPrompt } from "../prompt.ts";
@@ -131,19 +126,13 @@ function buildSalesHistory(
 }
 
 /** Exported for tests so the regex can be exercised without a full match. */
-export const _testCandidateConcluded = (text: string): boolean =>
-  candidateConcluded(text);
+export const _testCandidateConcluded = (text: string): boolean => candidateConcluded(text);
 
 function candidateConcluded(text: string): boolean {
   const t = text.toLowerCase();
-  if (/(давай[те]*\s+(оформ|анкет|поех|созв|попроб|начн|сдела))/i.test(t))
-    return true;
-  if (/(я\s+согласн[аы]|я\s+готов[а]?\s+(оформ|поех|начать|подать))/i.test(t))
-    return true;
-  if (
-    /^ок\s*[!,.\s]*(давай|оформ|поех|анкет|готов|подаём|подаем|начн)/i.test(t)
-  )
-    return true;
+  if (/(давай[те]*\s+(оформ|анкет|поех|созв|попроб|начн|сдела))/i.test(t)) return true;
+  if (/(я\s+согласн[аы]|я\s+готов[а]?\s+(оформ|поех|начать|подать))/i.test(t)) return true;
+  if (/^ок\s*[!,.\s]*(давай|оформ|поех|анкет|готов|подаём|подаем|начн)/i.test(t)) return true;
   if (/(не\s+интересно|мне\s+(не\s+)?подход|передумал)/i.test(t)) return true;
   if (/(не\s+пишите|отстань|это\s+развод)/i.test(t)) return true;
   return false;
@@ -156,9 +145,7 @@ export async function runSelfPlayMatch(
   const maxTurns = input.maxTurns ?? DEFAULT_MAX_TURNS;
   const transcript: SelfPlayMatchResult["transcript"] = [];
 
-  const skillRows = (await deps.skills.skillsForStyle(input.styleId)).filter(
-    (r) => r.is_enabled,
-  );
+  const skillRows = (await deps.skills.skillsForStyle(input.styleId)).filter((r) => r.is_enabled);
   const skills: SkillForPrompt[] = skillRows.map((r) => ({
     slug: r.slug,
     displayName: r.display_name,
@@ -211,8 +198,7 @@ export async function runSelfPlayMatch(
       consecutiveStalls++;
       if (consecutiveStalls >= STALL_LIMIT) {
         consecutiveStalls = 0;
-        salesText =
-          input.style.voice.stallCtaReply ?? SELF_PLAY_STALL_CTA_FALLBACK;
+        salesText = input.style.voice.stallCtaReply ?? SELF_PLAY_STALL_CTA_FALLBACK;
       } else {
         salesText = deps.stallReply ?? SELF_PLAY_DEFAULT_STALL_REPLY;
       }
@@ -238,10 +224,7 @@ export async function runSelfPlayMatch(
       }
     }
 
-    const candidateMessages = buildCandidateHistory(
-      transcript,
-      input.persona.systemPrompt,
-    );
+    const candidateMessages = buildCandidateHistory(transcript, input.persona.systemPrompt);
     let candidateText: string;
     try {
       candidateText = await deps.candidateChat.complete(candidateMessages, {
@@ -320,12 +303,7 @@ async function finalize(
     usedSkills.size > 0 ? skills.filter((s) => usedSkills.has(s.slug)) : skills;
   let leadId = -1;
   if (attributedSkills.length > 0) {
-    leadId = await persistSelfPlayOutcome(
-      deps,
-      input,
-      attributedSkills,
-      verdict,
-    );
+    leadId = await persistSelfPlayOutcome(deps, input, attributedSkills, verdict);
   }
   const result: SelfPlayMatchResult = {
     styleSlug: input.style.slug,
@@ -371,10 +349,7 @@ async function persistSelfPlayOutcome(
   }
 
   const current = await deps.ratings.getRating(input.styleId);
-  await deps.ratings.setRating(
-    input.styleId,
-    eloUpdate(current, verdict.outcome),
-  );
+  await deps.ratings.setRating(input.styleId, eloUpdate(current, verdict.outcome));
 
   return lead.id;
 }

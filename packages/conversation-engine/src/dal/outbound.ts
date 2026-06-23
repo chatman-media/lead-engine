@@ -43,10 +43,7 @@ export class OutboundQueueRepo {
         .select()
         .from(outboundQueue)
         .where(
-          and(
-            eq(outboundQueue.tenantId, this.ctx.tenantId),
-            eq(outboundQueue.idempotencyKey, key),
-          ),
+          and(eq(outboundQueue.tenantId, this.ctx.tenantId), eq(outboundQueue.idempotencyKey, key)),
         );
       if (existing) return existing as OutboundQueueRow;
     }
@@ -145,10 +142,7 @@ export class OutboundQueueRepo {
    * у которых status='processing' дольше `stuckSec` секунд (worker умер
    * не дойдя до markSent/markFailed). Cron'ится из apps/worker раз в N минут.
    */
-  async releaseStuckProcessing(opts: {
-    nowEpoch: number;
-    stuckSec: number;
-  }): Promise<number> {
+  async releaseStuckProcessing(opts: { nowEpoch: number; stuckSec: number }): Promise<number> {
     const cutoff = opts.nowEpoch - opts.stuckSec;
     const rows = await this.ctx.db.execute(sql`
       UPDATE ${outboundQueue}
@@ -170,9 +164,7 @@ export class OutboundQueueRepo {
         sentAt: nowEpoch,
         attempt: sql`${outboundQueue.attempt} + 1`,
       })
-      .where(
-        and(eq(outboundQueue.id, id), eq(outboundQueue.tenantId, this.ctx.tenantId)),
-      );
+      .where(and(eq(outboundQueue.id, id), eq(outboundQueue.tenantId, this.ctx.tenantId)));
   }
 
   async markFailed(id: number, error: string): Promise<void> {
@@ -183,8 +175,6 @@ export class OutboundQueueRepo {
         lastError: error,
         attempt: sql`${outboundQueue.attempt} + 1`,
       })
-      .where(
-        and(eq(outboundQueue.id, id), eq(outboundQueue.tenantId, this.ctx.tenantId)),
-      );
+      .where(and(eq(outboundQueue.id, id), eq(outboundQueue.tenantId, this.ctx.tenantId)));
   }
 }

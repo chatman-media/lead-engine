@@ -19,13 +19,7 @@ import { z } from "zod";
 // pipeline'ом, vertical-uae styles, RAG answer.
 export { FUNNEL_STAGES, type FunnelStage };
 
-export const SALES_FRAMEWORKS = [
-  "AIDA",
-  "PAS",
-  "SPIN",
-  "NEPQ",
-  "straight_line",
-] as const;
+export const SALES_FRAMEWORKS = ["AIDA", "PAS", "SPIN", "NEPQ", "straight_line"] as const;
 export type SalesFramework = (typeof SALES_FRAMEWORKS)[number];
 
 export const HOOK_KINDS = [

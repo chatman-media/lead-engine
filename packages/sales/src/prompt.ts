@@ -76,9 +76,7 @@ export function composeSystemPrompt(
   const stageCfg = stages[stage];
 
   const factsEntries = persona.facts
-    ? (Object.entries(persona.facts) as [string, string][]).filter(([, v]) =>
-        v.trim(),
-      )
+    ? (Object.entries(persona.facts) as [string, string][]).filter(([, v]) => v.trim())
     : [];
   const factsSection = factsEntries.length
     ? ` ЛИЧНЫЕ ФАКТЫ (используй строго эти данные): ${factsEntries.map(([k, v]) => `${k}: ${v}`).join("; ")}.`
@@ -121,14 +119,11 @@ export function composeSystemPrompt(
   // to apply per turn, instead of being forced to use all of them.
   const skillsForStage =
     options.skills?.filter(
-      (s) =>
-        s.applicableStages.length === 0 || s.applicableStages.includes(stage),
+      (s) => s.applicableStages.length === 0 || s.applicableStages.includes(stage),
     ) ?? [];
   const skillsBlock = skillsForStage.length
     ? `ПРИЁМЫ (используй уместные, не все сразу — выбирай по контексту):\n` +
-      skillsForStage
-        .map((s) => `- ${s.displayName} — ${s.promptFragment}`)
-        .join("\n")
+      skillsForStage.map((s) => `- ${s.displayName} — ${s.promptFragment}`).join("\n")
     : "";
 
   const stageBlock = stageCfg
@@ -140,9 +135,7 @@ export function composeSystemPrompt(
         : "")
     : `ТЕКУЩИЙ ЭТАП: ${stage}. (Специфических правил для этапа нет — используй общий стиль.)`;
 
-  const minorRule = guardrails.noMinors
-    ? "- Если prospect <18 лет — вежливо заверши диалог."
-    : "";
+  const minorRule = guardrails.noMinors ? "- Если prospect <18 лет — вежливо заверши диалог." : "";
   const topicsRule = guardrails.forbiddenTopics.length
     ? `- Запрещённые темы: ${guardrails.forbiddenTopics.join(", ")}.`
     : "";
@@ -173,16 +166,13 @@ export function composeSystemPrompt(
   const userFactsBlock = renderUserFactsBlock(options.userFacts);
   const summaryBlock = renderSummaryBlock(options.conversationSummary);
 
-  const needsGroundingReminder =
-    stageCfg?.groundingRequired === true && !preFetchedKbContext;
+  const needsGroundingReminder = stageCfg?.groundingRequired === true && !preFetchedKbContext;
 
   // Support mode: the lead is past approval and waiting on the visa
   // process. Drop every sales block (framework / hooks / skills / funnel
   // stage / few-shot) and replace them with a calm FAQ-support block.
   // Persona, voice, guardrails, KB grounding + context stay intact.
-  const support = options.supportPhase
-    ? supportBlock(options.supportPhase)
-    : "";
+  const support = options.supportPhase ? supportBlock(options.supportPhase) : "";
 
   return [
     personaBlock,

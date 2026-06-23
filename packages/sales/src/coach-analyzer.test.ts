@@ -3,7 +3,9 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import { describe, expect, it } from "bun:test";
 import { CoachAnalyzer, extractUserAssistantPairs } from "./coach-analyzer.ts";
 
-function msg(opts: Partial<MessageRow> & { id: number; role: MessageRow["role"]; text: string }): MessageRow {
+function msg(
+  opts: Partial<MessageRow> & { id: number; role: MessageRow["role"]; text: string },
+): MessageRow {
   return {
     id: opts.id,
     tenantId: 1,
@@ -83,7 +85,12 @@ class FakeChat implements ChatClient {
 }
 
 class FakeSkillOutcomes {
-  public recorded: Array<{ leadId: number; skillSlug: string; outcome: string; messageId: number | null }> = [];
+  public recorded: Array<{
+    leadId: number;
+    skillSlug: string;
+    outcome: string;
+    messageId: number | null;
+  }> = [];
   private seen = new Set<string>();
   async record(opts: {
     leadId: number;
@@ -239,9 +246,7 @@ describe("CoachAnalyzer", () => {
       availableSlugs: ["mirroring"],
       resolveChat: () => chat,
     });
-    const messages = new FakeMessages([
-      msg({ id: 1, role: "user", text: "alone" }),
-    ]);
+    const messages = new FakeMessages([msg({ id: 1, role: "user", text: "alone" })]);
     const outcomes = new FakeSkillOutcomes();
     const result = await analyzer.analyzeLead(
       { messages: messages as never, skillOutcomes: outcomes as never },

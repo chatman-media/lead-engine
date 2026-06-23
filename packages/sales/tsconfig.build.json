@@ -9,10 +9,6 @@
     "outDir": "./dist",
     "paths": {}
   },
-  "exclude": [
-    "src/__tests__/**"
-  ],
-  "include": [
-    "src/**/*.ts"
-  ]
+  "exclude": ["src/__tests__/**"],
+  "include": ["src/**/*.ts"]
 }

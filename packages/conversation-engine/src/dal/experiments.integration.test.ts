@@ -2,7 +2,12 @@
  * ExperimentsRepo (CRUD + status-переходы) + parseAllocation. Требует
  * DATABASE_URL; без него — graceful-skip.
  */
-import { applyAllMigrations, createIsolatedDb, schema, tryConnectToPg } from "@chatman-media/storage";
+import {
+  applyAllMigrations,
+  createIsolatedDb,
+  schema,
+  tryConnectToPg,
+} from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +17,14 @@ import { ExperimentsRepo, parseAllocation } from "./experiments.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_exp_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "storage", "migrations");
+const migrationsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -29,13 +41,22 @@ beforeAll(async () => {
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   enabled = true;
   n = Math.floor(Date.now() / 1000);
-  const [a] = await db.insert(schema.tenants).values({ slug: `exp-a-${n}` }).returning({ id: schema.tenants.id });
-  const [b] = await db.insert(schema.tenants).values({ slug: `exp-b-${n}` }).returning({ id: schema.tenants.id });
+  const [a] = await db
+    .insert(schema.tenants)
+    .values({ slug: `exp-a-${n}` })
+    .returning({ id: schema.tenants.id });
+  const [b] = await db
+    .insert(schema.tenants)
+    .values({ slug: `exp-b-${n}` })
+    .returning({ id: schema.tenants.id });
   t1 = a!.id;
   t2 = b!.id;
 }, 30_000);
@@ -47,7 +68,11 @@ afterAll(async () => {
 describe("ExperimentsRepo", () => {
   it("create → draft, byId находит, чужой тенант не видит", async () => {
     if (!enabled) return;
-    const created = await repo().create({ slug: slug("c1"), allocationJson: "[]", successMetric: "qualified" });
+    const created = await repo().create({
+      slug: slug("c1"),
+      allocationJson: "[]",
+      successMetric: "qualified",
+    });
     expect(created.status).toBe("draft");
     expect((await repo().byId(created.id))?.id).toBe(created.id);
     // изоляция: репо другого тенанта не видит
@@ -61,7 +86,11 @@ describe("ExperimentsRepo", () => {
 
   it("setStatus running проставляет startedAt и виден в findRunningBySlug", async () => {
     if (!enabled) return;
-    const e = await repo().create({ slug: slug("run"), allocationJson: "[]", successMetric: "won" });
+    const e = await repo().create({
+      slug: slug("run"),
+      allocationJson: "[]",
+      successMetric: "won",
+    });
     expect(await repo().findRunningBySlug(e.slug)).toBeNull(); // ещё draft
     const upd = await repo().setStatus(e.id, "running");
     expect(upd?.status).toBe("running");
@@ -71,7 +100,11 @@ describe("ExperimentsRepo", () => {
 
   it("setStatus done проставляет endedAt", async () => {
     if (!enabled) return;
-    const e = await repo().create({ slug: slug("done"), allocationJson: "[]", successMetric: "qualified" });
+    const e = await repo().create({
+      slug: slug("done"),
+      allocationJson: "[]",
+      successMetric: "qualified",
+    });
     const upd = await repo().setStatus(e.id, "done");
     expect(upd?.status).toBe("done");
     expect(upd?.endedAt).toBeGreaterThan(0);
@@ -79,8 +112,15 @@ describe("ExperimentsRepo", () => {
 
   it("update меняет allocationJson и successMetric", async () => {
     if (!enabled) return;
-    const e = await repo().create({ slug: slug("upd"), allocationJson: "[]", successMetric: "qualified" });
-    const upd = await repo().update(e.id, { allocationJson: '[{"style_slug":"x"}]', successMetric: "won" });
+    const e = await repo().create({
+      slug: slug("upd"),
+      allocationJson: "[]",
+      successMetric: "qualified",
+    });
+    const upd = await repo().update(e.id, {
+      allocationJson: '[{"style_slug":"x"}]',
+      successMetric: "won",
+    });
     expect(upd?.allocationJson).toBe('[{"style_slug":"x"}]');
     expect(upd?.successMetric).toBe("won");
   });
@@ -102,10 +142,14 @@ describe("parseAllocation", () => {
     ]);
   });
   it("вес ≤ 0 игнорируется → дефолт 1", () => {
-    expect(parseAllocation('[{"style_slug":"a","weight":-5}]')).toEqual([{ styleSlug: "a", weight: 1 }]);
+    expect(parseAllocation('[{"style_slug":"a","weight":-5}]')).toEqual([
+      { styleSlug: "a", weight: 1 },
+    ]);
   });
   it("пропускает записи без строкового slug", () => {
-    expect(parseAllocation('[{"weight":2},{"style_slug":"ok"}]')).toEqual([{ styleSlug: "ok", weight: 1 }]);
+    expect(parseAllocation('[{"weight":2},{"style_slug":"ok"}]')).toEqual([
+      { styleSlug: "ok", weight: 1 },
+    ]);
   });
   it("не-JSON → ошибка", () => {
     expect(() => parseAllocation("{not json")).toThrow("not JSON");

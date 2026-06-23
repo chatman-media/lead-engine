@@ -7,10 +7,7 @@ import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./reply-strategy/exchange-reply-guard.ts";
 import { normalizeReplyStrategyResult, type ReplyStrategy } from "./process-inbound.ts";
 import type { NotificationService } from "./notifications.ts";
-import {
-  emitOperatorHandoffNotifications,
-  primaryOperatorHandoff,
-} from "./operator-handoff.ts";
+import { emitOperatorHandoffNotifications, primaryOperatorHandoff } from "./operator-handoff.ts";
 import { systemClock } from "./types.ts";
 import type { ChannelContext, PipelineSink, ProcessInboundResult, TenantContext } from "./types.ts";
 import { withTenant } from "./with-tenant.ts";
@@ -185,9 +182,7 @@ export async function generateReplyAndEnqueue(
       contactId: result.contactId,
       inbound,
       userMessageText: text,
-      ...(result.userMessageId !== undefined
-        ? { userMessageId: result.userMessageId }
-        : {}),
+      ...(result.userMessageId !== undefined ? { userMessageId: result.userMessageId } : {}),
     }),
   );
   if (!replyOutput) {
@@ -323,9 +318,7 @@ export async function generateReplyAndEnqueue(
       userMessageText: text,
       inbound,
       envelopes: replyOutput.envelopes,
-      ...(replyOutput.operatorHandoffs
-        ? { operatorHandoffs: replyOutput.operatorHandoffs }
-        : {}),
+      ...(replyOutput.operatorHandoffs ? { operatorHandoffs: replyOutput.operatorHandoffs } : {}),
       notifications: deps.notifications ?? null,
       ...(deps.sink ? { sink: deps.sink } : {}),
     });

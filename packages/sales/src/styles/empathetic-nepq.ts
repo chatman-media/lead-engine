@@ -34,8 +34,7 @@ export const empatheticNepq: Style = StyleSchema.parse({
   stages: {
     opener: {
       goal: "познакомиться, узнать контекст",
-      guidance:
-        "Открывай мягким открытым вопросом — например 'как ты сейчас в моделинге?'.",
+      guidance: "Открывай мягким открытым вопросом — например 'как ты сейчас в моделинге?'.",
       maxTurns: 1,
     },
     qualify: {
@@ -58,8 +57,7 @@ export const empatheticNepq: Style = StyleSchema.parse({
     },
     close: {
       goal: "пусть prospect сам предложит next step",
-      guidance:
-        "'Как ты хочешь двигаться дальше — продолжим тут или удобнее голосом?'",
+      guidance: "'Как ты хочешь двигаться дальше — продолжим тут или удобнее голосом?'",
     },
   },
   fewShot: [

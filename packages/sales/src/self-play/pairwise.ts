@@ -15,11 +15,7 @@ import { extractJsonObject } from "../llm-json.ts";
 import { PAIRWISE_SYSTEM_PROMPT } from "../prompts/pairwise.ts";
 import type { IPairwiseMatchesRepo } from "../store.ts";
 import type { Style } from "../types.ts";
-import {
-  runSelfPlayMatch,
-  type SelfPlayDeps,
-  type SelfPlayMatchResult,
-} from "./orchestrator.ts";
+import { runSelfPlayMatch, type SelfPlayDeps, type SelfPlayMatchResult } from "./orchestrator.ts";
 import type { CandidatePersona } from "./personas.ts";
 
 export interface PairwiseDeps extends SelfPlayDeps {
@@ -63,10 +59,7 @@ export interface PairwiseMatchResult {
 
 function transcriptToString(t: SelfPlayMatchResult["transcript"]): string {
   return t
-    .map(
-      (m, i) =>
-        `[${i + 1}] ${m.role === "candidate" ? "candidate" : "salesperson"}: ${m.text}`,
-    )
+    .map((m, i) => `[${i + 1}] ${m.role === "candidate" ? "candidate" : "salesperson"}: ${m.text}`)
     .join("\n");
 }
 
@@ -111,8 +104,7 @@ export function parsePairwiseVerdict(raw: string): PairwiseVerdict {
   const parsed = extractJsonObject(raw);
   if (parsed) {
     const winner = pickWinner(parsed.winner);
-    const reason =
-      typeof parsed.reason === "string" ? parsed.reason : "(no reason)";
+    const reason = typeof parsed.reason === "string" ? parsed.reason : "(no reason)";
     if (winner) return { winner, reason };
   }
   const m = raw.match(/"winner"\s*:\s*"(a|b|draw)"/i);

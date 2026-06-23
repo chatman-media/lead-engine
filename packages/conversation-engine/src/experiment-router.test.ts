@@ -65,12 +65,16 @@ describe("loadExperimentVariants", () => {
 
   test("пропускает missing стиль, возвращает валидные", async () => {
     let call = 0;
-    const mixedRepo = { findActiveBySlug: async () => ++call === 1 ? null : { configJson: VALID_CONFIG_JSON } };
+    const mixedRepo = {
+      findActiveBySlug: async () => (++call === 1 ? null : { configJson: VALID_CONFIG_JSON }),
+    };
     const result = await loadExperimentVariants(
-      makeExperiment(JSON.stringify([
-        { styleSlug: "missing", weight: 0.3 },
-        { styleSlug: "valid", weight: 0.7 },
-      ])),
+      makeExperiment(
+        JSON.stringify([
+          { styleSlug: "missing", weight: 0.3 },
+          { styleSlug: "valid", weight: 0.7 },
+        ]),
+      ),
       mixedRepo as never,
     );
     expect(result).toHaveLength(1);

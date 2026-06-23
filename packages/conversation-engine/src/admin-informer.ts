@@ -29,14 +29,25 @@ import { TelegramClient } from "@chatman-media/channel-telegram";
 import { NotificationsRepo, type OperatorSettings } from "./dal/notifications.ts";
 import type { Db } from "./dal/types.ts";
 import type { NotificationEvent } from "./notifications.ts";
-import type { OpsAlert, OpsAlertKind, OpsEmailSender, OpsSeverity, OpsTelegramSender } from "./ops-alerts.ts";
+import type {
+  OpsAlert,
+  OpsAlertKind,
+  OpsEmailSender,
+  OpsSeverity,
+  OpsTelegramSender,
+} from "./ops-alerts.ts";
 import { withTenant } from "./with-tenant.ts";
 
 export type InformerTopic = "leads" | "escalation" | "orders" | "system";
 export type InformerSeverity = "critical" | "important" | "info";
 export type InformerLevel = "silent" | "critical" | "important" | "all";
 
-export const INFORMER_TOPICS: readonly InformerTopic[] = ["leads", "escalation", "orders", "system"];
+export const INFORMER_TOPICS: readonly InformerTopic[] = [
+  "leads",
+  "escalation",
+  "orders",
+  "system",
+];
 
 export interface InformerEvent {
   tenantId: number;
@@ -116,7 +127,10 @@ export function inQuietHours(settings: OperatorSettings | undefined, nowEpoch: n
 }
 
 /** Тема включена, если карты нет (NULL = все включены) или ключ != false. */
-export function topicEnabled(settings: OperatorSettings | undefined, topic: InformerTopic): boolean {
+export function topicEnabled(
+  settings: OperatorSettings | undefined,
+  topic: InformerTopic,
+): boolean {
   const raw = settings?.informerTopics;
   if (!raw) return true;
   try {
@@ -165,7 +179,11 @@ const NOTIF_MAP: Record<string, NotifMeta> = {
   stage_changed: { topic: "leads", severity: "info", title: "Смена стадии" },
   lead_stale: { topic: "leads", severity: "info", title: "Лид завис" },
   human_takeover: { topic: "escalation", severity: "important", title: "Нужна помощь оператора" },
-  verification_requested: { topic: "escalation", severity: "important", title: "Видео-верификация" },
+  verification_requested: {
+    topic: "escalation",
+    severity: "important",
+    title: "Видео-верификация",
+  },
   document_uploaded: { topic: "escalation", severity: "info", title: "Загружен документ" },
   operator_handoff_required: {
     topic: "escalation",
@@ -293,7 +311,10 @@ export interface AdminInformerDeps {
   cooldownSec?: number;
   /** In-app realtime sink для админки; сеть/доставка остаются вне пакета. */
   realtime?: (event: AdminInformerRealtimeEvent) => void;
-  log?: { warn?: (msg: string, ctx?: unknown) => void; info?: (msg: string, ctx?: unknown) => void };
+  log?: {
+    warn?: (msg: string, ctx?: unknown) => void;
+    info?: (msg: string, ctx?: unknown) => void;
+  };
 }
 
 interface DeliveryPlan {
@@ -364,7 +385,11 @@ export class AdminInformer {
       const chatId = owner.settings?.telegramChatId ?? null;
 
       // Persisted-дедуп (анти-шторм).
-      const recent = await repo.findRecentByDedup(event.tenantId, event.dedupKey, now - this.cooldownSec);
+      const recent = await repo.findRecentByDedup(
+        event.tenantId,
+        event.dedupKey,
+        now - this.cooldownSec,
+      );
       if (recent) return null;
 
       const level = (owner.settings?.informerLevel ?? "important") as InformerLevel;
@@ -453,14 +478,12 @@ export class AdminInformer {
 
     // Доставлено → исключаем из дайджеста.
     if (delivered) {
-      await this.repo
-        .markNotificationDelivered(plan.rowId, now)
-        .catch((err) =>
-          this.deps.log?.warn?.("[informer] mark delivered failed", {
-            rowId: plan.rowId,
-            err: String(err),
-          }),
-        );
+      await this.repo.markNotificationDelivered(plan.rowId, now).catch((err) =>
+        this.deps.log?.warn?.("[informer] mark delivered failed", {
+          rowId: plan.rowId,
+          err: String(err),
+        }),
+      );
     }
 
     this.deps.log?.info?.("[informer] routed", {

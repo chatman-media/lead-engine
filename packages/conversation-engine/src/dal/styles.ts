@@ -30,9 +30,7 @@ export class StylesRepo {
     const [row] = await this.ctx.db
       .select()
       .from(stylesTable)
-      .where(
-        and(eq(stylesTable.id, id), eq(stylesTable.tenantId, this.ctx.tenantId)),
-      );
+      .where(and(eq(stylesTable.id, id), eq(stylesTable.tenantId, this.ctx.tenantId)));
     return (row as StyleRow) ?? null;
   }
 
@@ -71,12 +69,7 @@ export class StylesRepo {
     const rows = await this.ctx.db
       .select()
       .from(stylesTable)
-      .where(
-        and(
-          eq(stylesTable.tenantId, this.ctx.tenantId),
-          sql`deleted_at IS NULL`,
-        ),
-      );
+      .where(and(eq(stylesTable.tenantId, this.ctx.tenantId), sql`deleted_at IS NULL`));
     return rows as StyleRow[];
   }
 
