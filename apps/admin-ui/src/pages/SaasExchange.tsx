@@ -1974,6 +1974,7 @@ function PayoutPointsTab() {
   const [syncing, setSyncing] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "map">("list");
   const [pointKind, setPointKind] = useState<"atm" | "office">("atm");
+  const [quoteFilter, setQuoteFilter] = useState<string | null>(null);
   const [sendLocPoint, setSendLocPoint] = useState<PayoutPoint | null>(null);
   const [sendLocConvId, setSendLocConvId] = useState("");
   const [sendingLoc, setSendingLoc] = useState(false);
@@ -2182,6 +2183,39 @@ function PayoutPointsTab() {
                 Офисы ({points.filter((p) => p.kind !== "atm").length})
               </Button>
             </div>
+            {(() => {
+              const currencies = [...new Set(points.map((p) => p.quoteAsset))].sort();
+              if (currencies.length < 2) return null;
+              return (
+                <div className="flex rounded-md border">
+                  <Button
+                    size="sm"
+                    variant={quoteFilter === null ? "secondary" : "ghost"}
+                    className="rounded-r-none border-0 px-2.5"
+                    onClick={() => {
+                      setQuoteFilter(null);
+                      setPointsPage(0);
+                    }}
+                  >
+                    Все
+                  </Button>
+                  {currencies.map((c, i) => (
+                    <Button
+                      key={c}
+                      size="sm"
+                      variant={quoteFilter === c ? "secondary" : "ghost"}
+                      className={`border-0 px-2.5 ${i === currencies.length - 1 ? "rounded-l-none" : "rounded-none"}`}
+                      onClick={() => {
+                        setQuoteFilter(c);
+                        setPointsPage(0);
+                      }}
+                    >
+                      {c}
+                    </Button>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
           <div className="flex gap-2">
             <Button
@@ -2250,8 +2284,10 @@ function PayoutPointsTab() {
               );
             })()}
           {(() => {
-            const visible = points.filter((p) =>
-              pointKind === "atm" ? p.kind === "atm" : p.kind !== "atm",
+            const visible = points.filter(
+              (p) =>
+                (pointKind === "atm" ? p.kind === "atm" : p.kind !== "atm") &&
+                (quoteFilter === null || p.quoteAsset === quoteFilter),
             );
             if (loading) return <Skeleton className="h-24 w-full" />;
             // Карта фильтруется по поддерживаемым банкам (если заданы); список —
