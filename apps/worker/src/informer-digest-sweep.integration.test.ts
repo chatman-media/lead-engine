@@ -41,7 +41,10 @@ function makeSweeper(sender: InformerDigestSender) {
   return new InformerDigestSweeper(db, { intervalMs: 1, botToken: "", sender });
 }
 
-async function seedPending(dedup: string, over: Partial<typeof adminNotifications.$inferInsert> = {}) {
+async function seedPending(
+  dedup: string,
+  over: Partial<typeof adminNotifications.$inferInsert> = {},
+) {
   await db.insert(adminNotifications).values({
     tenantId,
     adminId,
@@ -72,7 +75,10 @@ beforeAll(async () => {
   enabled = true;
 
   const now = Math.floor(Date.now() / 1000);
-  const [t] = await db.insert(schema.tenants).values({ slug: `inf-dig-${now}` }).returning({ id: schema.tenants.id });
+  const [t] = await db
+    .insert(schema.tenants)
+    .values({ slug: `inf-dig-${now}` })
+    .returning({ id: schema.tenants.id });
   tenantId = t!.id;
   const [a] = await db
     .insert(admins)
@@ -98,7 +104,12 @@ afterAll(async () => {
 describe("InformerDigestSweeper.sweepTenant", () => {
   it("due + есть pending → шлёт сводку, метит digested, штампует last_digest", async () => {
     if (!enabled) return;
-    await seedPending("d1", { severity: "critical", kind: "channel_down", topic: "system", title: "Канал упал" });
+    await seedPending("d1", {
+      severity: "critical",
+      kind: "channel_down",
+      topic: "system",
+      title: "Канал упал",
+    });
     await seedPending("d2");
     // уже доставленную в реалтайм строку в дайджест НЕ берём
     await seedPending("d3", { deliveredAt: 1, title: "Уже доставлено" });
@@ -140,7 +151,9 @@ describe("InformerDigestSweeper.sweepTenant", () => {
     const [row] = await db
       .select()
       .from(adminNotifications)
-      .where(and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.dedupKey, "off1")));
+      .where(
+        and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.dedupKey, "off1")),
+      );
     expect(row?.digestBatchId).toBeNull();
   });
 

@@ -112,10 +112,7 @@ export class CheckinSweeper {
             eq(leads.stageDefinitionId, stageDefinitions.id),
             eq(stageDefinitions.tenantId, tenantId),
             isNotNull(stageDefinitions.checkinIntervalDays),
-            or(
-              eq(stageDefinitions.kind, "intake"),
-              eq(stageDefinitions.kind, "active"),
-            ),
+            or(eq(stageDefinitions.kind, "intake"), eq(stageDefinitions.kind, "active")),
           ),
         )
         .where(
@@ -170,15 +167,15 @@ export class CheckinSweeper {
           and(
             inArray(channelIdentities.contactId, contactIds),
             // Exclude web — worker has no web adapter
-            sql`${channels.kind} NOT IN (${sql.join(EXCLUDED_KINDS.map((k) => sql`${k}`), sql`, `)})`,
+            sql`${channels.kind} NOT IN (${sql.join(
+              EXCLUDED_KINDS.map((k) => sql`${k}`),
+              sql`, `,
+            )})`,
           ),
         );
 
       // Build a map contactId → first identity
-      const identityByContact = new Map<
-        number,
-        (typeof identities)[number]
-      >();
+      const identityByContact = new Map<number, (typeof identities)[number]>();
       for (const id of identities) {
         if (!identityByContact.has(id.contactId)) {
           identityByContact.set(id.contactId, id);
@@ -254,9 +251,7 @@ export class CheckinSweeper {
       }
 
       if (sent > 0) {
-        console.log(
-          `[checkin-sweep] tenant=${tenantId} queued ${sent} check-in(s)`,
-        );
+        console.log(`[checkin-sweep] tenant=${tenantId} queued ${sent} check-in(s)`);
       }
     });
   }

@@ -34,15 +34,17 @@ let tenantId = 0;
 let activeStageId = 0;
 let lostStageId = 0;
 
-const runSweep = (s: StaleleadSweeper) =>
-  (s as unknown as { sweep: () => Promise<void> }).sweep();
+const runSweep = (s: StaleleadSweeper) => (s as unknown as { sweep: () => Promise<void> }).sweep();
 
 beforeAll(async () => {
   if (!ownerUrl) return;
   const probe = await tryConnectToPg(ownerUrl);
   if (!probe) return;
   await probe.end({ timeout: 0 }).catch(() => {});
-  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), { max: 3, onnotice: () => {} });
+  sql = postgres(await createIsolatedDb({ ownerUrl, testDbName: dbName }), {
+    max: 3,
+    onnotice: () => {},
+  });
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
   enabled = true;

@@ -37,7 +37,12 @@ import { and, eq, gte, inArray, lt, max, sql } from "drizzle-orm";
 // OpsAlert / OpsAlertSink / OpsAlertKind / OpsSeverity живут в conversation-engine
 // (их использует и роутер доставки #145). Ре-экспорт — чтобы импорт из этого
 // модуля продолжал работать.
-export type { OpsAlert, OpsAlertKind, OpsAlertSink, OpsSeverity } from "@chatman-media/conversation-engine";
+export type {
+  OpsAlert,
+  OpsAlertKind,
+  OpsAlertSink,
+  OpsSeverity,
+} from "@chatman-media/conversation-engine";
 
 export interface OpsWatchThresholds {
   /** Курс auto-строк не обновлялся дольше N минут → фид встал. */
@@ -115,7 +120,10 @@ export class OperationsWatchSweeper {
     try {
       await this.opts.sink.emit(alert);
     } catch (err) {
-      console.error(`[ops-watch] sink emit failed kind=${alert.kind} tenant=${alert.tenantId}`, err);
+      console.error(
+        `[ops-watch] sink emit failed kind=${alert.kind} tenant=${alert.tenantId}`,
+        err,
+      );
     }
   }
 

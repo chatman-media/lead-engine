@@ -30,25 +30,22 @@ let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
 let tenantId = 0;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    const [t] = await db
-      .insert(tenants)
-      .values({ slug: "worker-reload-tenant", plan: "free", status: "active" })
-      .returning({ id: tenants.id });
-    tenantId = t!.id;
-  },
-  30_000,
-);
+  const [t] = await db
+    .insert(tenants)
+    .values({ slug: "worker-reload-tenant", plan: "free", status: "active" })
+    .returning({ id: tenants.id });
+  tenantId = t!.id;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -106,7 +103,7 @@ describe("WorkerChannelRegistry.reloadAll", () => {
     if (!sql) return;
     const reg = new WorkerChannelRegistry();
     await reg.loadFromDb(db, { masterKeyHex: MASTER_KEY });
-    const id = [...((reg as unknown as { byDbId: Map<number, unknown> }).byDbId.keys())][0]!;
+    const id = [...(reg as unknown as { byDbId: Map<number, unknown> }).byDbId.keys()][0]!;
     const adapterBefore = reg.byChannelId(id)?.adapter;
     expect(adapterBefore).toBeDefined();
 

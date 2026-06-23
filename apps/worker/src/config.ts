@@ -95,22 +95,10 @@ export function loadWorkerConfig(): WorkerConfig {
     dispatcherBatchSize: Number.parseInt(process.env.DISPATCHER_BATCH_SIZE ?? "16", 10),
     dispatcherMaxLagSec: Number.parseInt(process.env.DISPATCHER_MAX_LAG_SEC ?? "60", 10),
     metricsPort: Number.parseInt(process.env.METRICS_PORT ?? "0", 10),
-    channelReloadIntervalMs: Number.parseInt(
-      process.env.WORKER_CHANNEL_RELOAD_MS ?? "30000",
-      10,
-    ),
-    staleSweepIntervalMs: Number.parseInt(
-      process.env.WORKER_STALE_SWEEP_MS ?? "3600000",
-      10,
-    ),
-    checkinSweepIntervalMs: Number.parseInt(
-      process.env.WORKER_CHECKIN_SWEEP_MS ?? "3600000",
-      10,
-    ),
-    checkinMaxPerStage: Number.parseInt(
-      process.env.WORKER_CHECKIN_MAX_PER_STAGE ?? "2",
-      10,
-    ),
+    channelReloadIntervalMs: Number.parseInt(process.env.WORKER_CHANNEL_RELOAD_MS ?? "30000", 10),
+    staleSweepIntervalMs: Number.parseInt(process.env.WORKER_STALE_SWEEP_MS ?? "3600000", 10),
+    checkinSweepIntervalMs: Number.parseInt(process.env.WORKER_CHECKIN_SWEEP_MS ?? "3600000", 10),
+    checkinMaxPerStage: Number.parseInt(process.env.WORKER_CHECKIN_MAX_PER_STAGE ?? "2", 10),
     exchangePaymentSweepMs: Number.parseInt(
       process.env.WORKER_EXCHANGE_PAYMENT_SWEEP_MS ?? "60000",
       10,

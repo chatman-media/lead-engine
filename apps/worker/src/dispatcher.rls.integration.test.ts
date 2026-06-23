@@ -104,86 +104,80 @@ class TestRegistry extends WorkerChannelRegistry {
   }
 }
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
 
-    ownerSql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(ownerSql, migrationsDir);
-    // НЕ делаем `ALTER NO FORCE RLS` — оставляем policy активной как в prod.
+  ownerSql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(ownerSql, migrationsDir);
+  // НЕ делаем `ALTER NO FORCE RLS` — оставляем policy активной как в prod.
 
-    await ownerSql.unsafe(`
+  await ownerSql.unsafe(`
       CREATE ROLE "${appRoleName}" LOGIN PASSWORD '${appRolePass}' NOSUPERUSER NOBYPASSRLS;
       GRANT USAGE ON SCHEMA public TO "${appRoleName}";
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${appRoleName}";
       GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${appRoleName}";
     `);
 
-    // Seed под owner (он bypass'ит). app-role будет коннектиться отдельно.
-    const ownerDb = drizzle(ownerSql, { schema });
-    const [t] = await ownerDb
-      .insert(tenants)
-      .values({ slug: "rls-disp", plan: "free", status: "active", llmBillingMode: "byok" })
-      .returning();
-    if (!t) throw new Error("seed tenant");
-    tenantId = t.id;
-    const [ch] = await ownerDb
-      .insert(channels)
-      .values({
-        tenantId,
-        kind: "telegram_bot",
-        externalId: "rls-disp-bot",
-        status: "active",
-      })
-      .returning();
-    if (!ch) throw new Error("seed channel");
-    channelDbId = ch.id;
-
-    // Подсадим pending row через owner (что-то для dispatcher'а).
-    const now = Math.floor(Date.now() / 1000);
-    await ownerDb.insert(outboundQueue).values({
+  // Seed под owner (он bypass'ит). app-role будет коннектиться отдельно.
+  const ownerDb = drizzle(ownerSql, { schema });
+  const [t] = await ownerDb
+    .insert(tenants)
+    .values({ slug: "rls-disp", plan: "free", status: "active", llmBillingMode: "byok" })
+    .returning();
+  if (!t) throw new Error("seed tenant");
+  tenantId = t.id;
+  const [ch] = await ownerDb
+    .insert(channels)
+    .values({
       tenantId,
-      channelId: channelDbId,
-      payloadJson: JSON.stringify({
-        channelId: String(channelDbId),
-        externalUserId: "user-rls",
-        parts: [{ kind: "text", text: "hello under RLS" }],
-      }),
-      scheduledAt: now,
-      status: "pending",
-      createdAt: now,
-    });
+      kind: "telegram_bot",
+      externalId: "rls-disp-bot",
+      status: "active",
+    })
+    .returning();
+  if (!ch) throw new Error("seed channel");
+  channelDbId = ch.id;
 
-    // App-роль для самого dispatcher'а — она BYPASSRLS не имеет.
-    const parsed = new URL(testUrl);
-    parsed.username = appRoleName;
-    parsed.password = appRolePass;
-    appSql = postgres(parsed.toString(), { max: 4, onnotice: () => {} });
-    appDb = drizzle(appSql, { schema });
-  },
-  30_000,
-);
+  // Подсадим pending row через owner (что-то для dispatcher'а).
+  const now = Math.floor(Date.now() / 1000);
+  await ownerDb.insert(outboundQueue).values({
+    tenantId,
+    channelId: channelDbId,
+    payloadJson: JSON.stringify({
+      channelId: String(channelDbId),
+      externalUserId: "user-rls",
+      parts: [{ kind: "text", text: "hello under RLS" }],
+    }),
+    scheduledAt: now,
+    status: "pending",
+    createdAt: now,
+  });
 
-afterAll(
-  async () => {
-    if (appSql) {
-      await appSql.end({ timeout: 0 }).catch(() => {});
-      appSql = null;
-    }
-    if (ownerSql) {
-      await ownerSql
-        .unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
-        .catch(() => {});
-      await ownerSql.end({ timeout: 0 }).catch(() => {});
-      ownerSql = null;
-    }
-  },
-  10_000,
-);
+  // App-роль для самого dispatcher'а — она BYPASSRLS не имеет.
+  const parsed = new URL(testUrl);
+  parsed.username = appRoleName;
+  parsed.password = appRolePass;
+  appSql = postgres(parsed.toString(), { max: 4, onnotice: () => {} });
+  appDb = drizzle(appSql, { schema });
+}, 30_000);
+
+afterAll(async () => {
+  if (appSql) {
+    await appSql.end({ timeout: 0 }).catch(() => {});
+    appSql = null;
+  }
+  if (ownerSql) {
+    await ownerSql
+      .unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
+      .catch(() => {});
+    await ownerSql.end({ timeout: 0 }).catch(() => {});
+    ownerSql = null;
+  }
+}, 10_000);
 
 describe("OutboundDispatcher under FORCE RLS / non-BYPASSRLS role", () => {
   it("end-to-end: claim → adapter.send → markSent ВСЁ через app.tenant_id SET LOCAL", async () => {

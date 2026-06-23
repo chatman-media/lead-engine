@@ -17,13 +17,7 @@
  */
 
 import { withTenant, type NotificationService } from "@chatman-media/conversation-engine";
-import {
-  contacts,
-  leadEvents,
-  leads,
-  stageDefinitions,
-  tenants,
-} from "@chatman-media/storage";
+import { contacts, leadEvents, leads, stageDefinitions, tenants } from "@chatman-media/storage";
 import { and, eq, isNotNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "@chatman-media/conversation-engine";
 
@@ -77,10 +71,7 @@ export class StaleleadSweeper {
         .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
         .from(stageDefinitions)
         .where(
-          and(
-            eq(stageDefinitions.tenantId, tenantId),
-            eq(stageDefinitions.kind, "terminal_lost"),
-          ),
+          and(eq(stageDefinitions.tenantId, tenantId), eq(stageDefinitions.kind, "terminal_lost")),
         )
         .limit(1);
 
@@ -103,10 +94,7 @@ export class StaleleadSweeper {
             eq(leads.stageDefinitionId, stageDefinitions.id),
             eq(stageDefinitions.tenantId, tenantId),
             isNotNull(stageDefinitions.staleTimeoutDays),
-            or(
-              eq(stageDefinitions.kind, "intake"),
-              eq(stageDefinitions.kind, "active"),
-            ),
+            or(eq(stageDefinitions.kind, "intake"), eq(stageDefinitions.kind, "active")),
           ),
         )
         .where(
@@ -114,10 +102,7 @@ export class StaleleadSweeper {
             eq(leads.tenantId, tenantId),
             isNotNull(leads.stageDefinitionId),
             // updated_at < now - stale_timeout_days * 86400
-            lt(
-              leads.updatedAt,
-              sql`${now} - (${stageDefinitions.staleTimeoutDays} * 86400)`,
-            ),
+            lt(leads.updatedAt, sql`${now} - (${stageDefinitions.staleTimeoutDays} * 86400)`),
           ),
         );
 

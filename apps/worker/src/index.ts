@@ -131,7 +131,9 @@ async function main() {
       maxCheckinsPerStage: cfg.checkinMaxPerStage,
     });
     checkinSweeperPromise = checkinSweeper.run(abort.signal).catch((err) => {
-      log.error("checkin-sweep fatal", { err: err instanceof Error ? err : new Error(String(err)) });
+      log.error("checkin-sweep fatal", {
+        err: err instanceof Error ? err : new Error(String(err)),
+      });
     });
     log.info("check-in sweep enabled", { intervalMs: cfg.checkinSweepIntervalMs });
   }
