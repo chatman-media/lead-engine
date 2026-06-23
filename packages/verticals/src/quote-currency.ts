@@ -8,83 +8,83 @@
  */
 
 export interface QuoteCurrency {
-	/** ISO-код: THB, PHP, ... */
-	code: string;
-	/** Слово в текстах клиенту: «бат», «песо». */
-	word: string;
-	/** Родительный падеж мн.ч. для текстов: «батов», «песо». */
-	wordGen: string;
-	/** Именительный падеж мн.ч. с заглавной для табло: «Баты», «Песо». */
-	tabloWord: string;
-	/** Флаг для табло/сообщений. */
-	flag: string;
-	/** Упоминание валюты в тексте (детект котировок в reply-guard). */
-	mentionRe: RegExp;
-	/** Локальный банковский рельс в текстах: «тайский банк», «местный банк». */
-	bankLabel: string;
-	/** Шаг округления вниз (floor) при расчёте котировки: 100 для PHP/THB, 10000 для VND. */
-	denomStep: number;
-	/** Шаг floor-округления по способу выдачи: банкомат. */
-	denomStepAtm: number;
-	/** Шаг floor-округления по способу выдачи: наличные/курьер. */
-	denomStepCash: number;
-	/** Шаг floor-округления по способу выдачи: банковский перевод. */
-	denomStepBank: number;
+  /** ISO-код: THB, PHP, ... */
+  code: string;
+  /** Слово в текстах клиенту: «бат», «песо». */
+  word: string;
+  /** Родительный падеж мн.ч. для текстов: «батов», «песо». */
+  wordGen: string;
+  /** Именительный падеж мн.ч. с заглавной для табло: «Баты», «Песо». */
+  tabloWord: string;
+  /** Флаг для табло/сообщений. */
+  flag: string;
+  /** Упоминание валюты в тексте (детект котировок в reply-guard). */
+  mentionRe: RegExp;
+  /** Локальный банковский рельс в текстах: «тайский банк», «местный банк». */
+  bankLabel: string;
+  /** Шаг округления вниз (floor) при расчёте котировки: 100 для PHP/THB, 10000 для VND. */
+  denomStep: number;
+  /** Шаг floor-округления по способу выдачи: банкомат. */
+  denomStepAtm: number;
+  /** Шаг floor-округления по способу выдачи: наличные/курьер. */
+  denomStepCash: number;
+  /** Шаг floor-округления по способу выдачи: банковский перевод. */
+  denomStepBank: number;
 }
 
 export const KNOWN_QUOTE_CURRENCIES: Record<string, QuoteCurrency> = {
-	PHP: {
-		code: "PHP",
-		word: "песо",
-		wordGen: "песо",
-		tabloWord: "Песо",
-		flag: "🇵🇭",
-		mentionRe: /php|песо|peso|₱/i,
-		bankLabel: "местный банк (BDO/BPI/GCash)",
-		denomStep: 100,
-		denomStepAtm: 100,
-		denomStepCash: 100,
-		denomStepBank: 1,
-	},
-	THB: {
-		code: "THB",
-		word: "бат",
-		wordGen: "батов",
-		tabloWord: "Баты",
-		flag: "🇹🇭",
-		mentionRe: /thb|бат|bhat|฿/i,
-		bankLabel: "тайский банк",
-		denomStep: 100,
-		denomStepAtm: 500,
-		denomStepCash: 100,
-		denomStepBank: 1,
-	},
-	VND: {
-		code: "VND",
-		word: "донг",
-		wordGen: "донгов",
-		tabloWord: "Донги",
-		flag: "🇻🇳",
-		mentionRe: /vnd|донг|dong|₫/i,
-		bankLabel: "вьетнамский банк",
-		denomStep: 10000,
-		denomStepAtm: 50000,
-		denomStepCash: 10000,
-		denomStepBank: 1,
-	},
-	IDR: {
-		code: "IDR",
-		word: "рупия",
-		wordGen: "рупий",
-		tabloWord: "Рупии",
-		flag: "🇮🇩",
-		mentionRe: /idr|рупи|rupiah|rp\b/i,
-		bankLabel: "индонезийский банк",
-		denomStep: 1000,
-		denomStepAtm: 50000,
-		denomStepCash: 10000,
-		denomStepBank: 1,
-	},
+  PHP: {
+    code: "PHP",
+    word: "песо",
+    wordGen: "песо",
+    tabloWord: "Песо",
+    flag: "🇵🇭",
+    mentionRe: /php|песо|peso|₱/i,
+    bankLabel: "местный банк (BDO/BPI/GCash)",
+    denomStep: 100,
+    denomStepAtm: 100,
+    denomStepCash: 100,
+    denomStepBank: 1,
+  },
+  THB: {
+    code: "THB",
+    word: "бат",
+    wordGen: "батов",
+    tabloWord: "Баты",
+    flag: "🇹🇭",
+    mentionRe: /thb|бат|bhat|฿/i,
+    bankLabel: "тайский банк",
+    denomStep: 100,
+    denomStepAtm: 500,
+    denomStepCash: 100,
+    denomStepBank: 1,
+  },
+  VND: {
+    code: "VND",
+    word: "донг",
+    wordGen: "донгов",
+    tabloWord: "Донги",
+    flag: "🇻🇳",
+    mentionRe: /vnd|донг|dong|₫/i,
+    bankLabel: "вьетнамский банк",
+    denomStep: 10000,
+    denomStepAtm: 50000,
+    denomStepCash: 10000,
+    denomStepBank: 1,
+  },
+  IDR: {
+    code: "IDR",
+    word: "рупия",
+    wordGen: "рупий",
+    tabloWord: "Рупии",
+    flag: "🇮🇩",
+    mentionRe: /idr|рупи|rupiah|rp\b/i,
+    bankLabel: "индонезийский банк",
+    denomStep: 1000,
+    denomStepAtm: 50000,
+    denomStepCash: 10000,
+    denomStepBank: 1,
+  },
 };
 
 /** Коды для UI-селекта (порядок = порядок показа). */
@@ -98,32 +98,30 @@ const PLATFORM_DEFAULT_CODE = "PHP";
  * валидный ISO-код работает без локализованного слова.
  */
 export function resolveQuoteCurrency(code?: string | null): QuoteCurrency {
-	const normalized = (code ?? "").trim().toUpperCase();
-	if (!normalized) return QUOTE_CURRENCY;
-	const known = KNOWN_QUOTE_CURRENCIES[normalized];
-	if (known) return known;
-	return {
-		code: normalized,
-		word: normalized,
-		wordGen: normalized,
-		tabloWord: normalized,
-		flag: "",
-		mentionRe: new RegExp(normalized.replace(/[^A-Z]/g, ""), "i"),
-		bankLabel: "местный банк",
-		denomStep: 1,
-		denomStepAtm: 1,
-		denomStepCash: 1,
-		denomStepBank: 1,
-	};
+  const normalized = (code ?? "").trim().toUpperCase();
+  if (!normalized) return QUOTE_CURRENCY;
+  const known = KNOWN_QUOTE_CURRENCIES[normalized];
+  if (known) return known;
+  return {
+    code: normalized,
+    word: normalized,
+    wordGen: normalized,
+    tabloWord: normalized,
+    flag: "",
+    mentionRe: new RegExp(normalized.replace(/[^A-Z]/g, ""), "i"),
+    bankLabel: "местный банк",
+    denomStep: 1,
+    denomStepAtm: 1,
+    denomStepCash: 1,
+    denomStepBank: 1,
+  };
 }
 
 function resolvePlatformDefault(): QuoteCurrency {
-	const code = (process.env.EXCHANGE_QUOTE_ASSET ?? PLATFORM_DEFAULT_CODE)
-		.trim()
-		.toUpperCase();
-	return (
-		KNOWN_QUOTE_CURRENCIES[code] ?? KNOWN_QUOTE_CURRENCIES[PLATFORM_DEFAULT_CODE] as QuoteCurrency
-	);
+  const code = (process.env.EXCHANGE_QUOTE_ASSET ?? PLATFORM_DEFAULT_CODE).trim().toUpperCase();
+  return (
+    KNOWN_QUOTE_CURRENCIES[code] ?? (KNOWN_QUOTE_CURRENCIES[PLATFORM_DEFAULT_CODE] as QuoteCurrency)
+  );
 }
 
 /** Платформенный дефолт (фоллбэк, когда per-tenant настройки нет). */
@@ -134,8 +132,8 @@ export const QUOTE_CURRENCY: QuoteCurrency = resolvePlatformDefault();
  * поймать котировку в тексте независимо от валюты тенанта.
  */
 export const ANY_QUOTE_CURRENCY_MENTION_RE: RegExp = new RegExp(
-	Object.values(KNOWN_QUOTE_CURRENCIES)
-		.map((c) => c.mentionRe.source)
-		.join("|"),
-	"i",
+  Object.values(KNOWN_QUOTE_CURRENCIES)
+    .map((c) => c.mentionRe.source)
+    .join("|"),
+  "i",
 );

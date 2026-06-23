@@ -8,10 +8,6 @@
     "rootDir": "./src",
     "outDir": "./dist"
   },
-  "exclude": [
-    "src/__tests__/**"
-  ],
-  "include": [
-    "src/**/*.ts"
-  ]
+  "exclude": ["src/__tests__/**"],
+  "include": ["src/**/*.ts"]
 }

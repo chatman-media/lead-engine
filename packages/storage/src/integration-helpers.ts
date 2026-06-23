@@ -55,7 +55,10 @@ export async function createIsolatedDb(opts: {
   return url.toString();
 }
 
-export async function dropIsolatedDb(opts: { ownerUrl: string; testDbName: string }): Promise<void> {
+export async function dropIsolatedDb(opts: {
+  ownerUrl: string;
+  testDbName: string;
+}): Promise<void> {
   const owner = postgres(opts.ownerUrl, { max: 1 });
   try {
     await owner.unsafe(

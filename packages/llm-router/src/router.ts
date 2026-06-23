@@ -68,10 +68,7 @@ export class InMemoryLlmRouter {
     }
   }
 
-  resolveChat(
-    tenantId: number,
-    purpose: "chat" | "vision" | "judge" = "chat",
-  ): ChatClient {
+  resolveChat(tenantId: number, purpose: "chat" | "vision" | "judge" = "chat"): ChatClient {
     const key = keyFor(tenantId, purpose);
     const cached = this.chatCache.get(key);
     if (cached) return cached;

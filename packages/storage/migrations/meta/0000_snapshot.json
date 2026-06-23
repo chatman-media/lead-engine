@@ -48,9 +48,7 @@
         "admins_email_unique": {
           "name": "admins_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -201,12 +199,8 @@
           "name": "audit_log_admin_id_admins_id_fk",
           "tableFrom": "audit_log",
           "tableTo": "admins",
-          "columnsFrom": [
-            "admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["admin_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -345,12 +339,8 @@
           "name": "coach_proposals_decided_by_admin_id_admins_id_fk",
           "tableFrom": "coach_proposals",
           "tableTo": "admins",
-          "columnsFrom": [
-            "decided_by_admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["decided_by_admin_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -531,12 +521,8 @@
           "name": "conversations_user_id_users_id_fk",
           "tableFrom": "conversations",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -544,12 +530,8 @@
           "name": "conversations_style_id_styles_id_fk",
           "tableFrom": "conversations",
           "tableTo": "styles",
-          "columnsFrom": [
-            "style_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["style_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -557,12 +539,8 @@
           "name": "conversations_experiment_id_experiments_id_fk",
           "tableFrom": "conversations",
           "tableTo": "experiments",
-          "columnsFrom": [
-            "experiment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["experiment_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -660,9 +638,7 @@
         "experiments_slug_unique": {
           "name": "experiments_slug_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "slug"
-          ]
+          "columns": ["slug"]
         }
       },
       "policies": {},
@@ -755,12 +731,8 @@
           "name": "kb_chunks_document_id_kb_documents_id_fk",
           "tableFrom": "kb_chunks",
           "tableTo": "kb_documents",
-          "columnsFrom": [
-            "document_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["document_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -982,12 +954,8 @@
           "name": "kb_suggestions_source_conversation_id_conversations_id_fk",
           "tableFrom": "kb_suggestions",
           "tableTo": "conversations",
-          "columnsFrom": [
-            "source_conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_conversation_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -995,12 +963,8 @@
           "name": "kb_suggestions_source_message_id_messages_id_fk",
           "tableFrom": "kb_suggestions",
           "tableTo": "messages",
-          "columnsFrom": [
-            "source_message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_message_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1008,12 +972,8 @@
           "name": "kb_suggestions_decided_by_admin_id_admins_id_fk",
           "tableFrom": "kb_suggestions",
           "tableTo": "admins",
-          "columnsFrom": [
-            "decided_by_admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["decided_by_admin_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1021,12 +981,8 @@
           "name": "kb_suggestions_kb_document_id_kb_documents_id_fk",
           "tableFrom": "kb_suggestions",
           "tableTo": "kb_documents",
-          "columnsFrom": [
-            "kb_document_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["kb_document_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1118,12 +1074,8 @@
           "name": "lead_events_lead_id_leads_id_fk",
           "tableFrom": "lead_events",
           "tableTo": "leads",
-          "columnsFrom": [
-            "lead_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["lead_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1131,12 +1083,8 @@
           "name": "lead_events_by_admin_id_admins_id_fk",
           "tableFrom": "lead_events",
           "tableTo": "admins",
-          "columnsFrom": [
-            "by_admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["by_admin_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1217,12 +1165,8 @@
           "name": "lead_notes_lead_id_leads_id_fk",
           "tableFrom": "lead_notes",
           "tableTo": "leads",
-          "columnsFrom": [
-            "lead_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["lead_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1230,12 +1174,8 @@
           "name": "lead_notes_by_admin_id_admins_id_fk",
           "tableFrom": "lead_notes",
           "tableTo": "admins",
-          "columnsFrom": [
-            "by_admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["by_admin_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1372,12 +1312,8 @@
           "name": "leads_user_id_users_id_fk",
           "tableFrom": "leads",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1385,12 +1321,8 @@
           "name": "leads_decided_by_admin_id_admins_id_fk",
           "tableFrom": "leads",
           "tableTo": "admins",
-          "columnsFrom": [
-            "decided_by_admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["decided_by_admin_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1400,16 +1332,12 @@
         "leads_user_id_unique": {
           "name": "leads_user_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "user_id"
-          ]
+          "columns": ["user_id"]
         },
         "leads_application_id_unique": {
           "name": "leads_application_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "application_id"
-          ]
+          "columns": ["application_id"]
         }
       },
       "policies": {},
@@ -1531,12 +1459,8 @@
           "name": "messages_conversation_id_conversations_id_fk",
           "tableFrom": "messages",
           "tableTo": "conversations",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["conversation_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1667,12 +1591,8 @@
           "name": "pairwise_matches_match_a_id_self_play_matches_id_fk",
           "tableFrom": "pairwise_matches",
           "tableTo": "self_play_matches",
-          "columnsFrom": [
-            "match_a_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["match_a_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1680,12 +1600,8 @@
           "name": "pairwise_matches_match_b_id_self_play_matches_id_fk",
           "tableFrom": "pairwise_matches",
           "tableTo": "self_play_matches",
-          "columnsFrom": [
-            "match_b_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["match_b_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1759,12 +1675,8 @@
           "name": "questionnaire_tokens_user_id_users_id_fk",
           "tableFrom": "questionnaire_tokens",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1913,12 +1825,8 @@
           "name": "self_play_matches_lead_id_leads_id_fk",
           "tableFrom": "self_play_matches",
           "tableTo": "leads",
-          "columnsFrom": [
-            "lead_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["lead_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1986,12 +1894,8 @@
           "name": "sessions_admin_id_admins_id_fk",
           "tableFrom": "sessions",
           "tableTo": "admins",
-          "columnsFrom": [
-            "admin_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["admin_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2143,12 +2047,8 @@
           "name": "shadow_evaluations_proposal_id_coach_proposals_id_fk",
           "tableFrom": "shadow_evaluations",
           "tableTo": "coach_proposals",
-          "columnsFrom": [
-            "proposal_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["proposal_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2307,12 +2207,8 @@
           "name": "skill_outcomes_lead_id_leads_id_fk",
           "tableFrom": "skill_outcomes",
           "tableTo": "leads",
-          "columnsFrom": [
-            "lead_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["lead_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2320,12 +2216,8 @@
           "name": "skill_outcomes_conversation_id_conversations_id_fk",
           "tableFrom": "skill_outcomes",
           "tableTo": "conversations",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["conversation_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -2333,12 +2225,8 @@
           "name": "skill_outcomes_message_id_messages_id_fk",
           "tableFrom": "skill_outcomes",
           "tableTo": "messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["message_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -2472,9 +2360,7 @@
         "skills_slug_unique": {
           "name": "skills_slug_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "slug"
-          ]
+          "columns": ["slug"]
         }
       },
       "policies": {},
@@ -2580,12 +2466,8 @@
           "name": "style_skills_style_id_styles_id_fk",
           "tableFrom": "style_skills",
           "tableTo": "styles",
-          "columnsFrom": [
-            "style_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["style_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2593,12 +2475,8 @@
           "name": "style_skills_skill_id_skills_id_fk",
           "tableFrom": "style_skills",
           "tableTo": "skills",
-          "columnsFrom": [
-            "skill_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["skill_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2606,10 +2484,7 @@
       "compositePrimaryKeys": {
         "style_skills_style_id_skill_id_pk": {
           "name": "style_skills_style_id_skill_id_pk",
-          "columns": [
-            "style_id",
-            "skill_id"
-          ]
+          "columns": ["style_id", "skill_id"]
         }
       },
       "uniqueConstraints": {},
@@ -2989,9 +2864,7 @@
         "users_tg_user_id_unique": {
           "name": "users_tg_user_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "tg_user_id"
-          ]
+          "columns": ["tg_user_id"]
         }
       },
       "policies": {},

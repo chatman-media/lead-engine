@@ -39,7 +39,10 @@ export function makePlatformMetrics(): PlatformMetrics {
   return {
     registry: r,
     webhookRequests: r.register(
-      new Counter("lead_engine_webhook_requests_total", "Webhook requests received, by channel + status"),
+      new Counter(
+        "lead_engine_webhook_requests_total",
+        "Webhook requests received, by channel + status",
+      ),
     ),
     webhookLatency: r.register(
       new Histogram(
@@ -52,13 +55,19 @@ export function makePlatformMetrics(): PlatformMetrics {
       new Counter("lead_engine_inbound_processed_total", "Inbound messages processed, by tenant"),
     ),
     inboundPersisted: r.register(
-      new Counter("lead_engine_inbound_persisted_total", "Inbound messages persisted (not deduped)"),
+      new Counter(
+        "lead_engine_inbound_persisted_total",
+        "Inbound messages persisted (not deduped)",
+      ),
     ),
     inboundDeduped: r.register(
       new Counter("lead_engine_inbound_deduped_total", "Inbound messages skipped due to dedup hit"),
     ),
     outboundEnqueued: r.register(
-      new Counter("lead_engine_outbound_enqueued_total", "OutboundEnvelopes pushed into outbound_queue"),
+      new Counter(
+        "lead_engine_outbound_enqueued_total",
+        "OutboundEnvelopes pushed into outbound_queue",
+      ),
     ),
     pipelineLatency: r.register(
       new Histogram(
@@ -68,10 +77,16 @@ export function makePlatformMetrics(): PlatformMetrics {
       ),
     ),
     outboundSent: r.register(
-      new Counter("lead_engine_outbound_sent_total", "OutboundEnvelopes successfully sent to channel"),
+      new Counter(
+        "lead_engine_outbound_sent_total",
+        "OutboundEnvelopes successfully sent to channel",
+      ),
     ),
     outboundFailed: r.register(
-      new Counter("lead_engine_outbound_failed_total", "OutboundEnvelope sends failed (with retry counter)"),
+      new Counter(
+        "lead_engine_outbound_failed_total",
+        "OutboundEnvelope sends failed (with retry counter)",
+      ),
     ),
     outboundDispatchLatency: r.register(
       new Histogram(
@@ -81,16 +96,28 @@ export function makePlatformMetrics(): PlatformMetrics {
       ),
     ),
     stuckReleased: r.register(
-      new Counter("lead_engine_outbound_stuck_released_total", "Stuck processing rows revived to pending"),
+      new Counter(
+        "lead_engine_outbound_stuck_released_total",
+        "Stuck processing rows revived to pending",
+      ),
     ),
     providerOrdersCreated: r.register(
-      new Counter("lead_engine_provider_orders_created_total", "Provider relay service orders created"),
+      new Counter(
+        "lead_engine_provider_orders_created_total",
+        "Provider relay service orders created",
+      ),
     ),
     providerRequests: r.register(
-      new Counter("lead_engine_provider_requests_total", "Provider outreach requests sent, by channel"),
+      new Counter(
+        "lead_engine_provider_requests_total",
+        "Provider outreach requests sent, by channel",
+      ),
     ),
     providerResponses: r.register(
-      new Counter("lead_engine_provider_responses_total", "Provider responses received, by outcome"),
+      new Counter(
+        "lead_engine_provider_responses_total",
+        "Provider responses received, by outcome",
+      ),
     ),
     providerTimeToQuote: r.register(
       new Histogram(
@@ -103,10 +130,16 @@ export function makePlatformMetrics(): PlatformMetrics {
       new Counter("lead_engine_provider_paid_orders_total", "Provider relay orders marked paid"),
     ),
     providerCommissionEarned: r.register(
-      new Counter("lead_engine_provider_commission_earned_total", "Provider relay commission amount earned"),
+      new Counter(
+        "lead_engine_provider_commission_earned_total",
+        "Provider relay commission amount earned",
+      ),
     ),
     providerFailures: r.register(
-      new Counter("lead_engine_provider_failures_total", "Provider relay failures, by channel and reason"),
+      new Counter(
+        "lead_engine_provider_failures_total",
+        "Provider relay failures, by channel and reason",
+      ),
     ),
     llmCalls: r.register(
       new Counter("lead_engine_llm_calls_total", "LLM API calls, by provider+purpose"),

@@ -78,7 +78,10 @@ export interface QuestionnaireSchema {
 export interface VerticalHooks<TCtx = unknown> {
   onLeadStageChange?: (ctx: TCtx, fromStage: string, toStage: string) => Promise<void> | void;
   onPhotoReceived?: (ctx: TCtx, photoClass: string, externalRef: string) => Promise<void> | void;
-  extractFields?: (ctx: TCtx, text: string) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  extractFields?: (
+    ctx: TCtx,
+    text: string,
+  ) => Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 
 export interface VerticalStyleSeed {

@@ -3,7 +3,10 @@ import { ChatApiError, type FetchLike } from "../types.ts";
 import { OpenRouterChatClient } from "./openrouter-chat.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 function sseResponse(lines: string[], status = 200): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -28,7 +31,10 @@ function throwingFetch(): FetchLike {
     throw new Error("ECONNREFUSED");
   }) as unknown as FetchLike;
 }
-function client(fetch: FetchLike, over: Partial<ConstructorParameters<typeof OpenRouterChatClient>[0]> = {}) {
+function client(
+  fetch: FetchLike,
+  over: Partial<ConstructorParameters<typeof OpenRouterChatClient>[0]> = {},
+) {
   return new OpenRouterChatClient({ apiKey: "k", model: "anthropic/claude", fetch, ...over });
 }
 const MSGS = [{ role: "user" as const, content: "hi" }];
@@ -39,7 +45,9 @@ describe("OpenRouterChatClient constructor", () => {
     expect(() => new OpenRouterChatClient({ apiKey: "k", model: "" })).toThrow("model");
   });
   it("дефолтный baseUrl = openrouter.ai/api/v1", async () => {
-    const { fn, calls } = capture(() => jsonResponse({ choices: [{ message: { content: "ok" } }] }));
+    const { fn, calls } = capture(() =>
+      jsonResponse({ choices: [{ message: { content: "ok" } }] }),
+    );
     await client(fn).complete(MSGS);
     expect(calls[0]!.url).toBe("https://openrouter.ai/api/v1/chat/completions");
   });
@@ -47,7 +55,9 @@ describe("OpenRouterChatClient constructor", () => {
 
 describe("OpenRouterChatClient.complete", () => {
   it("возвращает trimmed content + проставляет attribution-заголовки", async () => {
-    const { fn, calls } = capture(() => jsonResponse({ choices: [{ message: { content: "  hey  " } }] }));
+    const { fn, calls } = capture(() =>
+      jsonResponse({ choices: [{ message: { content: "  hey  " } }] }),
+    );
     const out = await client(fn, { siteUrl: "https://app", appName: "LE" }).complete(MSGS);
     expect(out).toBe("hey");
     const h = calls[0]!.init.headers as Record<string, string>;
@@ -79,14 +89,25 @@ describe("OpenRouterChatClient.completeWithTools", () => {
   it("возвращает tool_calls", async () => {
     const { fn } = capture(() =>
       jsonResponse({
-        choices: [{ message: { content: null, tool_calls: [{ id: "t1", type: "function", function: { name: "f", arguments: "{}" } }] } }],
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                { id: "t1", type: "function", function: { name: "f", arguments: "{}" } },
+              ],
+            },
+          },
+        ],
       }),
     );
     const res = await client(fn).completeWithTools(MSGS, []);
     expect(res.toolCalls[0]).toMatchObject({ id: "t1", name: "f", args: {} });
   });
   it("сеть недоступна → ChatApiError(0)", async () => {
-    await expect(client(throwingFetch()).completeWithTools(MSGS, [])).rejects.toMatchObject({ statusCode: 0 });
+    await expect(client(throwingFetch()).completeWithTools(MSGS, [])).rejects.toMatchObject({
+      statusCode: 0,
+    });
   });
 });
 

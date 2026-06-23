@@ -29,18 +29,31 @@ function capture(make: () => Response | Promise<Response>) {
   return { fn, calls };
 }
 
-function client(fetch: FetchLike, over: Partial<ConstructorParameters<typeof OpenAIChatClient>[0]> = {}) {
-  return new OpenAIChatClient({ apiKey: "k", baseUrl: "https://x/v1", model: "gpt-test", fetch, ...over });
+function client(
+  fetch: FetchLike,
+  over: Partial<ConstructorParameters<typeof OpenAIChatClient>[0]> = {},
+) {
+  return new OpenAIChatClient({
+    apiKey: "k",
+    baseUrl: "https://x/v1",
+    model: "gpt-test",
+    fetch,
+    ...over,
+  });
 }
 
 const MSGS = [{ role: "user" as const, content: "hi" }];
 
 describe("OpenAIChatClient constructor", () => {
   it("требует apiKey", () => {
-    expect(() => new OpenAIChatClient({ apiKey: "", baseUrl: "https://x/v1", model: "m" })).toThrow();
+    expect(
+      () => new OpenAIChatClient({ apiKey: "", baseUrl: "https://x/v1", model: "m" }),
+    ).toThrow();
   });
   it("срезает хвостовые слэши baseUrl", async () => {
-    const { fn, calls } = capture(() => jsonResponse({ choices: [{ message: { content: "ok" } }] }));
+    const { fn, calls } = capture(() =>
+      jsonResponse({ choices: [{ message: { content: "ok" } }] }),
+    );
     await client(fn, { baseUrl: "https://x/v1///" }).complete(MSGS);
     expect(calls[0]!.url).toBe("https://x/v1/chat/completions");
   });
@@ -48,7 +61,9 @@ describe("OpenAIChatClient constructor", () => {
 
 describe("OpenAIChatClient.complete", () => {
   it("шлёт корректный запрос и возвращает content", async () => {
-    const { fn, calls } = capture(() => jsonResponse({ choices: [{ message: { content: "Привет" } }] }));
+    const { fn, calls } = capture(() =>
+      jsonResponse({ choices: [{ message: { content: "Привет" } }] }),
+    );
     const out = await client(fn).complete(MSGS, { temperature: 0.5, numPredict: 100 });
     expect(out).toBe("Привет");
     expect(calls[0]!.url).toBe("https://x/v1/chat/completions");
@@ -80,7 +95,9 @@ describe("OpenAIChatClient.completeWithTools", () => {
             message: {
               role: "assistant",
               content: null,
-              tool_calls: [{ id: "t1", type: "function", function: { name: "calc", arguments: '{"a":1}' } }],
+              tool_calls: [
+                { id: "t1", type: "function", function: { name: "calc", arguments: '{"a":1}' } },
+              ],
             },
           },
         ],
@@ -91,7 +108,9 @@ describe("OpenAIChatClient.completeWithTools", () => {
     expect(res.toolCalls).toEqual([{ id: "t1", name: "calc", args: { a: 1 } }]);
   });
   it("возвращает текст когда tool_calls нет", async () => {
-    const { fn } = capture(() => jsonResponse({ choices: [{ message: { role: "assistant", content: "text" } }] }));
+    const { fn } = capture(() =>
+      jsonResponse({ choices: [{ message: { role: "assistant", content: "text" } }] }),
+    );
     const res = await client(fn).completeWithTools(MSGS, []);
     expect(res).toEqual({ content: "text", toolCalls: [] });
   });
@@ -103,7 +122,9 @@ describe("OpenAIChatClient.completeWithTools", () => {
 
 describe("OpenAIChatClient.completeStructured", () => {
   it("отправляет response_format json_schema и возвращает content", async () => {
-    const { fn, calls } = capture(() => jsonResponse({ choices: [{ message: { content: '{"ok":true}' } }] }));
+    const { fn, calls } = capture(() =>
+      jsonResponse({ choices: [{ message: { content: '{"ok":true}' } }] }),
+    );
     const out = await client(fn).completeStructured(MSGS, { type: "object" });
     expect(out).toBe('{"ok":true}');
     const body = JSON.parse(calls[0]!.init.body as string);
@@ -170,11 +191,15 @@ describe("OpenAIChatClient usage reporting", () => {
       jsonResponse({ choices: [{ message: { content: "{}" } }], usage: USAGE }),
     );
     let got: { promptTokens?: number } | undefined;
-    await client(fn).completeStructured(MSGS, {}, {
-      onUsage: (u) => {
-        got = u;
+    await client(fn).completeStructured(
+      MSGS,
+      {},
+      {
+        onUsage: (u) => {
+          got = u;
+        },
       },
-    });
+    );
     expect(got).toMatchObject({ promptTokens: 42 });
   });
 

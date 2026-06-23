@@ -3,7 +3,10 @@ import { EmbeddingApiError, type FetchLike } from "../types.ts";
 import { OllamaEmbeddingClient } from "./ollama-embed.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 function capture(make: () => Response | Promise<Response>) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -24,9 +27,19 @@ describe("OllamaEmbeddingClient.embed", () => {
     expect(calls.length).toBe(0);
   });
   it("успех: возвращает векторы и шлёт на /api/embed", async () => {
-    const { fn, calls } = capture(() => jsonResponse({ embeddings: [[1, 2, 3], [4, 5, 6]] }));
+    const { fn, calls } = capture(() =>
+      jsonResponse({
+        embeddings: [
+          [1, 2, 3],
+          [4, 5, 6],
+        ],
+      }),
+    );
     const out = await client(fn).embed(["a", "b"]);
-    expect(out).toEqual([[1, 2, 3], [4, 5, 6]]);
+    expect(out).toEqual([
+      [1, 2, 3],
+      [4, 5, 6],
+    ]);
     expect(calls[0]!.url).toBe("http://ollama:11434/api/embed");
   });
   it("HTTP !ok → EmbeddingApiError", async () => {
