@@ -33,7 +33,10 @@ function seedMax(channels: ChannelRegistry, extra: Partial<ChannelEntry> = {}): 
 
 function seedMaxEntries(channels: ChannelRegistry, entries: Partial<ChannelEntry>[]): void {
   // biome-ignore lint/suspicious/noExplicitAny: test seed for private map
-  (channels as any).byTenantSlug.set(SLUG, entries.map((extra) => makeMaxEntry(extra)));
+  (channels as any).byTenantSlug.set(
+    SLUG,
+    entries.map((extra) => makeMaxEntry(extra)),
+  );
 }
 
 function buildApp(opts: { seed?: Partial<ChannelEntry> | false; webhookSecret?: string } = {}) {

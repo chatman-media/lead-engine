@@ -172,10 +172,7 @@ export function makeSuperadminRoutes(opts: SuperadminRoutesOpts): Hono {
         ? body.tenantSlug.trim().toLowerCase()
         : null;
     if (customSlug && !isValidTenantSlug(customSlug)) {
-      return c.json(
-        { error: "invalid tenantSlug (lowercase, a-z 0-9 -, 3-32 chars)" },
-        400,
-      );
+      return c.json({ error: "invalid tenantSlug (lowercase, a-z 0-9 -, 3-32 chars)" }, 400);
     }
 
     const [existing] = await getEarlyAccessItem(opts.db, opts.publicUrl, id);
@@ -200,12 +197,10 @@ export function makeSuperadminRoutes(opts: SuperadminRoutesOpts): Hono {
 
     let slug = customSlug ?? deriveTenantSlug(existing.email);
     let attempt = 0;
-    let result:
-      | {
-          tenant: { id: number; slug: string; plan: string };
-          invite: { id: number; token: string; expiresAt: number; usedAt: number | null };
-        }
-      | null = null;
+    let result: {
+      tenant: { id: number; slug: string; plan: string };
+      invite: { id: number; token: string; expiresAt: number; usedAt: number | null };
+    } | null = null;
 
     while (attempt < 5 && !result) {
       attempt++;
@@ -300,7 +295,9 @@ export function makeSuperadminRoutes(opts: SuperadminRoutesOpts): Hono {
     if (!Number.isFinite(id) || id <= 0) return c.json({ error: "invalid id" }, 400);
 
     let body: { plan?: unknown };
-    try { body = (await c.req.json()) as typeof body; } catch {
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
       return c.json({ error: "invalid json" }, 400);
     }
     const plan = typeof body.plan === "string" ? body.plan : "";

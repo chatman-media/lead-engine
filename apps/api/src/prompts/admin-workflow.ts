@@ -3,16 +3,14 @@
 
 /** Каталоги допустимых значений, подставляемые в текст промпта (JSON.stringify). */
 export interface FunnelBuilderPromptCatalog {
-	stageKinds: readonly string[];
-	stageTypes: readonly string[];
-	activePhases: readonly string[];
-	fieldTypes: readonly string[];
+  stageKinds: readonly string[];
+  stageTypes: readonly string[];
+  activePhases: readonly string[];
+  fieldTypes: readonly string[];
 }
 
-export function buildFunnelBuilderSystemPrompt(
-	lists: FunnelBuilderPromptCatalog,
-): string {
-	return `Ты — помощник по настройке воронки продаж/квалификации в SaaS-платформе lead-engine.
+export function buildFunnelBuilderSystemPrompt(lists: FunnelBuilderPromptCatalog): string {
+  return `Ты — помощник по настройке воронки продаж/квалификации в SaaS-платформе lead-engine.
 Оператор описывает свой бизнес, а ты проектируешь воронку (funnel) из стадий и полей.
 
 ВЕДИ ДИАЛОГ: задавай по одному уточняющему вопросу за раз, пока не соберёшь достаточно

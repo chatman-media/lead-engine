@@ -20,7 +20,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_stagewh_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-stagewh-12345";
 
 let sql: Sql | null = null;
@@ -255,12 +264,16 @@ describe("admin-stage-webhooks /test", () => {
     expect(fetchCalls.length).toBe(1);
     expect(fetchCalls[0]?.url).toBe("https://example.com/test-hook");
     // Подпись X-Signature присутствует (secret задан)
-    expect((fetchCalls[0]?.init.headers as Record<string, string>)["X-Signature"]).toMatch(/^sha256=/);
+    expect((fetchCalls[0]?.init.headers as Record<string, string>)["X-Signature"]).toMatch(
+      /^sha256=/,
+    );
   });
 
   it("fetch упал → ok:false + error", async () => {
     if (!sql || !hookId) return;
-    globalThis.fetch = (async () => { throw new Error("network down"); }) as unknown as typeof fetch;
+    globalThis.fetch = (async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
     const res = await req("POST", `/api/admin/stage-webhooks/${hookId}/test`);
     expect(res.status).toBe(200); // роут не кидает, возвращает { ok: false }
     const body = (await res.json()) as { ok: boolean; error: string };

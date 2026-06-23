@@ -84,7 +84,9 @@ export class ShadowEvalJobRunner {
 
   wake(): void {
     if (this.stopped) return;
-    void this.runOnce().catch((err) => this.warn("shadow-eval queue tick failed", { err: toErrorMessage(err) }));
+    void this.runOnce().catch((err) =>
+      this.warn("shadow-eval queue tick failed", { err: toErrorMessage(err) }),
+    );
   }
 
   async runOnce(): Promise<number> {
@@ -115,10 +117,7 @@ export class ShadowEvalJobRunner {
     }
   }
 
-  private async claimNext(
-    tenantId: number,
-    now: number,
-  ): Promise<ClaimedShadowEvaluation | null> {
+  private async claimNext(tenantId: number, now: number): Promise<ClaimedShadowEvaluation | null> {
     const claimToken = `${this.workerId}:${now}:${Math.random().toString(36).slice(2, 10)}`;
     const leaseExpiresAt = now + this.leaseSeconds;
     const rows = await withTenant(this.opts.db, tenantId, async (tx) => {
@@ -188,12 +187,18 @@ export class ShadowEvalJobRunner {
 
     const parentStyle = parseStyleFromShadowPlanRow(parentStyleRow);
     if (parentStyle.kind === "invalid") {
-      await repo.update(row.id, { status: "failed", error: "parent style failed schema validation" });
+      await repo.update(row.id, {
+        status: "failed",
+        error: "parent style failed schema validation",
+      });
       return;
     }
     const candidateStyle = parseStyleFromShadowPlanRow(candidateStyleRow);
     if (candidateStyle.kind === "invalid") {
-      await repo.update(row.id, { status: "failed", error: "candidate style failed schema validation" });
+      await repo.update(row.id, {
+        status: "failed",
+        error: "candidate style failed schema validation",
+      });
       return;
     }
 
@@ -203,7 +208,11 @@ export class ShadowEvalJobRunner {
       return;
     }
 
-    const depsResult = await buildQualityRunnerDeps(this.opts, row.tenantId, configResult.config.reflect);
+    const depsResult = await buildQualityRunnerDeps(
+      this.opts,
+      row.tenantId,
+      configResult.config.reflect,
+    );
     if (depsResult.kind === "unavailable") {
       await repo.update(row.id, { status: "failed", error: depsResult.error });
       return;
@@ -306,13 +315,19 @@ function parseRunConfig(
     return { kind: "invalid", error: "invalid shadow evaluation run config" };
   }
   const config = parsed as Partial<ShadowEvaluationRunConfig>;
-  if (config.version !== 1) return { kind: "invalid", error: "unsupported shadow evaluation run config version" };
+  if (config.version !== 1)
+    return { kind: "invalid", error: "unsupported shadow evaluation run config version" };
   const runs = config.runs;
   if (typeof runs !== "number" || !Number.isInteger(runs) || runs < 1 || runs > 20) {
     return { kind: "invalid", error: "invalid shadow evaluation runs" };
   }
   const maxTurns = config.maxTurns;
-  if (typeof maxTurns !== "number" || !Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 20) {
+  if (
+    typeof maxTurns !== "number" ||
+    !Number.isInteger(maxTurns) ||
+    maxTurns < 1 ||
+    maxTurns > 20
+  ) {
     return { kind: "invalid", error: "invalid shadow evaluation maxTurns" };
   }
   if (typeof config.reflect !== "boolean") {

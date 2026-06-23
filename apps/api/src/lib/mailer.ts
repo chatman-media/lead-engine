@@ -35,9 +35,7 @@ export class Mailer {
 
   async send(opts: SendOpts): Promise<void> {
     if (!this.apiKey) {
-      console.log(
-        `[mailer] dry-run (no RESEND_API_KEY) → to=${opts.to} subject="${opts.subject}"`,
-      );
+      console.log(`[mailer] dry-run (no RESEND_API_KEY) → to=${opts.to} subject="${opts.subject}"`);
       return;
     }
     const res = await fetch("https://api.resend.com/emails", {
@@ -163,7 +161,12 @@ export function forgotPasswordEmailHtml(opts: { email: string; resetUrl: string 
 }
 
 /** Письмо с приглашением в команду. */
-export function inviteEmailHtml(opts: { email: string; inviteUrl: string; tenantSlug: string; role: string }): string {
+export function inviteEmailHtml(opts: {
+  email: string;
+  inviteUrl: string;
+  tenantSlug: string;
+  role: string;
+}): string {
   const roleLabel = opts.role === "superadmin" ? "Администратор" : "Менеджер";
   const tenantSlug = escHtml(opts.tenantSlug);
   const inviteUrl = escHtml(opts.inviteUrl);
@@ -190,14 +193,16 @@ export function usageAlertEmailHtml(opts: {
   return baseLayout(`
     <h1>${isOver ? "Квота LLM исчерпана ❌" : "80% квоты LLM использовано ⚠️"}</h1>
     <div class="highlight">
-      ${isOver
-        ? `❌ Лимит ${opts.limit.toLocaleString("ru")} ответов/мес исчерпан. Бот может перестать отвечать.`
-        : `⚠️ Использовано <strong>${opts.current.toLocaleString("ru")}</strong> из <strong>${opts.limit.toLocaleString("ru")}</strong> ответов (${opts.pct}%).`
+      ${
+        isOver
+          ? `❌ Лимит ${opts.limit.toLocaleString("ru")} ответов/мес исчерпан. Бот может перестать отвечать.`
+          : `⚠️ Использовано <strong>${opts.current.toLocaleString("ru")}</strong> из <strong>${opts.limit.toLocaleString("ru")}</strong> ответов (${opts.pct}%).`
       }
     </div>
-    <p>${isOver
-      ? "Апгрейд плана восстановит работу бота немедленно."
-      : "Если текущий темп сохранится, квота закончится до конца месяца."
+    <p>${
+      isOver
+        ? "Апгрейд плана восстановит работу бота немедленно."
+        : "Если текущий темп сохранится, квота закончится до конца месяца."
     }</p>
     <a href="${opts.billingUrl}" class="btn">Обновить план →</a>
     <p style="margin-bottom:0">Квота сбрасывается в начале каждого календарного месяца. Если у вас вопросы — ответьте на это письмо.</p>

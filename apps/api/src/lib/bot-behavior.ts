@@ -71,9 +71,7 @@ const OFFHOURS_MIN_GAP_SEC = 3 * 3600;
  * (диалог ушёл к оператору по стоп-слову или сейчас вне рабочих часов).
  * Приветствие/медиа-ack отправляются, но reply не блокируют (greeting precedes).
  */
-export async function applyBotBehaviorGates(
-  deps: BotBehaviorDeps,
-): Promise<BotBehaviorOutcome> {
+export async function applyBotBehaviorGates(deps: BotBehaviorDeps): Promise<BotBehaviorOutcome> {
   const { settings, result, inbound } = deps;
   const externalUserId = inbound.externalUserId;
   const text = result.userMessageText ?? "";

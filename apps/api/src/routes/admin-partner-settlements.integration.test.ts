@@ -131,8 +131,9 @@ async function listDeals(): Promise<
 > {
   const res = await authReq("/api/admin/partner-deals");
   expect(res.status).toBe(200);
-  return ((await res.json()) as { items: Array<{ id: number; status: string; settledAt: number | null }> })
-    .items;
+  return (
+    (await res.json()) as { items: Array<{ id: number; status: string; settledAt: number | null }> }
+  ).items;
 }
 
 describe("admin partner settlements", () => {
@@ -180,9 +181,11 @@ describe("admin partner settlements", () => {
 
     const listRes = await authReq(`/api/admin/partner-settlements?partnerId=${partnerId}`);
     expect(listRes.status).toBe(200);
-    const listed = ((await listRes.json()) as {
-      items: Array<{ id: number; partnerName: string; dealsCount: number }>;
-    }).items;
+    const listed = (
+      (await listRes.json()) as {
+        items: Array<{ id: number; partnerName: string; dealsCount: number }>;
+      }
+    ).items;
     expect(listed.length).toBe(1);
     expect(listed[0]!.partnerName).toBe("Settlement Partner A");
     expect(listed[0]!.dealsCount).toBe(2);
@@ -242,7 +245,10 @@ describe("admin partner settlements", () => {
       ...period,
     });
     expect(retryRes.status).toBe(201);
-    const retry = (await retryRes.json()) as { item: { totalCommission: number }; dealsCount: number };
+    const retry = (await retryRes.json()) as {
+      item: { totalCommission: number };
+      dealsCount: number;
+    };
     expect(retry.dealsCount).toBe(1);
     expect(retry.item.totalCommission).toBe(3_000);
 

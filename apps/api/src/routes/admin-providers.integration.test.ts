@@ -134,7 +134,12 @@ describe("admin providers", () => {
         activeServicesCount: number;
         metadataJson: string;
         identities: Array<{ channelId: number; externalUserId: string }>;
-        services: Array<{ id: number; serviceType: string; name: string; commissionPct: number | null }>;
+        services: Array<{
+          id: number;
+          serviceType: string;
+          name: string;
+          commissionPct: number | null;
+        }>;
       };
     };
     expect(created.item.category).toBe("massage");
@@ -163,7 +168,9 @@ describe("admin providers", () => {
     const listRes = await authReq("/api/admin/providers");
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as { items: Array<{ id: number; name: string }> };
-    expect(list.items).toContainEqual(expect.objectContaining({ id: created.item.id, name: "Lotus Spa" }));
+    expect(list.items).toContainEqual(
+      expect.objectContaining({ id: created.item.id, name: "Lotus Spa" }),
+    );
 
     const updateRes = await authReq(`/api/admin/providers/${created.item.id}`, {
       method: "PATCH",
@@ -171,7 +178,9 @@ describe("admin providers", () => {
       body: JSON.stringify({ status: "paused", serviceArea: "Phuket, Rawai" }),
     });
     expect(updateRes.status).toBe(200);
-    const updated = (await updateRes.json()) as { item: { status: string; serviceArea: string | null } };
+    const updated = (await updateRes.json()) as {
+      item: { status: string; serviceArea: string | null };
+    };
     expect(updated.item.status).toBe("paused");
     expect(updated.item.serviceArea).toBe("Phuket, Rawai");
 
@@ -185,7 +194,9 @@ describe("admin providers", () => {
       body: JSON.stringify({ isActive: false }),
     });
     expect(serviceUpdateRes.status).toBe(200);
-    const serviceUpdated = (await serviceUpdateRes.json()) as { item: { activeServicesCount: number } };
+    const serviceUpdated = (await serviceUpdateRes.json()) as {
+      item: { activeServicesCount: number };
+    };
     expect(serviceUpdated.item.activeServicesCount).toBe(0);
 
     const archiveRes = await authReq(`/api/admin/providers/${created.item.id}/archive`, {

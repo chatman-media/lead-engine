@@ -18,7 +18,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_vac_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-vacancies-flow-12345";
 
 let sql: Sql | null = null;
@@ -28,32 +37,29 @@ let token = "";
 
 const BASE = "/api/admin/vacancies";
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminVacanciesRoutes({ db }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminVacanciesRoutes({ db }));
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "vac@demo.io", password: "strong-pwd-12345" }),
-    });
-    token = ((await sa.json()) as { token: string }).token;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "vac@demo.io", password: "strong-pwd-12345" }),
+  });
+  token = ((await sa.json()) as { token: string }).token;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -62,7 +68,12 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function req(method: string, path: string, body?: unknown, withAuth = true): Promise<Response> {
+async function req(
+  method: string,
+  path: string,
+  body?: unknown,
+  withAuth = true,
+): Promise<Response> {
   return app.request(path, {
     method,
     headers: {
@@ -83,7 +94,7 @@ describe("admin-vacancies CRUD", () => {
     if (!sql) return;
     const res = await req("GET", BASE);
     expect(res.status).toBe(200);
-    expect((await res.json() as { items: unknown[] }).items).toEqual([]);
+    expect(((await res.json()) as { items: unknown[] }).items).toEqual([]);
   });
 
   it("POST без title → 400, без body → 400", async () => {
@@ -94,9 +105,18 @@ describe("admin-vacancies CRUD", () => {
 
   it("POST создаёт вакансию → 201, видна в GET", async () => {
     if (!sql) return;
-    const res = await req("POST", BASE, { title: "Курьер THB", body: "Доставка наличных", url: "https://x.io" });
+    const res = await req("POST", BASE, {
+      title: "Курьер THB",
+      body: "Доставка наличных",
+      url: "https://x.io",
+    });
     expect(res.status).toBe(201);
-    const v = (await res.json()) as { id: number; title: string; url: string | null; isActive: boolean };
+    const v = (await res.json()) as {
+      id: number;
+      title: string;
+      url: string | null;
+      isActive: boolean;
+    };
     expect(v.title).toBe("Курьер THB");
     expect(v.url).toBe("https://x.io");
     expect(v.isActive).toBe(true);
@@ -108,12 +128,19 @@ describe("admin-vacancies CRUD", () => {
 
   it("PATCH обновляет; bad id → 400; not found → 404", async () => {
     if (!sql) return;
-    const id = ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number }> }).items[0]!.id;
-    expect((await req("PATCH", `${BASE}/${id}`, { title: "Курьер 2", isActive: false, url: "" })).status).toBe(200);
+    const id = ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number }> })
+      .items[0]!.id;
+    expect(
+      (await req("PATCH", `${BASE}/${id}`, { title: "Курьер 2", isActive: false, url: "" })).status,
+    ).toBe(200);
     expect((await req("PATCH", `${BASE}/abc`, { title: "x" })).status).toBe(400);
     expect((await req("PATCH", `${BASE}/999999`, { title: "x" })).status).toBe(404);
 
-    const item = ((await (await req("GET", BASE)).json()) as { items: Array<{ title: string; isActive: boolean; url: string | null }> }).items[0]!;
+    const item = (
+      (await (await req("GET", BASE)).json()) as {
+        items: Array<{ title: string; isActive: boolean; url: string | null }>;
+      }
+    ).items[0]!;
     expect(item.title).toBe("Курьер 2");
     expect(item.isActive).toBe(false);
     expect(item.url).toBeNull();
@@ -121,7 +148,8 @@ describe("admin-vacancies CRUD", () => {
 
   it("DELETE удаляет; bad id → 400", async () => {
     if (!sql) return;
-    const id = ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number }> }).items[0]!.id;
+    const id = ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number }> })
+      .items[0]!.id;
     expect((await req("DELETE", `${BASE}/${id}`)).status).toBe(200);
     expect((await req("DELETE", `${BASE}/abc`)).status).toBe(400);
     expect(((await (await req("GET", BASE)).json()) as { items: unknown[] }).items).toEqual([]);

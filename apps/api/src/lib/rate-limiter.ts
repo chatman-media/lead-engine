@@ -68,10 +68,8 @@ export class InboundRateLimiter {
     // When global opts are 0 (disabled) — plan limits apply exclusively.
     const planMin = limits?.perMinute ?? this.opts.perMinute;
     const planHour = limits?.perHour ?? this.opts.perHour;
-    const perMinute =
-      this.opts.perMinute > 0 ? Math.min(planMin, this.opts.perMinute) : planMin;
-    const perHour =
-      this.opts.perHour > 0 ? Math.min(planHour, this.opts.perHour) : planHour;
+    const perMinute = this.opts.perMinute > 0 ? Math.min(planMin, this.opts.perMinute) : planMin;
+    const perHour = this.opts.perHour > 0 ? Math.min(planHour, this.opts.perHour) : planHour;
     const now = Date.now();
     let win = this.byTenant.get(tenantId);
     if (!win) {

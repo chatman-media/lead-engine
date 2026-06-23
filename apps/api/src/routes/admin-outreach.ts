@@ -1,8 +1,4 @@
-import {
-  type Db,
-  type NotificationService,
-  withTenant,
-} from "@chatman-media/conversation-engine";
+import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
 import {
   adminNotifications,
   admins,
@@ -29,11 +25,7 @@ type OperatorOutreachPriority = "normal" | "important" | "critical";
 const OPERATOR_TARGETS = new Set<OperatorOutreachTarget>(["all", "role", "admins"]);
 const OPERATOR_ROLES = new Set<OperatorOutreachRole>(["manager", "superadmin"]);
 const OPERATOR_CHANNELS = new Set<OperatorOutreachChannel>(["in_app", "telegram"]);
-const OPERATOR_PRIORITIES = new Set<OperatorOutreachPriority>([
-  "normal",
-  "important",
-  "critical",
-]);
+const OPERATOR_PRIORITIES = new Set<OperatorOutreachPriority>(["normal", "important", "critical"]);
 
 function isOperatorTarget(value: unknown): value is OperatorOutreachTarget {
   return typeof value === "string" && OPERATOR_TARGETS.has(value as OperatorOutreachTarget);
@@ -69,10 +61,7 @@ function operatorTitle(priority: OperatorOutreachPriority): string {
 }
 
 function escapeTelegramHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function formatOperatorTelegramText(title: string, body: string): string {
@@ -117,9 +106,7 @@ export function makeAdminOutreachRoutes(opts: {
     const nowEpochOuter = Math.floor(Date.now() / 1000);
     const scheduledAtRaw = typeof body.scheduledAt === "number" ? body.scheduledAt : null;
     const scheduledAt =
-      scheduledAtRaw !== null && scheduledAtRaw > nowEpochOuter
-        ? scheduledAtRaw
-        : null;
+      scheduledAtRaw !== null && scheduledAtRaw > nowEpochOuter ? scheduledAtRaw : null;
 
     const hasLeadIds = Array.isArray(body.leadIds) && body.leadIds.length > 0;
     const hasStageSlug = typeof body.stageSlug === "string" && body.stageSlug.trim().length > 0;
@@ -135,8 +122,9 @@ export function makeAdminOutreachRoutes(opts: {
       let targetLeads: Array<{ id: number; userId: number }>;
 
       if (hasLeadIds) {
-        const ids = (body.leadIds as unknown[])
-          .filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+        const ids = (body.leadIds as unknown[]).filter(
+          (x): x is number => typeof x === "number" && Number.isFinite(x),
+        );
         if (ids.length === 0) return { enqueued: 0, skipped: 0 };
         targetLeads = await tx
           .select({ id: leads.id, userId: leads.userId })
@@ -153,12 +141,7 @@ export function makeAdminOutreachRoutes(opts: {
         targetLeads = await tx
           .select({ id: leads.id, userId: leads.userId })
           .from(leads)
-          .where(
-            and(
-              eq(leads.tenantId, tenantId),
-              eq(leads.stageDefinitionId, stageDef.id),
-            ),
-          );
+          .where(and(eq(leads.tenantId, tenantId), eq(leads.stageDefinitionId, stageDef.id)));
       }
 
       if (targetLeads.length === 0) return { enqueued: 0, skipped: 0 };
@@ -225,7 +208,10 @@ export function makeAdminOutreachRoutes(opts: {
               createdAt: nowEpoch,
             })
             .returning({ id: conversations.id });
-          if (!newConv) { skipped++; continue; }
+          if (!newConv) {
+            skipped++;
+            continue;
+          }
           conversationId = newConv.id;
         }
 
@@ -241,7 +227,10 @@ export function makeAdminOutreachRoutes(opts: {
             createdAt: nowEpoch,
           })
           .returning({ id: messages.id });
-        if (!msg) { skipped++; continue; }
+        if (!msg) {
+          skipped++;
+          continue;
+        }
 
         // 5. Enqueue outbound.
         const envelope = {
@@ -345,10 +334,7 @@ export function makeAdminOutreachRoutes(opts: {
         .from(admins)
         .leftJoin(
           operatorSettings,
-          and(
-            eq(operatorSettings.adminId, admins.id),
-            eq(operatorSettings.tenantId, tenantId),
-          ),
+          and(eq(operatorSettings.adminId, admins.id), eq(operatorSettings.tenantId, tenantId)),
         )
         .where(and(...filters));
     });

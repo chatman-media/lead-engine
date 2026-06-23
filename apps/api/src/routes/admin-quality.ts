@@ -308,9 +308,12 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
       ? (labelRaw as AgentToolCallFeedbackLabel)
       : null;
     if (!label) {
-      return c.json({
-        error: `label must be one of: ${Array.from(TOOL_CALL_FEEDBACK_LABELS).join(", ")}`,
-      }, 400);
+      return c.json(
+        {
+          error: `label must be one of: ${Array.from(TOOL_CALL_FEEDBACK_LABELS).join(", ")}`,
+        },
+        400,
+      );
     }
 
     const note = parseOptionalToolFeedbackNote(body.note);
@@ -484,9 +487,7 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
         .limit(filters.value.limit);
     });
 
-    const jsonl = rows
-      .map((row) => JSON.stringify(toToolCallFeedbackExportRecord(row)))
-      .join("\n");
+    const jsonl = rows.map((row) => JSON.stringify(toToolCallFeedbackExportRecord(row))).join("\n");
     const body = jsonl ? `${jsonl}\n` : "";
     return c.body(body, 200, {
       "Content-Type": "application/x-ndjson; charset=utf-8",
@@ -539,9 +540,7 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     if (status === null) return c.json({ error: "invalid status" }, 400);
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
-      const conditions: SQL<unknown>[] = [
-        eq(agentToolCallImprovementProposals.tenantId, tenantId),
-      ];
+      const conditions: SQL<unknown>[] = [eq(agentToolCallImprovementProposals.tenantId, tenantId)];
       if (status !== "all") {
         conditions.push(eq(agentToolCallImprovementProposals.status, status));
       }
@@ -580,7 +579,10 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
         .select(toolCallRegressionCaseSelect)
         .from(agentToolCallRegressionCases)
         .where(and(...conditions))
-        .orderBy(desc(agentToolCallRegressionCases.updatedAt), desc(agentToolCallRegressionCases.id))
+        .orderBy(
+          desc(agentToolCallRegressionCases.updatedAt),
+          desc(agentToolCallRegressionCases.id),
+        )
         .limit(filters.value.limit);
     });
 
@@ -608,7 +610,10 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
         .select(toolCallRegressionCaseSelect)
         .from(agentToolCallRegressionCases)
         .where(and(...conditions))
-        .orderBy(desc(agentToolCallRegressionCases.updatedAt), desc(agentToolCallRegressionCases.id))
+        .orderBy(
+          desc(agentToolCallRegressionCases.updatedAt),
+          desc(agentToolCallRegressionCases.id),
+        )
         .limit(filters.value.limit);
     });
 
@@ -742,18 +747,24 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
       ? (statusRaw as ToolCallImprovementProposalStatus)
       : null;
     if (!status) {
-      return c.json({
-        error: `status must be one of: ${Array.from(TOOL_CALL_IMPROVEMENT_STATUSES).join(", ")}`,
-      }, 400);
+      return c.json(
+        {
+          error: `status must be one of: ${Array.from(TOOL_CALL_IMPROVEMENT_STATUSES).join(", ")}`,
+        },
+        400,
+      );
     }
     const resolution = parseToolCallImprovementResolutionInput(body.resolution);
     if (resolution.kind === "invalid") {
       return c.json({ error: resolution.error }, 400);
     }
     if (status === "applied" && !hasConcreteToolCallImprovementResolution(resolution.value)) {
-      return c.json({
-        error: "resolution with kind and ref or url is required when applying a proposal",
-      }, 400);
+      return c.json(
+        {
+          error: "resolution with kind and ref or url is required when applying a proposal",
+        },
+        400,
+      );
     }
 
     const now = Math.floor(Date.now() / 1000);
@@ -811,9 +822,12 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
       ? (statusRaw as ToolCallRegressionCaseStatus)
       : null;
     if (!status) {
-      return c.json({
-        error: `status must be one of: ${Array.from(TOOL_CALL_REGRESSION_CASE_STATUSES).join(", ")}`,
-      }, 400);
+      return c.json(
+        {
+          error: `status must be one of: ${Array.from(TOOL_CALL_REGRESSION_CASE_STATUSES).join(", ")}`,
+        },
+        400,
+      );
     }
 
     const now = Math.floor(Date.now() / 1000);
@@ -940,11 +954,14 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
         },
       });
 
-      return c.json({
-        ok: true,
-        case: toToolCallRegressionCaseResponse(result.regressionCase),
-        proposal: toToolCallImprovementProposalResponse(result.proposal),
-      }, 201);
+      return c.json(
+        {
+          ok: true,
+          case: toToolCallRegressionCaseResponse(result.regressionCase),
+          proposal: toToolCallImprovementProposalResponse(result.proposal),
+        },
+        201,
+      );
     },
   );
 
@@ -1143,7 +1160,9 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
         ? await tx
             .select(selfPlayMatchSelect)
             .from(selfPlayMatches)
-            .where(and(eq(selfPlayMatches.tenantId, tenantId), inArray(selfPlayMatches.id, matchIds)))
+            .where(
+              and(eq(selfPlayMatches.tenantId, tenantId), inArray(selfPlayMatches.id, matchIds)),
+            )
         : [];
       const byId = new Map(selfPlayRows.map((match) => [match.id, match]));
       return {
@@ -1168,7 +1187,13 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
           isActive: styles.isActive,
         })
         .from(styles)
-        .where(and(eq(styles.tenantId, tenantId), eq(styles.isActive, true), sql`${styles.deletedAt} IS NULL`))
+        .where(
+          and(
+            eq(styles.tenantId, tenantId),
+            eq(styles.isActive, true),
+            sql`${styles.deletedAt} IS NULL`,
+          ),
+        )
         .orderBy(styles.slug),
     );
 
@@ -1185,7 +1210,9 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
   app.post("/api/admin/quality/self-play/matches", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = c.var.adminId as number | undefined;
-    const body = await c.req.json<QualitySelfPlayRunBody>().catch((): QualitySelfPlayRunBody => ({}));
+    const body = await c.req
+      .json<QualitySelfPlayRunBody>()
+      .catch((): QualitySelfPlayRunBody => ({}));
 
     const styleSlug = parseRequiredBodyString(body.styleSlug);
     if (styleSlug.kind === "invalid") return c.json({ error: "styleSlug is required" }, 400);
@@ -1236,7 +1263,9 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
   app.post("/api/admin/quality/pairwise/matches", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = c.var.adminId as number | undefined;
-    const body = await c.req.json<QualityPairwiseRunBody>().catch((): QualityPairwiseRunBody => ({}));
+    const body = await c.req
+      .json<QualityPairwiseRunBody>()
+      .catch((): QualityPairwiseRunBody => ({}));
 
     const styleASlug = parseRequiredBodyString(body.styleASlug);
     if (styleASlug.kind === "invalid") return c.json({ error: "styleASlug is required" }, 400);
@@ -1262,10 +1291,16 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
       return c.json({ error: "active style not found" }, 404);
     }
     if (styleAResult.kind === "invalid") {
-      return c.json({ error: "style A failed schema validation", issues: styleAResult.issues }, 422);
+      return c.json(
+        { error: "style A failed schema validation", issues: styleAResult.issues },
+        422,
+      );
     }
     if (styleBResult.kind === "invalid") {
-      return c.json({ error: "style B failed schema validation", issues: styleBResult.issues }, 422);
+      return c.json(
+        { error: "style B failed schema validation", issues: styleBResult.issues },
+        422,
+      );
     }
     const persona = CANDIDATE_BY_SLUG.get(personaSlug.value);
     if (!persona) return c.json({ error: "persona not found" }, 404);
@@ -1646,11 +1681,13 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
           };
         }
 
-        const editsProposal = parseProposal(JSON.stringify({
-          summary: proposal.summary,
-          edits: parseJsonValue(proposal.editsJson, {}),
-          rationale: parseStringArray(proposal.rationaleJson),
-        }));
+        const editsProposal = parseProposal(
+          JSON.stringify({
+            summary: proposal.summary,
+            edits: parseJsonValue(proposal.editsJson, {}),
+            rationale: parseStringArray(proposal.rationaleJson),
+          }),
+        );
         const applied = applyEditsToStyle(parentStyleParse.data, editsProposal.edits);
         const candidateSlug = await nextCoachStyleSlug(tx, parentStyleParse.data.slug, proposal.id);
         const candidateStyle = StyleSchema.safeParse({
@@ -1731,14 +1768,18 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     }
 
     if (result.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
-    if (result.kind === "parent_not_found") return c.json({ error: "active parent style not found" }, 404);
+    if (result.kind === "parent_not_found")
+      return c.json({ error: "active parent style not found" }, 404);
     if (result.kind === "blocked") return c.json({ error: result.error }, 409);
     if (result.kind === "style_create_failed") return c.json({ error: result.error }, 500);
     if (result.kind === "invalid_parent_style") {
       return c.json({ error: "parent style failed schema validation", issues: result.issues }, 422);
     }
     if (result.kind === "invalid_candidate_style") {
-      return c.json({ error: "candidate style failed schema validation", issues: result.issues }, 422);
+      return c.json(
+        { error: "candidate style failed schema validation", issues: result.issues },
+        422,
+      );
     }
 
     await recordAudit(opts.db, {
@@ -1763,7 +1804,8 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
 
     const limit = parseLimit(c.req.query("limit"));
-    if (limit === null) return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
+    if (limit === null)
+      return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
     const newStyleSlug = optionalQuery(c.req.query("newStyleSlug"));
 
     const result = await withTenant(opts.db, tenantId, (tx) =>
@@ -1777,7 +1819,8 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
 
     if (result.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
     if (result.kind === "parent_not_found") return c.json({ error: "parent style not found" }, 404);
-    if (result.kind === "candidate_not_found") return c.json({ error: "derived style not found" }, 404);
+    if (result.kind === "candidate_not_found")
+      return c.json({ error: "derived style not found" }, 404);
     if (result.kind === "blocked") return c.json({ error: result.error }, 409);
 
     return c.json({ ok: true, preview: toShadowEvaluationPreview(result.plan) });
@@ -1870,7 +1913,8 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
 
     if (result.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
     if (result.kind === "parent_not_found") return c.json({ error: "parent style not found" }, 404);
-    if (result.kind === "candidate_not_found") return c.json({ error: "derived style not found" }, 404);
+    if (result.kind === "candidate_not_found")
+      return c.json({ error: "derived style not found" }, 404);
     if (result.kind === "no_pairwise") {
       return c.json({ error: "no pairwise matches found for parent and derived style" }, 409);
     }
@@ -2067,17 +2111,25 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
       }),
     );
     if (planResult.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
-    if (planResult.kind === "parent_not_found") return c.json({ error: "parent style not found" }, 404);
-    if (planResult.kind === "candidate_not_found") return c.json({ error: "derived style not found" }, 404);
+    if (planResult.kind === "parent_not_found")
+      return c.json({ error: "parent style not found" }, 404);
+    if (planResult.kind === "candidate_not_found")
+      return c.json({ error: "derived style not found" }, 404);
     if (planResult.kind === "blocked") return c.json({ error: planResult.error }, 409);
 
     const parentStyle = parseStyleFromShadowPlanRow(planResult.plan.parentStyle);
     if (parentStyle.kind === "invalid") {
-      return c.json({ error: "parent style failed schema validation", issues: parentStyle.issues }, 422);
+      return c.json(
+        { error: "parent style failed schema validation", issues: parentStyle.issues },
+        422,
+      );
     }
     const candidateStyle = parseStyleFromShadowPlanRow(planResult.plan.candidateStyle);
     if (candidateStyle.kind === "invalid") {
-      return c.json({ error: "candidate style failed schema validation", issues: candidateStyle.issues }, 422);
+      return c.json(
+        { error: "candidate style failed schema validation", issues: candidateStyle.issues },
+        422,
+      );
     }
 
     const selectedPersonaSlugs =
@@ -2177,7 +2229,8 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     }
     const outcome = outcomeRaw as EloOutcome | undefined;
     const limit = parseLimit(c.req.query("limit"));
-    if (limit === null) return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
+    if (limit === null)
+      return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
     const includeTranscript = parseIncludeTranscript(c.req.query("includeTranscript"));
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
@@ -2237,7 +2290,8 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     }
     const winner = winnerRaw as PairwiseWinner | undefined;
     const limit = parseLimit(c.req.query("limit"));
-    if (limit === null) return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
+    if (limit === null)
+      return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
     const includeTranscript = parseIncludeTranscript(c.req.query("includeTranscript"));
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
@@ -2267,9 +2321,7 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
         .limit(limit);
 
       const matchIds = [
-        ...new Set(
-          pairwiseRows.flatMap((row) => [row.matchAId, row.matchBId]).filter(isPresentId),
-        ),
+        ...new Set(pairwiseRows.flatMap((row) => [row.matchAId, row.matchBId]).filter(isPresentId)),
       ];
       const selfPlayRows = matchIds.length
         ? await tx
@@ -2287,7 +2339,9 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
               createdAt: selfPlayMatches.createdAt,
             })
             .from(selfPlayMatches)
-            .where(and(eq(selfPlayMatches.tenantId, tenantId), inArray(selfPlayMatches.id, matchIds)))
+            .where(
+              and(eq(selfPlayMatches.tenantId, tenantId), inArray(selfPlayMatches.id, matchIds)),
+            )
         : [];
 
       const byId = new Map(selfPlayRows.map((row) => [row.id, row]));
@@ -2421,8 +2475,7 @@ export async function buildQualityRunnerDeps(
   const kb =
     resolveRequiredQualityDep(opts.resolveKb, tenantId) ??
     makeTenantScopedKbStore(opts.db, tenantId);
-  const candidateChat =
-    resolveOptionalQualityDep(opts.resolveCandidateChat, tenantId) ?? salesChat;
+  const candidateChat = resolveOptionalQualityDep(opts.resolveCandidateChat, tenantId) ?? salesChat;
   const judgeChat = resolveOptionalQualityDep(opts.resolveJudgeChat, tenantId) ?? salesChat;
   const vacanciesBlock = await buildActiveVacanciesBlock(opts.db, tenantId);
 
@@ -2572,7 +2625,9 @@ function makeQualityStorageAdapters(
           const [conversation] = await tx
             .select({ id: conversations.id, userId: conversations.userId })
             .from(conversations)
-            .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, input.conversationId)))
+            .where(
+              and(eq(conversations.tenantId, tenantId), eq(conversations.id, input.conversationId)),
+            )
             .limit(1);
           if (!conversation) throw new Error("self-play conversation not found");
           const [created] = await tx
@@ -2821,7 +2876,9 @@ async function syncPersistedSelfPlayResult(
         fabricationsCaught: match.fabricationsCaught,
         skillsJson: JSON.stringify(match.skillsAttributed),
       })
-      .where(and(eq(selfPlayMatches.tenantId, tenantId), eq(selfPlayMatches.id, match.matchId ?? 0)));
+      .where(
+        and(eq(selfPlayMatches.tenantId, tenantId), eq(selfPlayMatches.id, match.matchId ?? 0)),
+      );
   });
 }
 
@@ -2951,10 +3008,7 @@ type ToolCallFeedbackTotals = {
   lastFeedbackAt: number | null;
 };
 
-type ToolCallImprovementProposalKind =
-  | "schema_fix"
-  | "routing_prompt_fix"
-  | "tool_candidate";
+type ToolCallImprovementProposalKind = "schema_fix" | "routing_prompt_fix" | "tool_candidate";
 
 type ToolCallImprovementProposalSeverity = "high" | "medium" | "low";
 type ToolCallImprovementProposalStatus = "pending" | "applied" | "dismissed";
@@ -3234,8 +3288,13 @@ function parseToolCallRegressionCaseCreateInput(
   if (exampleIndex.kind === "invalid") return { kind: "invalid", error: "invalid exampleIndex" };
   const title = parseNullableLimitedString(raw.title, 240, "title");
   if (title.kind === "invalid") return { kind: "invalid", error: title.error };
-  const expectedBehavior = parseNullableLimitedString(raw.expectedBehavior, 2000, "expectedBehavior");
-  if (expectedBehavior.kind === "invalid") return { kind: "invalid", error: expectedBehavior.error };
+  const expectedBehavior = parseNullableLimitedString(
+    raw.expectedBehavior,
+    2000,
+    "expectedBehavior",
+  );
+  if (expectedBehavior.kind === "invalid")
+    return { kind: "invalid", error: expectedBehavior.error };
   return {
     kind: "ok",
     value: {
@@ -3405,17 +3464,15 @@ function buildToolCallImprovementProposals(
     const toolName = row.toolName || "unknown_tool";
     const source = toToolCallSource(row.source);
     const key = `${row.label}:${toolName}:${source}`;
-    const cluster =
-      clusters.get(key) ??
-      {
-        label: row.label,
-        toolName,
-        source,
-        total: 0,
-        errorCount: 0,
-        lastFeedbackAt: null,
-        examples: [],
-      };
+    const cluster = clusters.get(key) ?? {
+      label: row.label,
+      toolName,
+      source,
+      total: 0,
+      errorCount: 0,
+      lastFeedbackAt: null,
+      examples: [],
+    };
     cluster.total += 1;
     if (row.error) cluster.errorCount += 1;
     cluster.lastFeedbackAt = Math.max(cluster.lastFeedbackAt ?? 0, row.feedbackCreatedAt);
@@ -3523,10 +3580,12 @@ function buildToolCallRegressionCaseInsert(opts: {
   now: number;
   proposal: ToolCallImprovementProposalRow;
   input: ToolCallRegressionCaseCreateInput;
-}): {
-  kind: "ok";
-  value: typeof agentToolCallRegressionCases.$inferInsert;
-} | { kind: "invalid"; error: string } {
+}):
+  | {
+      kind: "ok";
+      value: typeof agentToolCallRegressionCases.$inferInsert;
+    }
+  | { kind: "invalid"; error: string } {
   const examples = parseJsonArray(opts.proposal.examplesJson);
   if (examples.length === 0) {
     return { kind: "invalid", error: "proposal has no examples" };
@@ -3927,7 +3986,8 @@ function parseOptionalBodyInteger(
   min: number,
   max: number,
 ): { kind: "ok"; value: number | undefined } | { kind: "invalid" } {
-  if (value === undefined || value === null || value === "") return { kind: "ok", value: undefined };
+  if (value === undefined || value === null || value === "")
+    return { kind: "ok", value: undefined };
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) return { kind: "invalid" };
   return { kind: "ok", value: parsed };
@@ -4047,7 +4107,10 @@ export function makeShadowEvaluationRepo(
       }
 
       await withTenant(db, tenantId, async (tx) => {
-        const filters = [eq(shadowEvaluations.tenantId, tenantId), eq(shadowEvaluations.id, evalId)];
+        const filters = [
+          eq(shadowEvaluations.tenantId, tenantId),
+          eq(shadowEvaluations.id, evalId),
+        ];
         if (lease) filters.push(eq(shadowEvaluations.claimToken, lease.claimToken));
         await tx
           .update(shadowEvaluations)
@@ -4121,7 +4184,9 @@ async function resolveShadowEvaluationPlan(
       status: coachProposals.status,
     })
     .from(coachProposals)
-    .where(and(eq(coachProposals.id, input.proposalId), eq(coachProposals.tenantId, input.tenantId)))
+    .where(
+      and(eq(coachProposals.id, input.proposalId), eq(coachProposals.tenantId, input.tenantId)),
+    )
     .limit(1);
 
   if (!proposal) return { kind: "not_found" };
@@ -4287,11 +4352,7 @@ function countShadowPairwise<T extends { aWins: number; bWins: number; draws: nu
   return acc;
 }
 
-async function nextCoachStyleSlug(
-  tx: Db,
-  parentSlug: string,
-  proposalId: number,
-): Promise<string> {
+async function nextCoachStyleSlug(tx: Db, parentSlug: string, proposalId: number): Promise<string> {
   const base = `${sanitizeStyleSlug(parentSlug)}-coach-${proposalId}`.slice(0, 72);
   for (let i = 0; i < 20; i++) {
     const candidate = i === 0 ? base : `${base}-${i + 1}`;
@@ -4366,7 +4427,12 @@ function toCoachProposalResponse(row: CoachProposalRow) {
 }
 
 type ApplyCoachProposalResult =
-  | { kind: "ok"; proposal: ReturnType<typeof toCoachProposalResponse>; style: StyleResponseRow; parentStyleId: number }
+  | {
+      kind: "ok";
+      proposal: ReturnType<typeof toCoachProposalResponse>;
+      style: StyleResponseRow;
+      parentStyleId: number;
+    }
   | { kind: "not_found" }
   | { kind: "parent_not_found" }
   | { kind: "blocked"; error: string }
@@ -4448,9 +4514,7 @@ function missingSelfPlayResult(input: {
 }
 
 function toSelfPlayResult(row: SelfPlayMatchRow): SelfPlayMatchResult {
-  const outcome = OUTCOMES.has(row.outcome as EloOutcome)
-    ? (row.outcome as EloOutcome)
-    : "draw";
+  const outcome = OUTCOMES.has(row.outcome as EloOutcome) ? (row.outcome as EloOutcome) : "draw";
   return {
     styleSlug: row.styleSlug,
     personaSlug: row.personaSlug,
@@ -4471,9 +4535,7 @@ function toSelfPlayResult(row: SelfPlayMatchRow): SelfPlayMatchResult {
 }
 
 function toSelfPlaySummaryRecord(row: SelfPlayMatchRow) {
-  const outcome = OUTCOMES.has(row.outcome as EloOutcome)
-    ? (row.outcome as EloOutcome)
-    : "draw";
+  const outcome = OUTCOMES.has(row.outcome as EloOutcome) ? (row.outcome as EloOutcome) : "draw";
   return {
     id: row.id,
     style_slug: row.styleSlug,

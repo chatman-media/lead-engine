@@ -1,33 +1,26 @@
 import { withTenant } from "@chatman-media/conversation-engine";
 import {
-	adminInvites,
-	admins,
-	passwordResets,
-	referralCodes,
-	tenants,
+  adminInvites,
+  admins,
+  passwordResets,
+  referralCodes,
+  tenants,
 } from "@chatman-media/storage";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import {
-	AuthTokenError,
-	DEFAULT_TOKEN_LIFETIME_SEC,
-	deriveTenantSlug,
-	hashPassword,
-	signAuthToken,
-	verifyAuthToken,
-	verifyPassword,
+  AuthTokenError,
+  DEFAULT_TOKEN_LIFETIME_SEC,
+  deriveTenantSlug,
+  hashPassword,
+  signAuthToken,
+  verifyAuthToken,
+  verifyPassword,
 } from "../lib/auth.ts";
-import {
-	type AuthRateLimiter,
-	clientIpFromHeaders,
-} from "../lib/auth-rate-limiter.ts";
+import { type AuthRateLimiter, clientIpFromHeaders } from "../lib/auth-rate-limiter.ts";
 import { isUniqueViolation } from "../lib/db-errors.ts";
-import {
-	forgotPasswordEmailHtml,
-	type Mailer,
-	welcomeEmailHtml,
-} from "../lib/mailer.ts";
+import { forgotPasswordEmailHtml, type Mailer, welcomeEmailHtml } from "../lib/mailer.ts";
 
 /**
  * Auth-endpoints для SaaS-flow:
@@ -48,28 +41,28 @@ import {
  *   Endpoint принимает оба — middleware читает оба источника.
  */
 export interface AuthRoutesOpts {
-	// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-	db: PostgresJsDatabase<any>;
-	/** Secret для HMAC sign/verify. PLATFORM_AUTH_SECRET или fallback. */
-	secret: string;
-	/** Опциональный mailer для welcome email после signup. */
-	mailer?: Mailer;
-	/** Base URL admin-UI — для ссылки в письме. */
-	appUrl?: string;
-	/**
-	 * Разрешена ли публичная самостоятельная регистрация. Закрывается ТОЛЬКО при
-	 * явном `false` (так prod-callsite в index.ts передаёт
-	 * `ALLOW_PUBLIC_SIGNUP === "1"` → по умолчанию false → закрыто). Если не
-	 * передано (undefined) — signup открыт (дефолт для тестов/локалки).
-	 */
-	allowSignup?: boolean;
-	/**
-	 * Опциональный rate limiter для публичных auth-эндпойнтов (login / signup /
-	 * forgot / reset / accept-invite). Если задан — попытки лимитируются по
-	 * IP (+email для login) против brute-force / credential stuffing /
-	 * email-bombing. Если не задан — лимитирование отключено (дефолт для тестов).
-	 */
-	rateLimiter?: AuthRateLimiter;
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  db: PostgresJsDatabase<any>;
+  /** Secret для HMAC sign/verify. PLATFORM_AUTH_SECRET или fallback. */
+  secret: string;
+  /** Опциональный mailer для welcome email после signup. */
+  mailer?: Mailer;
+  /** Base URL admin-UI — для ссылки в письме. */
+  appUrl?: string;
+  /**
+   * Разрешена ли публичная самостоятельная регистрация. Закрывается ТОЛЬКО при
+   * явном `false` (так prod-callsite в index.ts передаёт
+   * `ALLOW_PUBLIC_SIGNUP === "1"` → по умолчанию false → закрыто). Если не
+   * передано (undefined) — signup открыт (дефолт для тестов/локалки).
+   */
+  allowSignup?: boolean;
+  /**
+   * Опциональный rate limiter для публичных auth-эндпойнтов (login / signup /
+   * forgot / reset / accept-invite). Если задан — попытки лимитируются по
+   * IP (+email для login) против brute-force / credential stuffing /
+   * email-bombing. Если не задан — лимитирование отключено (дефолт для тестов).
+   */
+  rateLimiter?: AuthRateLimiter;
 }
 
 /**
@@ -80,720 +73,646 @@ export interface AuthRoutesOpts {
  */
 let dummyPasswordHashPromise: Promise<string> | null = null;
 function getDummyPasswordHash(): Promise<string> {
-	if (!dummyPasswordHashPromise) {
-		dummyPasswordHashPromise = hashPassword(
-			"unused-constant-time-placeholder",
-		);
-	}
-	return dummyPasswordHashPromise;
+  if (!dummyPasswordHashPromise) {
+    dummyPasswordHashPromise = hashPassword("unused-constant-time-placeholder");
+  }
+  return dummyPasswordHashPromise;
 }
 
 interface SignupBody {
-	email: unknown;
-	password: unknown;
-	/** Опциональный custom slug. Если пусто — derive из email + random suffix. */
-	tenantSlug?: unknown;
-	/** Реферальный код партнёра (опционально). Трекает attribution. */
-	referralCode?: unknown;
+  email: unknown;
+  password: unknown;
+  /** Опциональный custom slug. Если пусто — derive из email + random suffix. */
+  tenantSlug?: unknown;
+  /** Реферальный код партнёра (опционально). Трекает attribution. */
+  referralCode?: unknown;
 }
 
 interface LoginBody {
-	email: unknown;
-	password: unknown;
+  email: unknown;
+  password: unknown;
 }
 
 export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
-	const app = new Hono();
+  const app = new Hono();
 
-	/**
-	 * Возвращает 429 JSON-ответ если key превысил лимит, иначе null.
-	 * Вызывать в начале sensitive-хендлеров: `const limited = rateLimit(c, key)`.
-	 */
-	function rateLimit(
-		// biome-ignore lint/suspicious/noExplicitAny: Hono Context generic
-		c: any,
-		keySuffix: string,
-	): Response | null {
-		if (!opts.rateLimiter) return null;
-		const ip = clientIpFromHeaders({
-			get: (n: string) => c.req.header(n) ?? null,
-		});
-		const decision = opts.rateLimiter.check(`${ip}:${keySuffix}`);
-		if (!decision.allowed) {
-			c.header("Retry-After", String(decision.retryAfterSec ?? 60));
-			return c.json(
-				{ error: "rate_limit_exceeded", retryAfterSec: decision.retryAfterSec },
-				429,
-			);
-		}
-		return null;
-	}
+  /**
+   * Возвращает 429 JSON-ответ если key превысил лимит, иначе null.
+   * Вызывать в начале sensitive-хендлеров: `const limited = rateLimit(c, key)`.
+   */
+  function rateLimit(
+    // biome-ignore lint/suspicious/noExplicitAny: Hono Context generic
+    c: any,
+    keySuffix: string,
+  ): Response | null {
+    if (!opts.rateLimiter) return null;
+    const ip = clientIpFromHeaders({
+      get: (n: string) => c.req.header(n) ?? null,
+    });
+    const decision = opts.rateLimiter.check(`${ip}:${keySuffix}`);
+    if (!decision.allowed) {
+      c.header("Retry-After", String(decision.retryAfterSec ?? 60));
+      return c.json({ error: "rate_limit_exceeded", retryAfterSec: decision.retryAfterSec }, 429);
+    }
+    return null;
+  }
 
-	/**
-	 * POST /api/auth/signup
-	 * Body: { email, password, tenantSlug? }
-	 * Returns: { token, admin: { id, email, role, tenantId }, tenant: { id, slug } }
-	 *
-	 * Создаёт **новый tenant** (free plan, byok billing) и **первого
-	 * admin'а** с role='superadmin'. Это primary self-service entry-point —
-	 * один email = один tenant. Multi-admin per tenant — invite flow
-	 * (отдельный endpoint, не в этом PR).
-	 */
-	app.post("/api/auth/signup", async (c) => {
-		// Закрыто только при явном allowSignup:false (prod через ALLOW_PUBLIC_SIGNUP).
-		if (opts.allowSignup === false) {
-			return c.json({ error: "signup_disabled" }, 403);
-		}
-		const limited = rateLimit(c, "signup");
-		if (limited) return limited;
-		let body: SignupBody;
-		try {
-			body = (await c.req.json()) as SignupBody;
-		} catch {
-			return c.json({ error: "invalid json" }, 400);
-		}
-		const email =
-			typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-		const password = typeof body.password === "string" ? body.password : "";
-		const customSlug =
-			typeof body.tenantSlug === "string" && body.tenantSlug.length > 0
-				? body.tenantSlug.trim().toLowerCase()
-				: undefined;
-		const referralCode =
-			typeof body.referralCode === "string" &&
-			body.referralCode.trim().length > 0
-				? body.referralCode.trim().toUpperCase()
-				: undefined;
+  /**
+   * POST /api/auth/signup
+   * Body: { email, password, tenantSlug? }
+   * Returns: { token, admin: { id, email, role, tenantId }, tenant: { id, slug } }
+   *
+   * Создаёт **новый tenant** (free plan, byok billing) и **первого
+   * admin'а** с role='superadmin'. Это primary self-service entry-point —
+   * один email = один tenant. Multi-admin per tenant — invite flow
+   * (отдельный endpoint, не в этом PR).
+   */
+  app.post("/api/auth/signup", async (c) => {
+    // Закрыто только при явном allowSignup:false (prod через ALLOW_PUBLIC_SIGNUP).
+    if (opts.allowSignup === false) {
+      return c.json({ error: "signup_disabled" }, 403);
+    }
+    const limited = rateLimit(c, "signup");
+    if (limited) return limited;
+    let body: SignupBody;
+    try {
+      body = (await c.req.json()) as SignupBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    const customSlug =
+      typeof body.tenantSlug === "string" && body.tenantSlug.length > 0
+        ? body.tenantSlug.trim().toLowerCase()
+        : undefined;
+    const referralCode =
+      typeof body.referralCode === "string" && body.referralCode.trim().length > 0
+        ? body.referralCode.trim().toUpperCase()
+        : undefined;
 
-		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-			return c.json({ error: "invalid email" }, 400);
-		}
-		if (password.length < 8) {
-			return c.json({ error: "password must be at least 8 characters" }, 400);
-		}
-		if (customSlug && !/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(customSlug)) {
-			return c.json(
-				{ error: "invalid tenantSlug (lowercase, a-z 0-9 -, 3-32 chars)" },
-				400,
-			);
-		}
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return c.json({ error: "invalid email" }, 400);
+    }
+    if (password.length < 8) {
+      return c.json({ error: "password must be at least 8 characters" }, 400);
+    }
+    if (customSlug && !/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(customSlug)) {
+      return c.json({ error: "invalid tenantSlug (lowercase, a-z 0-9 -, 3-32 chars)" }, 400);
+    }
 
-		// 1. Email uniqueness check (admin.email UNIQUE).
-		const existing = await opts.db
-			.select({ id: admins.id })
-			.from(admins)
-			.where(eq(admins.email, email));
-		if (existing.length > 0) {
-			return c.json({ error: "email already registered" }, 409);
-		}
+    // 1. Email uniqueness check (admin.email UNIQUE).
+    const existing = await opts.db
+      .select({ id: admins.id })
+      .from(admins)
+      .where(eq(admins.email, email));
+    if (existing.length > 0) {
+      return c.json({ error: "email already registered" }, 409);
+    }
 
-		// 2. Pick slug — custom если задан, иначе derived. Retry на conflict
-		// через uniq constraint.
-		let slug = customSlug ?? deriveTenantSlug(email);
-		let tenantRow: { id: number; slug: string } | null = null;
-		let attempt = 0;
-		const nowEpoch = Math.floor(Date.now() / 1000);
-		while (attempt < 5 && !tenantRow) {
-			attempt++;
-			try {
-				const [t] = await opts.db
-					.insert(tenants)
-					.values({
-						slug,
-						plan: "free",
-						status: "active",
-						llmBillingMode: "byok",
-						createdAt: nowEpoch,
-						updatedAt: nowEpoch,
-					})
-					.returning();
-				if (t) tenantRow = { id: t.id, slug: t.slug };
-			} catch (err) {
-				if (isUniqueViolation(err)) {
-					if (customSlug) {
-						// Если пользователь явно задал — вернуть 409 (не reroll'им).
-						return c.json({ error: "tenantSlug already taken" }, 409);
-					}
-					// Derived slug — reroll с новым suffix.
-					slug = deriveTenantSlug(email);
-					continue;
-				}
-				throw err;
-			}
-		}
-		if (!tenantRow) {
-			return c.json(
-				{ error: "could not allocate tenant slug after 5 attempts" },
-				500,
-			);
-		}
+    // 2. Pick slug — custom если задан, иначе derived. Retry на conflict
+    // через uniq constraint.
+    let slug = customSlug ?? deriveTenantSlug(email);
+    let tenantRow: { id: number; slug: string } | null = null;
+    let attempt = 0;
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    while (attempt < 5 && !tenantRow) {
+      attempt++;
+      try {
+        const [t] = await opts.db
+          .insert(tenants)
+          .values({
+            slug,
+            plan: "free",
+            status: "active",
+            llmBillingMode: "byok",
+            createdAt: nowEpoch,
+            updatedAt: nowEpoch,
+          })
+          .returning();
+        if (t) tenantRow = { id: t.id, slug: t.slug };
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          if (customSlug) {
+            // Если пользователь явно задал — вернуть 409 (не reroll'им).
+            return c.json({ error: "tenantSlug already taken" }, 409);
+          }
+          // Derived slug — reroll с новым suffix.
+          slug = deriveTenantSlug(email);
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!tenantRow) {
+      return c.json({ error: "could not allocate tenant slug after 5 attempts" }, 500);
+    }
 
-		// 3a. Если передан referralCode — ищем и трекаем (best-effort, не блокирует signup).
-		if (referralCode) {
-			try {
-				const [codeRow] = await opts.db
-					.select({ id: referralCodes.id })
-					.from(referralCodes)
-					.where(eq(referralCodes.code, referralCode));
-				if (codeRow) {
-					await opts.db
-						.update(referralCodes)
-						.set({ usesCount: sql`${referralCodes.usesCount} + 1` })
-						.where(eq(referralCodes.id, codeRow.id));
-					await opts.db
-						.update(tenants)
-						.set({ referredByCode: referralCode })
-						.where(eq(tenants.id, tenantRow.id));
-				}
-			} catch {
-				// best-effort — не ломаем регистрацию если трекинг упал
-			}
-		}
+    // 3a. Если передан referralCode — ищем и трекаем (best-effort, не блокирует signup).
+    if (referralCode) {
+      try {
+        const [codeRow] = await opts.db
+          .select({ id: referralCodes.id })
+          .from(referralCodes)
+          .where(eq(referralCodes.code, referralCode));
+        if (codeRow) {
+          await opts.db
+            .update(referralCodes)
+            .set({ usesCount: sql`${referralCodes.usesCount} + 1` })
+            .where(eq(referralCodes.id, codeRow.id));
+          await opts.db
+            .update(tenants)
+            .set({ referredByCode: referralCode })
+            .where(eq(tenants.id, tenantRow.id));
+        }
+      } catch {
+        // best-effort — не ломаем регистрацию если трекинг упал
+      }
+    }
 
-		// 3. Hash password + insert admin (linked to new tenant).
-		const passwordHash = await hashPassword(password);
-		// Admin INSERT под new tenant-context — RLS-correct.
-		const [adminRow] = await withTenant(
-			// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-			opts.db as any,
-			tenantRow.id,
-			async (tx) =>
-				tx
-					.insert(admins)
-					.values({
-						tenantId: tenantRow!.id,
-						email,
-						passwordHash,
-						role: "superadmin",
-						createdAt: nowEpoch,
-					})
-					.returning(),
-		);
-		if (!adminRow) {
-			return c.json({ error: "admin insert returned no row" }, 500);
-		}
+    // 3. Hash password + insert admin (linked to new tenant).
+    const passwordHash = await hashPassword(password);
+    // Admin INSERT под new tenant-context — RLS-correct.
+    const [adminRow] = await withTenant(
+      // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+      opts.db as any,
+      tenantRow.id,
+      async (tx) =>
+        tx
+          .insert(admins)
+          .values({
+            tenantId: tenantRow!.id,
+            email,
+            passwordHash,
+            role: "superadmin",
+            createdAt: nowEpoch,
+          })
+          .returning(),
+    );
+    if (!adminRow) {
+      return c.json({ error: "admin insert returned no row" }, 500);
+    }
 
-		// 4. Sign session token.
-		const token = signAuthToken(
-			{
-				adminId: adminRow.id,
-				tenantId: tenantRow.id,
-				role: "superadmin",
-				exp: nowEpoch + DEFAULT_TOKEN_LIFETIME_SEC,
-			},
-			opts.secret,
-		);
+    // 4. Sign session token.
+    const token = signAuthToken(
+      {
+        adminId: adminRow.id,
+        tenantId: tenantRow.id,
+        role: "superadmin",
+        exp: nowEpoch + DEFAULT_TOKEN_LIFETIME_SEC,
+      },
+      opts.secret,
+    );
 
-		// 5. Welcome email — best-effort, не блокирует ответ.
-		if (opts.mailer) {
-			opts.mailer
-				.send({
-					to: email,
-					subject: "Добро пожаловать в lead-engine 🎉",
-					html: welcomeEmailHtml({
-						email,
-						slug: tenantRow.slug,
-						appUrl: opts.appUrl ?? "https://app.leadengine.app",
-					}),
-				})
-				.catch((e) => console.warn("[mailer] welcome send failed:", e));
-		}
+    // 5. Welcome email — best-effort, не блокирует ответ.
+    if (opts.mailer) {
+      opts.mailer
+        .send({
+          to: email,
+          subject: "Добро пожаловать в lead-engine 🎉",
+          html: welcomeEmailHtml({
+            email,
+            slug: tenantRow.slug,
+            appUrl: opts.appUrl ?? "https://app.leadengine.app",
+          }),
+        })
+        .catch((e) => console.warn("[mailer] welcome send failed:", e));
+    }
 
-		return c.json({
-			token,
-			admin: {
-				id: adminRow.id,
-				email,
-				role: "superadmin",
-				tenantId: tenantRow.id,
-			},
-			tenant: { id: tenantRow.id, slug: tenantRow.slug },
-		});
-	});
+    return c.json({
+      token,
+      admin: {
+        id: adminRow.id,
+        email,
+        role: "superadmin",
+        tenantId: tenantRow.id,
+      },
+      tenant: { id: tenantRow.id, slug: tenantRow.slug },
+    });
+  });
 
-	/**
-	 * POST /api/auth/login
-	 * Body: { email, password }
-	 * Returns: { token, admin: { id, email, role, tenantId } } | 401
-	 */
-	app.post("/api/auth/login", async (c) => {
-		let body: LoginBody;
-		try {
-			body = (await c.req.json()) as LoginBody;
-		} catch {
-			return c.json({ error: "invalid json" }, 400);
-		}
-		const email =
-			typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-		const password = typeof body.password === "string" ? body.password : "";
-		if (!email || !password) {
-			return c.json({ error: "email and password required" }, 400);
-		}
-		const limited = rateLimit(c, `login:${email}`);
-		if (limited) return limited;
+  /**
+   * POST /api/auth/login
+   * Body: { email, password }
+   * Returns: { token, admin: { id, email, role, tenantId } } | 401
+   */
+  app.post("/api/auth/login", async (c) => {
+    let body: LoginBody;
+    try {
+      body = (await c.req.json()) as LoginBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!email || !password) {
+      return c.json({ error: "email and password required" }, 400);
+    }
+    const limited = rateLimit(c, `login:${email}`);
+    if (limited) return limited;
 
-		const [adminRow] = await opts.db
-			.select()
-			.from(admins)
-			.where(eq(admins.email, email));
-		if (!adminRow) {
-			// Constant-time: прогоняем argon2 против фиктивного хеша, чтобы время
-			// ответа не выдавало существование email (anti-enumeration). Generic 401.
-			await verifyPassword(password, await getDummyPasswordHash());
-			return c.json({ error: "invalid credentials" }, 401);
-		}
-		const ok = await verifyPassword(password, adminRow.passwordHash);
-		if (!ok) {
-			return c.json({ error: "invalid credentials" }, 401);
-		}
+    const [adminRow] = await opts.db.select().from(admins).where(eq(admins.email, email));
+    if (!adminRow) {
+      // Constant-time: прогоняем argon2 против фиктивного хеша, чтобы время
+      // ответа не выдавало существование email (anti-enumeration). Generic 401.
+      await verifyPassword(password, await getDummyPasswordHash());
+      return c.json({ error: "invalid credentials" }, 401);
+    }
+    const ok = await verifyPassword(password, adminRow.passwordHash);
+    if (!ok) {
+      return c.json({ error: "invalid credentials" }, 401);
+    }
 
-		const role: "superadmin" | "manager" =
-			adminRow.role === "manager" ? "manager" : "superadmin";
-		const nowEpoch = Math.floor(Date.now() / 1000);
-		const token = signAuthToken(
-			{
-				adminId: adminRow.id,
-				tenantId: adminRow.tenantId,
-				role,
-				exp: nowEpoch + DEFAULT_TOKEN_LIFETIME_SEC,
-			},
-			opts.secret,
-		);
+    const role: "superadmin" | "manager" = adminRow.role === "manager" ? "manager" : "superadmin";
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const token = signAuthToken(
+      {
+        adminId: adminRow.id,
+        tenantId: adminRow.tenantId,
+        role,
+        exp: nowEpoch + DEFAULT_TOKEN_LIFETIME_SEC,
+      },
+      opts.secret,
+    );
 
-		return c.json({
-			token,
-			admin: {
-				id: adminRow.id,
-				email: adminRow.email,
-				role,
-				tenantId: adminRow.tenantId,
-			},
-		});
-	});
+    return c.json({
+      token,
+      admin: {
+        id: adminRow.id,
+        email: adminRow.email,
+        role,
+        tenantId: adminRow.tenantId,
+      },
+    });
+  });
 
-	/**
-	 * POST /api/auth/accept-invite
-	 * Body: { token, password }
-	 * Returns: { token: <session>, admin, tenant } — same shape как /signup.
-	 *
-	 * Создаёт admin row с email + role из invite, mark'ает invite usedAt.
-	 * Token одноразовый. Token expired → 401, invite уже использован → 409,
-	 * email уже зарегистрирован в tenant'е → 409.
-	 *
-	 * Password rules: ≥ 8 chars (same as signup).
-	 */
-	app.post("/api/auth/accept-invite", async (c) => {
-		const limited = rateLimit(c, "accept-invite");
-		if (limited) return limited;
-		let body: { token?: unknown; password?: unknown };
-		try {
-			body = (await c.req.json()) as { token?: unknown; password?: unknown };
-		} catch {
-			return c.json({ error: "invalid json" }, 400);
-		}
-		const token = typeof body.token === "string" ? body.token.trim() : "";
-		const password = typeof body.password === "string" ? body.password : "";
-		if (!token) return c.json({ error: "token required" }, 400);
-		if (!password || password.length < 8) {
-			return c.json({ error: "password must be at least 8 chars" }, 400);
-		}
+  /**
+   * POST /api/auth/accept-invite
+   * Body: { token, password }
+   * Returns: { token: <session>, admin, tenant } — same shape как /signup.
+   *
+   * Создаёт admin row с email + role из invite, mark'ает invite usedAt.
+   * Token одноразовый. Token expired → 401, invite уже использован → 409,
+   * email уже зарегистрирован в tenant'е → 409.
+   *
+   * Password rules: ≥ 8 chars (same as signup).
+   */
+  app.post("/api/auth/accept-invite", async (c) => {
+    const limited = rateLimit(c, "accept-invite");
+    if (limited) return limited;
+    let body: { token?: unknown; password?: unknown };
+    try {
+      body = (await c.req.json()) as { token?: unknown; password?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!token) return c.json({ error: "token required" }, 400);
+    if (!password || password.length < 8) {
+      return c.json({ error: "password must be at least 8 chars" }, 400);
+    }
 
-		// Lookup invite (без tenant context — cross-tenant lookup by token).
-		const [invite] = await opts.db
-			.select({
-				id: adminInvites.id,
-				tenantId: adminInvites.tenantId,
-				email: adminInvites.email,
-				role: adminInvites.role,
-				expiresAt: adminInvites.expiresAt,
-				usedAt: adminInvites.usedAt,
-			})
-			.from(adminInvites)
-			.where(eq(adminInvites.token, token));
-		if (!invite) return c.json({ error: "invalid token" }, 401);
-		const nowEpoch = Math.floor(Date.now() / 1000);
-		if (invite.usedAt !== null) {
-			return c.json({ error: "invite already used" }, 409);
-		}
-		if (invite.expiresAt < nowEpoch) {
-			return c.json({ error: "invite expired" }, 401);
-		}
+    // Lookup invite (без tenant context — cross-tenant lookup by token).
+    const [invite] = await opts.db
+      .select({
+        id: adminInvites.id,
+        tenantId: adminInvites.tenantId,
+        email: adminInvites.email,
+        role: adminInvites.role,
+        expiresAt: adminInvites.expiresAt,
+        usedAt: adminInvites.usedAt,
+      })
+      .from(adminInvites)
+      .where(eq(adminInvites.token, token));
+    if (!invite) return c.json({ error: "invalid token" }, 401);
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    if (invite.usedAt !== null) {
+      return c.json({ error: "invite already used" }, 409);
+    }
+    if (invite.expiresAt < nowEpoch) {
+      return c.json({ error: "invite expired" }, 401);
+    }
 
-		// Check dup email в этом tenant'е.
-		const [existingAdmin] = await opts.db
-			.select({ id: admins.id })
-			.from(admins)
-			.where(
-				and(
-					eq(admins.tenantId, invite.tenantId),
-					eq(admins.email, invite.email),
-				),
-			);
-		if (existingAdmin) {
-			return c.json(
-				{ error: "admin with this email already exists in tenant" },
-				409,
-			);
-		}
+    // Check dup email в этом tenant'е.
+    const [existingAdmin] = await opts.db
+      .select({ id: admins.id })
+      .from(admins)
+      .where(and(eq(admins.tenantId, invite.tenantId), eq(admins.email, invite.email)));
+    if (existingAdmin) {
+      return c.json({ error: "admin with this email already exists in tenant" }, 409);
+    }
 
-		const passwordHash = await hashPassword(password);
+    const passwordHash = await hashPassword(password);
 
-		const result = await withTenant(opts.db, invite.tenantId, async (tx) => {
-			const [adminRow] = await tx
-				.insert(admins)
-				.values({
-					tenantId: invite.tenantId,
-					email: invite.email,
-					passwordHash,
-					role: invite.role,
-					createdAt: nowEpoch,
-				})
-				.returning();
-			await tx
-				.update(adminInvites)
-				.set({ usedAt: nowEpoch, acceptedAdminId: adminRow!.id })
-				.where(eq(adminInvites.id, invite.id));
-			return adminRow!;
-		});
+    const result = await withTenant(opts.db, invite.tenantId, async (tx) => {
+      const [adminRow] = await tx
+        .insert(admins)
+        .values({
+          tenantId: invite.tenantId,
+          email: invite.email,
+          passwordHash,
+          role: invite.role,
+          createdAt: nowEpoch,
+        })
+        .returning();
+      await tx
+        .update(adminInvites)
+        .set({ usedAt: nowEpoch, acceptedAdminId: adminRow!.id })
+        .where(eq(adminInvites.id, invite.id));
+      return adminRow!;
+    });
 
-		const [tenantRow] = await opts.db
-			.select({ slug: tenants.slug, plan: tenants.plan })
-			.from(tenants)
-			.where(eq(tenants.id, invite.tenantId));
+    const [tenantRow] = await opts.db
+      .select({ slug: tenants.slug, plan: tenants.plan })
+      .from(tenants)
+      .where(eq(tenants.id, invite.tenantId));
 
-		const sessionToken = signAuthToken(
-			{
-				adminId: result.id,
-				tenantId: invite.tenantId,
-				role: result.role as "superadmin" | "manager",
-				exp: nowEpoch + DEFAULT_TOKEN_LIFETIME_SEC,
-			},
-			opts.secret,
-		);
+    const sessionToken = signAuthToken(
+      {
+        adminId: result.id,
+        tenantId: invite.tenantId,
+        role: result.role as "superadmin" | "manager",
+        exp: nowEpoch + DEFAULT_TOKEN_LIFETIME_SEC,
+      },
+      opts.secret,
+    );
 
-		return c.json({
-			token: sessionToken,
-			admin: {
-				id: result.id,
-				email: result.email,
-				role: result.role,
-				tenantId: result.tenantId,
-			},
-			tenant: tenantRow
-				? { id: invite.tenantId, slug: tenantRow.slug, plan: tenantRow.plan }
-				: null,
-		});
-	});
+    return c.json({
+      token: sessionToken,
+      admin: {
+        id: result.id,
+        email: result.email,
+        role: result.role,
+        tenantId: result.tenantId,
+      },
+      tenant: tenantRow
+        ? { id: invite.tenantId, slug: tenantRow.slug, plan: tenantRow.plan }
+        : null,
+    });
+  });
 
-	/**
-	 * POST /api/auth/change-password
-	 * Requires Authorization Bearer token. Body: { currentPassword, newPassword }
-	 *
-	 * Verifies currentPassword against stored hash, then replaces with new
-	 * hash. Returns 200 { ok: true } on success.
-	 *
-	 * Errors:
-	 *   400 — missing/invalid fields, newPassword < 8 chars
-	 *   401 — missing/invalid token, or currentPassword wrong
-	 */
-	app.post("/api/auth/change-password", async (c) => {
-		const header = c.req.header("Authorization") ?? "";
-		const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-		if (!token)
-			return c.json({ error: "missing Authorization Bearer token" }, 401);
-		let claims: ReturnType<typeof verifyAuthToken>;
-		try {
-			claims = verifyAuthToken(token, opts.secret);
-		} catch {
-			return c.json({ error: "invalid token" }, 401);
-		}
+  /**
+   * POST /api/auth/change-password
+   * Requires Authorization Bearer token. Body: { currentPassword, newPassword }
+   *
+   * Verifies currentPassword against stored hash, then replaces with new
+   * hash. Returns 200 { ok: true } on success.
+   *
+   * Errors:
+   *   400 — missing/invalid fields, newPassword < 8 chars
+   *   401 — missing/invalid token, or currentPassword wrong
+   */
+  app.post("/api/auth/change-password", async (c) => {
+    const header = c.req.header("Authorization") ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (!token) return c.json({ error: "missing Authorization Bearer token" }, 401);
+    let claims: ReturnType<typeof verifyAuthToken>;
+    try {
+      claims = verifyAuthToken(token, opts.secret);
+    } catch {
+      return c.json({ error: "invalid token" }, 401);
+    }
 
-		let body: { currentPassword?: unknown; newPassword?: unknown };
-		try {
-			body = (await c.req.json()) as typeof body;
-		} catch {
-			return c.json({ error: "invalid json" }, 400);
-		}
-		const currentPassword =
-			typeof body.currentPassword === "string" ? body.currentPassword : "";
-		const newPassword =
-			typeof body.newPassword === "string" ? body.newPassword : "";
-		if (!currentPassword || !newPassword) {
-			return c.json({ error: "currentPassword and newPassword required" }, 400);
-		}
-		if (newPassword.length < 8) {
-			return c.json(
-				{ error: "newPassword must be at least 8 characters" },
-				400,
-			);
-		}
+    let body: { currentPassword?: unknown; newPassword?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
+    const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+    if (!currentPassword || !newPassword) {
+      return c.json({ error: "currentPassword and newPassword required" }, 400);
+    }
+    if (newPassword.length < 8) {
+      return c.json({ error: "newPassword must be at least 8 characters" }, 400);
+    }
 
-		const [adminRow] = await opts.db
-			.select({ id: admins.id, passwordHash: admins.passwordHash })
-			.from(admins)
-			.where(
-				and(
-					eq(admins.id, claims.adminId),
-					eq(admins.tenantId, claims.tenantId),
-				),
-			);
-		if (!adminRow) return c.json({ error: "admin not found" }, 401);
+    const [adminRow] = await opts.db
+      .select({ id: admins.id, passwordHash: admins.passwordHash })
+      .from(admins)
+      .where(and(eq(admins.id, claims.adminId), eq(admins.tenantId, claims.tenantId)));
+    if (!adminRow) return c.json({ error: "admin not found" }, 401);
 
-		const ok = await verifyPassword(currentPassword, adminRow.passwordHash);
-		if (!ok) return c.json({ error: "current password is incorrect" }, 401);
+    const ok = await verifyPassword(currentPassword, adminRow.passwordHash);
+    if (!ok) return c.json({ error: "current password is incorrect" }, 401);
 
-		const newHash = await hashPassword(newPassword);
-		await opts.db
-			.update(admins)
-			.set({ passwordHash: newHash })
-			.where(eq(admins.id, adminRow.id));
+    const newHash = await hashPassword(newPassword);
+    await opts.db.update(admins).set({ passwordHash: newHash }).where(eq(admins.id, adminRow.id));
 
-		return c.json({ ok: true });
-	});
+    return c.json({ ok: true });
+  });
 
-	/**
-	 * POST /api/auth/forgot-password
-	 * Body: { email }
-	 * Returns: { ok: true } — всегда, чтобы не раскрывать существование email.
-	 *
-	 * Генерирует одноразовый токен (1 час), сохраняет в password_resets,
-	 * отправляет письмо со ссылкой для сброса. Если mailer не настроен —
-	 * dry-run (лог без отправки). Предыдущие неиспользованные токены для
-	 * этого admin'а инвалидируются (ставится usedAt=now) при создании нового.
-	 */
-	app.post("/api/auth/forgot-password", async (c) => {
-		const limited = rateLimit(c, "forgot-password");
-		if (limited) return limited;
-		let body: { email?: unknown };
-		try {
-			body = (await c.req.json()) as typeof body;
-		} catch {
-			return c.json({ error: "invalid json" }, 400);
-		}
-		const email =
-			typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-		if (!email) return c.json({ error: "email required" }, 400);
+  /**
+   * POST /api/auth/forgot-password
+   * Body: { email }
+   * Returns: { ok: true } — всегда, чтобы не раскрывать существование email.
+   *
+   * Генерирует одноразовый токен (1 час), сохраняет в password_resets,
+   * отправляет письмо со ссылкой для сброса. Если mailer не настроен —
+   * dry-run (лог без отправки). Предыдущие неиспользованные токены для
+   * этого admin'а инвалидируются (ставится usedAt=now) при создании нового.
+   */
+  app.post("/api/auth/forgot-password", async (c) => {
+    const limited = rateLimit(c, "forgot-password");
+    if (limited) return limited;
+    let body: { email?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (!email) return c.json({ error: "email required" }, 400);
 
-		// Всегда 200 — не раскрываем существование email.
-		const [adminRow] = await opts.db
-			.select({ id: admins.id })
-			.from(admins)
-			.where(eq(admins.email, email));
+    // Всегда 200 — не раскрываем существование email.
+    const [adminRow] = await opts.db
+      .select({ id: admins.id })
+      .from(admins)
+      .where(eq(admins.email, email));
 
-		if (adminRow) {
-			const nowEpoch = Math.floor(Date.now() / 1000);
-			const expiresAt = nowEpoch + 3600; // 1 час
+    if (adminRow) {
+      const nowEpoch = Math.floor(Date.now() / 1000);
+      const expiresAt = nowEpoch + 3600; // 1 час
 
-			// Инвалидировать старые неиспользованные токены для этого admin'а.
-			await opts.db
-				.update(passwordResets)
-				.set({ usedAt: nowEpoch })
-				.where(
-					and(
-						eq(passwordResets.adminId, adminRow.id),
-						isNull(passwordResets.usedAt),
-					),
-				);
+      // Инвалидировать старые неиспользованные токены для этого admin'а.
+      await opts.db
+        .update(passwordResets)
+        .set({ usedAt: nowEpoch })
+        .where(and(eq(passwordResets.adminId, adminRow.id), isNull(passwordResets.usedAt)));
 
-			const buf = new Uint8Array(32);
-			globalThis.crypto.getRandomValues(buf);
-			const rawToken = Array.from(buf, (b) =>
-				b.toString(16).padStart(2, "0"),
-			).join("");
-			const hashBuf = await crypto.subtle.digest(
-				"SHA-256",
-				new TextEncoder().encode(rawToken),
-			);
-			const tokenHash = Array.from(new Uint8Array(hashBuf), (b) =>
-				b.toString(16).padStart(2, "0"),
-			).join("");
+      const buf = new Uint8Array(32);
+      globalThis.crypto.getRandomValues(buf);
+      const rawToken = Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+      const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawToken));
+      const tokenHash = Array.from(new Uint8Array(hashBuf), (b) =>
+        b.toString(16).padStart(2, "0"),
+      ).join("");
 
-			await opts.db.insert(passwordResets).values({
-				adminId: adminRow.id,
-				tokenHash,
-				expiresAt,
-				createdAt: nowEpoch,
-			});
+      await opts.db.insert(passwordResets).values({
+        adminId: adminRow.id,
+        tokenHash,
+        expiresAt,
+        createdAt: nowEpoch,
+      });
 
-			const resetUrl = `${opts.appUrl ?? "https://app.leadengine.app"}/reset-password?token=${rawToken}`;
-			if (opts.mailer) {
-				opts.mailer
-					.send({
-						to: email,
-						subject: "Сброс пароля — lead-engine",
-						html: forgotPasswordEmailHtml({ email, resetUrl }),
-					})
-					.catch((e) =>
-						console.warn("[mailer] forgot-password send failed:", e),
-					);
-			}
-		}
+      const resetUrl = `${opts.appUrl ?? "https://app.leadengine.app"}/reset-password?token=${rawToken}`;
+      if (opts.mailer) {
+        opts.mailer
+          .send({
+            to: email,
+            subject: "Сброс пароля — lead-engine",
+            html: forgotPasswordEmailHtml({ email, resetUrl }),
+          })
+          .catch((e) => console.warn("[mailer] forgot-password send failed:", e));
+      }
+    }
 
-		return c.json({ ok: true });
-	});
+    return c.json({ ok: true });
+  });
 
-	/**
-	 * POST /api/auth/reset-password
-	 * Body: { token, password }
-	 * Returns: { ok: true } | 400 | 401
-	 *
-	 * Проверяет токен: не просрочен, не использован. Обновляет passwordHash,
-	 * помечает токен usedAt=now.
-	 */
-	app.post("/api/auth/reset-password", async (c) => {
-		const limited = rateLimit(c, "reset-password");
-		if (limited) return limited;
-		let body: { token?: unknown; password?: unknown };
-		try {
-			body = (await c.req.json()) as typeof body;
-		} catch {
-			return c.json({ error: "invalid json" }, 400);
-		}
-		const token = typeof body.token === "string" ? body.token.trim() : "";
-		const password = typeof body.password === "string" ? body.password : "";
-		if (!token) return c.json({ error: "token required" }, 400);
-		if (!password || password.length < 8) {
-			return c.json({ error: "password must be at least 8 characters" }, 400);
-		}
+  /**
+   * POST /api/auth/reset-password
+   * Body: { token, password }
+   * Returns: { ok: true } | 400 | 401
+   *
+   * Проверяет токен: не просрочен, не использован. Обновляет passwordHash,
+   * помечает токен usedAt=now.
+   */
+  app.post("/api/auth/reset-password", async (c) => {
+    const limited = rateLimit(c, "reset-password");
+    if (limited) return limited;
+    let body: { token?: unknown; password?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!token) return c.json({ error: "token required" }, 400);
+    if (!password || password.length < 8) {
+      return c.json({ error: "password must be at least 8 characters" }, 400);
+    }
 
-		const nowEpoch = Math.floor(Date.now() / 1000);
-		const hashBuf = await crypto.subtle.digest(
-			"SHA-256",
-			new TextEncoder().encode(token),
-		);
-		const tokenHash = Array.from(new Uint8Array(hashBuf), (b) =>
-			b.toString(16).padStart(2, "0"),
-		).join("");
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const tokenHash = Array.from(new Uint8Array(hashBuf), (b) =>
+      b.toString(16).padStart(2, "0"),
+    ).join("");
 
-		const newHash = await hashPassword(password);
-		const ok = await opts.db.transaction(async (tx) => {
-			const [claimed] = await tx
-				.update(passwordResets)
-				.set({ usedAt: nowEpoch })
-				.where(
-					and(
-						eq(passwordResets.tokenHash, tokenHash),
-						isNull(passwordResets.usedAt),
-						sql`${passwordResets.expiresAt} >= ${nowEpoch}`,
-					),
-				)
-				.returning({ adminId: passwordResets.adminId });
-			if (!claimed) return false;
-			await tx
-				.update(admins)
-				.set({ passwordHash: newHash })
-				.where(eq(admins.id, claimed.adminId));
-			return true;
-		});
+    const newHash = await hashPassword(password);
+    const ok = await opts.db.transaction(async (tx) => {
+      const [claimed] = await tx
+        .update(passwordResets)
+        .set({ usedAt: nowEpoch })
+        .where(
+          and(
+            eq(passwordResets.tokenHash, tokenHash),
+            isNull(passwordResets.usedAt),
+            sql`${passwordResets.expiresAt} >= ${nowEpoch}`,
+          ),
+        )
+        .returning({ adminId: passwordResets.adminId });
+      if (!claimed) return false;
+      await tx.update(admins).set({ passwordHash: newHash }).where(eq(admins.id, claimed.adminId));
+      return true;
+    });
 
-		if (!ok) return c.json({ error: "invalid or expired token" }, 401);
-		return c.json({ ok: true });
-	});
+    if (!ok) return c.json({ error: "invalid or expired token" }, 401);
+    return c.json({ ok: true });
+  });
 
-	/**
-	 * POST /api/auth/logout
-	 * Stateless server side — client drops token. Endpoint существует только
-	 * для symmetric API + чтобы clients могли централизованно вызвать flow.
-	 * Future: добавить server-side token revocation list если потребуется.
-	 */
-	app.post("/api/auth/logout", (c) => {
-		return c.json({ ok: true });
-	});
+  /**
+   * POST /api/auth/logout
+   * Stateless server side — client drops token. Endpoint существует только
+   * для symmetric API + чтобы clients могли централизованно вызвать flow.
+   * Future: добавить server-side token revocation list если потребуется.
+   */
+  app.post("/api/auth/logout", (c) => {
+    return c.json({ ok: true });
+  });
 
-	/**
-	 * GET /api/auth/me
-	 * Verify token from Authorization header → return admin info.
-	 * Если token невалидный/missing → 401. Используется admin-UI на boot
-	 * чтобы понять — залогинен или нет.
-	 */
-	app.get("/api/auth/me", async (c) => {
-		const header = c.req.header("Authorization") ?? "";
-		const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-		if (!token)
-			return c.json({ error: "missing Authorization Bearer token" }, 401);
-		let claims: ReturnType<typeof verifyAuthToken>;
-		try {
-			claims = verifyAuthToken(token, opts.secret);
-		} catch (err) {
-			if (err instanceof AuthTokenError)
-				return c.json({ error: err.reason }, 401);
-			return c.json({ error: "auth failed" }, 401);
-		}
-		const [adminRow] = await opts.db
-			.select()
-			.from(admins)
-			.where(
-				and(
-					eq(admins.id, claims.adminId),
-					eq(admins.tenantId, claims.tenantId),
-				),
-			);
-		if (!adminRow) return c.json({ error: "admin not found" }, 401);
-		const [tenantRow] = await opts.db
-			.select({ slug: tenants.slug, plan: tenants.plan })
-			.from(tenants)
-			.where(eq(tenants.id, claims.tenantId));
-		return c.json({
-			admin: {
-				id: adminRow.id,
-				email: adminRow.email,
-				name: adminRow.name ?? null,
-				role: adminRow.role,
-				tenantId: adminRow.tenantId,
-			},
-			tenant: tenantRow
-				? { id: claims.tenantId, slug: tenantRow.slug, plan: tenantRow.plan }
-				: null,
-		});
-	});
+  /**
+   * GET /api/auth/me
+   * Verify token from Authorization header → return admin info.
+   * Если token невалидный/missing → 401. Используется admin-UI на boot
+   * чтобы понять — залогинен или нет.
+   */
+  app.get("/api/auth/me", async (c) => {
+    const header = c.req.header("Authorization") ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (!token) return c.json({ error: "missing Authorization Bearer token" }, 401);
+    let claims: ReturnType<typeof verifyAuthToken>;
+    try {
+      claims = verifyAuthToken(token, opts.secret);
+    } catch (err) {
+      if (err instanceof AuthTokenError) return c.json({ error: err.reason }, 401);
+      return c.json({ error: "auth failed" }, 401);
+    }
+    const [adminRow] = await opts.db
+      .select()
+      .from(admins)
+      .where(and(eq(admins.id, claims.adminId), eq(admins.tenantId, claims.tenantId)));
+    if (!adminRow) return c.json({ error: "admin not found" }, 401);
+    const [tenantRow] = await opts.db
+      .select({ slug: tenants.slug, plan: tenants.plan })
+      .from(tenants)
+      .where(eq(tenants.id, claims.tenantId));
+    return c.json({
+      admin: {
+        id: adminRow.id,
+        email: adminRow.email,
+        name: adminRow.name ?? null,
+        role: adminRow.role,
+        tenantId: adminRow.tenantId,
+      },
+      tenant: tenantRow
+        ? { id: claims.tenantId, slug: tenantRow.slug, plan: tenantRow.plan }
+        : null,
+    });
+  });
 
-	/**
-	 * PATCH /api/auth/me — обновить профиль текущего admin'а (пока — display name).
-	 * Self-verifies token (как GET /me). Body: { name }.
-	 */
-	app.patch("/api/auth/me", async (c) => {
-		const header = c.req.header("Authorization") ?? "";
-		const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-		if (!token)
-			return c.json({ error: "missing Authorization Bearer token" }, 401);
-		let claims: ReturnType<typeof verifyAuthToken>;
-		try {
-			claims = verifyAuthToken(token, opts.secret);
-		} catch (err) {
-			if (err instanceof AuthTokenError)
-				return c.json({ error: err.reason }, 401);
-			return c.json({ error: "auth failed" }, 401);
-		}
-		let body: { name?: unknown };
-		try {
-			body = (await c.req.json()) as { name?: unknown };
-		} catch {
-			return c.json({ error: "invalid json" }, 400);
-		}
-		const name = typeof body.name === "string" ? body.name.trim() : "";
-		if (name.length > 100)
-			return c.json({ error: "name too long (max 100)" }, 400);
-		const [updated] = await opts.db
-			.update(admins)
-			.set({ name: name || null })
-			.where(
-				and(
-					eq(admins.id, claims.adminId),
-					eq(admins.tenantId, claims.tenantId),
-				),
-			)
-			.returning({
-				id: admins.id,
-				email: admins.email,
-				name: admins.name,
-				role: admins.role,
-			});
-		if (!updated) return c.json({ error: "admin not found" }, 404);
-		return c.json({
-			ok: true,
-			admin: { ...updated, tenantId: claims.tenantId },
-		});
-	});
+  /**
+   * PATCH /api/auth/me — обновить профиль текущего admin'а (пока — display name).
+   * Self-verifies token (как GET /me). Body: { name }.
+   */
+  app.patch("/api/auth/me", async (c) => {
+    const header = c.req.header("Authorization") ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (!token) return c.json({ error: "missing Authorization Bearer token" }, 401);
+    let claims: ReturnType<typeof verifyAuthToken>;
+    try {
+      claims = verifyAuthToken(token, opts.secret);
+    } catch (err) {
+      if (err instanceof AuthTokenError) return c.json({ error: err.reason }, 401);
+      return c.json({ error: "auth failed" }, 401);
+    }
+    let body: { name?: unknown };
+    try {
+      body = (await c.req.json()) as { name?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (name.length > 100) return c.json({ error: "name too long (max 100)" }, 400);
+    const [updated] = await opts.db
+      .update(admins)
+      .set({ name: name || null })
+      .where(and(eq(admins.id, claims.adminId), eq(admins.tenantId, claims.tenantId)))
+      .returning({
+        id: admins.id,
+        email: admins.email,
+        name: admins.name,
+        role: admins.role,
+      });
+    if (!updated) return c.json({ error: "admin not found" }, 404);
+    return c.json({
+      ok: true,
+      admin: { ...updated, tenantId: claims.tenantId },
+    });
+  });
 
-	return app;
+  return app;
 }

@@ -36,9 +36,7 @@ describe("metrics-sink", () => {
     });
     const exposed = metrics.registry.format();
     expect(exposed).toContain('lead_engine_inbound_persisted_total{role="user",tenant="7"} 1');
-    expect(exposed).toContain(
-      'lead_engine_inbound_persisted_total{role="assistant",tenant="7"} 1',
-    );
+    expect(exposed).toContain('lead_engine_inbound_persisted_total{role="assistant",tenant="7"} 1');
   });
 
   it("outbound-enqueued → outboundEnqueued counter", () => {

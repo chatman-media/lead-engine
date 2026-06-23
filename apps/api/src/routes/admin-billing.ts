@@ -11,7 +11,12 @@ import { and, count, eq, gte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { allPlans, type PlanKind, resolvePlan } from "../lib/plans.ts";
-import { StripeApi, StripeApiError, type StripeInvoice, type StripeFetchLike } from "../lib/stripe-api.ts";
+import {
+  StripeApi,
+  StripeApiError,
+  type StripeInvoice,
+  type StripeFetchLike,
+} from "../lib/stripe-api.ts";
 
 /**
  * Per-tenant billing & plan endpoints (M1a — без Stripe).
@@ -278,10 +283,7 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
         })
         .from(llmUsageEvents)
         .where(
-          and(
-            eq(llmUsageEvents.tenantId, tenantId),
-            gte(llmUsageEvents.createdAt, sinceEpoch),
-          ),
+          and(eq(llmUsageEvents.tenantId, tenantId), gte(llmUsageEvents.createdAt, sinceEpoch)),
         );
 
       const byPurposeRows = await tx
@@ -295,10 +297,7 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
         })
         .from(llmUsageEvents)
         .where(
-          and(
-            eq(llmUsageEvents.tenantId, tenantId),
-            gte(llmUsageEvents.createdAt, sinceEpoch),
-          ),
+          and(eq(llmUsageEvents.tenantId, tenantId), gte(llmUsageEvents.createdAt, sinceEpoch)),
         )
         .groupBy(llmUsageEvents.purpose);
 
@@ -309,10 +308,7 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
         })
         .from(llmUsageEvents)
         .where(
-          and(
-            eq(llmUsageEvents.tenantId, tenantId),
-            gte(llmUsageEvents.createdAt, sinceEpoch),
-          ),
+          and(eq(llmUsageEvents.tenantId, tenantId), gte(llmUsageEvents.createdAt, sinceEpoch)),
         )
         .groupBy(llmUsageEvents.provider);
 
@@ -416,10 +412,7 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
       .from(stripeCustomers)
       .where(eq(stripeCustomers.tenantId, tenantId));
     if (!cust) {
-      return c.json(
-        { error: "no_stripe_customer", hint: "Start with /checkout first" },
-        404,
-      );
+      return c.json({ error: "no_stripe_customer", hint: "Start with /checkout first" }, 404);
     }
 
     const returnUrl =

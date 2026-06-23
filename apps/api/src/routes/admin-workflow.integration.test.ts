@@ -31,7 +31,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_workflow_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-workflow-flow-12345";
 
 let sql: Sql | null = null;
@@ -52,39 +61,36 @@ const fakeClient = {
   },
 } as unknown as ChatClient;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminWorkflowRoutes({ db, resolveChat: () => fakeClient }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminWorkflowRoutes({ db, resolveChat: () => fakeClient }));
 
-    // Второй app без resolveChat — для 503.
-    appNoLlm = new Hono();
-    appNoLlm.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    appNoLlm.route("/", makeAdminWorkflowRoutes({ db }));
+  // Второй app без resolveChat — для 503.
+  appNoLlm = new Hono();
+  appNoLlm.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  appNoLlm.route("/", makeAdminWorkflowRoutes({ db }));
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "workflow@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    token = sba.token;
-    tenantId = sba.admin.tenantId;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "workflow@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  token = sba.token;
+  tenantId = sba.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -93,7 +99,12 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function post(appInstance: Hono, path: string, payload: unknown, withAuth = true): Promise<Response> {
+async function post(
+  appInstance: Hono,
+  path: string,
+  payload: unknown,
+  withAuth = true,
+): Promise<Response> {
   return await appInstance.request(path, {
     method: "POST",
     headers: {
@@ -110,24 +121,146 @@ const MSGS = [{ role: "user", content: "у меня обменник крипт�
 
 /** Валидная воронка по костяку: intake → qualify → offer → won/lost. */
 const VALID_STAGES = [
-  { slug: "intake", displayName: "Заявка", kind: "intake", stageType: "form_fill", nextStages: ["qualify"], fields: [{ slug: "name", displayName: "Имя", fieldType: "text", required: true, aiExtractable: true }] },
-  { slug: "qualify", displayName: "Квалификация", kind: "active", stageType: "form_fill", phase: "qualify", goal: "понять сумму и валюту", guidance: "задай 1-2 вопроса", nextStages: ["offer"], fields: [] },
-  { slug: "offer", displayName: "Оффер", kind: "active", stageType: "rate_confirmation", phase: "offer", nextStages: ["won", "lost"], fields: [] },
-  { slug: "won", displayName: "Успех", kind: "terminal_won", stageType: "milestone", nextStages: [], fields: [] },
-  { slug: "lost", displayName: "Отказ", kind: "terminal_lost", stageType: "milestone", nextStages: [], fields: [] },
+  {
+    slug: "intake",
+    displayName: "Заявка",
+    kind: "intake",
+    stageType: "form_fill",
+    nextStages: ["qualify"],
+    fields: [
+      { slug: "name", displayName: "Имя", fieldType: "text", required: true, aiExtractable: true },
+    ],
+  },
+  {
+    slug: "qualify",
+    displayName: "Квалификация",
+    kind: "active",
+    stageType: "form_fill",
+    phase: "qualify",
+    goal: "понять сумму и валюту",
+    guidance: "задай 1-2 вопроса",
+    nextStages: ["offer"],
+    fields: [],
+  },
+  {
+    slug: "offer",
+    displayName: "Оффер",
+    kind: "active",
+    stageType: "rate_confirmation",
+    phase: "offer",
+    nextStages: ["won", "lost"],
+    fields: [],
+  },
+  {
+    slug: "won",
+    displayName: "Успех",
+    kind: "terminal_won",
+    stageType: "milestone",
+    nextStages: [],
+    fields: [],
+  },
+  {
+    slug: "lost",
+    displayName: "Отказ",
+    kind: "terminal_lost",
+    stageType: "milestone",
+    nextStages: [],
+    fields: [],
+  },
 ];
 
 /** Ветвящаяся (мульти-запрос) воронка: intake(request_type) → 2 ветки → общие won/lost. */
 const MULTI_STAGES = [
-  { slug: "request_received", displayName: "Заявка", kind: "intake", stageType: "form_fill", nextStages: ["exchange_request", "transfer_request", "cancelled"], fields: [{ slug: "request_type", displayName: "Тип запроса", fieldType: "select", required: true, aiExtractable: true, options: [{ value: "exchange", label: "Обмен" }, { value: "transfer", label: "Трансфер" }] }] },
-  { slug: "exchange_request", displayName: "Обмен: детали", kind: "active", stageType: "form_fill", phase: "qualify", nextStages: ["exchange_offer"], fields: [] },
-  { slug: "transfer_request", displayName: "Трансфер: детали", kind: "active", stageType: "form_fill", phase: "qualify", nextStages: ["transfer_offer"], fields: [] },
-  { slug: "exchange_offer", displayName: "Обмен: оффер", kind: "active", stageType: "rate_confirmation", phase: "offer", nextStages: ["exchange_fulfill"], fields: [] },
-  { slug: "transfer_offer", displayName: "Трансфер: оффер", kind: "active", stageType: "rate_confirmation", phase: "offer", nextStages: ["transfer_fulfill"], fields: [] },
-  { slug: "exchange_fulfill", displayName: "Обмен: выдача", kind: "active", stageType: "milestone", phase: "fulfill", nextStages: ["completed", "cancelled"], fields: [] },
-  { slug: "transfer_fulfill", displayName: "Трансфер: подача", kind: "active", stageType: "milestone", phase: "fulfill", nextStages: ["completed", "cancelled"], fields: [] },
-  { slug: "completed", displayName: "Выполнено", kind: "terminal_won", stageType: "milestone", nextStages: [], fields: [] },
-  { slug: "cancelled", displayName: "Отменено", kind: "terminal_lost", stageType: "milestone", nextStages: [], fields: [] },
+  {
+    slug: "request_received",
+    displayName: "Заявка",
+    kind: "intake",
+    stageType: "form_fill",
+    nextStages: ["exchange_request", "transfer_request", "cancelled"],
+    fields: [
+      {
+        slug: "request_type",
+        displayName: "Тип запроса",
+        fieldType: "select",
+        required: true,
+        aiExtractable: true,
+        options: [
+          { value: "exchange", label: "Обмен" },
+          { value: "transfer", label: "Трансфер" },
+        ],
+      },
+    ],
+  },
+  {
+    slug: "exchange_request",
+    displayName: "Обмен: детали",
+    kind: "active",
+    stageType: "form_fill",
+    phase: "qualify",
+    nextStages: ["exchange_offer"],
+    fields: [],
+  },
+  {
+    slug: "transfer_request",
+    displayName: "Трансфер: детали",
+    kind: "active",
+    stageType: "form_fill",
+    phase: "qualify",
+    nextStages: ["transfer_offer"],
+    fields: [],
+  },
+  {
+    slug: "exchange_offer",
+    displayName: "Обмен: оффер",
+    kind: "active",
+    stageType: "rate_confirmation",
+    phase: "offer",
+    nextStages: ["exchange_fulfill"],
+    fields: [],
+  },
+  {
+    slug: "transfer_offer",
+    displayName: "Трансфер: оффер",
+    kind: "active",
+    stageType: "rate_confirmation",
+    phase: "offer",
+    nextStages: ["transfer_fulfill"],
+    fields: [],
+  },
+  {
+    slug: "exchange_fulfill",
+    displayName: "Обмен: выдача",
+    kind: "active",
+    stageType: "milestone",
+    phase: "fulfill",
+    nextStages: ["completed", "cancelled"],
+    fields: [],
+  },
+  {
+    slug: "transfer_fulfill",
+    displayName: "Трансфер: подача",
+    kind: "active",
+    stageType: "milestone",
+    phase: "fulfill",
+    nextStages: ["completed", "cancelled"],
+    fields: [],
+  },
+  {
+    slug: "completed",
+    displayName: "Выполнено",
+    kind: "terminal_won",
+    stageType: "milestone",
+    nextStages: [],
+    fields: [],
+  },
+  {
+    slug: "cancelled",
+    displayName: "Отменено",
+    kind: "terminal_lost",
+    stageType: "milestone",
+    nextStages: [],
+    fields: [],
+  },
 ];
 
 describe("admin-workflow /ai-chat", () => {
@@ -171,12 +304,21 @@ describe("admin-workflow /ai-chat", () => {
 
   it("readyToGenerate:true → нормализованные stages + preview + backbone", async () => {
     if (!sql) return;
-    nextRaw = JSON.stringify({ reply: "Готова воронка", readyToGenerate: true, stages: VALID_STAGES });
+    nextRaw = JSON.stringify({
+      reply: "Готова воронка",
+      readyToGenerate: true,
+      stages: VALID_STAGES,
+    });
     const res = await post(app, AICHAT, { messages: MSGS });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       readyToGenerate: boolean;
-      stages: Array<{ slug: string; position: number; autoAdvanceCondition?: string; configJson?: string }>;
+      stages: Array<{
+        slug: string;
+        position: number;
+        autoAdvanceCondition?: string;
+        configJson?: string;
+      }>;
       preview: Array<{ kind: string }>;
       backbone: { errors: string[]; warnings: string[] };
     };
@@ -247,8 +389,23 @@ describe("admin-workflow /apply", () => {
     if (!sql) return;
     const res = await post(app, APPLY, {
       stages: [
-        { slug: "intake", displayName: "Заявка", kind: "intake", stageType: "form_fill", nextStages: [], fields: [] },
-        { slug: "qualify", displayName: "Квал", kind: "active", stageType: "form_fill", phase: "qualify", nextStages: [], fields: [] },
+        {
+          slug: "intake",
+          displayName: "Заявка",
+          kind: "intake",
+          stageType: "form_fill",
+          nextStages: [],
+          fields: [],
+        },
+        {
+          slug: "qualify",
+          displayName: "Квал",
+          kind: "active",
+          stageType: "form_fill",
+          phase: "qualify",
+          nextStages: [],
+          fields: [],
+        },
       ],
     });
     expect(res.status).toBe(400);
@@ -314,14 +471,22 @@ describe("admin-workflow /apply", () => {
     const snapshot = JSON.parse(versions[0]?.snapshotJson ?? "{}") as {
       stages: Array<{ slug: string; displayName: string }>;
     };
-    expect(snapshot.stages.find((stage) => stage.slug === "qualify")?.displayName).toBe("Квалификация");
+    expect(snapshot.stages.find((stage) => stage.slug === "qualify")?.displayName).toBe(
+      "Квалификация",
+    );
   });
 
   it("валидная, но слабая behavior-конфигурация → ok + warnings", async () => {
     if (!sql) return;
     const weak = VALID_STAGES.map((stage) =>
       stage.slug === "qualify"
-        ? { ...stage, goal: undefined, guidance: undefined, fields: [], autoAdvanceCondition: undefined }
+        ? {
+            ...stage,
+            goal: undefined,
+            guidance: undefined,
+            fields: [],
+            autoAdvanceCondition: undefined,
+          }
         : stage,
     );
     const res = await post(app, APPLY, { stages: weak });
@@ -330,7 +495,9 @@ describe("admin-workflow /apply", () => {
     expect(body.ok).toBe(true);
     expect(body.warnings.some((w) => w.includes('"qualify"') && w.includes("goal"))).toBe(true);
     expect(body.warnings.some((w) => w.includes('"qualify"') && w.includes("guidance"))).toBe(true);
-    expect(body.warnings.some((w) => w.includes('"qualify"') && w.includes("transition/exit rule"))).toBe(true);
+    expect(
+      body.warnings.some((w) => w.includes('"qualify"') && w.includes("transition/exit rule")),
+    ).toBe(true);
   });
 });
 
@@ -345,7 +512,9 @@ describe("admin-workflow /apply мульти-запрос (R3)", () => {
     const [intake] = await db
       .select({ id: stageDefinitions.id, configJson: stageDefinitions.configJson })
       .from(stageDefinitions)
-      .where(and(eq(stageDefinitions.tenantId, tenantId), eq(stageDefinitions.slug, "request_received")));
+      .where(
+        and(eq(stageDefinitions.tenantId, tenantId), eq(stageDefinitions.slug, "request_received")),
+      );
     const fields = await db
       .select({ slug: stageFields.slug, optionsJson: stageFields.optionsJson })
       .from(stageFields)
@@ -368,7 +537,20 @@ describe("admin-workflow /apply мульти-запрос (R3)", () => {
       s.slug === "request_received"
         ? {
             ...s,
-            fields: [{ slug: "request_type", displayName: "Тип запроса", fieldType: "select", required: true, aiExtractable: true, options: [{ value: "exchange", label: "Обмен" }, { value: "transfer", label: "Трансфер" }, { value: "food", label: "Еда" }] }],
+            fields: [
+              {
+                slug: "request_type",
+                displayName: "Тип запроса",
+                fieldType: "select",
+                required: true,
+                aiExtractable: true,
+                options: [
+                  { value: "exchange", label: "Обмен" },
+                  { value: "transfer", label: "Трансфер" },
+                  { value: "food", label: "Еда" },
+                ],
+              },
+            ],
           }
         : s,
     );

@@ -105,7 +105,8 @@ describe("admin partners ledger", () => {
       }),
     });
     expect(dealRes.status).toBe(201);
-    const deal = ((await dealRes.json()) as { item: { id: number; commissionAmount: number } }).item;
+    const deal = ((await dealRes.json()) as { item: { id: number; commissionAmount: number } })
+      .item;
     expect(deal.commissionAmount).toBe(15_000);
 
     const closeRes = await authReq(`/api/admin/partner-deals/${deal.id}`, {
@@ -114,16 +115,25 @@ describe("admin partners ledger", () => {
       body: JSON.stringify({ status: "completed", grossAmount: 120_000, commissionPct: 10 }),
     });
     expect(closeRes.status).toBe(200);
-    const closed = ((await closeRes.json()) as {
-      item: { status: string; grossAmount: number; commissionAmount: number; completedAt: number | null };
-    }).item;
+    const closed = (
+      (await closeRes.json()) as {
+        item: {
+          status: string;
+          grossAmount: number;
+          commissionAmount: number;
+          completedAt: number | null;
+        };
+      }
+    ).item;
     expect(closed.status).toBe("completed");
     expect(closed.grossAmount).toBe(120_000);
     expect(closed.commissionAmount).toBe(12_000);
     expect(closed.completedAt).toBeTruthy();
 
     const listRes = await authReq("/api/admin/partners");
-    const list = (await listRes.json()) as { items: Array<{ dealsCount: number; commissionTotal: number }> };
+    const list = (await listRes.json()) as {
+      items: Array<{ dealsCount: number; commissionTotal: number }>;
+    };
     expect(list.items[0]?.dealsCount).toBe(1);
     expect(list.items[0]?.commissionTotal).toBe(12_000);
   });

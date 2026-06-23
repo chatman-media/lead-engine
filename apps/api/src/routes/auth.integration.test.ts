@@ -19,7 +19,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_auth_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-auth-secret-very-long-string";
 
 let sql: Sql | null = null;
@@ -29,26 +38,33 @@ let app: Hono;
 /** Mock mailer: captures sent emails in-memory instead of calling Resend. */
 const sentEmails: SendOpts[] = [];
 const mockMailer = {
-  send: async (opts: SendOpts) => { sentEmails.push(opts); },
+  send: async (opts: SendOpts) => {
+    sentEmails.push(opts);
+  },
 } as unknown as Mailer;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET, mailer: mockMailer, appUrl: "https://app.test" }));
-  },
-  30_000,
-);
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route(
+    "/",
+    makeAuthRoutes({
+      db: db as any,
+      secret: SECRET,
+      mailer: mockMailer,
+      appUrl: "https://app.test",
+    }),
+  );
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {

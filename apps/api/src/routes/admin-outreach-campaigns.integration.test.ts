@@ -31,7 +31,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_camp_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-camp-12345";
 
 let sql: Sql | null = null;
@@ -82,7 +91,11 @@ async function makeLead(opts: {
 async function authReq(path: string, init: RequestInit = {}): Promise<Response> {
   return app.request(path, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init.headers ?? {}), Authorization: `Bearer ${token}` },
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+    },
   });
 }
 
@@ -115,7 +128,14 @@ beforeAll(async () => {
   botChannelId = await withTenant(db, tenantId, async (tx) => {
     const [ch] = await tx
       .insert(channels)
-      .values({ tenantId, kind: "telegram_bot", externalId: "@campbot", status: "active", createdAt: now, updatedAt: now })
+      .values({
+        tenantId,
+        kind: "telegram_bot",
+        externalId: "@campbot",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
       .returning({ id: channels.id });
     return ch!.id;
   });
@@ -131,7 +151,9 @@ afterAll(async () => {
 describe("outreach campaigns + drip", () => {
   it("validates required fields", async () => {
     if (!sql) return;
-    expect((await authReq("/api/admin/outreach-campaigns", { method: "POST", body: "{}" })).status).toBe(400);
+    expect(
+      (await authReq("/api/admin/outreach-campaigns", { method: "POST", body: "{}" })).status,
+    ).toBe(400);
     const noGreet = await authReq("/api/admin/outreach-campaigns", {
       method: "POST",
       body: JSON.stringify({ name: "X" }),
@@ -146,7 +168,11 @@ describe("outreach campaigns + drip", () => {
     // cold: telegram-бот, но контакт не писал первым — skipped.
     const coldLead = await makeLead({ name: "Пётр", withIdentity: true, withConversation: false });
     // no-channel: нет identity вовсе — skipped.
-    const noChanLead = await makeLead({ name: "Без канала", withIdentity: false, withConversation: false });
+    const noChanLead = await makeLead({
+      name: "Без канала",
+      withIdentity: false,
+      withConversation: false,
+    });
 
     const created = await authReq("/api/admin/outreach-campaigns", {
       method: "POST",

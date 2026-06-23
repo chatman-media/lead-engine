@@ -48,26 +48,23 @@ const ENV_CFG = {
   masterKeyHex: MASTER_KEY,
 } as unknown as ApiConfig;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    // Create one tenant.
-    const [t] = await db
-      .insert(tenants)
-      .values({ slug: "tenant-reload-a", plan: "free", status: "active" })
-      .returning({ id: tenants.id });
-    tenantA = t!.id;
-  },
-  30_000,
-);
+  // Create one tenant.
+  const [t] = await db
+    .insert(tenants)
+    .values({ slug: "tenant-reload-a", plan: "free", status: "active" })
+    .returning({ id: tenants.id });
+  tenantA = t!.id;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -200,12 +197,7 @@ describe("tenant-reloader.reloadLlm", () => {
     // DELETE via DB direct.
     await db
       .delete(llmProviderConfigs)
-      .where(
-        and(
-          eq(llmProviderConfigs.tenantId, tenantA),
-          eq(llmProviderConfigs.purpose, "chat"),
-        ),
-      );
+      .where(and(eq(llmProviderConfigs.tenantId, tenantA), eq(llmProviderConfigs.purpose, "chat")));
 
     await reloader.reloadLlm(tenantA);
     // Snapshot теперь не имеет chat для tenantA.
@@ -287,9 +279,7 @@ describe("tenant-reloader.reloadChannels", () => {
 
     expect(registry.getTelegramBotsByTenant("tenant-reload-a")).toHaveLength(1);
 
-    await db
-      .delete(channels)
-      .where(eq(channels.tenantId, tenantA));
+    await db.delete(channels).where(eq(channels.tenantId, tenantA));
 
     await reloader.reloadChannels(tenantA);
     expect(registry.getTelegramBotsByTenant("tenant-reload-a")).toHaveLength(0);

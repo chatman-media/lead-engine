@@ -8,15 +8,8 @@ import {
 import { eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
-import {
-  type Mailer,
-  paymentFailedEmailHtml,
-  trialEndingEmailHtml,
-} from "../lib/mailer.ts";
-import {
-  StripeSignatureError,
-  verifyStripeSignature,
-} from "../lib/stripe-signature.ts";
+import { type Mailer, paymentFailedEmailHtml, trialEndingEmailHtml } from "../lib/mailer.ts";
+import { StripeSignatureError, verifyStripeSignature } from "../lib/stripe-signature.ts";
 
 /**
  * Минимальный набор Stripe event types которые мы actually обрабатываем.
@@ -116,7 +109,13 @@ export function makeStripeWebhookRoutes(opts: {
 
     let tenantId: number | null = null;
     try {
-      tenantId = await applyEvent(opts.db, event, priceMap, opts.mailer, opts.appUrl ?? "https://app.leadengine.app");
+      tenantId = await applyEvent(
+        opts.db,
+        event,
+        priceMap,
+        opts.mailer,
+        opts.appUrl ?? "https://app.leadengine.app",
+      );
     } catch (err) {
       console.warn(`[stripe webhook] event ${event.id} (${event.type}) failed:`, err);
       // Не записываем в processed — Stripe ретриит, и при retry'е попытаемся
@@ -179,17 +178,19 @@ async function applyEvent(
         : 3;
       const info = await getTenantEmailInfo(db, tenantId);
       if (info) {
-        await mailer.send({
-          to: info.email,
-          subject: `Ваш триал lead-engine заканчивается через ${daysLeft} ${daysLeft === 1 ? "день" : "дня"}`,
-          html: trialEndingEmailHtml({
-            email: info.email,
-            slug: info.slug,
-            daysLeft,
-            appUrl: appUrl ?? "https://app.leadengine.app",
-            billingUrl: `${appUrl ?? "https://app.leadengine.app"}/billing`,
-          }),
-        }).catch((e) => console.warn("[mailer] trial_will_end send failed:", e));
+        await mailer
+          .send({
+            to: info.email,
+            subject: `Ваш триал lead-engine заканчивается через ${daysLeft} ${daysLeft === 1 ? "день" : "дня"}`,
+            html: trialEndingEmailHtml({
+              email: info.email,
+              slug: info.slug,
+              daysLeft,
+              appUrl: appUrl ?? "https://app.leadengine.app",
+              billingUrl: `${appUrl ?? "https://app.leadengine.app"}/billing`,
+            }),
+          })
+          .catch((e) => console.warn("[mailer] trial_will_end send failed:", e));
       }
     }
 
@@ -208,16 +209,18 @@ async function applyEvent(
       if (cust?.tenantId) {
         const info = await getTenantEmailInfo(db, cust.tenantId);
         if (info) {
-          await mailer.send({
-            to: info.email,
-            subject: "Не удалось списать оплату lead-engine",
-            html: paymentFailedEmailHtml({
-              email: info.email,
-              slug: info.slug,
-              appUrl: appUrl ?? "https://app.leadengine.app",
-              billingUrl: `${appUrl ?? "https://app.leadengine.app"}/billing`,
-            }),
-          }).catch((e) => console.warn("[mailer] payment_failed send failed:", e));
+          await mailer
+            .send({
+              to: info.email,
+              subject: "Не удалось списать оплату lead-engine",
+              html: paymentFailedEmailHtml({
+                email: info.email,
+                slug: info.slug,
+                appUrl: appUrl ?? "https://app.leadengine.app",
+                billingUrl: `${appUrl ?? "https://app.leadengine.app"}/billing`,
+              }),
+            })
+            .catch((e) => console.warn("[mailer] payment_failed send failed:", e));
           return cust.tenantId;
         }
       }
@@ -257,11 +260,17 @@ async function applyCustomer(
     : null;
   let tenantId: number | null = null;
   if (metaTenantSlug) {
-    const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, metaTenantSlug));
+    const [t] = await db
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.slug, metaTenantSlug));
     if (t) tenantId = t.id;
   }
   if (!tenantId && metaTenantId !== null && Number.isFinite(metaTenantId)) {
-    const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, metaTenantId));
+    const [t] = await db
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.id, metaTenantId));
     if (t) tenantId = t.id;
   }
   if (!tenantId) {

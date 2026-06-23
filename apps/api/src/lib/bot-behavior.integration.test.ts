@@ -31,7 +31,16 @@ import { autoCloseTick } from "./auto-close.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_botbeh_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-botbeh-12345";
 const TG_SECRET = "tg-botbeh-secret-xyz";
 
@@ -95,7 +104,9 @@ async function convFor(fromId: number) {
   const [conv] = await db
     .select({ id: conversations.id, mode: conversations.mode })
     .from(conversations)
-    .where(and(eq(conversations.userId, ident.contactId), eq(conversations.channelId, channelDbId)));
+    .where(
+      and(eq(conversations.userId, ident.contactId), eq(conversations.channelId, channelDbId)),
+    );
   return conv ?? null;
 }
 
@@ -160,7 +171,11 @@ beforeAll(async () => {
       .returning();
     return ch!.id;
   });
-  const adapter = new TelegramBotAdapter({ id: String(channelDbId), token: "TKN", fetch: globalThis.fetch });
+  const adapter = new TelegramBotAdapter({
+    id: String(channelDbId),
+    token: "TKN",
+    fetch: globalThis.fetch,
+  });
   entry = {
     tenantId,
     tenantSlug: "demo",
@@ -237,7 +252,10 @@ describe("bot behavior gates", () => {
     const conv = await convFor(8105);
     // Делаем диалог «протухшим»: last_message_at сутки назад.
     const dayAgo = Math.floor(Date.now() / 1000) - 24 * 3600;
-    await db.update(conversations).set({ lastMessageAt: dayAgo }).where(eq(conversations.id, conv!.id));
+    await db
+      .update(conversations)
+      .set({ lastMessageAt: dayAgo })
+      .where(eq(conversations.id, conv!.id));
 
     await autoCloseTick(db, {
       nowSec: Math.floor(Date.now() / 1000),

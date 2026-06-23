@@ -32,7 +32,10 @@ function monthBounds(): { start: number; end: number } {
   return { start: Math.floor(start), end: Math.floor(end) };
 }
 
-async function getOwnerEmail(db: Db, tenantId: number): Promise<{ email: string; slug: string } | null> {
+async function getOwnerEmail(
+  db: Db,
+  tenantId: number,
+): Promise<{ email: string; slug: string } | null> {
   const [row] = await db
     .select({ email: admins.email, slug: tenants.slug })
     .from(admins)
@@ -42,11 +45,7 @@ async function getOwnerEmail(db: Db, tenantId: number): Promise<{ email: string;
   return row ?? null;
 }
 
-export async function checkUsageAlerts(
-  db: Db,
-  mailer: Mailer,
-  appUrl: string,
-): Promise<void> {
+export async function checkUsageAlerts(db: Db, mailer: Mailer, appUrl: string): Promise<void> {
   const mk = monthKey();
   const { start, end } = monthBounds();
 
@@ -82,23 +81,28 @@ export async function checkUsageAlerts(
       if (!owner) continue;
 
       _sent.add(dedupKey);
-      mailer.send({
-        to: owner.email,
-        subject: threshold >= 1
-          ? "Квота LLM исчерпана — lead-engine"
-          : "Использовано 80% квоты LLM — lead-engine",
-        html: usageAlertEmailHtml({
-          email: owner.email,
-          slug: owner.slug,
-          current,
-          limit: limits.maxLlmCallsPerMonth,
-          pct: Math.round(pct * 100),
-          appUrl,
-          billingUrl: `${appUrl}/billing`,
-        }),
-      }).catch((e) => console.warn(`[usage-alerts] send failed tenant=${tenant.id}:`, e));
+      mailer
+        .send({
+          to: owner.email,
+          subject:
+            threshold >= 1
+              ? "Квота LLM исчерпана — lead-engine"
+              : "Использовано 80% квоты LLM — lead-engine",
+          html: usageAlertEmailHtml({
+            email: owner.email,
+            slug: owner.slug,
+            current,
+            limit: limits.maxLlmCallsPerMonth,
+            pct: Math.round(pct * 100),
+            appUrl,
+            billingUrl: `${appUrl}/billing`,
+          }),
+        })
+        .catch((e) => console.warn(`[usage-alerts] send failed tenant=${tenant.id}:`, e));
 
-      console.log(`[usage-alerts] alert sent tenant=${tenant.id} threshold=${threshold * 100}% usage=${current}/${limits.maxLlmCallsPerMonth}`);
+      console.log(
+        `[usage-alerts] alert sent tenant=${tenant.id} threshold=${threshold * 100}% usage=${current}/${limits.maxLlmCallsPerMonth}`,
+      );
     }
   }
 }

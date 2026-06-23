@@ -18,7 +18,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_ref_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-referral-flow-12345";
 
 let sql: Sql | null = null;
@@ -28,32 +37,29 @@ let token = "";
 
 const BASE = "/api/admin/referral-codes";
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminReferralRoutes({ db }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminReferralRoutes({ db }));
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "ref@demo.io", password: "strong-pwd-12345" }),
-    });
-    token = ((await sa.json()) as { token: string }).token;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "ref@demo.io", password: "strong-pwd-12345" }),
+  });
+  token = ((await sa.json()) as { token: string }).token;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -62,7 +68,12 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function req(method: string, path: string, body?: unknown, withAuth = true): Promise<Response> {
+async function req(
+  method: string,
+  path: string,
+  body?: unknown,
+  withAuth = true,
+): Promise<Response> {
   return app.request(path, {
     method,
     headers: {
@@ -102,7 +113,8 @@ describe("admin-referral-codes CRUD", () => {
 
   it("GET возвращает созданные коды", async () => {
     if (!sql) return;
-    const items = ((await (await req("GET", BASE)).json()) as { items: Array<{ code: string }> }).items;
+    const items = ((await (await req("GET", BASE)).json()) as { items: Array<{ code: string }> })
+      .items;
     expect(items.length).toBe(2); // авто + PROMO-CODE
     expect(items.some((i) => i.code === "PROMO-CODE")).toBe(true);
   });
@@ -110,7 +122,8 @@ describe("admin-referral-codes CRUD", () => {
   it("DELETE: bad id → 400; валидный → ok + исчезает из GET", async () => {
     if (!sql) return;
     expect((await req("DELETE", `${BASE}/abc`)).status).toBe(400);
-    const items = ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number }> }).items;
+    const items = ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number }> })
+      .items;
     for (const it of items) expect((await req("DELETE", `${BASE}/${it.id}`)).status).toBe(200);
     expect(((await (await req("GET", BASE)).json()) as { items: unknown[] }).items).toEqual([]);
   });

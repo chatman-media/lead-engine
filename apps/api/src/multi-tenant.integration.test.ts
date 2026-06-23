@@ -139,90 +139,87 @@ class TestChannelRegistry extends ChannelRegistry {
   }
 }
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 4, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    // Apps run под superuser/BYPASSRLS на локальном dev — pipeline'у это OK;
-    // под dedicated non-bypass role'ью pipeline тоже работает (см.
-    // packages/storage/src/rls.integration.test.ts). Здесь фокус на
-    // data-level изоляции, не на RLS-механике.
-    db = drizzle(sql, { schema });
-    nowEpoch = Math.floor(Date.now() / 1000);
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 4, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  // Apps run под superuser/BYPASSRLS на локальном dev — pipeline'у это OK;
+  // под dedicated non-bypass role'ью pipeline тоже работает (см.
+  // packages/storage/src/rls.integration.test.ts). Здесь фокус на
+  // data-level изоляции, не на RLS-механике.
+  db = drizzle(sql, { schema });
+  nowEpoch = Math.floor(Date.now() / 1000);
 
-    const registry = new TestChannelRegistry();
+  const registry = new TestChannelRegistry();
 
-    for (const slug of ["alpha", "beta"] as const) {
-      const [t] = await db
-        .insert(tenants)
-        .values({
-          slug,
-          plan: "free",
-          status: "active",
-          llmBillingMode: "byok",
-          createdAt: nowEpoch,
-          updatedAt: nowEpoch,
-        })
-        .returning();
-      if (!t) throw new Error(`seed tenant ${slug}`);
-      tenantIds[slug] = t.id;
+  for (const slug of ["alpha", "beta"] as const) {
+    const [t] = await db
+      .insert(tenants)
+      .values({
+        slug,
+        plan: "free",
+        status: "active",
+        llmBillingMode: "byok",
+        createdAt: nowEpoch,
+        updatedAt: nowEpoch,
+      })
+      .returning();
+    if (!t) throw new Error(`seed tenant ${slug}`);
+    tenantIds[slug] = t.id;
 
-      const [ch] = await db
-        .insert(channels)
-        .values({
-          tenantId: t.id,
-          kind: "telegram_bot",
-          externalId: `${slug}-bot`,
-          status: "active",
-          createdAt: nowEpoch,
-          updatedAt: nowEpoch,
-        })
-        .returning();
-      if (!ch) throw new Error(`seed channel ${slug}`);
-      channelDbIds[slug] = ch.id;
-
-      const adapter = new FakeTelegramAdapter(String(ch.id));
-      adapters[slug] = adapter;
-      registry.addEntry({
-        channelDbId: ch.id,
+    const [ch] = await db
+      .insert(channels)
+      .values({
         tenantId: t.id,
-        tenantSlug: slug,
-        tenantPlan: "free",
         kind: "telegram_bot",
         externalId: `${slug}-bot`,
-        // FakeTelegramAdapter удовлетворяет channel-core ChannelAdapter
-        // интерфейсу, но ChannelRegistry typed под конкретные классы
-        // (TelegramBotAdapter | WhatsAppCloudAdapter). webhook-telegram
-        // делает `entry.adapter as TelegramBotAdapter` без проверки —
-        // safe cast в тестах.
-        // biome-ignore lint/suspicious/noExplicitAny: structural cast для теста
-        adapter: adapter as any,
-      });
-    }
+        status: "active",
+        createdAt: nowEpoch,
+        updatedAt: nowEpoch,
+      })
+      .returning();
+    if (!ch) throw new Error(`seed channel ${slug}`);
+    channelDbIds[slug] = ch.id;
 
-    const metrics = makePlatformMetrics();
-    app = new Hono();
-    app.route(
-      "/",
-      makeTelegramWebhookRoutes({
-        db,
-        channels: registry,
-        webhookSecret: TELEGRAM_SECRET,
-        metrics,
-      }),
-    );
-    app.use("/admin/*", makeTenantContextMiddleware({ baseDomain: BASE_DOMAIN }));
-    app.use("/admin/*", requireTenant);
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAdminRoutes({ db: db as any }));
-  },
-  30_000,
-);
+    const adapter = new FakeTelegramAdapter(String(ch.id));
+    adapters[slug] = adapter;
+    registry.addEntry({
+      channelDbId: ch.id,
+      tenantId: t.id,
+      tenantSlug: slug,
+      tenantPlan: "free",
+      kind: "telegram_bot",
+      externalId: `${slug}-bot`,
+      // FakeTelegramAdapter удовлетворяет channel-core ChannelAdapter
+      // интерфейсу, но ChannelRegistry typed под конкретные классы
+      // (TelegramBotAdapter | WhatsAppCloudAdapter). webhook-telegram
+      // делает `entry.adapter as TelegramBotAdapter` без проверки —
+      // safe cast в тестах.
+      // biome-ignore lint/suspicious/noExplicitAny: structural cast для теста
+      adapter: adapter as any,
+    });
+  }
+
+  const metrics = makePlatformMetrics();
+  app = new Hono();
+  app.route(
+    "/",
+    makeTelegramWebhookRoutes({
+      db,
+      channels: registry,
+      webhookSecret: TELEGRAM_SECRET,
+      metrics,
+    }),
+  );
+  app.use("/admin/*", makeTenantContextMiddleware({ baseDomain: BASE_DOMAIN }));
+  app.use("/admin/*", requireTenant);
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAdminRoutes({ db: db as any }));
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -231,11 +228,7 @@ afterAll(async () => {
   }
 }, 10_000);
 
-function tgUpdate(opts: {
-  messageId: number;
-  fromId: number;
-  text: string;
-}): TgUpdate {
+function tgUpdate(opts: { messageId: number; fromId: number; text: string }): TgUpdate {
   return {
     update_id: Math.floor(Math.random() * 1_000_000),
     message: {
@@ -388,10 +381,7 @@ describe("multi-tenant isolation (Stage 8)", () => {
     if (!sql) return;
     // Узнаём id beta'иного контакта (через DB), пробуем достать его как alpha
     const betaContact = (
-      await db
-        .select()
-        .from(contacts)
-        .where(eq(contacts.tenantId, tenantIds.beta))
+      await db.select().from(contacts).where(eq(contacts.tenantId, tenantIds.beta))
     )[0]!;
 
     const res = await app.request(`/admin/contacts/${betaContact.id}`, {
@@ -403,10 +393,7 @@ describe("multi-tenant isolation (Stage 8)", () => {
   it("admin cross-tenant probe: beta запрашивает контакт alpha → 404", async () => {
     if (!sql) return;
     const alphaContact = (
-      await db
-        .select()
-        .from(contacts)
-        .where(eq(contacts.tenantId, tenantIds.alpha))
+      await db.select().from(contacts).where(eq(contacts.tenantId, tenantIds.alpha))
     )[0]!;
 
     const res = await app.request(`/admin/contacts/${alphaContact.id}`, {
@@ -418,10 +405,7 @@ describe("multi-tenant isolation (Stage 8)", () => {
   it("admin cross-tenant: alpha запрашивает messages у beta'иной conversation → пустой list", async () => {
     if (!sql) return;
     const betaConv = (
-      await db
-        .select()
-        .from(conversations)
-        .where(eq(conversations.tenantId, tenantIds.beta))
+      await db.select().from(conversations).where(eq(conversations.tenantId, tenantIds.beta))
     )[0]!;
 
     // Здесь endpoint вернёт 200 с пустым items (MessagesRepo фильтрует по

@@ -38,9 +38,7 @@ describe("wrapChatClient", () => {
     await wrapped.complete([{ role: "user", content: "hi" }]);
     await wrapped.complete([{ role: "user", content: "hi again" }]);
     const exposed = metrics.registry.format();
-    expect(exposed).toContain(
-      'lead_engine_llm_calls_total{provider="openai",purpose="chat"} 2',
-    );
+    expect(exposed).toContain('lead_engine_llm_calls_total{provider="openai",purpose="chat"} 2');
   });
 
   it("прокидывает return value наверх", async () => {
@@ -84,12 +82,8 @@ describe("wrapChatClient", () => {
     await chat.complete([{ role: "user", content: "x" }]);
     await memory.complete([{ role: "user", content: "x" }]);
     const exposed = metrics.registry.format();
-    expect(exposed).toContain(
-      'lead_engine_llm_calls_total{provider="openai",purpose="chat"} 2',
-    );
-    expect(exposed).toContain(
-      'lead_engine_llm_calls_total{provider="openai",purpose="memory"} 1',
-    );
+    expect(exposed).toContain('lead_engine_llm_calls_total{provider="openai",purpose="chat"} 2');
+    expect(exposed).toContain('lead_engine_llm_calls_total{provider="openai",purpose="memory"} 1');
   });
 
   it("non-Error throws → kind='unknown'", async () => {
@@ -209,8 +203,12 @@ describe("wrapChatClient — optional methods forwarded", () => {
   it("completeWithTools — инкрементит llmCalls, пробрасывает результат", async () => {
     const metrics = makePlatformMetrics();
     const innerWithTools: ChatClient = {
-      async complete() { return "ok"; },
-      async completeWithTools(_m, _t, _o) { return { content: "tool-result", toolCalls: [] }; },
+      async complete() {
+        return "ok";
+      },
+      async completeWithTools(_m, _t, _o) {
+        return { content: "tool-result", toolCalls: [] };
+      },
     };
     const w = wrapChatClient(innerWithTools, metrics, { provider: "openai", purpose: "chat" });
     const result = await w.completeWithTools!([], [], {});
@@ -223,8 +221,12 @@ describe("wrapChatClient — optional methods forwarded", () => {
   it("completeWithTools error → llmErrors + re-throws", async () => {
     const metrics = makePlatformMetrics();
     const innerErr: ChatClient = {
-      async complete() { return "ok"; },
-      async completeWithTools() { throw new RangeError("tools-down"); },
+      async complete() {
+        return "ok";
+      },
+      async completeWithTools() {
+        throw new RangeError("tools-down");
+      },
     };
     const w = wrapChatClient(innerErr, metrics, { provider: "openai", purpose: "chat" });
     await expect(w.completeWithTools!([], [], {})).rejects.toThrow("tools-down");
@@ -234,8 +236,12 @@ describe("wrapChatClient — optional methods forwarded", () => {
   it("completeStructured — пробрасывает напрямую (без обёртки метрик)", async () => {
     const metrics = makePlatformMetrics();
     const innerStruct: ChatClient = {
-      async complete() { return "ok"; },
-      async completeStructured() { return JSON.stringify({ result: 42 }); },
+      async complete() {
+        return "ok";
+      },
+      async completeStructured() {
+        return JSON.stringify({ result: 42 });
+      },
     };
     const w = wrapChatClient(innerStruct, metrics, { provider: "openai", purpose: "chat" });
     // biome-ignore lint/suspicious/noExplicitAny: stub
@@ -245,9 +251,14 @@ describe("wrapChatClient — optional methods forwarded", () => {
 
   it("stream — пробрасывается когда inner поддерживает", async () => {
     const metrics = makePlatformMetrics();
-    async function* fakeStream() { yield "chunk1"; yield "chunk2"; }
+    async function* fakeStream() {
+      yield "chunk1";
+      yield "chunk2";
+    }
     const innerStream: ChatClient = {
-      async complete() { return "ok"; },
+      async complete() {
+        return "ok";
+      },
       stream: () => fakeStream(),
     };
     const w = wrapChatClient(innerStream, metrics, { provider: "openai", purpose: "chat" });

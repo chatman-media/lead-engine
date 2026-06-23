@@ -29,7 +29,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_kb_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-kb-flow-12345";
 
 let sql: Sql | null = null;
@@ -41,52 +50,49 @@ let kbUploadDir = "";
 let previousKbUploadDir: string | undefined;
 let embedderEnabled = true;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    previousKbUploadDir = process.env.KB_UPLOAD_DIR;
-    kbUploadDir = await mkdtemp(join(tmpdir(), "lead-engine-kb-files-"));
-    process.env.KB_UPLOAD_DIR = kbUploadDir;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  previousKbUploadDir = process.env.KB_UPLOAD_DIR;
+  kbUploadDir = await mkdtemp(join(tmpdir(), "lead-engine-kb-files-"));
+  process.env.KB_UPLOAD_DIR = kbUploadDir;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    // NullEmbeddingClient — zero vectors, dim=1536 (default kb_chunks schema).
-    const embedder = new NullEmbeddingClient(1536);
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route(
-      "/",
-      makeAdminKbRoutes({
-        db,
-        resolveEmbedder: () => {
-          if (!embedderEnabled) throw new Error("embedder disabled for test");
-          return embedder;
-        },
-      }),
-    );
+  // NullEmbeddingClient — zero vectors, dim=1536 (default kb_chunks schema).
+  const embedder = new NullEmbeddingClient(1536);
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route(
+    "/",
+    makeAdminKbRoutes({
+      db,
+      resolveEmbedder: () => {
+        if (!embedderEnabled) throw new Error("embedder disabled for test");
+        return embedder;
+      },
+    }),
+  );
 
-    // Signup to get token + tenantId.
-    const signupRes = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "kb-test@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sb = (await signupRes.json()) as {
-      token: string;
-      admin: { tenantId: number };
-    };
-    token = sb.token;
-    tenantId = sb.admin.tenantId;
-  },
-  30_000,
-);
+  // Signup to get token + tenantId.
+  const signupRes = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "kb-test@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sb = (await signupRes.json()) as {
+    token: string;
+    admin: { tenantId: number };
+  };
+  token = sb.token;
+  tenantId = sb.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -103,10 +109,7 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function authReq(
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
+async function authReq(path: string, init: RequestInit = {}): Promise<Response> {
   return app.request(path, {
     ...init,
     headers: {
@@ -138,7 +141,8 @@ describe("admin-kb upload/list/delete flow", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: "Test doc",
-        body: "Один из наших клиентов нашёл работу за 2 недели. " +
+        body:
+          "Один из наших клиентов нашёл работу за 2 недели. " +
           "Контракт от 3 месяцев, виза оформляется агентством.",
       }),
     });
@@ -167,7 +171,8 @@ describe("admin-kb upload/list/delete flow", () => {
 
   it("dedup: same body → same source, не дублируется", async () => {
     if (!sql) return;
-    const sameBody = "Один из наших клиентов нашёл работу за 2 недели. " +
+    const sameBody =
+      "Один из наших клиентов нашёл работу за 2 недели. " +
       "Контракт от 3 месяцев, виза оформляется агентством.";
     const res = await authReq("/api/admin/kb/documents", {
       method: "POST",
@@ -310,7 +315,9 @@ describe("admin-kb upload/list/delete flow", () => {
       };
       expect(body.mode).toBe("text");
       expect(body.items.some((hit) => hit.documentId === documentId)).toBe(true);
-      expect(body.items.find((hit) => hit.documentId === documentId)?.text).toContain("Банковский перевод");
+      expect(body.items.find((hit) => hit.documentId === documentId)?.text).toContain(
+        "Банковский перевод",
+      );
     } finally {
       embedderEnabled = true;
     }
@@ -428,7 +435,9 @@ describe("admin-kb upload/list/delete flow", () => {
       items: Array<{ title: string; scopeType: string; funnelId: number | null }>;
     };
     expect(funnelList.items.some((d) => d.title === "How to pay scoped")).toBe(true);
-    expect(funnelList.items.every((d) => d.scopeType === "funnel" && d.funnelId === funnelId)).toBe(true);
+    expect(funnelList.items.every((d) => d.scopeType === "funnel" && d.funnelId === funnelId)).toBe(
+      true,
+    );
 
     const allFunnelDocsRes = await authReq(`/api/admin/kb/documents?funnelId=${funnelId}`);
     const allFunnelDocs = (await allFunnelDocsRes.json()) as {
@@ -479,7 +488,9 @@ describe("admin-kb upload/list/delete flow", () => {
       items: Array<{ questionText: string; scopeType: string }>;
       pendingCount: number;
     };
-    expect(globalSuggestions.items.some((s) => s.questionText === "Global unanswered scoped test")).toBe(true);
+    expect(
+      globalSuggestions.items.some((s) => s.questionText === "Global unanswered scoped test"),
+    ).toBe(true);
     expect(globalSuggestions.items.every((s) => s.scopeType === "global")).toBe(true);
     expect(globalSuggestions.pendingCount).toBe(globalSuggestions.items.length);
 
@@ -490,8 +501,12 @@ describe("admin-kb upload/list/delete flow", () => {
       items: Array<{ questionText: string; scopeType: string; funnelId: number | null }>;
       pendingCount: number;
     };
-    expect(funnelSuggestions.items.some((s) => s.questionText === "Funnel unanswered scoped test")).toBe(true);
-    expect(funnelSuggestions.items.some((s) => s.questionText === "Payment unanswered scoped test")).toBe(true);
+    expect(
+      funnelSuggestions.items.some((s) => s.questionText === "Funnel unanswered scoped test"),
+    ).toBe(true);
+    expect(
+      funnelSuggestions.items.some((s) => s.questionText === "Payment unanswered scoped test"),
+    ).toBe(true);
     expect(funnelSuggestions.items.every((s) => s.funnelId === funnelId)).toBe(true);
     expect(funnelSuggestions.items.some((s) => s.scopeType === "global")).toBe(false);
     expect(funnelSuggestions.pendingCount).toBe(funnelSuggestions.items.length);
@@ -502,8 +517,12 @@ describe("admin-kb upload/list/delete flow", () => {
     const stageSuggestions = (await stageSuggestionsRes.json()) as {
       items: Array<{ questionText: string; scopeType: string; stageSlug: string | null }>;
     };
-    expect(stageSuggestions.items.map((s) => s.questionText)).toContain("Payment unanswered scoped test");
-    expect(stageSuggestions.items.every((s) => s.scopeType === "stage" && s.stageSlug === "payment")).toBe(true);
+    expect(stageSuggestions.items.map((s) => s.questionText)).toContain(
+      "Payment unanswered scoped test",
+    );
+    expect(
+      stageSuggestions.items.every((s) => s.scopeType === "stage" && s.stageSlug === "payment"),
+    ).toBe(true);
 
     const requirementsRes = await authReq(`/api/admin/kb/requirements?funnelId=${funnelId}`);
     expect(requirementsRes.status).toBe(200);
@@ -513,7 +532,9 @@ describe("admin-kb upload/list/delete flow", () => {
     };
     expect(requirements.funnel.id).toBe(funnelId);
     expect(requirements.items.find((i) => i.key === "exchange_how_to_pay")?.covered).toBe(true);
-    expect(requirements.items.find((i) => i.key === "stage_payment_payment")?.matchedDocuments).toBe(1);
+    expect(
+      requirements.items.find((i) => i.key === "stage_payment_payment")?.matchedDocuments,
+    ).toBe(1);
 
     const funnelSearchRes = await authReq("/api/admin/kb/search", {
       method: "POST",
@@ -570,7 +591,9 @@ describe("admin-kb upload/list/delete flow", () => {
     expect(stageSearch.funnelId).toBe(funnelId);
     expect(stageSearch.stageSlug).toBe("payment");
     expect(stageSearch.items.some((hit) => hit.title === "Payment stage scoped")).toBe(true);
-    expect(stageSearch.items.every((hit) => hit.scopeType === "stage" && hit.stageSlug === "payment")).toBe(true);
+    expect(
+      stageSearch.items.every((hit) => hit.scopeType === "stage" && hit.stageSlug === "payment"),
+    ).toBe(true);
   });
 
   it("POST empty body → 400", async () => {
@@ -600,9 +623,7 @@ describe("admin-kb upload/list/delete flow", () => {
     const form = new FormData();
     form.append(
       "file",
-      new Blob([
-        "Multipart upload test content про танцовщиц в Дубае. Контракт 3 месяца.",
-      ]),
+      new Blob(["Multipart upload test content про танцовщиц в Дубае. Контракт 3 месяца."]),
       "test.txt",
     );
     const res = await authReq("/api/admin/kb/documents", {
@@ -901,7 +922,13 @@ describe("admin-kb suggestions", () => {
     const now = Math.floor(Date.now() / 1000);
     const [s] = await db
       .insert(kbSuggestions)
-      .values({ tenantId, questionText: "Без ответа", status: "pending", createdAt: now, updatedAt: now })
+      .values({
+        tenantId,
+        questionText: "Без ответа",
+        status: "pending",
+        createdAt: now,
+        updatedAt: now,
+      })
       .returning({ id: kbSuggestions.id });
     const suggestionId = s?.id;
     if (!suggestionId) throw new Error("expected empty-draft suggestion");
@@ -918,7 +945,13 @@ describe("admin-kb suggestions", () => {
     const now = Math.floor(Date.now() / 1000);
     const [s] = await db
       .insert(kbSuggestions)
-      .values({ tenantId, questionText: "Отклонить", status: "pending", createdAt: now, updatedAt: now })
+      .values({
+        tenantId,
+        questionText: "Отклонить",
+        status: "pending",
+        createdAt: now,
+        updatedAt: now,
+      })
       .returning({ id: kbSuggestions.id });
     const suggestionId = s?.id;
     if (!suggestionId) throw new Error("expected reject suggestion");

@@ -17,32 +17,32 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 /** Per-tenant IPN verification token (hex, 32 chars). */
 export function westWalletIpnToken(tenantId: number, masterKeyHex: string): string {
-	return createHmac("sha256", masterKeyHex)
-		.update(`westwallet-ipn:${tenantId}`)
-		.digest("hex")
-		.slice(0, 32);
+  return createHmac("sha256", masterKeyHex)
+    .update(`westwallet-ipn:${tenantId}`)
+    .digest("hex")
+    .slice(0, 32);
 }
 
 /** Append the IPN token to an IPN URL as `?key=<token>`. Returns input on parse failure. */
 export function withIpnKey(ipnUrl: string, tenantId: number, masterKeyHex: string): string {
-	try {
-		const u = new URL(ipnUrl);
-		u.searchParams.set("key", westWalletIpnToken(tenantId, masterKeyHex));
-		return u.toString();
-	} catch {
-		return ipnUrl;
-	}
+  try {
+    const u = new URL(ipnUrl);
+    u.searchParams.set("key", westWalletIpnToken(tenantId, masterKeyHex));
+    return u.toString();
+  } catch {
+    return ipnUrl;
+  }
 }
 
 /** Constant-time check that `provided` matches the tenant's IPN token. */
 export function verifyIpnKey(
-	provided: string | undefined | null,
-	tenantId: number,
-	masterKeyHex: string,
+  provided: string | undefined | null,
+  tenantId: number,
+  masterKeyHex: string,
 ): boolean {
-	if (!provided || !masterKeyHex) return false;
-	const expected = westWalletIpnToken(tenantId, masterKeyHex);
-	const a = Buffer.from(provided);
-	const b = Buffer.from(expected);
-	return a.length === b.length && timingSafeEqual(a, b);
+  if (!provided || !masterKeyHex) return false;
+  const expected = westWalletIpnToken(tenantId, masterKeyHex);
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }

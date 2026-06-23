@@ -102,13 +102,18 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
         return repo.create({ slug, allocationJson: allocationRaw, successMetric: metric });
       });
     } catch (err: unknown) {
-      if (isUniqueViolation(err)) return c.json({ error: "experiment with this slug already exists" }, 409);
+      if (isUniqueViolation(err))
+        return c.json({ error: "experiment with this slug already exists" }, 409);
       throw err;
     }
 
     await recordAudit(opts.db, {
-      tenantId, adminId, action: "experiment.create",
-      targetKind: "experiment", targetId: row.id, details: { slug, metric },
+      tenantId,
+      adminId,
+      action: "experiment.create",
+      targetKind: "experiment",
+      targetId: row.id,
+      details: { slug, metric },
     });
 
     return c.json(row, 201);
@@ -163,8 +168,12 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
     if ("error" in updated) return c.json({ error: updated.error }, 409);
 
     await recordAudit(opts.db, {
-      tenantId, adminId, action: "experiment.update",
-      targetKind: "experiment", targetId: id, details: patch,
+      tenantId,
+      adminId,
+      action: "experiment.update",
+      targetKind: "experiment",
+      targetId: id,
+      details: patch,
     });
 
     return c.json(updated);
@@ -221,7 +230,9 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
         });
         if ("error" in preview) return { error: preview.error };
         if (!preview.canRun) {
-          return { error: "experiment needs at least 2 active valid style variants before running" };
+          return {
+            error: "experiment needs at least 2 active valid style variants before running",
+          };
         }
       }
       return repo.setStatus(id, newStatus as "running" | "paused" | "done");
@@ -231,8 +242,12 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
     if ("error" in updated) return c.json({ error: updated.error }, 409);
 
     await recordAudit(opts.db, {
-      tenantId, adminId, action: `experiment.status.${newStatus as string}`,
-      targetKind: "experiment", targetId: id, details: { status: newStatus },
+      tenantId,
+      adminId,
+      action: `experiment.status.${newStatus as string}`,
+      targetKind: "experiment",
+      targetId: id,
+      details: { status: newStatus },
     });
 
     return c.json(updated);
@@ -250,7 +265,8 @@ function validateAllocationJson(allocationJson: string): string | null {
   }
   if (entries.length < 2) return "allocationJson must include at least 2 valid variants";
   const uniqueSlugs = new Set(entries.map((entry) => entry.styleSlug));
-  if (uniqueSlugs.size < entries.length) return "allocationJson variants must use unique style slugs";
+  if (uniqueSlugs.size < entries.length)
+    return "allocationJson variants must use unique style slugs";
   return null;
 }
 
@@ -324,7 +340,10 @@ async function buildExperimentPreview(opts: BuildExperimentPreviewOpts) {
     });
   }
 
-  const router = validVariants.length > 0 ? new ABRouter({ variants: validVariants, salt: opts.experiment.slug }) : null;
+  const router =
+    validVariants.length > 0
+      ? new ABRouter({ variants: validVariants, salt: opts.experiment.slug })
+      : null;
   const assignments = router
     ? Array.from({ length: opts.sampleSize }, (_, index) => {
         const userId = `preview-${index + 1}`;

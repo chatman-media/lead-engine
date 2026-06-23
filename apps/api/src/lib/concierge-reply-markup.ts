@@ -50,9 +50,7 @@ const CONCIERGE_REPLY_MARKUP: ReplyMarkup = {
       { label: "🍕 Еда", callbackData: `${SERVICE_BUTTON_PREFIX}food` },
       { label: "🧹 Уборка", callbackData: `${SERVICE_BUTTON_PREFIX}housekeeping` },
     ],
-    [
-      { label: "🏖 Экскурсия", callbackData: `${SERVICE_BUTTON_PREFIX}tour` },
-    ],
+    [{ label: "🏖 Экскурсия", callbackData: `${SERVICE_BUTTON_PREFIX}tour` }],
   ],
 };
 
@@ -86,10 +84,7 @@ async function resolveOpenLeadStageSlug(
  * добавляет inline-кнопки услуг к последнему envelope'у ответа.
  * Для всех других стадий/вертикалей поведение не меняется.
  */
-export function wrapWithConciergeButtons(
-  strategy: ReplyStrategy,
-  db: Db,
-): ReplyStrategy {
+export function wrapWithConciergeButtons(strategy: ReplyStrategy, db: Db): ReplyStrategy {
   return {
     generate: async (opts) => {
       const result = await strategy.generate(opts);
@@ -98,11 +93,7 @@ export function wrapWithConciergeButtons(
 
       let stageSlug: string | null = null;
       try {
-        stageSlug = await resolveOpenLeadStageSlug(
-          db,
-          opts.tenant.tenantId,
-          opts.contactId,
-        );
+        stageSlug = await resolveOpenLeadStageSlug(db, opts.tenant.tenantId, opts.contactId);
       } catch {
         // Не ломаем reply при ошибке резолвинга стадии.
         return result;

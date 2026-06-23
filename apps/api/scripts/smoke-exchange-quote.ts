@@ -42,8 +42,19 @@ async function upsertRate(r: {
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: [exchangeRates.tenantId, exchangeRates.asset, exchangeRates.quoteAsset, exchangeRates.network],
-        set: { baseRate: r.baseRate, quoteMode: r.quoteMode, marginPct: r.marginPct ?? 0, isActive: true, updatedAt: now },
+        target: [
+          exchangeRates.tenantId,
+          exchangeRates.asset,
+          exchangeRates.quoteAsset,
+          exchangeRates.network,
+        ],
+        set: {
+          baseRate: r.baseRate,
+          quoteMode: r.quoteMode,
+          marginPct: r.marginPct ?? 0,
+          isActive: true,
+          updatedAt: now,
+        },
       });
   });
 }
@@ -77,7 +88,13 @@ async function main() {
   assertEq("USDT 90 → THB", q3.ok && q3.amountToThb, 2600);
 
   // Маржа: base 31.0448, маржа 2% → eff = 30.4239, 100 USDT → 3042 THB
-  await upsertRate({ asset: "USDT", network: "trc20", baseRate: 31.0448, quoteMode: "multiply", marginPct: 2 });
+  await upsertRate({
+    asset: "USDT",
+    network: "trc20",
+    baseRate: 31.0448,
+    quoteMode: "multiply",
+    marginPct: 2,
+  });
   const q4 = await computeQuote(db as never, TENANT, { asset: "USDT", amount: 100 });
   assertEq("USDT 100 @2% margin → THB", q4.ok && q4.amountToThb, Math.round(100 * 31.0448 * 0.98));
 
@@ -87,7 +104,9 @@ async function main() {
 
   // Очистка тестовых курсов
   await withTenant(db as never, TENANT, async (tx) => {
-    await tx.delete(exchangeRates).where(and(eq(exchangeRates.tenantId, TENANT), eq(exchangeRates.quoteAsset, "THB")));
+    await tx
+      .delete(exchangeRates)
+      .where(and(eq(exchangeRates.tenantId, TENANT), eq(exchangeRates.quoteAsset, "THB")));
   });
 
   await client.end({ timeout: 0 });

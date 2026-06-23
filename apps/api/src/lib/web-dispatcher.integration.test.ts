@@ -29,7 +29,16 @@ import { WebOutboundDispatcher } from "./web-dispatcher.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_webdisp_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
@@ -57,57 +66,51 @@ class TestWebRegistry extends WebChannelRegistry {
   }
 }
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    // RLS FORCE — см. comment в dispatcher.integration.test.ts
-    const rlsTables = await sql<Array<{ tablename: string }>>`
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  // RLS FORCE — см. comment в dispatcher.integration.test.ts
+  const rlsTables = await sql<Array<{ tablename: string }>>`
       SELECT tablename FROM pg_tables WHERE schemaname='public' AND rowsecurity=true
     `;
-    for (const { tablename } of rlsTables) {
-      await sql.unsafe(`ALTER TABLE "${tablename}" NO FORCE ROW LEVEL SECURITY`);
-    }
-    db = drizzle(sql, { schema });
+  for (const { tablename } of rlsTables) {
+    await sql.unsafe(`ALTER TABLE "${tablename}" NO FORCE ROW LEVEL SECURITY`);
+  }
+  db = drizzle(sql, { schema });
 
-    const [t] = await db
-      .insert(tenants)
-      .values({ slug: "webdisp", plan: "free", status: "active", llmBillingMode: "byok" })
-      .returning();
-    if (!t) throw new Error("seed tenant");
-    tenantId = t.id;
+  const [t] = await db
+    .insert(tenants)
+    .values({ slug: "webdisp", plan: "free", status: "active", llmBillingMode: "byok" })
+    .returning();
+  if (!t) throw new Error("seed tenant");
+  tenantId = t.id;
 
-    const [webCh] = await db
-      .insert(channels)
-      .values({ tenantId, kind: "web", externalId: "web-disp", status: "active" })
-      .returning();
-    if (!webCh) throw new Error("seed web channel");
-    webChannelDbId = webCh.id;
+  const [webCh] = await db
+    .insert(channels)
+    .values({ tenantId, kind: "web", externalId: "web-disp", status: "active" })
+    .returning();
+  if (!webCh) throw new Error("seed web channel");
+  webChannelDbId = webCh.id;
 
-    const [tgCh] = await db
-      .insert(channels)
-      .values({ tenantId, kind: "telegram_bot", externalId: "tg-disp", status: "active" })
-      .returning();
-    if (!tgCh) throw new Error("seed tg channel");
-    tgChannelDbId = tgCh.id;
-  },
-  30_000,
-);
+  const [tgCh] = await db
+    .insert(channels)
+    .values({ tenantId, kind: "telegram_bot", externalId: "tg-disp", status: "active" })
+    .returning();
+  if (!tgCh) throw new Error("seed tg channel");
+  tgChannelDbId = tgCh.id;
+}, 30_000);
 
-afterAll(
-  async () => {
-    if (sql) {
-      await sql.end({ timeout: 0 }).catch(() => {});
-      sql = null;
-    }
-  },
-  10_000,
-);
+afterAll(async () => {
+  if (sql) {
+    await sql.end({ timeout: 0 }).catch(() => {});
+    sql = null;
+  }
+}, 10_000);
 
 beforeEach(async () => {
   if (!sql) return;
@@ -168,10 +171,7 @@ describe("WebOutboundDispatcher integration", () => {
 
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
-    const [row] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, queueId));
+    const [row] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, queueId));
     expect(row?.status).toBe("sent");
     // adapter.send отправил bot_text frame в pinned WS.
     expect(fakeWs.sent.some((s) => s.includes('"type":"bot_text"') && s.includes("из web"))).toBe(
@@ -203,10 +203,7 @@ describe("WebOutboundDispatcher integration", () => {
 
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
-    const [row] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, tgQueueId));
+    const [row] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, tgQueueId));
     expect(row?.status).toBe("pending"); // telegram_bot row остался pending — web dispatcher его не трогает
   });
 
@@ -228,10 +225,7 @@ describe("WebOutboundDispatcher integration", () => {
 
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
-    const [row] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, queueId));
+    const [row] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, queueId));
     expect(row?.status).toBe("failed");
     expect(row?.lastError).toContain("no active connection");
     expect(metrics.registry.format()).toContain(
@@ -268,10 +262,7 @@ describe("WebOutboundDispatcher integration", () => {
 
     await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
-    const [updated] = await db
-      .select()
-      .from(outboundQueue)
-      .where(eq(outboundQueue.id, row.id));
+    const [updated] = await db.select().from(outboundQueue).where(eq(outboundQueue.id, row.id));
     expect(updated?.status).toBe("failed");
     expect(metrics.registry.format()).toContain(
       `lead_engine_outbound_failed_total{reason="bad_payload",tenant="${tenantId}"} 1`,

@@ -79,8 +79,11 @@ async function main() {
         ),
       )
   )[0];
-  if (!channelRow) throw new Error(`no active web channel for tenant ${args.slug} — onboard with --with-web`);
-  console.log(`[smoke] tenant id=${tenantRow.id} slug=${tenantRow.slug} web-channel id=${channelRow.id}`);
+  if (!channelRow)
+    throw new Error(`no active web channel for tenant ${args.slug} — onboard with --with-web`);
+  console.log(
+    `[smoke] tenant id=${tenantRow.id} slug=${tenantRow.slug} web-channel id=${channelRow.id}`,
+  );
 
   // 2. Snapshot outbound queue (нам нужны rows ПОСЛЕ нашего message'а).
   const beforeRows = await db
@@ -120,7 +123,9 @@ async function main() {
         );
       } else if (frame.type === "bot_text") {
         receivedReply = { id: frame.id, text: frame.text };
-        console.log(`[smoke] bot_text received (${String(frame.text).replace(/\n|\r/g, "").length} chars)`);
+        console.log(
+          `[smoke] bot_text received (${String(frame.text).replace(/\n|\r/g, "").length} chars)`,
+        );
       } else {
         console.log("[smoke] unknown frame:", JSON.stringify(frame).replace(/\n|\r/g, ""));
       }
@@ -139,7 +144,8 @@ async function main() {
 
   // 5. Poll outbound_queue для нового row (status 'sent'/'pending'/'processing').
   const deadline = Date.now() + args.timeoutMs;
-  let newRow: { id: number; status: string; payloadJson: string; lastError: string | null } | null = null;
+  let newRow: { id: number; status: string; payloadJson: string; lastError: string | null } | null =
+    null;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
     const rows = await db
@@ -156,9 +162,9 @@ async function main() {
     if (candidate) {
       newRow = candidate;
       console.log(
-        `[smoke] outbound row id=${newRow.id} status=${newRow.status} (${
-          ((Date.now() - (startedAt + performance.timeOrigin)) / 1000).toFixed(1)
-        }s ${newRow.status === "sent" ? "delivered" : "queued"})`,
+        `[smoke] outbound row id=${newRow.id} status=${newRow.status} (${(
+          (Date.now() - (startedAt + performance.timeOrigin)) / 1000
+        ).toFixed(1)}s ${newRow.status === "sent" ? "delivered" : "queued"})`,
       );
       break;
     }
@@ -183,10 +189,14 @@ async function main() {
   console.log("\n========== LLM REPLY ==========");
   console.log(replyText || "<empty>");
   console.log("================================");
-  console.log(`[smoke] queue status: ${newRow.status}${newRow.lastError ? ` (error: ${newRow.lastError})` : ""}`);
+  console.log(
+    `[smoke] queue status: ${newRow.status}${newRow.lastError ? ` (error: ${newRow.lastError})` : ""}`,
+  );
 
   if (receivedReply) {
-    console.log(`[smoke] WS bot_text frame: ${String(receivedReply.text).replace(/\n|\r/g, "").length} chars (matched DB: ${receivedReply.text === replyText})`);
+    console.log(
+      `[smoke] WS bot_text frame: ${String(receivedReply.text).replace(/\n|\r/g, "").length} chars (matched DB: ${receivedReply.text === replyText})`,
+    );
   } else {
     console.log("[smoke] ⚠ WS bot_text frame NOT received — adapter.send not invoked in time");
   }

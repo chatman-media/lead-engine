@@ -523,7 +523,9 @@ describe("GET /api/admin/leads/:id/kb-guidance", () => {
     expect(body.kbAvailable).toBe(true);
     expect(body.requiredFields.find((item) => item.id === field!.id)?.filled).toBe(false);
     expect(body.missingRequiredFields.map((item) => item.displayName)).toContain("Client budget");
-    expect(body.kbRequirements.find((item) => item.key === "business_overview")?.covered).toBe(false);
+    expect(body.kbRequirements.find((item) => item.key === "business_overview")?.covered).toBe(
+      false,
+    );
     expect(body.kbRequirements.find((item) => item.key === "process_and_sla")?.required).toBe(true);
     expect(body.nextActions.some((action) => action.includes("Client budget"))).toBe(true);
     expect(body.nextActions.some((action) => action.includes("материалы БЗ"))).toBe(true);

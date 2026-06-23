@@ -50,123 +50,120 @@ let tenantB = 0;
 const conversationIdsA: number[] = [];
 let conversationIdB = 0;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route(
-      "/",
-      makeAdminConversationsRoutes({
-        db,
-        // Mock media-proxy: возвращает фиктивные байты с content-type.
-        downloadMedia: async () =>
-          new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
-            headers: { "content-type": "image/png" },
-          }),
-      }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route(
+    "/",
+    makeAdminConversationsRoutes({
+      db,
+      // Mock media-proxy: возвращает фиктивные байты с content-type.
+      downloadMedia: async () =>
+        new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+          headers: { "content-type": "image/png" },
+        }),
+    }),
+  );
 
-    // Tenant A.
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "conv-a@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    tokenA = sba.token;
-    tenantA = sba.admin.tenantId;
+  // Tenant A.
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "conv-a@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  tokenA = sba.token;
+  tenantA = sba.admin.tenantId;
 
-    // Tenant B.
-    const sb = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "conv-b@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
-    tokenB = sbb.token;
-    tenantB = sbb.admin.tenantId;
+  // Tenant B.
+  const sb = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "conv-b@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
+  tokenB = sbb.token;
+  tenantB = sbb.admin.tenantId;
 
-    const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000);
 
-    // Create 3 conversations for tenant A с разным lastMessageAt
-    // (для pagination & ordering testing).
-    for (let i = 0; i < 3; i++) {
-      const [contact] = await db
-        .insert(contacts)
-        .values({
-          tenantId: tenantA,
-          displayName: `Contact A${i}`,
-          ...(i === 0
-            ? {
-                attributesJson: JSON.stringify({
-                  last_photo_class: "passport",
-                  passport_family_name: "IVANOV",
-                  passport_given_name: "IVAN",
-                }),
-              }
-            : {}),
-        })
-        .returning({ id: contacts.id });
-      const [conv] = await db
-        .insert(conversations)
-        .values({
-          tenantId: tenantA,
-          userId: contact!.id,
-          source: "bot",
-          mode: "ai",
-          status: "open",
-          lastMessageText: `Msg 4 in conv ${i}`,
-          lastMessageAt: now - i * 100, // i=0 — newest, i=2 — oldest
-          createdAt: now - i * 100,
-        })
-        .returning({ id: conversations.id });
-      conversationIdsA.push(conv!.id);
-
-      // 5 messages per conversation, chronological.
-      for (let m = 0; m < 5; m++) {
-        await db.insert(messages).values({
-          tenantId: tenantA,
-          conversationId: conv!.id,
-          role: m % 2 === 0 ? "user" : "assistant",
-          text: `Msg ${m} in conv ${i}`,
-          createdAt: now - i * 100 + m,
-        });
-      }
-    }
-
-    // Tenant B: 1 conversation.
-    const [contactB] = await db
+  // Create 3 conversations for tenant A с разным lastMessageAt
+  // (для pagination & ordering testing).
+  for (let i = 0; i < 3; i++) {
+    const [contact] = await db
       .insert(contacts)
-      .values({ tenantId: tenantB, displayName: "Contact B0" })
+      .values({
+        tenantId: tenantA,
+        displayName: `Contact A${i}`,
+        ...(i === 0
+          ? {
+              attributesJson: JSON.stringify({
+                last_photo_class: "passport",
+                passport_family_name: "IVANOV",
+                passport_given_name: "IVAN",
+              }),
+            }
+          : {}),
+      })
       .returning({ id: contacts.id });
-    const [convB] = await db
+    const [conv] = await db
       .insert(conversations)
       .values({
-        tenantId: tenantB,
-        userId: contactB!.id,
+        tenantId: tenantA,
+        userId: contact!.id,
         source: "bot",
         mode: "ai",
         status: "open",
-        lastMessageText: "Msg B",
-        lastMessageAt: now,
-        createdAt: now,
+        lastMessageText: `Msg 4 in conv ${i}`,
+        lastMessageAt: now - i * 100, // i=0 — newest, i=2 — oldest
+        createdAt: now - i * 100,
       })
       .returning({ id: conversations.id });
-    conversationIdB = convB!.id;
-  },
-  30_000,
-);
+    conversationIdsA.push(conv!.id);
+
+    // 5 messages per conversation, chronological.
+    for (let m = 0; m < 5; m++) {
+      await db.insert(messages).values({
+        tenantId: tenantA,
+        conversationId: conv!.id,
+        role: m % 2 === 0 ? "user" : "assistant",
+        text: `Msg ${m} in conv ${i}`,
+        createdAt: now - i * 100 + m,
+      });
+    }
+  }
+
+  // Tenant B: 1 conversation.
+  const [contactB] = await db
+    .insert(contacts)
+    .values({ tenantId: tenantB, displayName: "Contact B0" })
+    .returning({ id: contacts.id });
+  const [convB] = await db
+    .insert(conversations)
+    .values({
+      tenantId: tenantB,
+      userId: contactB!.id,
+      source: "bot",
+      mode: "ai",
+      status: "open",
+      lastMessageText: "Msg B",
+      lastMessageAt: now,
+      createdAt: now,
+    })
+    .returning({ id: conversations.id });
+  conversationIdB = convB!.id;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -175,11 +172,7 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function authReq(
-  token: string,
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
+async function authReq(token: string, path: string, init: RequestInit = {}): Promise<Response> {
   return await app.request(path, {
     ...init,
     headers: {
@@ -244,9 +237,9 @@ describe("admin-conversations", () => {
 
   it("pagination: cursor возвращает следующую страницу", async () => {
     if (!sql) return;
-    const page1 = (await (
-      await authReq(tokenA, "/api/admin/conversations?limit=2")
-    ).json()) as { nextCursor: number };
+    const page1 = (await (await authReq(tokenA, "/api/admin/conversations?limit=2")).json()) as {
+      nextCursor: number;
+    };
     const page2 = (await (
       await authReq(tokenA, `/api/admin/conversations?limit=2&cursor=${page1.nextCursor}`)
     ).json()) as { items: Array<{ id: number }>; nextCursor?: number };
@@ -476,15 +469,13 @@ describe("admin-conversations", () => {
         `human_takeover:${id}`,
       ].includes(row.dedupKey),
     );
-    expect(relevantRows.find((row) => row.kind === "verification_requested")?.readAt).toBeGreaterThan(
-      0,
-    );
-    expect(relevantRows.find((row) => row.kind === "operator_handoff_required")?.readAt).toBeGreaterThan(
-      0,
-    );
-    expect(relevantRows.find((row) => row.kind === "document_uploaded")?.readAt).toBeGreaterThan(
-      0,
-    );
+    expect(
+      relevantRows.find((row) => row.kind === "verification_requested")?.readAt,
+    ).toBeGreaterThan(0);
+    expect(
+      relevantRows.find((row) => row.kind === "operator_handoff_required")?.readAt,
+    ).toBeGreaterThan(0);
+    expect(relevantRows.find((row) => row.kind === "document_uploaded")?.readAt).toBeGreaterThan(0);
     expect(relevantRows.find((row) => row.kind === "human_takeover")?.readAt).toBeNull();
   });
 
@@ -1048,9 +1039,7 @@ describe("GET /api/admin/conversations/:id/media", () => {
         text: "",
         createdAt: now,
         metaJson: JSON.stringify({
-          parts: [
-            { kind: "photo", mediaRef: { channelId: "10", externalRef: "passport_xyz" } },
-          ],
+          parts: [{ kind: "photo", mediaRef: { channelId: "10", externalRef: "passport_xyz" } }],
         }),
       })
       .returning({ id: messages.id });
@@ -1236,7 +1225,13 @@ describe("DELETE /api/admin/conversations/:id/messages/:msgId (#697)", () => {
       .returning({ id: conversations.id });
     const [msg] = await db
       .insert(messages)
-      .values({ tenantId: tenantA, conversationId: conv!.id, role: "human", text: "ошибся", createdAt: now })
+      .values({
+        tenantId: tenantA,
+        conversationId: conv!.id,
+        role: "human",
+        text: "ошибся",
+        createdAt: now,
+      })
       .returning({ id: messages.id });
     await db.insert(outboundQueue).values({
       tenantId: tenantA,
@@ -1255,11 +1250,10 @@ describe("DELETE /api/admin/conversations/:id/messages/:msgId (#697)", () => {
       createdAt: now,
     });
 
-    const res = await authReq(
-      tokenA,
-      `/api/admin/conversations/${conv!.id}/messages/${msg!.id}`,
-      { method: "DELETE", headers: { "Content-Type": "application/json" } },
-    );
+    const res = await authReq(tokenA, `/api/admin/conversations/${conv!.id}/messages/${msg!.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, channelDelete: true });
 
@@ -1299,18 +1293,22 @@ describe("DELETE /api/admin/conversations/:id/messages/:msgId (#697)", () => {
       .returning({ id: conversations.id });
     const [msg] = await db
       .insert(messages)
-      .values({ tenantId: tenantA, conversationId: conv!.id, role: "human", text: "x", createdAt: now })
+      .values({
+        tenantId: tenantA,
+        conversationId: conv!.id,
+        role: "human",
+        text: "x",
+        createdAt: now,
+      })
       .returning({ id: messages.id });
-    const res = await authReq(
-      tokenA,
-      `/api/admin/conversations/${conv!.id}/messages/${msg!.id}`,
-      { method: "DELETE", headers: { "Content-Type": "application/json" } },
-    );
+    const res = await authReq(tokenA, `/api/admin/conversations/${conv!.id}/messages/${msg!.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, channelDelete: false });
   });
 });
-
 
 describe("#731 переводящий слой оператору", () => {
   function makeChat() {
@@ -1361,7 +1359,13 @@ describe("#731 переводящий слой оператору", () => {
     });
     const [msg] = await db
       .insert(messages)
-      .values({ tenantId: tenantA, conversationId: conv!.id, role: "user", text: incoming, createdAt: now })
+      .values({
+        tenantId: tenantA,
+        conversationId: conv!.id,
+        role: "user",
+        text: incoming,
+        createdAt: now,
+      })
       .returning({ id: messages.id });
     return { conversationId: conv!.id, messageId: msg!.id };
   }
@@ -1375,11 +1379,17 @@ describe("#731 переводящий слой оператору", () => {
 
   it("GET лениво переводит входящее клиента на русский и кэширует в messages", async () => {
     if (!sql) return;
-    const { conversationId, messageId } = await seedLangConversation("en", "Hello, what is the rate?");
+    const { conversationId, messageId } = await seedLangConversation(
+      "en",
+      "Hello, what is the rate?",
+    );
     const fake = makeChat();
-    const res = await appWithChat(() => fake.chat).request(`/api/admin/conversations/${conversationId}`, {
-      headers: { Authorization: `Bearer ${tokenA}` },
-    });
+    const res = await appWithChat(() => fake.chat).request(
+      `/api/admin/conversations/${conversationId}`,
+      {
+        headers: { Authorization: `Bearer ${tokenA}` },
+      },
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       messages: Array<{ id: number; translatedText: string | null; translatedLang: string | null }>;

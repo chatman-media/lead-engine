@@ -44,10 +44,7 @@ describe("signAuthToken / verifyAuthToken", () => {
   });
 
   it("expired token → throws", () => {
-    const expired = signAuthToken(
-      makeClaims({ exp: Math.floor(Date.now() / 1000) - 60 }),
-      SECRET,
-    );
+    const expired = signAuthToken(makeClaims({ exp: Math.floor(Date.now() / 1000) - 60 }), SECRET);
     expect(() => verifyAuthToken(expired, SECRET)).toThrow(/expired/);
   });
 

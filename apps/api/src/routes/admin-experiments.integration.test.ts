@@ -21,7 +21,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_exp_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-experiments-flow-12345";
 
 let sql: Sql | null = null;
@@ -36,64 +45,61 @@ const ALLOC = JSON.stringify([
   { style_slug: "b", weight: 50 },
 ]);
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminExperimentsRoutes({ db }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminExperimentsRoutes({ db }));
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "exp@demo.io", password: "strong-pwd-12345" }),
-    });
-    token = ((await sa.json()) as { token: string }).token;
-    const [owner] = await db
-      .select({ tenantId: admins.tenantId })
-      .from(admins)
-      .where(eq(admins.email, "exp@demo.io"));
-    if (!owner) throw new Error("experiment owner fixture missing");
-    await db.insert(stylesTable).values([
-      {
-        tenantId: owner.tenantId,
-        slug: "a",
-        displayName: "Style A",
-        configJson: JSON.stringify(styleConfig("a", "Style A")),
-        isActive: true,
-        version: 1,
-        createdAt: 1,
-      },
-      {
-        tenantId: owner.tenantId,
-        slug: "b",
-        displayName: "Style B",
-        configJson: JSON.stringify(styleConfig("b", "Style B")),
-        isActive: true,
-        version: 1,
-        createdAt: 1,
-      },
-    ]);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "exp@demo.io", password: "strong-pwd-12345" }),
+  });
+  token = ((await sa.json()) as { token: string }).token;
+  const [owner] = await db
+    .select({ tenantId: admins.tenantId })
+    .from(admins)
+    .where(eq(admins.email, "exp@demo.io"));
+  if (!owner) throw new Error("experiment owner fixture missing");
+  await db.insert(stylesTable).values([
+    {
+      tenantId: owner.tenantId,
+      slug: "a",
+      displayName: "Style A",
+      configJson: JSON.stringify(styleConfig("a", "Style A")),
+      isActive: true,
+      version: 1,
+      createdAt: 1,
+    },
+    {
+      tenantId: owner.tenantId,
+      slug: "b",
+      displayName: "Style B",
+      configJson: JSON.stringify(styleConfig("b", "Style B")),
+      isActive: true,
+      version: 1,
+      createdAt: 1,
+    },
+  ]);
 
-    const sb = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "exp-other@demo.io", password: "strong-pwd-12345" }),
-    });
-    secondToken = ((await sb.json()) as { token: string }).token;
-  },
-  30_000,
-);
+  const sb = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "exp-other@demo.io", password: "strong-pwd-12345" }),
+  });
+  secondToken = ((await sb.json()) as { token: string }).token;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -102,7 +108,12 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function req(method: string, path: string, body?: unknown, withAuth = true): Promise<Response> {
+async function req(
+  method: string,
+  path: string,
+  body?: unknown,
+  withAuth = true,
+): Promise<Response> {
   return app.request(path, {
     method,
     headers: {
@@ -114,7 +125,9 @@ async function req(method: string, path: string, body?: unknown, withAuth = true
 }
 
 async function firstId(): Promise<number> {
-  const rows = ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number; slug: string }> }).items;
+  const rows = (
+    (await (await req("GET", BASE)).json()) as { items: Array<{ id: number; slug: string }> }
+  ).items;
   const row = rows.find((item) => item.slug === "exp-a");
   if (!row) throw new Error("primary experiment fixture missing");
   return row.id;
@@ -143,18 +156,42 @@ describe("admin-experiments", () => {
 
   it("POST валидация: slug / metric / allocation / json", async () => {
     if (!sql) return;
-    expect((await req("POST", BASE, { slug: "Bad Slug", successMetric: "won", allocationJson: ALLOC })).status).toBe(400);
-    expect((await req("POST", BASE, { slug: "exp1", successMetric: "nope", allocationJson: ALLOC })).status).toBe(400);
-    expect((await req("POST", BASE, { slug: "exp1", successMetric: "won", allocationJson: JSON.stringify([{ x: 1 }]) })).status).toBe(400);
-    expect((await req("POST", BASE, { slug: "exp1", successMetric: "won", allocationJson: "{not json" })).status).toBe(400);
+    expect(
+      (await req("POST", BASE, { slug: "Bad Slug", successMetric: "won", allocationJson: ALLOC }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await req("POST", BASE, { slug: "exp1", successMetric: "nope", allocationJson: ALLOC }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await req("POST", BASE, {
+          slug: "exp1",
+          successMetric: "won",
+          allocationJson: JSON.stringify([{ x: 1 }]),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await req("POST", BASE, { slug: "exp1", successMetric: "won", allocationJson: "{not json" }))
+        .status,
+    ).toBe(400);
   });
 
   it("POST happy → 201; дубль slug → 409", async () => {
     if (!sql) return;
-    const res = await req("POST", BASE, { slug: "exp-a", successMetric: "won", allocationJson: ALLOC });
+    const res = await req("POST", BASE, {
+      slug: "exp-a",
+      successMetric: "won",
+      allocationJson: ALLOC,
+    });
     expect(res.status).toBe(201);
     expect(((await res.json()) as { slug: string }).slug).toBe("exp-a");
-    expect((await req("POST", BASE, { slug: "exp-a", successMetric: "won", allocationJson: ALLOC })).status).toBe(409);
+    expect(
+      (await req("POST", BASE, { slug: "exp-a", successMetric: "won", allocationJson: ALLOC }))
+        .status,
+    ).toBe(409);
   });
 
   it("GET preview → валидирует variants и показывает deterministic assignment", async () => {
@@ -173,7 +210,9 @@ describe("admin-experiments", () => {
     expect(body.assignments).toHaveLength(12);
     expect(body.counts.reduce((sum, item) => sum + item.count, 0)).toBe(12);
 
-    const again = (await (await req("GET", `${BASE}/${id}/preview?sample=12`)).json()) as ExperimentPreviewResponse;
+    const again = (await (
+      await req("GET", `${BASE}/${id}/preview?sample=12`)
+    ).json()) as ExperimentPreviewResponse;
     expect(again.assignments).toEqual(body.assignments);
     expect((await secondTenantReq("GET", `${BASE}/${id}/preview`)).status).toBe(404);
     expect((await req("GET", `${BASE}/0/preview`)).status).toBe(400);
@@ -185,11 +224,17 @@ describe("admin-experiments", () => {
       { style_slug: "a", weight: 1 },
       { style_slug: "missing", weight: 1 },
     ]);
-    const created = await req("POST", BASE, { slug: "exp-missing", successMetric: "won", allocationJson });
+    const created = await req("POST", BASE, {
+      slug: "exp-missing",
+      successMetric: "won",
+      allocationJson,
+    });
     expect(created.status).toBe(201);
     const id = ((await created.json()) as { id: number }).id;
 
-    const preview = (await (await req("GET", `${BASE}/${id}/preview?sample=8`)).json()) as ExperimentPreviewResponse;
+    const preview = (await (
+      await req("GET", `${BASE}/${id}/preview?sample=8`)
+    ).json()) as ExperimentPreviewResponse;
     expect(preview.canRun).toBe(false);
     expect(preview.variants).toContainEqual({
       styleSlug: "missing",
@@ -221,7 +266,9 @@ describe("admin-experiments", () => {
     const id = await firstId(); // exp-a ещё в draft
     expect((await req("PATCH", `${BASE}/${id}`, { successMetric: "nope" })).status).toBe(400);
     expect((await req("PATCH", `${BASE}/${id}`, { allocationJson: "{not json" })).status).toBe(400);
-    expect((await req("PATCH", `${BASE}/${id}`, { allocationJson: JSON.stringify([{ x: 1 }]) })).status).toBe(400);
+    expect(
+      (await req("PATCH", `${BASE}/${id}`, { allocationJson: JSON.stringify([{ x: 1 }]) })).status,
+    ).toBe(400);
   });
 
   it("PUT status: bad status → 400; invalid transition → 409; draft→running → 200; затем PATCH running → 409", async () => {

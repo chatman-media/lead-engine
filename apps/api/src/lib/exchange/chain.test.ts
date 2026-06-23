@@ -34,10 +34,21 @@ describe("verifyTronUsdt", () => {
       contractRet: "SUCCESS",
       timestamp: NOW * 1000,
       trc20TransferInfo: [
-        { to_address: TO, from_address: "TFrom", amount_str: "100000000", decimals: 6, symbol: "USDT" },
+        {
+          to_address: TO,
+          from_address: "TFrom",
+          amount_str: "100000000",
+          decimals: 6,
+          symbol: "USDT",
+        },
       ],
     });
-    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100, nowEpoch: NOW });
+    const r = await verifyTronUsdt({
+      txHash: TX,
+      toAddress: TO,
+      expectedAmount: 100,
+      nowEpoch: NOW,
+    });
     expect(r.ok).toBe(true);
     expect(r.amount).toBe(100);
     expect(r.fromAddress).toBe("TFrom");
@@ -51,14 +62,28 @@ describe("verifyTronUsdt", () => {
       timestamp: NOW,
       trc20TransferInfo: [{ to_address: TO, amount_str: "50000000", decimals: 6, symbol: "USDT" }],
     });
-    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100, nowEpoch: NOW });
+    const r = await verifyTronUsdt({
+      txHash: TX,
+      toAddress: TO,
+      expectedAmount: 100,
+      nowEpoch: NOW,
+    });
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("меньше ожидаемой");
   });
 
   it("нет перевода USDT на наш адрес → ok:false", async () => {
-    mockJson({ confirmed: true, timestamp: NOW, trc20TransferInfo: [{ to_address: "TOther", amount_str: "100000000", symbol: "USDT" }] });
-    const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 100, nowEpoch: NOW });
+    mockJson({
+      confirmed: true,
+      timestamp: NOW,
+      trc20TransferInfo: [{ to_address: "TOther", amount_str: "100000000", symbol: "USDT" }],
+    });
+    const r = await verifyTronUsdt({
+      txHash: TX,
+      toAddress: TO,
+      expectedAmount: 100,
+      nowEpoch: NOW,
+    });
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("нет перевода USDT");
   });
@@ -92,7 +117,13 @@ describe("verifyTronUsdt", () => {
       contractRet: "SUCCESS",
       timestamp: (NOW - 25 * 60 * 60) * 1000,
       trc20TransferInfo: [
-        { to_address: TO, from_address: "TFrom", amount_str: "1000000", decimals: 6, symbol: "USDT" },
+        {
+          to_address: TO,
+          from_address: "TFrom",
+          amount_str: "1000000",
+          decimals: 6,
+          symbol: "USDT",
+        },
       ],
     });
     const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 1, nowEpoch: NOW });
@@ -106,7 +137,13 @@ describe("verifyTronUsdt", () => {
       confirmed: true,
       contractRet: "SUCCESS",
       trc20TransferInfo: [
-        { to_address: TO, from_address: "TFrom", amount_str: "1000000", decimals: 6, symbol: "USDT" },
+        {
+          to_address: TO,
+          from_address: "TFrom",
+          amount_str: "1000000",
+          decimals: 6,
+          symbol: "USDT",
+        },
       ],
     });
     const r = await verifyTronUsdt({ txHash: TX, toAddress: TO, expectedAmount: 1, nowEpoch: NOW });

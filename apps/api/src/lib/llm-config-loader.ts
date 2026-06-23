@@ -217,10 +217,7 @@ export async function loadTenantLlmConfigs(opts: LoadOpts): Promise<LoadedLlmCon
 }
 
 /** Filter tenants that have a given purpose configured. */
-export function tenantsWithPurpose(
-  loaded: LoadedLlmConfigs,
-  purpose: LlmPurpose,
-): number[] {
+export function tenantsWithPurpose(loaded: LoadedLlmConfigs, purpose: LlmPurpose): number[] {
   const out: number[] = [];
   for (const [tenantId, m] of loaded.byTenant) {
     if (m.has(purpose)) out.push(tenantId);

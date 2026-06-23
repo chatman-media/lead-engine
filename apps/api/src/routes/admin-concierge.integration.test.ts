@@ -17,11 +17,17 @@ import type { ConciergeCatalog } from "../lib/concierge-domain-tools.ts";
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_admin_concierge_${Math.random().toString(36).slice(2, 10)}`;
 const migrationsDir = resolve(
-  __dirname, "..", "..", "..", "..", "packages", "storage", "migrations",
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
 );
 const SECRET = "test-secret-admin-concierge-12345";
-const MASTER_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const MASTER_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;

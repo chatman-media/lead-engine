@@ -198,9 +198,7 @@ export function selectNextStage(opts: {
   const { nextStages, hasRequestTypeField, requestType } = opts;
   if (hasRequestTypeField && nextStages.length > 1) {
     const branch = requestType
-      ? nextStages.find(
-          (s) => s === `${requestType}_request` || s.startsWith(`${requestType}_`),
-        )
+      ? nextStages.find((s) => s === `${requestType}_request` || s.startsWith(`${requestType}_`))
       : undefined;
     if (!branch) return null;
     return { nextSlug: branch, requestType };
@@ -222,9 +220,7 @@ export function evaluateTransition(ctx: TransitionContext): TransitionSelection 
   if (workflowRule) {
     if (!ctx.allRequiredFieldsFilled) return null;
     const explicitTo =
-      typeof workflowRule.to === "string" && workflowRule.to.trim()
-        ? workflowRule.to.trim()
-        : null;
+      typeof workflowRule.to === "string" && workflowRule.to.trim() ? workflowRule.to.trim() : null;
     const selected = explicitTo
       ? {
           nextSlug: explicitTo,
@@ -348,12 +344,7 @@ export async function handleFieldUpdatedInTx(
       required: stageFields.required,
     })
     .from(stageFields)
-    .where(
-      and(
-        eq(stageFields.stageId, stage.id),
-        eq(stageFields.tenantId, event.tenantId),
-      ),
-    );
+    .where(and(eq(stageFields.stageId, stage.id), eq(stageFields.tenantId, event.tenantId)));
   const requiredFields = fields.filter((field) => field.required);
   if (requiredFields.length === 0) return noAdvance("no_required_fields");
 
@@ -507,10 +498,7 @@ export async function loadWebhookCallbackPageInTx(
     .select({ displayName: stageDefinitions.displayName })
     .from(stageDefinitions)
     .where(
-      and(
-        eq(stageDefinitions.id, event.stageId),
-        eq(stageDefinitions.tenantId, event.tenantId),
-      ),
+      and(eq(stageDefinitions.id, event.stageId), eq(stageDefinitions.tenantId, event.tenantId)),
     )
     .limit(1);
 
@@ -671,10 +659,7 @@ async function advanceLeadToNextStageInTx(
     );
   if (!currentStage) return { kind: "no_lead" };
 
-  if (
-    event.requiredCurrentStageType &&
-    currentStage.stageType !== event.requiredCurrentStageType
-  ) {
+  if (event.requiredCurrentStageType && currentStage.stageType !== event.requiredCurrentStageType) {
     return {
       kind: "not_applicable",
       reason: "current_stage_type",
@@ -819,9 +804,7 @@ function whenType(raw: unknown): string | null {
 }
 
 function priorityOf(rule: WorkflowTransitionRule): number {
-  return typeof rule.priority === "number" && Number.isFinite(rule.priority)
-    ? rule.priority
-    : 0;
+  return typeof rule.priority === "number" && Number.isFinite(rule.priority) ? rule.priority : 0;
 }
 
 async function resolveRequestType(opts: {

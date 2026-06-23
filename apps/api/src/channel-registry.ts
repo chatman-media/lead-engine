@@ -358,8 +358,7 @@ export class ChannelRegistry {
       read(VK_SECRET_KEY),
     ]);
     return {
-      confirmationCode:
-        confirmationCode || this.loadOpts.vkConfirmationCodeFallback || undefined,
+      confirmationCode: confirmationCode || this.loadOpts.vkConfirmationCodeFallback || undefined,
       secretKey: secretKey || this.loadOpts.vkSecretKeyFallback || undefined,
     };
   }
@@ -501,11 +500,7 @@ export class ChannelRegistry {
         );
         if (!token) continue;
         adapter = new MaxAdapter({ id: String(row.channelId), accessToken: token });
-        maxWebhookSecret = await this.resolveMaxWebhookSecret(
-          db,
-          row.tenantId,
-          row.credentialsRef,
-        );
+        maxWebhookSecret = await this.resolveMaxWebhookSecret(db, row.tenantId, row.credentialsRef);
       } else {
         // telegram_userbot и web в apps/api НЕ загружаются — userbot живёт
         // в apps/worker, web обрабатывается через отдельный WS-endpoint.

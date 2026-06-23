@@ -97,7 +97,9 @@ export async function advanceLead(opts: {
     const [conv] = await tx
       .select({ id: conversations.id, source: conversations.source })
       .from(conversations)
-      .where(and(eq(conversations.tenantId, tenantId), eq(conversations.userId, transition.contactId)))
+      .where(
+        and(eq(conversations.tenantId, tenantId), eq(conversations.userId, transition.contactId)),
+      )
       .orderBy(desc(conversations.lastMessageAt))
       .limit(1);
 
@@ -113,7 +115,11 @@ export async function advanceLead(opts: {
           conversationId: conv.id,
           role: "assistant",
           text: msgText,
-          metaJson: JSON.stringify({ adminId, sentVia: "operator-advance", toStage: transition.to }),
+          metaJson: JSON.stringify({
+            adminId,
+            sentVia: "operator-advance",
+            toStage: transition.to,
+          }),
           createdAt: now,
         })
         .returning({ id: messages.id });
@@ -128,7 +134,12 @@ export async function advanceLead(opts: {
           .select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
           .from(channelIdentities)
           .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-          .where(and(eq(channelIdentities.contactId, transition.contactId), eq(channels.status, "active")))
+          .where(
+            and(
+              eq(channelIdentities.contactId, transition.contactId),
+              eq(channels.status, "active"),
+            ),
+          )
           .limit(1);
         if (identity) {
           await tx.insert(outboundQueue).values({
@@ -167,7 +178,9 @@ export async function advanceLead(opts: {
           ),
         )
         .limit(1);
-      const commissionPct = Number(service?.commissionPct ?? service?.partnerDefaultCommissionPct ?? 0);
+      const commissionPct = Number(
+        service?.commissionPct ?? service?.partnerDefaultCommissionPct ?? 0,
+      );
       await tx.insert(partnerDeals).values({
         tenantId,
         partnerId: service?.partnerId ?? null,
@@ -233,7 +246,9 @@ export async function advanceLead(opts: {
       let leadFields: Record<string, unknown> = {};
       try {
         leadFields = JSON.parse(contactRow?.intakeJson ?? "{}") as Record<string, unknown>;
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       const pingOpts: PartnerPingOpts = {
         webhookUrl: ctx.webhookUrl,

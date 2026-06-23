@@ -26,7 +26,16 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_notif_${Math.random().toString(36).slice(2, 10)}`;
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const SECRET = "test-secret-notifications-flow-12345";
 
 let sql: Sql | null = null;
@@ -37,49 +46,46 @@ let token = "";
 
 const BASE = "/api/admin/notifications";
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    // biome-ignore lint/suspicious/noExplicitAny: repo generic db
-    const repo = new NotificationsRepo(db as any);
-    app.route(BASE, makeAdminNotificationsRoutes({ repo, botUsername: "mybot" }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  // biome-ignore lint/suspicious/noExplicitAny: repo generic db
+  const repo = new NotificationsRepo(db as any);
+  app.route(BASE, makeAdminNotificationsRoutes({ repo, botUsername: "mybot" }));
 
-    appSvc = new Hono();
-    appSvc.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    appSvc.route(
-      BASE,
-      makeAdminNotificationsRoutes({
-        repo,
-        botUsername: "mybot",
-        notificationService: {
-          sendTestMessage: async () => ({ ok: true }),
-        } as unknown as NotificationService,
-        opsRouter: { emit: async () => {} } as unknown as OpsAlertRouter,
-        opsEmailConfigured: true,
-      }),
-    );
+  appSvc = new Hono();
+  appSvc.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  appSvc.route(
+    BASE,
+    makeAdminNotificationsRoutes({
+      repo,
+      botUsername: "mybot",
+      notificationService: {
+        sendTestMessage: async () => ({ ok: true }),
+      } as unknown as NotificationService,
+      opsRouter: { emit: async () => {} } as unknown as OpsAlertRouter,
+      opsEmailConfigured: true,
+    }),
+  );
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "notif@demo.io", password: "strong-pwd-12345" }),
-    });
-    token = ((await sa.json()) as { token: string }).token;
-  },
-  30_000,
-);
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "notif@demo.io", password: "strong-pwd-12345" }),
+  });
+  token = ((await sa.json()) as { token: string }).token;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -88,7 +94,13 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function req(method: string, path: string, body?: unknown, withAuth = true, instance?: Hono): Promise<Response> {
+async function req(
+  method: string,
+  path: string,
+  body?: unknown,
+  withAuth = true,
+  instance?: Hono,
+): Promise<Response> {
   return (instance ?? app).request(BASE + path, {
     method,
     headers: {
@@ -109,7 +121,11 @@ describe("admin-notifications", () => {
     if (!sql) return;
     expect(((await (await req("GET", "/rules")).json()) as { items: unknown[] }).items).toEqual([]);
 
-    const created = await req("POST", "/rules", { eventType: "stage_changed", targetId: "-100123", condition: { stage: "won" } });
+    const created = await req("POST", "/rules", {
+      eventType: "stage_changed",
+      targetId: "-100123",
+      condition: { stage: "won" },
+    });
     expect(created.status).toBe(201);
     const rule = (await created.json()) as { id: number };
 
@@ -127,34 +143,57 @@ describe("admin-notifications", () => {
 
   it("settings: get default → put → get reflects", async () => {
     if (!sql) return;
-    const def = (await (await req("GET", "/settings")).json()) as { botUsername: string; notifyOnAssignedOnly: boolean };
+    const def = (await (await req("GET", "/settings")).json()) as {
+      botUsername: string;
+      notifyOnAssignedOnly: boolean;
+    };
     expect(def.botUsername).toBe("mybot");
     expect(def.notifyOnAssignedOnly).toBe(true);
 
-    expect((await req("PUT", "/settings", { telegramChatId: "555", notifyOnAssignedOnly: false })).status).toBe(200);
-    const upd = (await (await req("GET", "/settings")).json()) as { telegramChatId: string | null; notifyOnAssignedOnly: boolean };
+    expect(
+      (await req("PUT", "/settings", { telegramChatId: "555", notifyOnAssignedOnly: false }))
+        .status,
+    ).toBe(200);
+    const upd = (await (await req("GET", "/settings")).json()) as {
+      telegramChatId: string | null;
+      notifyOnAssignedOnly: boolean;
+    };
     expect(upd.telegramChatId).toBe("555");
     expect(upd.notifyOnAssignedOnly).toBe(false);
   });
 
   it("link tokens: settings/link + group-link → возвращают token", async () => {
     if (!sql) return;
-    expect(typeof ((await (await req("POST", "/settings/link")).json()) as { token: string }).token).toBe("string");
-    expect(typeof ((await (await req("POST", "/group-link", { eventType: "stage_changed" })).json()) as { token: string }).token).toBe("string");
+    expect(
+      typeof ((await (await req("POST", "/settings/link")).json()) as { token: string }).token,
+    ).toBe("string");
+    expect(
+      typeof (
+        (await (await req("POST", "/group-link", { eventType: "stage_changed" })).json()) as {
+          token: string;
+        }
+      ).token,
+    ).toBe("string");
   });
 
   it("informer: feed + prefs update", async () => {
     if (!sql) return;
-    const feed = (await (await req("GET", "/informer/feed?limit=5")).json()) as { items: unknown[] };
+    const feed = (await (await req("GET", "/informer/feed?limit=5")).json()) as {
+      items: unknown[];
+    };
     expect(Array.isArray(feed.items)).toBe(true);
-    expect((await req("PUT", "/informer", {
-      informerLevel: "critical",
-      informerDigest: "daily",
-      informerDigestHour: 9,
-      informerTz: "Asia/Bangkok",
-      informerMutedUntil: null,
-      informerTopics: { leads: true, orders: false },
-    })).status).toBe(200);
+    expect(
+      (
+        await req("PUT", "/informer", {
+          informerLevel: "critical",
+          informerDigest: "daily",
+          informerDigestHour: 9,
+          informerTz: "Asia/Bangkok",
+          informerMutedUntil: null,
+          informerTopics: { leads: true, orders: false },
+        })
+      ).status,
+    ).toBe(200);
   });
 
   it("informer: read endpoint marks feed rows read", async () => {
@@ -184,7 +223,12 @@ describe("admin-notifications", () => {
     if (!inserted) throw new Error("admin notification insert returned no row");
 
     const before = (await (await req("GET", "/informer/feed?limit=5")).json()) as {
-      items: Array<{ id: number; readAt: number | null; conversationId: number | null; leadId: number | null }>;
+      items: Array<{
+        id: number;
+        readAt: number | null;
+        conversationId: number | null;
+        leadId: number | null;
+      }>;
     };
     const beforeItem = before.items.find((item) => item.id === inserted.id);
     expect(beforeItem?.readAt).toBeNull();
@@ -200,7 +244,11 @@ describe("admin-notifications", () => {
 
   it("ops: status (без роутера) + ops-test (не настроен)", async () => {
     if (!sql) return;
-    const status = (await (await req("GET", "/ops-status")).json()) as { enabled: boolean; botConfigured: boolean; telegramLinked: boolean };
+    const status = (await (await req("GET", "/ops-status")).json()) as {
+      enabled: boolean;
+      botConfigured: boolean;
+      telegramLinked: boolean;
+    };
     expect(status.enabled).toBe(false);
     expect(status.botConfigured).toBe(true);
     expect(status.telegramLinked).toBe(true); // выставили telegramChatId в settings-тесте
@@ -209,19 +257,38 @@ describe("admin-notifications", () => {
 
   it("templates: upsert → list → no body 400 → delete", async () => {
     if (!sql) return;
-    expect((await req("PUT", "/templates/stage_changed", { body: "Привет {{name}}" })).status).toBe(200);
+    expect((await req("PUT", "/templates/stage_changed", { body: "Привет {{name}}" })).status).toBe(
+      200,
+    );
     expect((await req("PUT", "/templates/stage_changed", {})).status).toBe(400);
     const list = (await (await req("GET", "/templates")).json()) as { items: unknown[] };
     expect(list.items.length).toBe(1);
     expect((await req("DELETE", "/templates/stage_changed")).status).toBe(200);
-    expect(((await (await req("GET", "/templates")).json()) as { items: unknown[] }).items).toEqual([]);
+    expect(((await (await req("GET", "/templates")).json()) as { items: unknown[] }).items).toEqual(
+      [],
+    );
   });
 
   it("со сконфигуренными сервисами: rule/test + ops-test → ok:true", async () => {
     if (!sql) return;
-    const created = await req("POST", "/rules", { eventType: "stage_changed", targetId: "-100" }, true, appSvc);
+    const created = await req(
+      "POST",
+      "/rules",
+      { eventType: "stage_changed", targetId: "-100" },
+      true,
+      appSvc,
+    );
     const rule = (await created.json()) as { id: number };
-    expect(((await (await req("POST", `/rules/${rule.id}/test`, undefined, true, appSvc)).json()) as { ok: boolean }).ok).toBe(true);
-    expect(((await (await req("POST", "/ops-test", undefined, true, appSvc)).json()) as { ok: boolean }).ok).toBe(true);
+    expect(
+      (
+        (await (await req("POST", `/rules/${rule.id}/test`, undefined, true, appSvc)).json()) as {
+          ok: boolean;
+        }
+      ).ok,
+    ).toBe(true);
+    expect(
+      ((await (await req("POST", "/ops-test", undefined, true, appSvc)).json()) as { ok: boolean })
+        .ok,
+    ).toBe(true);
   });
 });

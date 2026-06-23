@@ -29,7 +29,16 @@ const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_admin_rls_${Math.random().toString(36).slice(2, 10)}`;
 const appRoleName = `app_admin_rls_${Math.random().toString(36).slice(2, 8)}`;
 const appRolePass = "test-pass-admin-rls";
-const migrationsDir = resolve(__dirname, "..", "..", "..", "..", "packages", "storage", "migrations");
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
 const BASE_DOMAIN = "test.local";
 
 let ownerSql: Sql | null = null;
@@ -42,104 +51,98 @@ let contactId = 0;
 let leadId = 0;
 const nowEpoch = Math.floor(Date.now() / 1000);
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
 
-    ownerSql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(ownerSql, migrationsDir);
-    // FORCE RLS остаётся активным — production-like setup.
+  ownerSql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(ownerSql, migrationsDir);
+  // FORCE RLS остаётся активным — production-like setup.
 
-    await ownerSql.unsafe(`
+  await ownerSql.unsafe(`
       CREATE ROLE "${appRoleName}" LOGIN PASSWORD '${appRolePass}' NOSUPERUSER NOBYPASSRLS;
       GRANT USAGE ON SCHEMA public TO "${appRoleName}";
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${appRoleName}";
       GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${appRoleName}";
     `);
 
-    const ownerDb = drizzle(ownerSql, { schema });
-    const [t] = await ownerDb
-      .insert(tenants)
-      .values({ slug: "rls-admin", plan: "free", status: "active", llmBillingMode: "byok" })
-      .returning();
-    if (!t) throw new Error("seed tenant");
-    tenantId = t.id;
-    await ownerDb
-      .insert(channels)
-      .values({ tenantId, kind: "telegram_bot", externalId: "rls-admin-bot", status: "active" });
-    const [contact] = await ownerDb
-      .insert(contacts)
-      .values({ tenantId, displayName: "User RLS", attributesJson: null })
-      .returning();
-    if (!contact) throw new Error("seed contact");
-    contactId = contact.id;
-    const [conv] = await ownerDb
-      .insert(conversations)
-      .values({
-        tenantId,
-        userId: contactId,
-        source: "bot",
-        mode: "ai",
-        lastMessageAt: nowEpoch,
-      })
-      .returning();
-    if (!conv) throw new Error("seed conversation");
-    conversationId = conv.id;
-    await ownerDb.insert(messages).values({
+  const ownerDb = drizzle(ownerSql, { schema });
+  const [t] = await ownerDb
+    .insert(tenants)
+    .values({ slug: "rls-admin", plan: "free", status: "active", llmBillingMode: "byok" })
+    .returning();
+  if (!t) throw new Error("seed tenant");
+  tenantId = t.id;
+  await ownerDb
+    .insert(channels)
+    .values({ tenantId, kind: "telegram_bot", externalId: "rls-admin-bot", status: "active" });
+  const [contact] = await ownerDb
+    .insert(contacts)
+    .values({ tenantId, displayName: "User RLS", attributesJson: null })
+    .returning();
+  if (!contact) throw new Error("seed contact");
+  contactId = contact.id;
+  const [conv] = await ownerDb
+    .insert(conversations)
+    .values({
       tenantId,
-      conversationId,
-      role: "user",
-      text: "RLS hello",
+      userId: contactId,
+      source: "bot",
+      mode: "ai",
+      lastMessageAt: nowEpoch,
+    })
+    .returning();
+  if (!conv) throw new Error("seed conversation");
+  conversationId = conv.id;
+  await ownerDb.insert(messages).values({
+    tenantId,
+    conversationId,
+    role: "user",
+    text: "RLS hello",
+    createdAt: nowEpoch,
+  });
+  const [l] = await ownerDb
+    .insert(leads)
+    .values({
+      tenantId,
+      userId: contactId,
+      state: "intake_pending",
       createdAt: nowEpoch,
-    });
-    const [l] = await ownerDb
-      .insert(leads)
-      .values({
-        tenantId,
-        userId: contactId,
-        state: "intake_pending",
-        createdAt: nowEpoch,
-        updatedAt: nowEpoch,
-      })
-      .returning();
-    if (!l) throw new Error("seed lead");
-    leadId = l.id;
+      updatedAt: nowEpoch,
+    })
+    .returning();
+  if (!l) throw new Error("seed lead");
+  leadId = l.id;
 
-    // Hono app под app-role'ью (non-bypass).
-    const parsed = new URL(testUrl);
-    parsed.username = appRoleName;
-    parsed.password = appRolePass;
-    appSql = postgres(parsed.toString(), { max: 4, onnotice: () => {} });
-    appDb = drizzle(appSql, { schema });
+  // Hono app под app-role'ью (non-bypass).
+  const parsed = new URL(testUrl);
+  parsed.username = appRoleName;
+  parsed.password = appRolePass;
+  appSql = postgres(parsed.toString(), { max: 4, onnotice: () => {} });
+  appDb = drizzle(appSql, { schema });
 
-    app = new Hono();
-    app.use("/admin/*", makeTenantContextMiddleware({ baseDomain: BASE_DOMAIN }));
-    app.use("/admin/*", requireTenant);
-    app.route("/", makeAdminRoutes({ db: appDb }));
-  },
-  30_000,
-);
+  app = new Hono();
+  app.use("/admin/*", makeTenantContextMiddleware({ baseDomain: BASE_DOMAIN }));
+  app.use("/admin/*", requireTenant);
+  app.route("/", makeAdminRoutes({ db: appDb }));
+}, 30_000);
 
-afterAll(
-  async () => {
-    if (appSql) {
-      await appSql.end({ timeout: 0 }).catch(() => {});
-      appSql = null;
-    }
-    if (ownerSql) {
-      await ownerSql
-        .unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
-        .catch(() => {});
-      await ownerSql.end({ timeout: 0 }).catch(() => {});
-      ownerSql = null;
-    }
-  },
-  10_000,
-);
+afterAll(async () => {
+  if (appSql) {
+    await appSql.end({ timeout: 0 }).catch(() => {});
+    appSql = null;
+  }
+  if (ownerSql) {
+    await ownerSql
+      .unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
+      .catch(() => {});
+    await ownerSql.end({ timeout: 0 }).catch(() => {});
+    ownerSql = null;
+  }
+}, 10_000);
 
 function tenantHost(slug: string): string {
   return `${slug}.${BASE_DOMAIN}`;

@@ -1,10 +1,5 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import {
-  funnels,
-  partners,
-  partnerServices,
-  serviceCatalogItems,
-} from "@chatman-media/storage";
+import { funnels, partners, partnerServices, serviceCatalogItems } from "@chatman-media/storage";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
@@ -74,10 +69,7 @@ export function makeAdminServiceCatalogRoutes(opts: { db: Db }): Hono {
         .from(serviceCatalogItems)
         .leftJoin(
           funnels,
-          and(
-            eq(funnels.tenantId, tenantId),
-            eq(funnels.id, serviceCatalogItems.funnelId),
-          ),
+          and(eq(funnels.tenantId, tenantId), eq(funnels.id, serviceCatalogItems.funnelId)),
         )
         .leftJoin(
           partnerServices,
@@ -91,7 +83,11 @@ export function makeAdminServiceCatalogRoutes(opts: { db: Db }): Hono {
           and(eq(partners.tenantId, tenantId), eq(partners.id, partnerServices.partnerId)),
         )
         .where(eq(serviceCatalogItems.tenantId, tenantId))
-        .orderBy(desc(serviceCatalogItems.isActive), asc(serviceCatalogItems.sortOrder), desc(serviceCatalogItems.id)),
+        .orderBy(
+          desc(serviceCatalogItems.isActive),
+          asc(serviceCatalogItems.sortOrder),
+          desc(serviceCatalogItems.id),
+        ),
     );
 
     return c.json({ items: rows });
@@ -100,7 +96,7 @@ export function makeAdminServiceCatalogRoutes(opts: { db: Db }): Hono {
   app.post("/api/admin/service-catalog/items", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = c.var.adminId as number | undefined;
-    const body = await c.req.json<CatalogBody>().catch(() => ({} as CatalogBody));
+    const body = await c.req.json<CatalogBody>().catch(() => ({}) as CatalogBody);
     const now = Math.floor(Date.now() / 1000);
     const built = buildCatalogState({ body, tenantId, now });
     if ("error" in built) return c.json({ error: built.error }, built.status);
@@ -123,7 +119,8 @@ export function makeAdminServiceCatalogRoutes(opts: { db: Db }): Hono {
       });
       return c.json({ item: result.item }, 201);
     } catch (err) {
-      if (isUniqueViolation(err)) return c.json({ error: "service with this slug already exists" }, 409);
+      if (isUniqueViolation(err))
+        return c.json({ error: "service with this slug already exists" }, 409);
       throw err;
     }
   });
@@ -133,7 +130,7 @@ export function makeAdminServiceCatalogRoutes(opts: { db: Db }): Hono {
     const adminId = c.var.adminId as number | undefined;
     const id = Number(c.req.param("id"));
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
-    const body = await c.req.json<CatalogBody>().catch(() => ({} as CatalogBody));
+    const body = await c.req.json<CatalogBody>().catch(() => ({}) as CatalogBody);
     const now = Math.floor(Date.now() / 1000);
 
     try {
@@ -169,7 +166,8 @@ export function makeAdminServiceCatalogRoutes(opts: { db: Db }): Hono {
       });
       return c.json({ item: result.item });
     } catch (err) {
-      if (isUniqueViolation(err)) return c.json({ error: "service with this slug already exists" }, 409);
+      if (isUniqueViolation(err))
+        return c.json({ error: "service with this slug already exists" }, 409);
       throw err;
     }
   });
@@ -218,7 +216,9 @@ function buildCatalogState(input: {
 
   const slugSource = has(body, "slug") ? cleanString(body.slug) : (existing?.slug ?? name);
   const slug = normalizeSlug(slugSource) || normalizeSlug(name) || `service_${now}`;
-  const rawFunnelId = has(body, "funnelId") ? parseOptionalId(body.funnelId) : (existing?.funnelId ?? null);
+  const rawFunnelId = has(body, "funnelId")
+    ? parseOptionalId(body.funnelId)
+    : (existing?.funnelId ?? null);
   const rawPartnerServiceId = has(body, "partnerServiceId")
     ? parseOptionalId(body.partnerServiceId)
     : (existing?.partnerServiceId ?? null);
@@ -242,14 +242,20 @@ function buildCatalogState(input: {
       tenantId,
       slug,
       name,
-      category: has(body, "category") ? cleanNullableString(body.category) : (existing?.category ?? null),
-      description: has(body, "description") ? cleanNullableString(body.description) : (existing?.description ?? null),
+      category: has(body, "category")
+        ? cleanNullableString(body.category)
+        : (existing?.category ?? null),
+      description: has(body, "description")
+        ? cleanNullableString(body.description)
+        : (existing?.description ?? null),
       routeType,
       funnelId: routeType === "funnel" ? rawFunnelId : null,
       partnerServiceId: routeType === "partner_service" ? rawPartnerServiceId : null,
       webhookUrl,
       isActive: has(body, "isActive") ? Boolean(body.isActive) : (existing?.isActive ?? true),
-      sortOrder: has(body, "sortOrder") ? parseSortOrder(body.sortOrder) : (existing?.sortOrder ?? 0),
+      sortOrder: has(body, "sortOrder")
+        ? parseSortOrder(body.sortOrder)
+        : (existing?.sortOrder ?? 0),
       metadataJson: metadataResult.value,
       ...(existing ? {} : { createdAt: now }),
       updatedAt: now,
@@ -279,7 +285,9 @@ async function validateTarget(
     const [row] = await tx
       .select({ id: partnerServices.id })
       .from(partnerServices)
-      .where(and(eq(partnerServices.tenantId, tenantId), eq(partnerServices.id, state.partnerServiceId)))
+      .where(
+        and(eq(partnerServices.tenantId, tenantId), eq(partnerServices.id, state.partnerServiceId)),
+      )
       .limit(1);
     return row ? null : "partner service not found";
   }
@@ -292,7 +300,12 @@ function has(obj: object, key: keyof CatalogBody): boolean {
 }
 
 function parseRouteType(value: unknown): RouteType | null {
-  if (value === "manual" || value === "funnel" || value === "partner_service" || value === "webhook") {
+  if (
+    value === "manual" ||
+    value === "funnel" ||
+    value === "partner_service" ||
+    value === "webhook"
+  ) {
     return value;
   }
   return null;
@@ -354,10 +367,39 @@ function normalizeSlug(value: string): string {
 
 function transliterate(value: string): string {
   const map: Record<string, string> = {
-    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
-    й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
-    у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ы: "y", э: "e",
-    ю: "yu", я: "ya", ъ: "", ь: "",
+    а: "a",
+    б: "b",
+    в: "v",
+    г: "g",
+    д: "d",
+    е: "e",
+    ё: "e",
+    ж: "zh",
+    з: "z",
+    и: "i",
+    й: "y",
+    к: "k",
+    л: "l",
+    м: "m",
+    н: "n",
+    о: "o",
+    п: "p",
+    р: "r",
+    с: "s",
+    т: "t",
+    у: "u",
+    ф: "f",
+    х: "h",
+    ц: "c",
+    ч: "ch",
+    ш: "sh",
+    щ: "sch",
+    ы: "y",
+    э: "e",
+    ю: "yu",
+    я: "ya",
+    ъ: "",
+    ь: "",
   };
   return value
     .toLowerCase()

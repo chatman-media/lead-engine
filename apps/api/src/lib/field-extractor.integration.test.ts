@@ -61,10 +61,7 @@ function stubRef(response: string): LoadedRef {
 }
 
 async function freshContact(): Promise<number> {
-  const [c] = await db
-    .insert(contacts)
-    .values({ tenantId })
-    .returning({ id: contacts.id });
+  const [c] = await db.insert(contacts).values({ tenantId }).returning({ id: contacts.id });
   return c!.id;
 }
 
@@ -126,10 +123,7 @@ describe("concierge branch-aware auto-advance (slice 3)", () => {
     expect(lead?.state).toBe("transfer_request");
     expect(lead?.requestType).toBe("transfer");
 
-    const events = await db
-      .select()
-      .from(leadEvents)
-      .where(eq(leadEvents.leadId, lead!.id));
+    const events = await db.select().from(leadEvents).where(eq(leadEvents.leadId, lead!.id));
     expect(events.some((e) => e.toState === "transfer_request")).toBe(true);
   });
 
@@ -175,12 +169,7 @@ describe("concierge branch-aware auto-advance (slice 3)", () => {
     const [completed] = await db
       .select({ id: stageDefinitions.id })
       .from(stageDefinitions)
-      .where(
-        and(
-          eq(stageDefinitions.tenantId, tenantId),
-          eq(stageDefinitions.slug, "completed"),
-        ),
-      );
+      .where(and(eq(stageDefinitions.tenantId, tenantId), eq(stageDefinitions.slug, "completed")));
     await db
       .update(leads)
       .set({ stageDefinitionId: completed!.id, state: "completed" })

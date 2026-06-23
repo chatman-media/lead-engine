@@ -1,10 +1,5 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import {
-  conversations,
-  leads,
-  messages,
-  stageDefinitions,
-} from "@chatman-media/storage";
+import { conversations, leads, messages, stageDefinitions } from "@chatman-media/storage";
 import { and, count, eq, gte, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { loadPrimaryActiveFunnel } from "../lib/primary-funnel.ts";
@@ -45,10 +40,7 @@ export function makeAdminDashboardRoutes(opts: AdminDashboardRoutesOpts): Hono {
         .from(stageDefinitions)
         .leftJoin(
           leads,
-          and(
-            eq(leads.stageDefinitionId, stageDefinitions.id),
-            eq(leads.tenantId, tenantId),
-          ),
+          and(eq(leads.stageDefinitionId, stageDefinitions.id), eq(leads.tenantId, tenantId)),
         )
         .where(
           primaryFunnel
@@ -74,10 +66,7 @@ export function makeAdminDashboardRoutes(opts: AdminDashboardRoutesOpts): Hono {
         .from(leads)
         .where(
           primaryStageIds.length > 0
-            ? and(
-                eq(leads.tenantId, tenantId),
-                inArray(leads.stageDefinitionId, primaryStageIds),
-              )
+            ? and(eq(leads.tenantId, tenantId), inArray(leads.stageDefinitionId, primaryStageIds))
             : eq(leads.tenantId, tenantId),
         );
 
@@ -85,26 +74,17 @@ export function makeAdminDashboardRoutes(opts: AdminDashboardRoutesOpts): Hono {
       const [convOpen] = await tx
         .select({ n: count(conversations.id) })
         .from(conversations)
-        .where(
-          and(eq(conversations.tenantId, tenantId), eq(conversations.mode, "ai")),
-        );
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.mode, "ai")));
 
       const [convEscalated] = await tx
         .select({ n: count(conversations.id) })
         .from(conversations)
-        .where(
-          and(eq(conversations.tenantId, tenantId), eq(conversations.mode, "human")),
-        );
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.mode, "human")));
 
       const [convToday] = await tx
         .select({ n: count(conversations.id) })
         .from(conversations)
-        .where(
-          and(
-            eq(conversations.tenantId, tenantId),
-            gte(conversations.createdAt, todayStart),
-          ),
-        );
+        .where(and(eq(conversations.tenantId, tenantId), gte(conversations.createdAt, todayStart)));
 
       const [convUnread] = await tx
         .select({ n: sql<number>`COALESCE(SUM(${conversations.unreadCount}), 0)::int` })

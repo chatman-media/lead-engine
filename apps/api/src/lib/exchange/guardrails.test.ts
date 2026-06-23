@@ -37,13 +37,12 @@ describe("checkRateGuard — легальные котировки проход�
   });
 
   // Реальные тарифы обменника: объёмные RUB-тарифы намеренно НИЖЕ base (volume discount).
-  it.each([2.64, 2.59, 2.52, 2.48, 2.39])(
-    "RUB volume-tier %p при базе 2.55 не роняет guard",
-    (displayRate) => {
-      const r = checkRateGuard({ eff: displayRate, baseRate: 2.55, mode: "divide", guardrails: G });
-      expect(r.tripped).toBe(false);
-    },
-  );
+  it.each([
+    2.64, 2.59, 2.52, 2.48, 2.39,
+  ])("RUB volume-tier %p при базе 2.55 не роняет guard", (displayRate) => {
+    const r = checkRateGuard({ eff: displayRate, baseRate: 2.55, mode: "divide", guardrails: G });
+    expect(r.tripped).toBe(false);
+  });
 
   it.each([31.35, 31.45, 31.7])("USDT-тариф %p при базе 31.5 проходит", (displayRate) => {
     const r = checkRateGuard({ eff: displayRate, baseRate: 31.5, mode: "multiply", guardrails: G });
@@ -64,8 +63,8 @@ describe("checkRateGuard — крайние случаи и конфиг", () =>
     expect(
       checkRateGuard({ eff: 21, baseRate: 35, mode: "multiply", guardrails: loose }).tripped,
     ).toBe(false);
-    expect(
-      checkRateGuard({ eff: 21, baseRate: 35, mode: "multiply", guardrails: G }).tripped,
-    ).toBe(true);
+    expect(checkRateGuard({ eff: 21, baseRate: 35, mode: "multiply", guardrails: G }).tripped).toBe(
+      true,
+    );
   });
 });

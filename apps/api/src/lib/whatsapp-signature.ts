@@ -21,9 +21,7 @@ export class WhatsAppSignatureError extends Error {
  * Парсит `X-Hub-Signature-256` header. Format: `sha256=<hex>`.
  * Возвращает hex-строку signature или throws.
  */
-export function parseWhatsAppSignatureHeader(
-  header: string | null | undefined,
-): string {
+export function parseWhatsAppSignatureHeader(header: string | null | undefined): string {
   if (!header) throw new WhatsAppSignatureError("header missing");
   const trimmed = header.trim();
   // Meta всегда префиксит "sha256=". Если префикса нет — это malformed,
@@ -60,9 +58,7 @@ export interface VerifyWhatsAppOptions {
  */
 export function verifyWhatsAppSignature(opts: VerifyWhatsAppOptions): void {
   const gotHex = parseWhatsAppSignatureHeader(opts.header);
-  const expectedHex = createHmac("sha256", opts.secret)
-    .update(opts.payload, "utf8")
-    .digest("hex");
+  const expectedHex = createHmac("sha256", opts.secret).update(opts.payload, "utf8").digest("hex");
   const gotBuf = Buffer.from(gotHex, "hex");
   const expectedBuf = Buffer.from(expectedHex, "hex");
   if (gotBuf.length !== expectedBuf.length) {

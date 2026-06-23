@@ -66,9 +66,7 @@ export function createMcpServer(opts: {
         return { content: [{ type: "text" as const, text: "No results found." }] };
       }
 
-      const text = hits
-        .map((h, i) => `[${i + 1}] **${h.title}**\n${h.text}`)
-        .join("\n\n---\n\n");
+      const text = hits.map((h, i) => `[${i + 1}] **${h.title}**\n${h.text}`).join("\n\n---\n\n");
       return { content: [{ type: "text" as const, text }] };
     },
   );
@@ -79,7 +77,10 @@ export function createMcpServer(opts: {
     "lead_list",
     "List leads for this tenant. Optionally filter by stage/state.",
     {
-      state: z.string().optional().describe("Filter by lead state slug (e.g. intake_pending, approved)"),
+      state: z
+        .string()
+        .optional()
+        .describe("Filter by lead state slug (e.g. intake_pending, approved)"),
       limit: z.number().int().min(1).max(50).default(20).describe("Max results"),
     },
     async ({ state, limit }) => {
@@ -146,7 +147,10 @@ export function createMcpServer(opts: {
     "Move a lead to a different stage/state.",
     {
       id: z.number().int().positive().describe("Lead ID"),
-      state: z.string().min(1).describe("Target state slug (e.g. approved, docs_pending, rejected)"),
+      state: z
+        .string()
+        .min(1)
+        .describe("Target state slug (e.g. approved, docs_pending, rejected)"),
     },
     async ({ id, state }) => {
       const nowEpoch = Math.floor(Date.now() / 1000);

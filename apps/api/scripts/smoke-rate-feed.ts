@@ -42,10 +42,31 @@ async function main() {
     ]) {
       await tx
         .insert(exchangeRates)
-        .values({ tenantId: TENANT, asset: r.asset, quoteAsset: QUOTE, network: r.network, baseRate: 0, quoteMode: r.quoteMode, autoUpdate: true, createdAt: now, updatedAt: now })
+        .values({
+          tenantId: TENANT,
+          asset: r.asset,
+          quoteAsset: QUOTE,
+          network: r.network,
+          baseRate: 0,
+          quoteMode: r.quoteMode,
+          autoUpdate: true,
+          createdAt: now,
+          updatedAt: now,
+        })
         .onConflictDoUpdate({
-          target: [exchangeRates.tenantId, exchangeRates.asset, exchangeRates.quoteAsset, exchangeRates.network],
-          set: { baseRate: 0, autoUpdate: true, quoteMode: r.quoteMode, isActive: true, updatedAt: now },
+          target: [
+            exchangeRates.tenantId,
+            exchangeRates.asset,
+            exchangeRates.quoteAsset,
+            exchangeRates.network,
+          ],
+          set: {
+            baseRate: 0,
+            autoUpdate: true,
+            quoteMode: r.quoteMode,
+            isActive: true,
+            updatedAt: now,
+          },
         });
     }
   });
@@ -55,7 +76,12 @@ async function main() {
   console.log("  result:", res);
 
   const after = await withTenant(db, TENANT, async (tx) =>
-    tx.select({ asset: exchangeRates.asset, baseRate: exchangeRates.baseRate, mode: exchangeRates.quoteMode })
+    tx
+      .select({
+        asset: exchangeRates.asset,
+        baseRate: exchangeRates.baseRate,
+        mode: exchangeRates.quoteMode,
+      })
       .from(exchangeRates)
       .where(and(eq(exchangeRates.tenantId, TENANT), eq(exchangeRates.autoUpdate, true))),
   );
@@ -68,11 +94,15 @@ async function main() {
 
   // cleanup
   await withTenant(db, TENANT, async (tx) => {
-    await tx.delete(exchangeRates).where(and(eq(exchangeRates.tenantId, TENANT), eq(exchangeRates.quoteAsset, QUOTE)));
+    await tx
+      .delete(exchangeRates)
+      .where(and(eq(exchangeRates.tenantId, TENANT), eq(exchangeRates.quoteAsset, QUOTE)));
   });
 
   await client.end({ timeout: 0 });
-  console.log(ok ? `\n✅ фид обновил base_rate (${QUOTE})` : "\n❌ base_rate не обновился (проверь сеть/API)");
+  console.log(
+    ok ? `\n✅ фид обновил base_rate (${QUOTE})` : "\n❌ base_rate не обновился (проверь сеть/API)",
+  );
   process.exit(ok ? 0 : 1);
 }
 
