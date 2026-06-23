@@ -1982,6 +1982,7 @@ function PayoutPointsTab() {
   const [supportedBanks, setSupportedBanks] = useState<string[]>([]);
   const [savingBanks, setSavingBanks] = useState(false);
   const [pointsPage, setPointsPage] = useState(0);
+  const [osmRegion, setOsmRegion] = useState("ph_manila");
 
   const load = (force = false) => {
     if (!force && payoutPointsCache.value) {
@@ -2138,12 +2139,27 @@ function PayoutPointsTab() {
     }
   };
 
+  const OSM_REGIONS: Record<string, { label: string; bbox: string; quoteAsset: string }> = {
+    ph_manila: {
+      label: "Филиппины — Манила",
+      bbox: "14.35,120.90,14.80,121.15",
+      quoteAsset: "PHP",
+    },
+    th_bangkok: {
+      label: "Таиланд — Бангкок",
+      bbox: "13.60,100.40,13.90,100.80",
+      quoteAsset: "THB",
+    },
+    th_phuket: { label: "Таиланд — Пхукет", bbox: "7.75,98.20,8.20,98.45", quoteAsset: "THB" },
+  };
+
   const syncOsm = async () => {
     setSyncing(true);
     try {
-      const r = await saas.syncOsmAtms();
+      const region = OSM_REGIONS[osmRegion];
+      const r = await saas.syncOsmAtms({ bbox: region.bbox, quoteAsset: region.quoteAsset });
       toast.success(
-        `OSM синк: добавлено/обновлено ${r.upserted} из ${r.fetched} (пропущено ${r.skipped})`,
+        `OSM синк (${region.label}): добавлено/обновлено ${r.upserted} из ${r.fetched} (пропущено ${r.skipped})`,
       );
       load(true);
     } catch {
@@ -2226,6 +2242,18 @@ function PayoutPointsTab() {
               <MapIcon className="mr-1 h-4 w-4" />
               {viewMode === "map" ? "Список" : "Карта"}
             </Button>
+            <Select value={osmRegion} onValueChange={setOsmRegion}>
+              <SelectTrigger className="h-8 w-44 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(OSM_REGIONS).map(([key, r]) => (
+                  <SelectItem key={key} value={key} className="text-xs">
+                    {r.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button size="sm" variant="outline" onClick={syncOsm} disabled={syncing}>
               {syncing ? "Синхронизация…" : "Синк OSM"}
             </Button>
