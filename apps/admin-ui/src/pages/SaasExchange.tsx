@@ -423,6 +423,44 @@ const REQUISITE_GROUPS: Array<{ title: string; fields: RequisiteField[] }> = [
 
 const REQUISITE_TYPES = REQUISITE_GROUPS.flatMap((group) => group.fields);
 
+// Группировка 18 секций реквизитов по смысловым категориям для UI.
+const CATEGORY_GROUPS: Array<{
+  category: string;
+  groupTitles: string[];
+}> = [
+  {
+    category: "Крипто",
+    groupTitles: [
+      "USDT TRC20",
+      "USDT ERC20",
+      "USDT BEP20 / BSC",
+      "USDT TON",
+      "USDT Solana",
+      "USDC ERC20",
+      "USDC Solana",
+      "BTC",
+      "ETH ERC20",
+      "LTC",
+      "TRX Tron",
+      "TON",
+      "Exchange ID",
+      "WestWallet",
+    ],
+  },
+  {
+    category: "Фиат",
+    groupTitles: ["RUB оплата", "Выдача средств"],
+  },
+  {
+    category: "Контакты",
+    groupTitles: ["Контакты и офисы"],
+  },
+  {
+    category: "Тексты и правила",
+    groupTitles: ["AML / KYC"],
+  },
+];
+
 const LEGACY_REQUISITE_LABELS: Record<string, string> = {
   exchange_operator_contact: "Контакт оператора",
   exchange_payout_methods: "Выдача: банки / наличные",
@@ -546,10 +584,15 @@ export function SaasExchange() {
   const [orders, setOrders] = useState<ExchangeOrder[]>([]);
   const [ordersTotal, setOrdersTotal] = useState(0);
   const [ordersPage, setOrdersPage] = useState(0);
+  const [ordersFilter, setOrdersFilter] = useState<"all" | "active" | "done" | "cancelled">("all");
+  const [selectedOrder, setSelectedOrder] = useState<ExchangeOrder | null>(null);
   const ORDERS_PAGE_SIZE = 20;
   const [turnover, setTurnover] = useState<ExchangeTurnover | null>(null);
   const [exchangeEval, setExchangeEval] = useState<ExchangeEvalResult | null>(null);
   const [exchangeEvalRunning, setExchangeEvalRunning] = useState(false);
+
+  // Временная метка последнего обновления курсов
+  const [ratesUpdatedAt, setRatesUpdatedAt] = useState<number | null>(null);
 
   // Курсы — тир-карта от рыночного фида (RUB + USDT), редактируемая
   const [cardProposals, setCardProposals] = useState<ExchangeRateCardProposal[]>([]);
@@ -614,9 +657,32 @@ export function SaasExchange() {
     return false;
   }
 
-  const loadOrders = (page: number) => {
+  const ACTIVE_STATUSES = [
+    "pending",
+    "awaiting_payment",
+    "awaiting_issue",
+    "in_progress",
+    "rate_confirmed",
+  ];
+  const DONE_STATUSES = ["completed", "issued"];
+  const CANCELLED_STATUSES = ["cancelled", "expired"];
+
+  const loadOrders = (page: number, filter?: typeof ordersFilter) => {
+    const f = filter ?? ordersFilter;
+    const statusParam =
+      f === "active"
+        ? ACTIVE_STATUSES.join(",")
+        : f === "done"
+          ? DONE_STATUSES.join(",")
+          : f === "cancelled"
+            ? CANCELLED_STATUSES.join(",")
+            : undefined;
     saas
-      .exchangeOrders({ limit: ORDERS_PAGE_SIZE, offset: page * ORDERS_PAGE_SIZE })
+      .exchangeOrders({
+        limit: ORDERS_PAGE_SIZE,
+        offset: page * ORDERS_PAGE_SIZE,
+        status: statusParam,
+      })
       .then((o) => {
         setOrders(o.orders);
         setOrdersTotal(o.total);
@@ -694,6 +760,7 @@ export function SaasExchange() {
     setRefreshing(true);
     try {
       const r = await saas.refreshExchangeRates();
+      setRatesUpdatedAt(Date.now());
       toast.success(`Курсы обновлены: ${r.updated}, пропущено ${r.skipped}, ошибок ${r.failed}`);
       load();
     } catch (err) {
@@ -783,6 +850,7 @@ export function SaasExchange() {
       const result = await saas.previewExchangeRateCard();
       setCardProposals(result.proposals);
       setRateCardMessage(result.message);
+      setRatesUpdatedAt(Date.now());
     } catch (err) {
       if (!handle401(err)) toast.error("Не удалось получить курс с рынка");
     } finally {
@@ -1324,12 +1392,21 @@ export function SaasExchange() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Курсы обмена по диапазонам</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои курсы
-                по диапазонам сумм — отдельно для рублей и USDT (как на табло). Система сохраняет
-                отклонение от рынка и обновляет значения вместе с рынком.
-              </p>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base">Курсы обмена по диапазонам</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои
+                    курсы по диапазонам сумм — отдельно для рублей и USDT (как на табло). Система
+                    сохраняет отклонение от рынка и обновляет значения вместе с рынком.
+                  </p>
+                </div>
+                {ratesUpdatedAt && (
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    обновлено {Math.round((Date.now() - ratesUpdatedAt) / 60000)} мин назад
+                  </span>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {cardProposals.length === 0 ? (
@@ -1401,9 +1478,59 @@ export function SaasExchange() {
                       </div>
                     </div>
                   </div>
-                  <pre className="max-h-[560px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs">
-                    {postTemplate ? `${rateCardMessage}\n\n${postTemplate}` : rateCardMessage}
-                  </pre>
+                  <div className="max-h-[560px] overflow-auto rounded-md border bg-muted/30 p-3 space-y-4">
+                    {cardProposals.map((proposal) => (
+                      <div key={`${proposal.asset}-${proposal.network}`} className="space-y-1.5">
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          {proposal.asset}
+                          {proposal.network ? ` (${proposal.network})` : ""} → {quoteCode}
+                          <span className="ml-2 font-normal normal-case">
+                            рынок: {formatRate(proposal.marketRate)}
+                          </span>
+                        </div>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b text-muted-foreground">
+                              <th className="py-1 pr-3 text-left font-medium">
+                                Диапазон ({quoteCode})
+                              </th>
+                              <th className="py-1 pr-3 text-right font-medium">Курс</th>
+                              <th className="py-1 pr-3 text-right font-medium">Откл %</th>
+                              <th className="py-1 text-left font-mono font-medium">Формула</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {proposal.tiers.map((tier, idx) => (
+                              <tr key={idx} className="border-b border-muted/40 last:border-0">
+                                <td className="py-1 pr-3">
+                                  {tier.maxThb === null
+                                    ? `от ${tier.minThb.toLocaleString("ru-RU")}`
+                                    : `${tier.minThb.toLocaleString("ru-RU")} – ${tier.maxThb.toLocaleString("ru-RU")}`}
+                                </td>
+                                <td className="py-1 pr-3 text-right font-semibold">
+                                  {formatRate(tier.displayRate)}
+                                </td>
+                                <td
+                                  className={`py-1 pr-3 text-right ${tier.deviationPct >= 0 ? "text-emerald-600" : "text-red-600"}`}
+                                >
+                                  {tier.deviationPct >= 0 ? "+" : ""}
+                                  {tier.deviationPct.toFixed(2)}%
+                                </td>
+                                <td className="py-1 font-mono text-muted-foreground">
+                                  {tier.formula}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                    {postTemplate && (
+                      <pre className="whitespace-pre-wrap border-t pt-3 text-xs text-muted-foreground">
+                        {postTemplate}
+                      </pre>
+                    )}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -1710,7 +1837,7 @@ export function SaasExchange() {
         <TabsContent value="orders" className="space-y-4">
           <Card>
             <CardHeader className="pb-2">
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <CardTitle className="text-base">Заявки обмена</CardTitle>
                   <p className="text-muted-foreground text-xs">
@@ -1718,21 +1845,46 @@ export function SaasExchange() {
                     exchange funnel.
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={runEval}
-                  disabled={exchangeEvalRunning}
-                  title="Прогнать exchange-сценарии как живые LLM-диалоги и оценить сквозной поток"
-                >
-                  {exchangeEvalRunning ? (
-                    <Loader2Icon className="size-4 animate-spin" />
-                  ) : (
-                    <RefreshCwIcon className="size-4" />
-                  )}
-                  {exchangeEvalRunning ? "Проверяем…" : "Эмуляция качества"}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex rounded-md border">
+                    {(
+                      [
+                        ["all", "Все"],
+                        ["active", "Активные"],
+                        ["done", "Завершённые"],
+                        ["cancelled", "Отменённые"],
+                      ] as const
+                    ).map(([val, label]) => (
+                      <Button
+                        key={val}
+                        size="sm"
+                        variant={ordersFilter === val ? "secondary" : "ghost"}
+                        className="border-0 rounded-none first:rounded-l-md last:rounded-r-md"
+                        onClick={() => {
+                          setOrdersFilter(val);
+                          loadOrders(0, val);
+                        }}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={runEval}
+                    disabled={exchangeEvalRunning}
+                    title="Прогнать exchange-сценарии как живые LLM-диалоги и оценить сквозной поток"
+                  >
+                    {exchangeEvalRunning ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <RefreshCwIcon className="size-4" />
+                    )}
+                    {exchangeEvalRunning ? "Проверяем…" : "Эмуляция качества"}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -1748,13 +1900,12 @@ export function SaasExchange() {
                     <TableHead>TG / Верификация</TableHead>
                     <TableHead>Оплата</TableHead>
                     <TableHead>Выдача</TableHead>
-                    <TableHead>Действия</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {orders.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-center text-muted-foreground">
+                      <TableCell colSpan={9} className="text-center text-muted-foreground">
                         Заявок нет
                       </TableCell>
                     </TableRow>
@@ -1764,8 +1915,7 @@ export function SaasExchange() {
                       key={o.id}
                       order={o}
                       onPatch={patchOrder}
-                      onIssueCode={issueCode}
-                      onConfirmPayment={confirmPayment}
+                      onSelect={setSelectedOrder}
                     />
                   ))}
                 </TableBody>
@@ -1798,6 +1948,39 @@ export function SaasExchange() {
               )}
             </CardContent>
           </Card>
+
+          {/* Side panel для выдачи / действий заявки */}
+          {selectedOrder && (
+            <Dialog
+              open
+              onOpenChange={(open) => {
+                if (!open) setSelectedOrder(null);
+              }}
+            >
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Заявка #{selectedOrder.id}</DialogTitle>
+                </DialogHeader>
+                <OrderDetailPanel
+                  order={selectedOrder}
+                  onPatch={async (id, patch) => {
+                    await patchOrder(id, patch);
+                    // обновляем локальную копию из свежего списка
+                    setSelectedOrder((prev) => (prev ? { ...prev, ...patch } : null));
+                  }}
+                  onIssueCode={async (id, code) => {
+                    await issueCode(id, code);
+                    setSelectedOrder(null);
+                  }}
+                  onConfirmPayment={async (id) => {
+                    await confirmPayment(id);
+                    setSelectedOrder(null);
+                  }}
+                  onClose={() => setSelectedOrder(null)}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
 
           {(exchangeEval || exchangeEvalRunning) && (
             <ExchangeEvalReportCard result={exchangeEval} running={exchangeEvalRunning} />
@@ -1844,82 +2027,93 @@ export function SaasExchange() {
                 </p>
               )}
 
-              <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-                {REQUISITE_GROUPS.map((group) => {
-                  const groupHasSavedValue = group.fields.some((field) => {
-                    const saved = savedByKey.get(field.key);
-                    return Boolean(saved?.value || saved?.hasValue);
-                  });
-                  return (
-                    <div key={group.title} className="space-y-3 rounded-md border p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="font-medium text-sm">{group.title}</div>
-                        {groupHasSavedValue && <Badge variant="outline">сохранено</Badge>}
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                        {group.fields.map((item) => {
-                          const saved = savedByKey.get(item.key);
-                          const current = reqValues[item.key] ?? "";
-                          return (
-                            <div key={item.key} className="space-y-1.5">
-                              <Label>{item.label}</Label>
-                              <div className="flex items-start gap-2">
-                                {item.multiline ? (
-                                  <Textarea
-                                    autoComplete="off"
-                                    rows={4}
-                                    value={current}
-                                    onChange={(e) =>
-                                      setReqValues((prev) => ({
-                                        ...prev,
-                                        [item.key]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder={
-                                      saved?.sensitive && saved.hasValue
-                                        ? "сохранено, введите новое для замены"
-                                        : item.placeholder
-                                    }
-                                    className="min-h-[96px]"
-                                  />
-                                ) : (
-                                  <Input
-                                    autoComplete="off"
-                                    type={item.secret ? "password" : "text"}
-                                    value={current}
-                                    onChange={(e) =>
-                                      setReqValues((prev) => ({
-                                        ...prev,
-                                        [item.key]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder={
-                                      saved?.sensitive && saved.hasValue
-                                        ? "сохранено, введите новое для замены"
-                                        : item.placeholder
-                                    }
-                                  />
-                                )}
-                                <Button
-                                  type="button"
-                                  onClick={() => handleSaveRequisite(item.key)}
-                                  disabled={savingReqKey === item.key || !current.trim()}
-                                >
-                                  <SaveIcon className="size-4" />
-                                  OK
-                                </Button>
-                              </div>
-                              {item.hint && (
-                                <p className="text-xs text-muted-foreground">{item.hint}</p>
-                              )}
+              {CATEGORY_GROUPS.map(({ category, groupTitles }) => {
+                const catGroups = REQUISITE_GROUPS.filter((g) => groupTitles.includes(g.title));
+                if (catGroups.length === 0) return null;
+                return (
+                  <div key={category}>
+                    <h3 className="mt-6 mb-3 border-b pb-1 text-sm font-semibold text-muted-foreground">
+                      {category}
+                    </h3>
+                    <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+                      {catGroups.map((group) => {
+                        const groupHasSavedValue = group.fields.some((field) => {
+                          const saved = savedByKey.get(field.key);
+                          return Boolean(saved?.value || saved?.hasValue);
+                        });
+                        return (
+                          <div key={group.title} className="space-y-3 rounded-md border p-4">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-medium text-sm">{group.title}</div>
+                              {groupHasSavedValue && <Badge variant="outline">сохранено</Badge>}
                             </div>
-                          );
-                        })}
-                      </div>
+                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                              {group.fields.map((item) => {
+                                const saved = savedByKey.get(item.key);
+                                const current = reqValues[item.key] ?? "";
+                                return (
+                                  <div key={item.key} className="space-y-1.5">
+                                    <Label>{item.label}</Label>
+                                    <div className="flex items-start gap-2">
+                                      {item.multiline ? (
+                                        <Textarea
+                                          autoComplete="off"
+                                          rows={4}
+                                          value={current}
+                                          onChange={(e) =>
+                                            setReqValues((prev) => ({
+                                              ...prev,
+                                              [item.key]: e.target.value,
+                                            }))
+                                          }
+                                          placeholder={
+                                            saved?.sensitive && saved.hasValue
+                                              ? "сохранено, введите новое для замены"
+                                              : item.placeholder
+                                          }
+                                          className="min-h-[96px]"
+                                        />
+                                      ) : (
+                                        <Input
+                                          autoComplete="off"
+                                          type={item.secret ? "password" : "text"}
+                                          value={current}
+                                          onChange={(e) =>
+                                            setReqValues((prev) => ({
+                                              ...prev,
+                                              [item.key]: e.target.value,
+                                            }))
+                                          }
+                                          placeholder={
+                                            saved?.sensitive && saved.hasValue
+                                              ? "сохранено, введите новое для замены"
+                                              : item.placeholder
+                                          }
+                                        />
+                                      )}
+                                      <Button
+                                        type="button"
+                                        onClick={() => handleSaveRequisite(item.key)}
+                                        disabled={savingReqKey === item.key || !current.trim()}
+                                      >
+                                        <SaveIcon className="size-4" />
+                                        OK
+                                      </Button>
+                                    </div>
+                                    {item.hint && (
+                                      <p className="text-xs text-muted-foreground">{item.hint}</p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
         </TabsContent>
@@ -3045,20 +3239,27 @@ function SignalBadge({
   );
 }
 
+const ACTIVE_ORDER_STATUSES = [
+  "pending",
+  "awaiting_payment",
+  "awaiting_issue",
+  "in_progress",
+  "quote",
+  "paid",
+  "payout",
+];
+
 function OrderRow({
   order,
   onPatch,
-  onIssueCode,
-  onConfirmPayment,
+  onSelect,
 }: {
   order: ExchangeOrder;
   onPatch: (id: number, patch: Parameters<typeof saas.updateExchangeOrder>[1]) => void;
-  onIssueCode: (id: number, code: string) => void;
-  onConfirmPayment: (id: number) => void;
+  onSelect: (order: ExchangeOrder) => void;
 }) {
-  const [code, setCode] = useState(order.payoutCode ?? "");
   const [verif, setVerif] = useState(order.verificationId ?? "");
-  const [sourceBank, setSourceBank] = useState(order.sourceBank ?? "");
+  const isActive = ACTIVE_ORDER_STATUSES.includes(order.status);
   return (
     <TableRow>
       <TableCell>{order.id}</TableCell>
@@ -3099,11 +3300,87 @@ function OrderRow({
         />
       </TableCell>
       <TableCell className="text-xs">
+        <div className="text-muted-foreground">{order.paymentMethod ?? "—"}</div>
+        {order.sourceBank && (
+          <div className="text-[10px] text-muted-foreground">{order.sourceBank}</div>
+        )}
+      </TableCell>
+      <TableCell className="text-xs">
+        {order.payoutMethod ? (
+          <div className="text-muted-foreground">{order.payoutMethod}</div>
+        ) : null}
+        {isActive ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-1 h-7 text-[11px]"
+            onClick={() => onSelect(order)}
+          >
+            Выдать
+          </Button>
+        ) : (
+          order.payoutCode && (
+            <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+              {order.payoutCode}
+            </div>
+          )
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function OrderDetailPanel({
+  order,
+  onPatch,
+  onIssueCode,
+  onConfirmPayment,
+  onClose,
+}: {
+  order: ExchangeOrder;
+  onPatch: (id: number, patch: Parameters<typeof saas.updateExchangeOrder>[1]) => Promise<void>;
+  onIssueCode: (id: number, code: string) => Promise<void>;
+  onConfirmPayment: (id: number) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [code, setCode] = useState(order.payoutCode ?? "");
+  const [payoutMethod, setPayoutMethod] = useState(order.payoutMethod ?? "none");
+  const [status, setStatus] = useState(order.status ?? "quote");
+  const [paymentMethod, setPaymentMethod] = useState(order.paymentMethod ?? "none");
+  const [sourceBank, setSourceBank] = useState(order.sourceBank ?? "");
+
+  return (
+    <div className="space-y-4">
+      {/* Сводка */}
+      <div className="rounded-md border bg-muted/30 px-4 py-3 text-sm space-y-1">
+        <div>
+          <span className="font-medium">Направление:</span> {order.direction}
+          {order.network ? ` (${order.network})` : ""}
+        </div>
+        <div>
+          <span className="font-medium">Сумма:</span> {order.amountFrom} {order.assetFrom} →{" "}
+          {order.amountToThb}
+        </div>
+        <div>
+          <span className="font-medium">Клиент TG:</span> {order.telegramId ?? "—"}
+        </div>
+        <div>
+          <span className="font-medium">Статус:</span>{" "}
+          <Badge variant={STATUS_VARIANT[order.status] ?? "secondary"}>{order.status}</Badge>
+        </div>
+      </div>
+
+      {/* Метод оплаты */}
+      <div className="space-y-1.5">
+        <Label className="text-xs">Метод оплаты</Label>
         <Select
-          value={order.paymentMethod ?? "none"}
-          onValueChange={(v) => onPatch(order.id, { paymentMethod: v === "none" ? null : v })}
+          value={paymentMethod}
+          onValueChange={(v) => {
+            setPaymentMethod(v);
+            onPatch(order.id, { paymentMethod: v === "none" ? null : v });
+          }}
         >
-          <SelectTrigger className="h-7 w-44">
+          <SelectTrigger className="h-8">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -3116,7 +3393,7 @@ function OrderRow({
           </SelectContent>
         </Select>
         <Input
-          className="mt-1 h-7 w-36"
+          className="h-8 mt-1"
           value={sourceBank}
           onChange={(e) => setSourceBank(e.target.value)}
           onBlur={() =>
@@ -3125,13 +3402,19 @@ function OrderRow({
           }
           placeholder="банк-источник"
         />
-      </TableCell>
-      <TableCell className="text-xs">
+      </div>
+
+      {/* Метод выдачи */}
+      <div className="space-y-1.5">
+        <Label className="text-xs">Метод выдачи</Label>
         <Select
-          value={order.payoutMethod ?? "none"}
-          onValueChange={(v) => onPatch(order.id, { payoutMethod: v === "none" ? null : v })}
+          value={payoutMethod}
+          onValueChange={(v) => {
+            setPayoutMethod(v);
+            onPatch(order.id, { payoutMethod: v === "none" ? null : v });
+          }}
         >
-          <SelectTrigger className="h-7 w-44">
+          <SelectTrigger className="h-8">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -3143,32 +3426,38 @@ function OrderRow({
             <SelectItem value="atm">ATM legacy</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Код выдачи */}
+      <div className="space-y-1.5">
+        <Label className="text-xs">Код выдачи</Label>
         <Input
-          className="mt-1 h-7 w-28"
+          className="h-8"
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          onBlur={() =>
-            code !== (order.payoutCode ?? "") && onPatch(order.id, { payoutCode: code })
-          }
-          placeholder="Код выдачи"
+          placeholder="Введите или оставьте пустым для генерации"
         />
         <Button
           type="button"
           size="sm"
-          variant="secondary"
-          className="mt-1 h-7 w-28 text-[11px]"
+          className="w-full"
           onClick={() => onIssueCode(order.id, code)}
-          title="Сохранить код, перевести в «выдача» и отправить клиенту в чат"
         >
-          {code.trim() ? "Выдать клиенту" : "🎲 Сген. и выдать"}
+          {code.trim() ? "Выдать клиенту" : "Сгенерировать и выдать"}
         </Button>
-      </TableCell>
-      <TableCell>
+      </div>
+
+      {/* Статус */}
+      <div className="space-y-1.5">
+        <Label className="text-xs">Статус заявки</Label>
         <Select
-          value={order.status || "quote"}
-          onValueChange={(v) => onPatch(order.id, { status: v })}
+          value={status}
+          onValueChange={(v) => {
+            setStatus(v);
+            onPatch(order.id, { status: v });
+          }}
         >
-          <SelectTrigger className="h-8 w-36">
+          <SelectTrigger className="h-8">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -3187,20 +3476,25 @@ function OrderRow({
             ))}
           </SelectContent>
         </Select>
-        {order.status === "awaiting_payment" && (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="mt-1 h-7 w-36 text-[11px]"
-            onClick={() => onConfirmPayment(order.id)}
-            title="Подтвердить оплату (фиат) — перевести в paid и уведомить клиента"
-          >
-            ✅ Подтвердить оплату
-          </Button>
-        )}
-      </TableCell>
-    </TableRow>
+      </div>
+
+      {/* Подтверждение оплаты */}
+      {order.status === "awaiting_payment" && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="w-full"
+          onClick={() => onConfirmPayment(order.id)}
+        >
+          Подтвердить оплату
+        </Button>
+      )}
+
+      <Button type="button" variant="outline" size="sm" className="w-full" onClick={onClose}>
+        Закрыть
+      </Button>
+    </div>
   );
 }
 
