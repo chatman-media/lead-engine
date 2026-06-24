@@ -187,6 +187,26 @@ export function resolveBankConfig(tags: Record<string, string>): BankConfig | nu
   return null;
 }
 
+/**
+ * Для банкоматов, не попавших в BANK_MAP — используем тег name/operator/brand
+ * как bankName и консервативные дефолты по валюте.
+ * Возвращает null только если тег имени полностью отсутствует.
+ */
+export function buildFallbackConfig(
+  tags: Record<string, string>,
+  quoteAsset: string,
+): BankConfig | null {
+  const bankName = (tags.operator ?? tags.brand ?? tags.name ?? "").trim();
+  if (!bankName) return null;
+  const isTHB = quoteAsset === "THB";
+  return {
+    bankName,
+    denomination: isTHB ? 500 : 100,
+    perWithdrawalMax: isTHB ? 20_000 : 10_000,
+    codeTtlSec: isTHB ? 900 : 1800,
+  };
+}
+
 // ── OSM helpers ───────────────────────────────────────────────────────────────
 
 interface OsmNode {
@@ -233,7 +253,16 @@ export function validateBbox(bbox: string): void {
 
 export async function fetchOsmAtms(bbox: string): Promise<OsmNode[]> {
   validateBbox(bbox);
-  const query = `[out:json][timeout:90][bbox:${bbox}];\nnode["amenity"="atm"];\nout body;`;
+  // Собираем ATM тремя способами: прямые банкоматы + узлы с atm=yes + банковские
+  // отделения где atm явно не отключён — это даёт ~3-5x больше точек на Пхукете.
+  const query =
+    `[out:json][timeout:90][bbox:${bbox}];\n` +
+    `(\n` +
+    `  node["amenity"="atm"];\n` +
+    `  node["atm"="yes"];\n` +
+    `  node["amenity"="bank"]["atm"!="no"];\n` +
+    `);\n` +
+    `out body;`;
   const body = `data=${encodeURIComponent(query)}`;
 
   const MAX_ATTEMPTS = 3;
@@ -340,7 +369,7 @@ export async function syncOsmAtms(
 
   for (const node of nodes) {
     const tags = node.tags ?? {};
-    const bankConfig = resolveBankConfig(tags);
+    const bankConfig = resolveBankConfig(tags) ?? buildFallbackConfig(tags, quoteAsset);
     if (!bankConfig) {
       skipped++;
       continue;
