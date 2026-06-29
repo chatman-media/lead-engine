@@ -49,12 +49,12 @@
     "@chatman-media/verticals": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.26",
+    "hono": "^4.12.27",
     "postgres": "^3.4.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
+    "@biomejs/biome": "^2.5.1",
     "@types/bun": "1.3.14",
     "typescript": "^6.0.3"
   }
