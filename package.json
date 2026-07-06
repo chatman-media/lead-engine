@@ -45,12 +45,12 @@
     "lint:format": "biome ci --changed --since=origin/main"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
+    "@biomejs/biome": "^2.5.2",
     "@codecov/vite-plugin": "^2.0.1",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/exec": "^7.0.3",
     "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^12.0.8",
+    "@semantic-release/github": "^12.0.9",
     "@semantic-release/npm": "^13.1.5",
     "jscpd": "^4.0.5",
     "knip": "^5.64.4",
