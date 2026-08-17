@@ -58,17 +58,17 @@
   },
   "dependencies": {
     "@chatman-media/llm-router": "workspace:*",
-    "unpdf": "^1.6.2",
+    "unpdf": "^1.8.1",
     "zod": "^4.4.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
+    "@biomejs/biome": "^2.5.8",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^12.0.8",
+    "@semantic-release/github": "^12.0.9",
     "@semantic-release/npm": "^13.1.5",
     "@types/bun": "latest",
-    "semantic-release": "^25.0.5",
+    "semantic-release": "^25.0.9",
     "typescript": "^6.0.3"
   },
   "publishConfig": {
