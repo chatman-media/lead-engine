@@ -47,15 +47,15 @@
     "@chatman-media/vertical-saas": "workspace:*",
     "@chatman-media/vertical-video": "workspace:*",
     "@chatman-media/verticals": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.26",
+    "hono": "^4.13.3",
     "postgres": "^3.4.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
-    "@types/bun": "1.3.14",
+    "@biomejs/biome": "^2.5.9",
+    "@types/bun": "1.4.0",
     "typescript": "^6.0.3"
   }
 }

@@ -38,8 +38,8 @@
     "@chatman-media/channel-core": "workspace:*"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
-    "@types/bun": "1.3.14",
+    "@biomejs/biome": "^2.5.9",
+    "@types/bun": "1.4.0",
     "typescript": "^6.0.3"
   },
   "repository": {
